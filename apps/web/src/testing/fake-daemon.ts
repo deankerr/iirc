@@ -536,6 +536,7 @@ export const fakeDaemon = () => {
   const ownerChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
   const uploads: (typeof Upload.Encoded)[] = [];
   const uploadFollowers: Follower[] = [];
+  const uploadsMissing: string[] = [];
   const uploadPagesRead: (string | undefined)[] = [];
   const uploadPagesHeld: (() => void)[] = [];
   // Each Upload `upload` made, as its event, at its Change's sequence, oldest first.
@@ -765,6 +766,8 @@ export const fakeDaemon = () => {
     uploadRefusals,
     /** The Uploads held, newest first, deleted ones too, as the wire carries them. */
     uploads,
+    /** The ids of the live Uploads whose bytes are gone, which the Uploads' stream says first and whenever they change. */
+    uploadsMissing,
     /** How many Uploads a page holds when its request gives no `limit`. */
     uploadsPage: 50,
     /** Each file sent to `POST /api/uploads`, by the name its query gave and its size. */
@@ -1467,6 +1470,26 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * The event that says which Uploads' bytes are gone, whole, as the wire carries it.
+   * @returns The event.
+   */
+  const missingText = () =>
+    `event: missing\ndata: ${JSON.stringify({ uploads: daemon.uploadsMissing })}\n\n`;
+
+  /**
+   * Says which Uploads' bytes are gone, as the Daemon does when a read finds one gone, or
+   * finds one back: to every follower of the Uploads' stream, whole, with no sequence.
+   * @param ids - The ids of every Upload gone.
+   */
+  const lose = (...ids: readonly string[]) => {
+    daemon.uploadsMissing.splice(0, daemon.uploadsMissing.length, ...ids);
+
+    for (const follower of uploadFollowers) {
+      follower.controller.enqueue(encoder.encode(missingText()));
+    }
+  };
+
+  /**
    * Holds a new Upload, newest of all, and sends it to every follower of the Uploads'
    * Changes, as another device's upload would, at the next sequence, which a follower
    * resuming before it is sent too.
@@ -1647,7 +1670,9 @@ export const fakeDaemon = () => {
           ? []
           : uploadChanges.flatMap((one) => (one.sequence > Number(after) ? [one.text] : []));
 
-      return signedInOnly(() => following(uploadFollowers, url, headers, init, replayed));
+      return signedInOnly(() =>
+        following(uploadFollowers, url, headers, init, [missingText(), ...replayed])
+      );
     }
 
     if (url.pathname === "/api/uploads") {
@@ -2182,7 +2207,7 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, expire, fetch, send, sendPreview, sendUi, upload };
+  return { daemon, endStreams, expire, fetch, lose, send, sendPreview, sendUi, upload };
 };
 
 /**

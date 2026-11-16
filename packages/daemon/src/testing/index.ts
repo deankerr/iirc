@@ -22,4 +22,4 @@ export { connectPeer } from "./peer.ts";
 
 export type { Peer } from "./peer.ts";
 
-export { holdsBytes, seedUpload } from "./uploads.ts";
+export { holdsBytes, loseBytes, seedUpload } from "./uploads.ts";

@@ -1,7 +1,7 @@
 /**
  * What an end-to-end run does to Uploads that a running Daemon cannot do for it: keeping an
- * Upload in the Journal as if it had been made at another time, and asking the bucket
- * whether bytes are in it.
+ * Upload in the Journal as if it had been made at another time, asking the bucket whether
+ * bytes are in it, and taking them out of it behind the Daemon's back.
  *
  * @packageDocumentation
  */
@@ -97,3 +97,22 @@ export const holdsBytes = async (minio: Minio, bucket: string, hash: string) =>
       })
     ).pipe(Effect.orDie)
   );
+
+/**
+ * Removes bytes from a bucket of the MinIO, as a lifecycle rule or a mistake would, without
+ * the Daemon being told.
+ * @param minio - The MinIO.
+ * @param bucket - The bucket.
+ * @param hash - The bytes' hash.
+ */
+export const loseBytes = async (minio: Minio, bucket: string, hash: string) => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* storeIn(minio, bucket);
+
+        yield* store.delete(Sha256.make(hash));
+      })
+    ).pipe(Effect.orDie)
+  );
+};

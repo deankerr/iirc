@@ -255,6 +255,36 @@ describe("the Uploads held", () => {
   });
 });
 
+describe("the Uploads whose bytes are missing", () => {
+  it("holds none to start, and the ids the stream gave, whole, replacing those held", () => {
+    const first = after({ _tag: "Missing", ids: [a.id, b.id] });
+    const second = reduceUploads(first, { _tag: "Missing", ids: [b.id, c.id] });
+
+    expect(initialUploads.missing).toStrictEqual(new Set());
+    expect(first.missing).toStrictEqual(new Set([a.id, b.id]));
+    expect(second.missing).toStrictEqual(new Set([b.id, c.id]));
+    expect(reduceUploads(second, { _tag: "Missing", ids: [] }).missing).toStrictEqual(new Set());
+  });
+
+  it("keeps them as pages, Changes, and answers fold in, since they are a fact about the store", () => {
+    const state = after(
+      { _tag: "Missing", ids: [c.id] },
+      { _tag: "Paged", after: undefined, page: { next: null, through: 2, uploads: [c, b] } },
+      { _tag: "Changed", sequence: 3, upload: d },
+      { _tag: "Answered", upload: b }
+    );
+
+    expect(state.missing).toStrictEqual(new Set([c.id]));
+  });
+
+  it("starts them over with the list, for a restarted stream sends them again", () => {
+    const held = after({ _tag: "Missing", ids: [a.id] });
+
+    expect(reduceUploads(held, shown).missing).toStrictEqual(new Set());
+    expect(reduceUploads(held, { _tag: "Forgotten" }).missing).toStrictEqual(new Set());
+  });
+});
+
 describe("the Uploads held while the deleted show", () => {
   it("hides the deleted until asked, and starts the list over when that changes", () => {
     const held = after({

@@ -4,8 +4,9 @@
  * their Changes give them, where the next page begins, and
  * the sequence of the last Change folded in, which the stream is followed after. A page only
  * ever extends the list at its end, and the stream only ever gives what is newer than
- * everything held, so an Upload is held once. Its link, whether it gets a thumbnail, and its
- * size are derived as it is drawn, never held. Beside them, what the Owner asked of each,
+ * everything held, so an Upload is held once. Beside them, the ids of those whose bytes the
+ * Daemon found gone from the Store. Its link, whether it gets a thumbnail, and its size are
+ * derived as it is drawn, never held. Beside them, what the Owner asked of each,
  * a rename or a delete, while it waits on the Daemon or after it failed.
  *
  * @packageDocumentation
@@ -21,8 +22,11 @@ import type { Upload, UploadId } from "@iirc/api";
  * held, as that Change gave it, so a later page read before the Change, and arriving after
  * it, is folded as the Change left it rather than bringing back what it undid. Whether
  * deleted Uploads are shown is `showDeleted`: while it is not, a deleted one is never held.
+ * `missing` is the ids of the live Uploads whose bytes the Daemon confirmed are gone, as the
+ * stream last said, which is the one place a row learns it from.
  */
 export interface Uploads {
+  readonly missing: ReadonlySet<UploadId>;
   readonly showDeleted: boolean;
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null | undefined;
@@ -32,6 +36,7 @@ export interface Uploads {
 
 /** Nothing held, no page read, and the deleted not shown. */
 export const initialUploads: Uploads = {
+  missing: new Set(),
   next: undefined,
   showDeleted: false,
   through: undefined,
@@ -53,6 +58,8 @@ export interface UploadsPage {
  * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
  * - `Answered`: the Daemon answered a rename or a delete with the Upload as it is now,
  *   ahead of the Change the stream gives for it.
+ * - `Missing`: the stream gave the ids of every Upload whose bytes are gone, whole, which
+ *   replaces those held.
  * - `DeletedShown`: the Owner chose whether the deleted Uploads show, which starts the list
  *   over, to be read again with them or without.
  * - `Forgotten`: the page signed out, so nothing is held.
@@ -61,6 +68,7 @@ export type UploadsEvent =
   | { readonly _tag: "Paged"; readonly after: UploadId | undefined; readonly page: UploadsPage }
   | { readonly _tag: "Changed"; readonly sequence: number; readonly upload: Upload }
   | { readonly _tag: "Answered"; readonly upload: Upload }
+  | { readonly _tag: "Missing"; readonly ids: readonly UploadId[] }
   | { readonly _tag: "DeletedShown"; readonly shown: boolean }
   | { readonly _tag: "Forgotten" };
 
@@ -136,7 +144,8 @@ const unread = (state: Uploads, upload: Upload): boolean => {
  * aside for that page. An answer to a rename or a delete is folded at once, into one held
  * only, and moves nothing on, since the stream still gives its Change. Choosing whether the
  * deleted show starts the list over, as it was before any page was read, and changes
- * nothing when it is chosen as it already is.
+ * nothing when it is chosen as it already is. Which are missing is replaced whole when the
+ * stream says, and empties with the list, as a restarted stream says it again.
  * @param state - The Uploads held.
  * @param event - What happened.
  * @returns The Uploads held now.
@@ -157,6 +166,7 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       }
 
       return {
+        missing: state.missing,
         next: page.next,
         showDeleted: state.showDeleted,
         through: state.through ?? page.through,
@@ -190,6 +200,10 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       return state.uploads.some((one) => one.id === upload.id)
         ? { ...state, uploads: replaced(state, upload) }
         : state;
+    }
+
+    case "Missing": {
+      return { ...state, missing: new Set(event.ids) };
     }
 
     case "DeletedShown": {
