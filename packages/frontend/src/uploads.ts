@@ -16,16 +16,24 @@ import type { Upload, UploadId } from "@iirc/api";
  * The Uploads held, newest first, where the next page begins, and how far they were
  * folded: `next` is an Upload's id, as a page gave it, or `null` once the last page was
  * read, and `through` the sequence of the last Upload Change folded in. Both are none
- * before the first page was read.
+ * before the first page was read. `unpaged` holds each Upload a Change gave that was not
+ * held, as that Change gave it, so a later page read before the Change, and arriving after
+ * it, is folded as the Change left it rather than bringing back what it undid.
  */
 export interface Uploads {
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null | undefined;
   readonly through: number | undefined;
+  readonly unpaged: ReadonlyMap<UploadId, Upload>;
 }
 
 /** Nothing held, and no page read. */
-export const initialUploads: Uploads = { next: undefined, through: undefined, uploads: [] };
+export const initialUploads: Uploads = {
+  next: undefined,
+  through: undefined,
+  unpaged: new Map(),
+  uploads: [],
+};
 
 /** A page of the Uploads, newest first, as the API gives it. */
 export interface UploadsPage {
@@ -50,17 +58,25 @@ export type UploadsEvent =
   | { readonly _tag: "Forgotten" };
 
 /**
- * A page's Uploads after those held, passing over any already held.
+ * A page's Uploads after those held, passing over any already held, each as a Change since
+ * gave it, if one did, and passing over any deleted.
  * @param held - The Uploads held.
  * @param page - The page's Uploads, newest first.
+ * @param unpaged - The Uploads Changes gave that were not held.
  * @returns The Uploads held now.
  */
-const extended = (held: readonly Upload[], page: readonly Upload[]): readonly Upload[] => {
+const extended = (
+  held: readonly Upload[],
+  page: readonly Upload[],
+  unpaged: ReadonlyMap<UploadId, Upload>
+): readonly Upload[] => {
   const ids = new Set(held.map((upload) => upload.id));
   const added: Upload[] = [];
 
-  for (const upload of page) {
-    if (!ids.has(upload.id)) {
+  for (const read of page) {
+    const upload = unpaged.get(read.id) ?? read;
+
+    if (!ids.has(upload.id) && upload.deleted === undefined) {
       ids.add(upload.id);
       added.push(upload);
     }
@@ -104,7 +120,7 @@ const unread = (state: Uploads, upload: Upload): boolean => {
  * since the stream gives what is newer than any later page. A Change is folded only when it
  * is after the last folded in: one held is replaced in place, or dropped once deleted, and
  * one not held is newer than all, so it goes first, unless it is deleted, or a page not yet
- * read holds it. An answer to a rename or a delete is folded at once, into one held only,
+ * read holds it, when it is kept aside for that page. An answer to a rename or a delete is folded at once, into one held only,
  * and moves nothing on, since the stream still gives its Change.
  * @param state - The Uploads held.
  * @param event - What happened.
@@ -119,10 +135,17 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
         return state;
       }
 
+      const unpaged = new Map(state.unpaged);
+
+      for (const read of page.uploads) {
+        unpaged.delete(read.id);
+      }
+
       return {
         next: page.next,
         through: state.through ?? page.through,
-        uploads: extended(state.uploads, page.uploads),
+        unpaged,
+        uploads: extended(state.uploads, page.uploads, state.unpaged),
       };
     }
 
@@ -141,7 +164,7 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       }
 
       return upload.deleted !== undefined || unread(state, upload)
-        ? after
+        ? { ...after, unpaged: new Map(state.unpaged).set(upload.id, upload) }
         : { ...after, uploads: [upload, ...state.uploads] };
     }
 

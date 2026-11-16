@@ -178,6 +178,39 @@ describe("the Uploads held", () => {
     });
   });
 
+  it("folds a later page over the Changes that arrived while it was read, never bringing back one deleted", () => {
+    const [olderA, olderB, olderC] = ["a", "b", "c"].map((letter) =>
+      upload(letter, undefined, 1_600_000_000_000)
+    );
+
+    if (olderA === undefined || olderB === undefined || olderC === undefined) {
+      throw new Error("no Uploads");
+    }
+
+    const renamedC = upload("c", "renamed.png", 1_600_000_000_000);
+
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: d.id, through: 5, uploads: [e, d] } },
+      { _tag: "Changed", sequence: 6, upload: deleted(olderB) },
+      { _tag: "Changed", sequence: 7, upload: renamedC },
+      {
+        _tag: "Paged",
+        after: d.id,
+        page: { next: null, through: 5, uploads: [olderC, olderB, olderA] },
+      }
+    );
+
+    expect({
+      ids: ids(state),
+      names: state.uploads.map((one) => one.name),
+      through: state.through,
+    }).toStrictEqual({
+      ids: ["e", "d", "c", "a"],
+      names: [undefined, undefined, "renamed.png", undefined],
+      through: 7,
+    });
+  });
+
   it("takes the Daemon's answer to a rename in place, and to a delete by dropping it, ahead of its Change", () => {
     const renamed = upload("d", "renamed.png");
     const gone = deleted(c);
