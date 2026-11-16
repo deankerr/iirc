@@ -22,13 +22,11 @@ import type { CredentialName } from "@iirc/protocol/line";
 import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed } from "@iirc/runtime/journal";
 import { Vault } from "@iirc/runtime/vault";
-import type { Scope } from "effect";
 import {
   Chunk,
   Clock,
   Context,
   Data,
-  Deferred,
   Effect,
   FileSystem,
   HashMap,
@@ -44,6 +42,7 @@ import { SecureRandom } from "effect/crypto";
 
 import { DataDirectoryFailed } from "../lock.ts";
 import { OwnerConfiguration } from "../options.ts";
+import { StoreBytes } from "../store-bytes.ts";
 import { encodeUploadId, idBytes } from "./id.ts";
 import { detectKind, kindOfType } from "./kind.ts";
 import { safeName } from "./names.ts";
@@ -290,8 +289,8 @@ export class Uploads extends Context.Service<
     /**
      * Deletes an Upload for the Owner, journaling its `Deleted`, so its link and its bytes
      * are answered as an id no Upload has from then on. Its record stays. Its bytes are then
-     * released from the store unless a live Upload, or an upload still being kept, has the
-     * same, and a store that cannot release them is logged, not failed. One no Upload has is
+     * released from the store unless a live Upload, an upload still being kept, or a Preview
+     * has the same, and a store that cannot release them is logged, not failed. One no Upload has is
      * `NoSuchUpload`, and one already deleted is answered as it is, with nothing journaled.
      */
     readonly delete: (id: UploadId) => Effect.Effect<Shown, NoSuchUpload | JournalFailed>;
@@ -521,6 +520,7 @@ export const layerUploads = (dataDir: string) =>
       const owner = yield* OwnerConfiguration;
       const vault = yield* Vault;
       const makeStore = yield* ByteStoreMaker;
+      const bytes = yield* StoreBytes;
       const fs = yield* FileSystem.FileSystem;
       const random = yield* SecureRandom.SecureRandom;
 
@@ -598,105 +598,19 @@ export const layerUploads = (dataDir: string) =>
         return taken ? yield* freshId : id;
       });
 
-      // Bytes are released from the store only once no live Upload has them, which is
-      // derived from what is held. An upload puts its bytes before it journals, outside the
-      // turn, so what is held cannot say an upload of the same bytes is on its way. So each
-      // upload claims its hash before it puts, and lets go once it has journaled or failed,
-      // and bytes claimed are never released. A release in progress is held here too, and an
-      // upload of the same bytes waits for it to end before it claims them, so it never puts
-      // bytes a release is about to remove. Both are read and changed only under the turn.
-      const claims = new Map<string, number>();
-      const releasing = new Map<string, Deferred.Deferred<undefined>>();
-
-      // Claims a hash for an upload until the Scope closes, once no release of it is in
-      // progress.
-      const claimed = (hash: string): Effect.Effect<void, never, Scope.Scope> =>
-        Effect.acquireRelease(
-          turn.withPermit(
-            Effect.sync(() => {
-              const busy = releasing.get(hash);
-
-              if (busy === undefined) {
-                claims.set(hash, (claims.get(hash) ?? 0) + 1);
-              }
-
-              return Option.fromUndefinedOr(busy);
-            })
-          ),
-          (busy) =>
-            Option.isSome(busy)
-              ? Effect.void
-              : turn.withPermit(
-                  Effect.sync(() => {
-                    const left = (claims.get(hash) ?? 1) - 1;
-
-                    if (left === 0) {
-                      claims.delete(hash);
-                    } else {
-                      claims.set(hash, left);
-                    }
-                  })
-                )
-        ).pipe(
-          Effect.flatMap((busy) =>
-            Option.isSome(busy)
-              ? Effect.andThen(Deferred.await(busy.value), claimed(hash))
-              : Effect.void
-          )
-        );
-
-      // Releases an Upload's bytes from the store unless a live Upload has them, an upload
-      // has claimed them, or a release of them is already in progress. A store that cannot
-      // release them is logged, and they stay.
+      // Bytes leave the store only once no live Upload and no Preview has them. An upload
+      // claims its hash before it puts, until it has journaled or failed, since what is held
+      // cannot say an upload of the same bytes is on its way.
       const release = (hash: Sha256) =>
-        Effect.gen(function* () {
-          const free = yield* turn.withPermit(
-            Effect.gen(function* () {
-              const all = yield* SubscriptionRef.get(held);
-
-              const kept = claims.has(hash) || releasing.has(hash) || liveHas(all, hash);
-
-              if (kept) {
-                return Option.none();
-              }
-
-              const done = yield* Deferred.make<undefined>();
-
-              releasing.set(hash, done);
-
-              return Option.some(done);
-            })
-          );
-
-          if (Option.isNone(free)) {
-            return;
-          }
-
-          yield* Effect.gen(function* () {
-            const now = yield* switchNow;
-
-            const store =
+        bytes.release(hash, {
+          store: switchNow.pipe(
+            Effect.flatMap((now) =>
               now._tag === "On"
-                ? yield* storeOf(now.bucket)
-                : yield* new ByteStoreUnavailable({ reason: "Uploads are off" });
-
-            yield* store.delete(hash);
-            yield* Effect.logInfo("Released an Upload's bytes", { hash });
-          }).pipe(
-            Effect.catchTag("ByteStoreUnavailable", (error) =>
-              Effect.logWarning("Could not release an Upload's bytes, which stay in the store", {
-                hash,
-                reason: error.reason,
-              })
-            ),
-            Effect.ensuring(
-              turn.withPermit(
-                Effect.sync(() => releasing.delete(hash)).pipe(
-                  Effect.andThen(Deferred.succeed(free.value, undefined))
-                )
-              )
+                ? storeOf(now.bucket)
+                : Effect.fail(new ByteStoreUnavailable({ reason: "Uploads are off" }))
             )
-          );
+          ),
+          uploaded: Effect.map(SubscriptionRef.get(held), (all) => liveHas(all, hash)),
         });
 
       // An append is whole or absent, and holding it is in the same uninterruptible step, so
@@ -738,7 +652,7 @@ export const layerUploads = (dataDir: string) =>
           const kind = detectKind(staged.head);
           const keeping = yield* keepable(staged, kind.type);
 
-          yield* claimed(keeping.hash);
+          yield* bytes.claimed(Sha256.make(keeping.hash));
           const store = yield* storeOf(now.bucket);
           const stored = yield* store.put(keeping.bytes);
 

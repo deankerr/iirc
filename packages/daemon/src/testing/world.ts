@@ -43,6 +43,7 @@ import { OwnerConfiguration, layerOwnerConfiguration } from "../options.ts";
 import { layerPreviews } from "../previews/previews.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
+import { layerStoreBytes } from "../store-bytes.ts";
 import { layerUiConfiguration } from "../ui.ts";
 import { ByteStoreMaker, layerUploads } from "../uploads/uploads.ts";
 
@@ -163,19 +164,16 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
       layerProjector,
       layerPreviews.pipe(
         Layer.provideMerge(layerUiConfiguration),
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(LinkFetch, world.links),
-            Layer.succeed(PreviewCache, world.previews),
-            bytes
-          )
-        )
+        Layer.provide(Layer.merge(Layer.succeed(LinkFetch, world.links), bytes))
       ),
       layerLinkListener.pipe(
         Layer.provideMerge(layerUploads(dataDir)),
         Layer.provide(Layer.merge(bytes, platform))
       )
     ).pipe(
+      Layer.provideMerge(
+        layerStoreBytes.pipe(Layer.provideMerge(Layer.succeed(PreviewCache, world.previews)))
+      ),
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         Layer.unwrap(
