@@ -330,6 +330,16 @@ const followed = async (from: number) =>
     })
   );
 
+const toImage: Handler = (request, response) => {
+  if (request.url === "/pic.png") {
+    response.writeHead(200, { "content-type": "image/png" });
+    response.end(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  } else {
+    response.writeHead(302, { location: "/pic.png" });
+    response.end("moved");
+  }
+};
+
 describe("redirects", () => {
   it("three redirects are followed, each resolved against the last by name", async () => {
     const { outcome, site } = await followed(3);
@@ -340,6 +350,31 @@ describe("redirects", () => {
     expect(site.seen.map((each) => [each.url, each.headers.host])).toStrictEqual(
       [3, 2, 1, 0].map((left) => [`/r/${left}`, `hops.test:${site.port}`])
     );
+  });
+
+  it("a redirect to an image, asked as a page, is a wrong type that names the final link", async () => {
+    const { outcome, site } = await run(
+      Effect.gen(function* () {
+        const site = yield* serve(toImage);
+        const names = scripted({ "hops.test": [["127.0.0.1"]] });
+
+        return {
+          outcome: yield* fetched(
+            { policy: loopbackPolicy(site.port), resolver: names.resolver },
+            `http://hops.test:${site.port}/`
+          ),
+          site,
+        };
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      failed: {
+        _tag: "LinkWrongType",
+        link: `http://hops.test:${site.port}/pic.png`,
+        type: "image/png",
+      },
+    });
   });
 
   it("a fourth redirect is refused", async () => {

@@ -4,8 +4,8 @@
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
  * one's words starting where a Message's text does. In a Timeline too narrow for those
  * columns, a row is one run of text that wraps under itself. Failed Connections in a row
- * say how many and when. Every name and every text a Network sent sits in its own isolate,
- * as a text node.
+ * say how many and when. A Message's Previews, if it has any, are under its text. Every name
+ * and every text a Network sent sits in its own isolate, as a text node.
  *
  * @packageDocumentation
  */
@@ -15,6 +15,7 @@ import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
 import { dayShown, timeShown } from "../options/ui.ts";
+import { MessagePreviews } from "../previews/message-previews.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { dayIso, dayWritten } from "../ui/day.ts";
@@ -288,6 +289,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
           <span className={styles.delivery}>{delivery}</span>
         </>
       )}
+      <MessagePreviews item={row.item} />
     </div>
   );
 };

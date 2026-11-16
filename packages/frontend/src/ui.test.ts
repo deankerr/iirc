@@ -24,6 +24,7 @@ const shared = {
     font: "commit-mono",
     leading: 1.45,
     light: "light",
+    previews: "off",
     read: "latest",
     size: 16,
     spellcheck: true,
@@ -151,6 +152,7 @@ describe("a device's overrides", () => {
         font: "system",
         leading: 1.45,
         light: "light",
+        previews: "off",
         read: "latest",
         size: 14,
         spellcheck: true,
@@ -189,6 +191,24 @@ const unknown = { _tag: "Unknown" };
 
 const activity = (happened: typeof Activity.Encoded) =>
   content({ _tag: "Activity", activity: happened, at: unknown, id: unknown, live: true });
+
+describe("an option every device shares only", () => {
+  it("is never a device's: not read back, not kept, not in effect, and never written there", () => {
+    const kept = deviceUiOf('{"previews":"on","size":20}');
+
+    expect({
+      effective: effectiveUi(shared, { previews: "on", size: 20 }).previews,
+      kept,
+      overridden: overridden(noOverrides, "previews", "links only"),
+      written: [writtenOnDevice("previews", "on", false), writtenOnDevice("previews", "on", true)],
+    }).toStrictEqual({
+      effective: "off",
+      kept: { size: 20 },
+      overridden: noOverrides,
+      written: [false, false],
+    });
+  });
+});
 
 describe("which items a Timeline shows", () => {
   it("in a Channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {

@@ -62,11 +62,14 @@ export class LinkTooLarge extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("LinkTooLarge", { limit: Schema.Finite }) {}
 
-/** The answer is not of a type its purpose takes, by its header or by its leading bytes. */
+/**
+ * The answer is not of a type its purpose takes, by its header or by its leading bytes.
+ * `link` is the address that answered, after redirects, as the guard read it.
+ */
 export class LinkWrongType extends Schema.TaggedError<
   LinkWrongType,
   { readonly brand: unique symbol }
->()("LinkWrongType", { type: Schema.String }) {}
+>()("LinkWrongType", { link: Schema.String, type: Schema.String }) {}
 
 /** Why a body stopped before its end. */
 export type BodyFailure = LinkTooLarge | LinkTimedOut | LinkUnreachable;

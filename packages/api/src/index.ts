@@ -12,6 +12,7 @@ export {
   NetworksGroup,
   NewsGroup,
   OptionsGroup,
+  PreviewsGroup,
   RequestValidation,
   requestParseOptions,
   SignInGroup,
@@ -31,11 +32,13 @@ export {
   NotAChannel,
   NotInChannel,
   OptionsChanged,
+  PreviewsOff,
   SignInsFailed,
   TimelinesFailed,
   TimelinesKept,
   UiChanged,
   Unauthorized,
+  UnknownMessage,
   UnknownNetwork,
   UnknownTimeline,
   UnknownUpload,
@@ -160,6 +163,7 @@ export {
   Leading,
   NickSuffix,
   Palette,
+  PreviewsShown,
   ReadRule,
   SpellcheckShown,
   Theme,
@@ -178,9 +182,11 @@ export {
   isFontName,
   leadingBounds,
   nickSuffixMaxLength,
+  sharedOnly,
   textSizeBounds,
   uiDefaults,
   uiOptionNames,
+  uiSharedOnly,
   uiValueKept,
   widestLineBounds,
 } from "./ui.ts";
@@ -221,5 +227,17 @@ export {
   UploadsStatus,
   uploadNameMaxLength,
 } from "./uploads.ts";
+
+export {
+  MessagePreviews,
+  Preview,
+  PreviewFailure,
+  PreviewId,
+  PreviewItem,
+  PreviewKind,
+  PreviewState,
+  PreviewsEvent,
+  PreviewsRequest,
+} from "./previews.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

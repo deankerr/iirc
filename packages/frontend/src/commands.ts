@@ -44,6 +44,7 @@ import type { Asked, Configuration, Edit, Json } from "./options.ts";
 import { parseThemeName, systemTheme } from "./theme.ts";
 import type { ThemeOption, ThemesEdit } from "./theme.ts";
 import type { PaneChange } from "./timelines.ts";
+import { isOverridable } from "./ui.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
 export type SayKind = "Privmsg" | "Notice" | "Action";
@@ -447,6 +448,14 @@ const afterDevice = (args: string): string | undefined =>
 const deviceOnlyUi = `Only an option under ui is kept for this device, as in /set ${deviceFlag} ui.theme light.`;
 
 /**
+ * Why an option every device shares only is refused for this device alone, in words.
+ * @param name - The option's name.
+ * @returns The words.
+ */
+const sharedOnlyUi = (name: string) =>
+  `${name} is shared by every device, so no device overrides it. Use /set ${name} without ${deviceFlag}.`;
+
+/**
  * An option under `ui` set to a value given as text, for every device or this one.
  * @param name - The option's name.
  * @param text - The value, or none when nothing followed the name.
@@ -458,6 +467,10 @@ const setUi = (name: string, text: string | undefined, device: boolean): Parsed<
 
   if (found._tag === "Invalid") {
     return found;
+  }
+
+  if (device && !isOverridable(found.value.option)) {
+    return invalid(sharedOnlyUi(name));
   }
 
   // Text takes the rest of the line after the name's space as it is, empty or spaces
@@ -535,6 +548,10 @@ const unsetArguments = (args: string): Parsed<Intent> => {
 
   if (isUiName(name)) {
     const found = resolveUi(name);
+
+    if (found._tag === "Parsed" && onDevice !== undefined && !isOverridable(found.value.option)) {
+      return invalid(sharedOnlyUi(name));
+    }
 
     return found._tag === "Invalid"
       ? found

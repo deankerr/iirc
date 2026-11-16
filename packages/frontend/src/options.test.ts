@@ -1157,6 +1157,7 @@ describe("the options under ui", () => {
       font: "system",
       leading: 1.45,
       light: "light",
+      previews: "off",
       read: "latest",
       size: 14,
       spellcheck: false,
@@ -1201,6 +1202,7 @@ describe("the options under ui", () => {
         },
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Text" },
+        { _tag: "Choice", choices: ["off", "links only", "on"] },
         { _tag: "Choice", choices: ["shown", "latest", "asked"] },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Toggle" },
@@ -1230,6 +1232,7 @@ describe("the options under ui", () => {
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
+        ["ui.previews", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
         ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.spellcheck", { _tag: "Shown", text: "on" }, { _tag: "Unset" }, undefined],
@@ -1295,6 +1298,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "light" },
           undefined,
           "light",
+        ],
+        [
+          "ui.previews",
+          { _tag: "Shown", text: "off" },
+          { _tag: "Shown", text: "off" },
+          undefined,
+          "off",
         ],
         [
           "ui.read",
@@ -1382,7 +1392,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-17),
+        .slice(-18),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1396,6 +1406,7 @@ describe("the options under ui", () => {
         "ui.font",
         "ui.leading",
         "ui.light",
+        "ui.previews",
         "ui.read",
         "ui.size",
         "ui.spellcheck",
@@ -1433,6 +1444,53 @@ describe("the options under ui", () => {
       theme: [undefined],
     });
     expect(fontMissing).toBe("not found on this device");
+  });
+
+  it("offer ui.previews as off, links only, or on, off to start, set by /set for every device and never for one", () => {
+    const previews = uiOptionsOf(shared, { previews: "on" }).find(
+      (one) => one.option === "previews"
+    );
+
+    expect({
+      device: read("/set -device ui.previews on"),
+      kind: previews?.kind,
+      links: read("/set ui.previews links only"),
+      linksCase: read("/set ui.previews  Links Only "),
+      linksWord: read("/set ui.previews links"),
+      shown: [previews?.value, previews?.device, previews?.starts],
+      unset: read("/unset ui.previews"),
+      unsetDevice: read("/unset -device ui.previews"),
+    }).toStrictEqual({
+      device: {
+        _tag: "Invalid",
+        message:
+          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+      },
+      kind: { _tag: "Choice", choices: ["off", "links only", "on"] },
+      links: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "links only" }],
+      },
+      linksCase: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "links only" }],
+      },
+      linksWord: {
+        _tag: "Invalid",
+        message: 'ui.previews: Choose one of off, links only, on, not "links".',
+      },
+      // A device's override of it, kept by hand, is neither shown nor in effect.
+      shown: [{ _tag: "Shown", text: "off" }, undefined, "off"],
+      unset: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: undefined }],
+      },
+      unsetDevice: {
+        _tag: "Invalid",
+        message:
+          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+      },
+    });
   });
 
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {

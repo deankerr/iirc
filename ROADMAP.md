@@ -21,12 +21,12 @@ IRC carries text, so a picture is always a link. Two features make a link feel l
 A Message's links shown with more than their address: a page's title and image, or the media itself in place.
 
 - **The Daemon fetches, never the browser.** A browser fetching a link a stranger posted gives that stranger the Owner's IP address on every device. The Daemon fetches each link once, on demand, and serves the Preview and its media from its own origin, so the page's CSP names no other host for an image.
-- **Fetching is guarded against SSRF.** The Daemon resolves the name itself, refuses loopback, private, link-local and other special ranges, connects to the address it checked, follows redirects one at a time checking each, and caps size, time and content types. It keeps what it fetched, failures included, and serves media by its own hash, so it is never an open proxy.
-- **Off until the Owner turns it on,** per Network or per Timeline as options under `ui`, and fetched only when a Message is shown, since fetching ahead tells a link's host when the Daemon saw it.
+- **Fetching is guarded against SSRF.** The Daemon resolves the name itself, refuses loopback, private, link-local and other special ranges, connects to the address it checked, follows redirects one at a time checking each, and caps size, time and content types. It serves media by its own hash, so it is never an open proxy.
+- **Off until the Owner turns it on,** as `ui.previews`, which is `off`, `links only` or `on`. `links only` is a text Preview and fetches no image. A Timeline can override the choice either way, rather than a Network, and the choice and the overrides are shared by every device. Fetched only when a Message is shown, since fetching ahead tells a link's host when the Daemon saw it, and a link in a Direct Message waits for a press.
 - **Any page, by what the page says of itself:** OpenGraph, Twitter card tags, and the oEmbed it points to. **A link to media itself** by its content type: an image, an animated image, a video, or a sound.
 - **A player loads only on a press,** where a page's tags name one, in a sandboxed frame from a short list of hosts the CSP names. A service's script is never loaded into the page.
 - **No service is coded for.** A plain fetch already gets a Preview from most of the services that matter: YouTube, X, GitHub, Bluesky, Mastodon, Giphy, Twitch, Vimeo, Streamable, Spotify, SoundCloud, Bandcamp and Wikipedia. A recorded page from each is a fixture, so we know the Preview it gives.
-- **Open question:** whether a Preview belongs in the Journal or only in the Daemon's cache. A cache is enough to start.
+- **A Preview is a cache outside the Journal,** keyed by the link, since a page can always be fetched again. Its images are held in the same store as Uploads, as references the Daemon may evict.
 
 ### Uploads
 

@@ -9,6 +9,8 @@ import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun";
 import { makeS3ByteStore } from "@iirc/byte-store-s3";
 import { client } from "@iirc/client";
 import { layerSqliteJournal } from "@iirc/journal-sqlite";
+import type { LinkFetch } from "@iirc/link-fetch";
+import { layerBunLinkFetch } from "@iirc/link-fetch-bun";
 import type { Pacing } from "@iirc/outbox";
 import { layerRuntime } from "@iirc/runtime";
 import { layerSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
@@ -26,6 +28,7 @@ import { ApiKeys } from "./keys.ts";
 import { layerLinkListener } from "./link-listener.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
 import { OwnerConfiguration, layerOwnerConfiguration } from "./options.ts";
+import { layerPreviews } from "./previews/previews.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import { layerUiConfiguration } from "./ui.ts";
@@ -45,6 +48,13 @@ export interface DaemonOptions {
   readonly hangupDrain?: Duration.Input | undefined;
   /** How long stopping waits for each Network's Connections to close. 5 seconds unless given. */
   readonly stopTimeout?: Duration.Input | undefined;
+  /** iirc's version, which the link fetch names in its user agent. `0.0.0` unless given. */
+  readonly version?: string | undefined;
+  /**
+   * How Previews fetch a stranger's link. The guard under the fixed policy unless given, as
+   * production always has it. A test gives a fake, or the guard under a loopback policy.
+   */
+  readonly linkFetch?: Layer.Layer<LinkFetch> | undefined;
 }
 
 /** Where the API listens. */
@@ -183,10 +193,17 @@ const layerCore = (options: DaemonOptions) => {
     Layer.provide(Layer.merge(Layer.succeed(ByteStoreMaker, makeS3ByteStore), platform))
   );
 
+  const linkFetch = options.linkFetch ?? layerBunLinkFetch({ version: options.version ?? "0.0.0" });
+
+  // Previews read the Timelines and the `ui` options, and fetch through the link fetch.
+  const previews = layerPreviews.pipe(Layer.provide(linkFetch));
+
   // The `ui` options are folded from the Journal's Changes, beside the Runtime, and so are
   // the Uploads. The options under `store` and `uploads` are folded before it starts, since
   // it spares the Credentials they name, even as it finishes a removal cut short.
-  const owned = Layer.mergeAll(timelines, layerUiConfiguration, uploads);
+  const owned = previews.pipe(
+    Layer.provideMerge(Layer.mergeAll(timelines, layerUiConfiguration, uploads))
+  );
 
   const runtime = runtimeFirstToStop(options).pipe(
     Layer.provideMerge(layerOwnerConfiguration),

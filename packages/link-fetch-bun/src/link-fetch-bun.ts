@@ -434,7 +434,7 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
         const type = declared(purpose, header);
 
         if (type === undefined) {
-          return yield* new LinkWrongType({ type: header });
+          return yield* new LinkWrongType({ link: target.href, type: header });
         }
 
         const cap = capOf(purpose, type);
@@ -452,7 +452,7 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
         // Only the first bytes are looked at, however many the first chunks held, so the type
         // never depends on how the body was split.
         if (purpose.kind === "image" && sniff(first.subarray(0, sniffed)) !== type) {
-          return yield* new LinkWrongType({ type: header });
+          return yield* new LinkWrongType({ link: target.href, type: header });
         }
 
         return {

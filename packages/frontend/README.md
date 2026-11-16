@@ -199,7 +199,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
-- **Every device shares them, and one may override any for itself** with `-device`. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
+- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and the palette alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.**
@@ -310,6 +310,16 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
 - **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was, and an answer that never left takes the `Refused` tone. One the Owner sent shows whom they asked for what, and a reply to their `PING` shows how long it took, in seconds to the millisecond, as the Daemon journaled the two, never by a clock the page reads. An answer to Self's `OPER` says whether Self is an IRC operator now, a refusal by its numeric in the `Refused` tone.
+
+## Previews
+
+What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It is `@iirc/frontend/previews`.
+
+- **Nothing is asked for ahead of the screen.** A Message is asked for only once the view says it came into view, only once, and only while the stream is followed, so no change an ask starts is missed. `asksWanted` gives the asks to make.
+- **`ui.previews` is the shared value alone** (`previewsModeOf`), since the Daemon acts on it. Under `off`, or before it is read, nothing is asked for, followed, or shown.
+- **An item is held once, by its id,** so a change the stream gives updates every Message that shows it. An answer is taken only by the ask in flight, and never replaces an item the stream changed after that ask began.
+- **A stream followed again asks again** for each Message still waiting on a Preview, since a Preview is not in the Journal and its stream resumes nothing.
+- **What a Message shows is derived.** Before its answer, a placeholder for each link `previewableLinksOf` finds, so its height does not change once answered, and after it, each of those links with the state of its item as it is now, shared by every link with the same id: pending, ready as its summary line (`summaryOf`) and description, or failed as the plain link with its reason in words (`reasonWords`). A link is an anchor only when it reads as one `http` or `https` link, and everything a stranger wrote is contained.
 
 ## Activity
 

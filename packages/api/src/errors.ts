@@ -7,7 +7,7 @@ import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
 import { ByteCount, OwnerOptionName, OwnerSequence } from "./options.ts";
-import { CallerIntent, NetworkId, Sequence } from "./schemas.ts";
+import { CallerIntent, Cursor, NetworkId, Sequence } from "./schemas.ts";
 import { UiSequence } from "./ui.ts";
 import { UploadId } from "./uploads.ts";
 
@@ -144,6 +144,24 @@ export class OptionsChanged extends Schema.TaggedError<
   OptionsChanged,
   { readonly brand: unique symbol }
 >()("OptionsChanged", { sequence: OwnerSequence }, { httpApiStatus: 409 }) {}
+
+/**
+ * No Message stands at this position in the Timeline: nothing does, or what does is not a
+ * Message, such as an Activity: a 404.
+ */
+export class UnknownMessage extends Schema.TaggedError<
+  UnknownMessage,
+  { readonly brand: unique symbol }
+>()("UnknownMessage", { position: Cursor, timeline: TimelineId }, { httpApiStatus: 404 }) {}
+
+/**
+ * Previews are off for the Timeline, as `ui.previews` says, so nothing was fetched. Asking
+ * again once they are on succeeds: a 409.
+ */
+export class PreviewsOff extends Schema.TaggedError<
+  PreviewsOff,
+  { readonly brand: unique symbol }
+>()("PreviewsOff", { timeline: TimelineId }, { httpApiStatus: 409 }) {}
 
 /** No Upload has this id: a 404. */
 export class UnknownUpload extends Schema.TaggedError<

@@ -14,7 +14,11 @@ import { Authorization, signInCookie } from "@iirc/api";
 import { makeMemoryByteStore } from "@iirc/byte-store/testing";
 import type { ByteStoreHarness } from "@iirc/byte-store/testing";
 import { client } from "@iirc/client";
+import { LinkFetch } from "@iirc/link-fetch";
+import type { LinkFetchService } from "@iirc/link-fetch";
+import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
 import { layerRuntime } from "@iirc/runtime";
+import type { RuntimeOptions } from "@iirc/runtime";
 import { Journal, JournalFailed } from "@iirc/runtime/journal";
 import type { JournalRecord, JournalService } from "@iirc/runtime/journal";
 import { makeMemoryJournal, makeMemoryTransport, makeMemoryVault } from "@iirc/runtime/testing";
@@ -33,6 +37,7 @@ import { HttpApiMiddleware } from "effect/http-api";
 import { ApiKeys, createKey } from "../keys.ts";
 import { layerLinkListener } from "../link-listener.ts";
 import { OwnerConfiguration, layerOwnerConfiguration } from "../options.ts";
+import { layerPreviews } from "../previews/previews.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
 import { layerUiConfiguration } from "../ui.ts";
@@ -97,6 +102,8 @@ export interface World {
   readonly store: TimelineStoreService;
   /** The byte store, in memory, reached from any bucket but {@link unreachableEndpoint}. */
   readonly bytes: ByteStoreHarness;
+  /** How Previews fetch a link: a fake that answers none unless the test gave one. */
+  readonly links: LinkFetchService;
   readonly logged: string[];
 }
 
@@ -107,16 +114,19 @@ export const unreachableEndpoint = "http://unreachable.invalid";
  * Fresh in-memory ports, and somewhere to keep what is logged.
  * @param journal - A Journal to use instead of a fresh one.
  * @param store - A Timeline store to use instead of a fresh one in memory.
+ * @param links - A link fetch to use instead of a fake that answers no link.
  * @returns The world.
  */
 export const makeWorld = (
   journal?: JournalService,
-  store?: TimelineStoreService
+  store?: TimelineStoreService,
+  links?: LinkFetchService
 ): Effect.Effect<World> =>
   Effect.gen(function* () {
     return {
       bytes: yield* makeMemoryByteStore,
       journal: journal ?? (yield* makeMemoryJournal),
+      links: links ?? (yield* makeFakeLinkFetch({})).service,
       logged: [],
       memory: yield* makeMemoryTransport,
       store: store ?? (yield* makeMemoryTimelineStore),
@@ -132,13 +142,17 @@ export const makeWorld = (
  * and the keys and browser sign-ins of that directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
+ * @param pacing - How fast Lines leave each Connection, the Runtime's own unless given.
  * @returns The Layer.
  */
-export const layerWorld = (world: World, dataDir: string) =>
+export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOptions["pacing"]) =>
   Layer.mergeAll(
     Layer.mergeAll(
       layerProjector,
-      layerUiConfiguration,
+      layerPreviews.pipe(
+        Layer.provideMerge(layerUiConfiguration),
+        Layer.provide(Layer.succeed(LinkFetch, world.links))
+      ),
       layerLinkListener.pipe(
         Layer.provideMerge(layerUploads(dataDir)),
         Layer.provide(
@@ -156,7 +170,9 @@ export const layerWorld = (world: World, dataDir: string) =>
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         Layer.unwrap(
-          OwnerConfiguration.useSync((owner) => layerRuntime(client, { spared: owner.spared }))
+          OwnerConfiguration.useSync((owner) =>
+            layerRuntime(client, { pacing, spared: owner.spared })
+          )
         ).pipe(
           Layer.provideMerge(layerOwnerConfiguration),
           Layer.provideMerge(

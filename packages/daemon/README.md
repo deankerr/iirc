@@ -16,9 +16,9 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | --- | --- |
 | `layerDaemon(options, listen?, beside?)` | The Daemon, serving the API on `listen` (`127.0.0.1:7667` unless given), for as long as the Layer lives. It also provides its `HttpServer`, so a test can find an ephemeral port. `beside` is a Layer of routes served on the same origin, such as `iirc daemon --web`'s, which the Daemon knows nothing of. |
 | `Beside` | The type of those routes: a Layer that adds to the `HttpRouter`, and may use the server's `FileSystem`, `Path`, and file responses. |
-| `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s). |
+| `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s), iirc's `version`, for the link fetch's user agent (`0.0.0`), and `linkFetch`, how Previews fetch a link: the guard under the fixed policy unless given. |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
-| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `Uploads`, `ApiKeys`, and `SignIns`. |
+| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `Uploads`, `Previews`, `ApiKeys`, and `SignIns`. |
 | `Heartbeat`, `ChangesPage` | How often the News and Timeline changes streams say they are alive (15 s), and how many things one event of the Timeline changes holds at most (500). Each is a reference a test may set. |
 | `createKey(dataDir, name)` | `iirc key create`: makes a key, stores its hash, and gives the key once. Call it with the data directory held. |
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
@@ -30,6 +30,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store` and `uploads`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |
 | `Uploads`, `layerUploads(dataDir)`, `ByteStoreMaker` | The Uploads folded from the Journal's `Uploaded` Changes, whether they are on, and how a body becomes a kept Upload, below. The Layer needs the `Journal`, the `Vault`, `OwnerConfiguration`, the file system, `SecureRandom`, and a `ByteStoreMaker`, which makes the byte store from where a bucket is and its keys: `makeS3ByteStore` in the Daemon. |
 | `layerLinkListener` | The link listener, below, given `Uploads` and `OwnerConfiguration`. |
+| `Previews`, `layerPreviews` | A Message's Previews, below, and each change of one. The Layer needs `LinkFetch`, the `TimelineStore`, and `UiConfiguration`. |
 
 ## The data directory
 
@@ -94,6 +95,17 @@ The link listener, in `src/link-listener.ts`, is a second HTTP server, never a r
 - **An Upload is served as its record says.** Its `Content-Type` is the type read from its bytes, with a charset where one applies, and its `Content-Disposition` names its safe name, as an ASCII `filename` and as `filename*`. Raster images, common audio and video, and plain text are `inline`, and everything else, SVG, HTML, XML, and PDF among them, an `attachment`. It is `Cache-Control: no-cache`.
 - **What it cannot serve is plain text.** An Upload no one has, or whose bytes the store confirms are gone, is 404, and a store that cannot be reached is 503 with `Cache-Control: no-store`.
 - **The API serves the same bytes the same way.** An Upload's answer, its headers and the first chunk read before answering, is built in `src/uploads/serving.ts` for both, so the API's `content` route and the listener cannot drift apart. Only what neither can serve differs: the API answers with its own errors.
+
+## Previews
+
+A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Daemon fetches a stranger's link only through the link fetch port, `@iirc/link-fetch`, whose production adapter is the guard, `@iirc/link-fetch-bun`.
+
+- **Asking is what fetches.** An ask names a Message by its Timeline and position, which the store's window around that position finds. The Daemon reads `ui.previews` as journaled, and while it is `off` answers `PreviewsOff` and fetches nothing. Otherwise each of the Message's links that `previewableLinksOf` gives, at most three, is answered from what is kept, or starts a fetch and is `Pending`.
+- **A link is kept by its address without its fragment,** in memory, so one link in many Messages, or asked by many Frontends, is fetched once, and an ask while it is fetched joins that fetch. Its id is the first 128 bits of that address's SHA-256. Nothing is kept on disk: a restart forgets every Preview, and asking fetches again.
+- **A link is fetched as a page,** under `links only` and, until images are offered, under `on`. A page's head is read by the pure reader in `src/previews/read.ts`, and a page with neither a title nor a description has nothing to show. An answer of an image, video, or audio type, which the guard refuses as a page without reading its body, is a text Preview of its kind, its type, and its host as its site.
+- **A failure is its reason,** from the link fetch's error: refused, unreachable, timed out, or too large, and any other type nothing to show. Anything unforeseen is unreachable, so no Preview stays pending. A failure is kept as a Preview is.
+- **A Direct Message's link waits for a press,** fetching nothing, unless it is already kept.
+- **Each change of a state is published** to every follower of the changes stream, `Pending` as a fetch starts and its outcome as it ends. A fetch runs in the Daemon's Scope, so it ends when the Daemon stops.
 
 ## API keys
 
@@ -170,7 +182,9 @@ The link listener, in `src/link-listener.ts`, is a second HTTP server, never a r
 - **Ergo** 2.19.1 is fetched into the gitignored `.cache/ergo/` and checked against its checksums file and a pinned SHA-256 before it runs. The Daemon dials it over TLS and trusts its self-signed root through the Transport's `trust`, never by turning verification off.
 - **MinIO** is the maintained pgsty/minio fork, since MinIO itself no longer publishes binaries. It is fetched into `.cache/minio/` and checked the same way, and serves its S3 API on loopback with an empty bucket, and more on asking.
 
-`@iirc/daemon/testing` exports the private Ircds, MinIO, the raw peer, and the loopback port picker, `startNgircd`, `startErgo`, `startMinio`, `connectPeer`, `freePort`, and `loopback`, so another package's end-to-end run, such as the web frontend's in `apps/iirc`, starts them the same way.
+`@iirc/daemon/testing` exports the private Ircds, MinIO, the raw peer, and the loopback port picker, `startNgircd`, `startErgo`, `startMinio`, `connectPeer`, `freePort`, and `loopback`, so another package's end-to-end run, such as the web frontend's in `apps/iirc`, starts them the same way. It also exports `layerLoopbackLinkFetch(port)`, the guard admitting a fixture site on `127.0.0.1:<port>`, to give `layerDaemon` as `linkFetch`.
+
+Previews are tested over a real server with the link fetch's fake, which answers by link and records what it was asked.
 
 ## Not yet
 
@@ -178,5 +192,5 @@ The link listener, in `src/link-listener.ts`, is a second HTTP server, never a r
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, and ending sign-ins other than by signing out.**
-- **Previews.** The Daemon will fetch a stranger's link only through the link fetch port, `@iirc/link-fetch`, and nothing composes it yet.
+- **Previews beyond a page's text.** Images, oEmbed, players, the press for a Direct Message, Timeline overrides, bounds on fetching, a cache that survives a restart and refreshes, and forgetting a failure after an hour.
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

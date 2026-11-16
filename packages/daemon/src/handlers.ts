@@ -41,6 +41,7 @@ import {
 import type {
   NewsEvent,
   OptionsEvent,
+  PreviewsEvent,
   TimelineChangesEvent,
   UiEvent,
   Upload,
@@ -87,6 +88,7 @@ import { ApiKeys } from "./keys.ts";
 import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
 import type { OptionsChangedSince } from "./options.ts";
+import { Previews } from "./previews/previews.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
@@ -1292,6 +1294,31 @@ const uploads = HttpApiBuilder.group(
   })
 );
 
+// A Message's Previews, asked for by its place, and every change of one, as it happens.
+const previews = HttpApiBuilder.group(
+  DaemonApi,
+  "previews",
+  Effect.fn(function* (handlers) {
+    const held = yield* Previews;
+
+    return handlers
+      .handle("ask", ({ params, payload }) =>
+        held.ask(params.timeline, payload.position).pipe(
+          Effect.map((found) => ({ previews: found })),
+          Effect.catchTags({ TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)) })
+        )
+      )
+      .handle("changes", () =>
+        followed(
+          held.changes.pipe(
+            Stream.map((item): PreviewsEvent => ({ data: item, event: "changed" }))
+          ),
+          { data: {}, event: "heartbeat" }
+        )
+      );
+  })
+);
+
 // A body over the limit is refused unread, and Bun's graceful stop waits for a client
 // still sending one, so the 413 closes its Connection rather than hold up the Daemon's
 // shutdown. The limit's error reaches here as a defect. An upload answered with an error may
@@ -1350,6 +1377,7 @@ export const ApiHandlers = Layer.mergeAll(
   ui,
   options,
   uploads,
+  previews,
   credentials
 ).pipe(Layer.provideMerge(Layer.mergeAll(requestValidation, authorization)));
 

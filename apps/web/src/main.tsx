@@ -24,6 +24,7 @@ import { ownerSync } from "./options/owner.ts";
 import { uiSync } from "./options/ui.ts";
 import { uploadsSync } from "./options/uploads.ts";
 import { watchPage } from "./page/watch.ts";
+import { previewsSync } from "./previews/atoms.ts";
 import { marking } from "./reading/atoms.ts";
 import { check } from "./sign-in/atoms.ts";
 import { watchTheme } from "./theme/atoms.ts";
@@ -56,6 +57,9 @@ registry.mount(channelSync);
 registry.mount(completer);
 
 registry.mount(chantypesSync);
+
+// The Previews of the Messages shown, asked for and followed while `ui.previews` asks.
+registry.mount(previewsSync);
 
 // What was typed under a draft goes to its Timeline once the draft shows it.
 registry.mount(draftsCarried);

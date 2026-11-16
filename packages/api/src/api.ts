@@ -26,6 +26,7 @@ import {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
+  PreviewsOff,
   SignInsFailed,
   TimelinesFailed,
   TimelinesKept,
@@ -33,6 +34,7 @@ import {
   UiChanged,
   Unauthorized,
   UnknownNetwork,
+  UnknownMessage,
   UnknownTimeline,
   UnknownUpload,
   UploadTooLarge,
@@ -42,6 +44,7 @@ import {
   VaultFailed,
 } from "./errors.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
+import { MessagePreviews, PreviewsEvent, PreviewsRequest } from "./previews.ts";
 import {
   Acted,
   ActRequest,
@@ -388,6 +391,27 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
   )
   .middleware(Authorization) {}
 
+/**
+ * Previews: a Message's, asked for by its place in its Timeline, which starts fetching any
+ * of its links not yet fetched, and each change of a Preview's state, as Server-Sent
+ * Events, live. It is beside News, not in it, since a Preview is never journaled. Asking is
+ * a `POST`, so one carried by a cookie must come from the Daemon's own origin, and another
+ * site cannot make the Daemon fetch.
+ */
+export class PreviewsGroup extends HttpApiGroup.make("previews")
+  .add(
+    HttpApiEndpoint.post("ask", "/timelines/:timeline/previews", {
+      error: [UnknownTimeline, UnknownMessage, PreviewsOff, TimelinesFailed],
+      params: { timeline: TimelineId },
+      payload: PreviewsRequest,
+      success: MessagePreviews,
+    }),
+    HttpApiEndpoint.get("changes", "/previews/changes", {
+      success: HttpApiSchema.StreamSse({ events: PreviewsEvent }),
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -433,6 +457,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(UiGroup)
   .add(OptionsGroup)
   .add(UploadsGroup)
+  .add(PreviewsGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)
