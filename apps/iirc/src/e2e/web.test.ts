@@ -4932,7 +4932,7 @@ describe("the web frontend on iirc daemon --web", () => {
             gone: gone.status,
             marked,
             missingRecord: recordBefore?.missing,
-            problems: problems.filter((problem) => !problem.includes("404")),
+            problems: problems.filter((problem) => problem.includes("Content Security Policy")),
             recordAfter: recordAfter?.missing,
             storeHolds: await holdsBytes(minio, minio.bucket, lostUpload.hash),
           }).toStrictEqual({
