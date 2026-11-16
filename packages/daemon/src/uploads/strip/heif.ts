@@ -114,12 +114,14 @@ const close = (out: Writer, at: number, header: number) => {
 // Where a box's payload begins.
 const payloadAt = (box: Box) => box.start + box.header;
 
-// `ipma` without the associations of dropped items.
+// `ipma` without the associations of dropped items. A kept item that needs, by an essential
+// association, a property that is retyped could not be decoded, so that is a failure.
 const rebuildAssociations = (
   bytes: Uint8Array,
   out: Writer,
   ipma: Box,
-  kept: ReadonlySet<number>
+  kept: ReadonlySet<number>,
+  retyped: ReadonlySet<number>
 ): Unreadable | null => {
   const p = payloadAt(ipma);
 
@@ -141,10 +143,24 @@ const rebuildAssociations = (
     }
 
     if (kept.has(readBe(bytes, at, idWidth))) {
+      for (let i = at + idWidth + 1; i < end; i += indexWidth) {
+        const association = readBe(bytes, i, indexWidth);
+        const essential = hasFlag(bytes[i] ?? 0, 128);
+        const index = association - (essential ? 128 * 256 ** (indexWidth - 1) : 0);
+
+        if (essential && retyped.has(index)) {
+          return bad("a kept item needs a property that is dropped");
+        }
+      }
+
       entries.push({ end, start: at });
     }
 
     at = end;
+  }
+
+  if (at !== ipma.end) {
+    return bad("an ipma has more than its count of entries");
   }
 
   const begin = open(out, bytes, ipma);
@@ -188,6 +204,26 @@ const rebuildProperties = (bytes: Uint8Array, out: Writer, ipco: Box): Unreadabl
   return null;
 };
 
+// The 1-based indices of the properties of `ipco` that are retyped.
+const retypedIndices = (
+  bytes: Uint8Array,
+  ipco: Box | undefined
+): ReadonlySet<number> | Unreadable => {
+  if (ipco === undefined) {
+    return new Set();
+  }
+
+  const properties = readBoxes(bytes, payloadAt(ipco), ipco.end);
+
+  if (properties instanceof Unreadable) {
+    return properties;
+  }
+
+  return new Set(
+    properties.flatMap((property, i) => (keptProperties.has(property.type) ? [] : [i + 1]))
+  );
+};
+
 // `iprp` with `ipco` as above and `ipma` without dropped items; anything else in it is dropped.
 const rebuildPropertyBox = (
   bytes: Uint8Array,
@@ -201,6 +237,18 @@ const rebuildPropertyBox = (
     return children;
   }
 
+  const ipcos = children.filter((child) => child.type === types.ipco);
+
+  if (ipcos.length > 1) {
+    return bad("more than one ipco in an iprp");
+  }
+
+  const retyped = retypedIndices(bytes, ipcos[0]);
+
+  if (retyped instanceof Unreadable) {
+    return retyped;
+  }
+
   const begin = open(out, bytes, iprp);
 
   for (const child of children) {
@@ -209,7 +257,7 @@ const rebuildPropertyBox = (
     if (child.type === types.ipco) {
       failure = rebuildProperties(bytes, out, child);
     } else if (child.type === types.ipma) {
-      failure = rebuildAssociations(bytes, out, child, kept);
+      failure = rebuildAssociations(bytes, out, child, kept, retyped);
     }
 
     if (failure !== null) {
@@ -416,7 +464,9 @@ const decide = (
   }
 
   const items =
-    iinf === undefined ? { infos: [], kept: new Set<number>() } : readItems(bytes, iinf);
+    iinf === undefined
+      ? { infos: [], kept: new Set<number>(), listed: new Set<number>() }
+      : readItems(bytes, iinf);
 
   if (items instanceof Unreadable) {
     return items;
@@ -430,6 +480,15 @@ const decide = (
 
   if (locations instanceof Unreadable) {
     return locations;
+  }
+
+  // A dropped item must be found in iloc, or where its data is cannot be proved.
+  const located = new Set((locations?.entries ?? []).map(({ id }) => id));
+
+  for (const id of items.listed) {
+    if (!items.kept.has(id) && !located.has(id)) {
+      return bad("an item is listed in iinf and not located in iloc");
+    }
   }
 
   const zeros = zeroing(locations?.entries ?? [], items.kept, {

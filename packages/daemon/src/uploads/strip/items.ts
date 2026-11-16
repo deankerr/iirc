@@ -17,7 +17,9 @@ export interface Range {
 
 // Images, and what makes one from others: a grid, an overlay, an identity, or a gain map.
 // Everything else, Exif, XMP in a `mime` item, a `uri ` item, or a type unknown, is dropped.
-const kept = typesOf("hvc1 hvt1 av01 grid iovl iden jpeg j2k1 unci tmap mski avc1 vvc1");
+// A `jpeg` item is dropped too, since a JPEG's data carries APP segments of its own, EXIF and
+// XMP among them, which are not walked here.
+const kept = typesOf("hvc1 hvt1 av01 grid iovl iden j2k1 unci tmap mski avc1 vvc1");
 
 const infe = typeOf("infe");
 
@@ -25,8 +27,9 @@ const u16 = (bytes: Uint8Array, at: number) => readBe(bytes, at, 2);
 
 const u32 = (bytes: Uint8Array, at: number) => readBe(bytes, at, 4);
 
-/** The items `iinf` lists: the ids of the ones kept, and their `infe` boxes. */
+/** The items `iinf` lists: the ids of all, of the ones kept, and the `infe` boxes of those. */
 export interface Items {
+  readonly listed: ReadonlySet<number>;
   readonly kept: ReadonlySet<number>;
   readonly infos: readonly Box[];
 }
@@ -89,7 +92,7 @@ export const readItems = (bytes: Uint8Array, iinf: Box): Items | Unreadable => {
     }
   }
 
-  return { infos: keeping, kept: ids };
+  return { infos: keeping, kept: ids, listed: seen };
 };
 
 /** An extent of an item's data: where it begins, its entry's base put in, and how long it is. */
@@ -222,6 +225,18 @@ export const readLocations = (bytes: Uint8Array, iloc: Box): Locations | Unreada
 
     entries.push(entry);
     at = entry.span.end;
+  }
+
+  // The entries are all there is, to the end of the box, whatever the count says: a count
+  // below them would leave items unlocated, so their data could not be found to be zeroed.
+  if (at !== iloc.end) {
+    return bad("an iloc has more than its count of entries");
+  }
+
+  const located = new Set(entries.map(({ id }) => id));
+
+  if (located.size !== entries.length) {
+    return bad("an iloc lists an item twice");
   }
 
   return { countAt, countWidth: widths.id, entries };

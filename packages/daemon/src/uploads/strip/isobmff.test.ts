@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { holds } from "../../testing/images.ts";
+import { holds, jpegWithGps } from "../../testing/images.ts";
 import {
   box,
   boxAt,
@@ -386,6 +386,23 @@ const photo: HeifOptions = {
 
 const topLevel = (bytes: Uint8Array) => pathsOf(bytes, new Set(["moov"]));
 
+// The iloc of a built file, whose version 1 entries are 16 bytes: its count, and the id of its
+// second entry, are what a lying file changes.
+const withIloc = (bytes: Uint8Array, change: (iloc: Uint8Array) => void) => {
+  const out = Uint8Array.from(bytes);
+  const iloc = boxAt(out, "meta", "iloc");
+
+  if (iloc === undefined) {
+    throw new Error("no iloc");
+  }
+
+  change(out.subarray(iloc.start + iloc.header));
+
+  return out;
+};
+
+const twoItems = () => heif({ items: [keptItem(1, "IMAGE-ONE"), exifItem(2)], primary: 1 });
+
 describe("walking an image", () => {
   it("keeps the images, drops Exif and XMP with their data, and writes a free box for what meta gave up", () => {
     const built = heif(photo);
@@ -500,6 +517,88 @@ describe("walking an image", () => {
       properties: ["ispe", "free", "colr"],
       secret: false,
     });
+  });
+
+  it("refuses an iloc whose count is lower than its entries, which would leave an item's data unlocated", () => {
+    const lying = withIloc(twoItems().bytes, (iloc) => {
+      iloc.set(u(1, 2), 6);
+    });
+
+    expect(reasonOf("image", lying)).toBe("an iloc has more than its count of entries");
+  });
+
+  it("refuses an iloc that lists an item twice", () => {
+    const lying = withIloc(twoItems().bytes, (iloc) => {
+      iloc.set(u(1, 2), 8 + 16);
+    });
+
+    expect(reasonOf("image", lying)).toBe("an iloc lists an item twice");
+  });
+
+  it("refuses a dropped item that iloc does not locate", () => {
+    const lying = withIloc(twoItems().bytes, (iloc) => {
+      iloc.set(u(9, 2), 8 + 16);
+    });
+
+    expect(reasonOf("image", lying)).toBe("an item is listed in iinf and not located in iloc");
+  });
+
+  it("drops a JPEG item, which holds metadata of its own, with its data", () => {
+    const built = heif({
+      items: [keptItem(1, "IMAGE-ONE"), { data: jpegWithGps, id: 2, type: "jpeg" }],
+      primary: 1,
+    });
+
+    const out = stripped("image", built.bytes);
+
+    expect({
+      after: holds(out, "PLANTED-"),
+      before: holds(built.bytes, "PLANTED-"),
+      types: itemsOf(out).map(({ type }) => type),
+    }).toStrictEqual({ after: false, before: true, types: ["hvc1"] });
+  });
+
+  it("refuses an image whose primary item is a JPEG", () => {
+    const built = heif({
+      items: [{ data: jpegWithGps, id: 1, type: "jpeg" }],
+      primary: 1,
+    });
+
+    expect(reasonOf("image", built.bytes)).toBe("the primary item is dropped or missing");
+  });
+
+  it.each([
+    ["one", false],
+    ["two", true],
+  ] as const)(
+    "refuses an image with an essential association to a property it would retype, in %s bytes",
+    (_, ipmaWide) => {
+      const essential = ipmaWide ? 0x80_00 : 0x80;
+
+      const built = heif({
+        associations: [{ id: 1, indices: [1, essential + 2, 3] }],
+        items: [keptItem(1, "IMAGE-ONE")],
+        layout: { ipmaWide },
+        primary: 1,
+        properties: [props[1] ?? text(""), box("zzzz", secret), props[2] ?? text("")],
+      });
+
+      expect(reasonOf("image", built.bytes)).toBe("a kept item needs a property that is dropped");
+    }
+  );
+
+  it("retypes a property that only a dropped item needs, essential or not", () => {
+    const built = heif({
+      associations: [
+        { id: 1, indices: [1, 3] },
+        { id: 2, indices: [0x80 + 2] },
+      ],
+      items: [keptItem(1, "IMAGE-ONE"), exifItem(2)],
+      primary: 1,
+      properties: [props[1] ?? text(""), box("zzzz", secret), props[2] ?? text("")],
+    });
+
+    expect(propertyTypes(stripped("image", built.bytes))).toStrictEqual(["ispe", "free", "colr"]);
   });
 
   it("drops a box in meta that is on no keep-list", () => {
