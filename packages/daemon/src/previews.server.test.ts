@@ -57,7 +57,8 @@ const serve = (answers: Readonly<Record<string, Answer>>) =>
       Layer.provideMerge(
         BunHttpServer.layer({ gracefulShutdownTimeout: 100, hostname: "127.0.0.1", port: 0 })
       ),
-      Layer.provide(layerWorld(world, dataDir)),
+      // A burst wide enough that no Line waits on the real clock's pacing.
+      Layer.provide(layerWorld(world, dataDir, { burst: 100, interval: 2000 })),
       Layer.provide(Layer.succeed(Heartbeat, Duration.millis(50)))
     );
 
@@ -389,7 +390,7 @@ describe("Previews over a real server", () => {
     );
 
     expect(result).toStrictEqual(["https://cats.example/"]);
-  }, 20_000);
+  });
 
   it("gives a link to media reached through a redirect as a Preview of the final link", async () => {
     const result = await run(

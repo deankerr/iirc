@@ -18,6 +18,7 @@ import { LinkFetch } from "@iirc/link-fetch";
 import type { LinkFetchService } from "@iirc/link-fetch";
 import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
 import { layerRuntime } from "@iirc/runtime";
+import type { RuntimeOptions } from "@iirc/runtime";
 import { Journal, JournalFailed } from "@iirc/runtime/journal";
 import type { JournalRecord, JournalService } from "@iirc/runtime/journal";
 import { makeMemoryJournal, makeMemoryTransport, makeMemoryVault } from "@iirc/runtime/testing";
@@ -141,9 +142,10 @@ export const makeWorld = (
  * and the keys and browser sign-ins of that directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
+ * @param pacing - How fast Lines leave each Connection, the Runtime's own unless given.
  * @returns The Layer.
  */
-export const layerWorld = (world: World, dataDir: string) =>
+export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOptions["pacing"]) =>
   Layer.mergeAll(
     Layer.mergeAll(
       layerProjector,
@@ -168,7 +170,9 @@ export const layerWorld = (world: World, dataDir: string) =>
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         Layer.unwrap(
-          OwnerConfiguration.useSync((owner) => layerRuntime(client, { spared: owner.spared }))
+          OwnerConfiguration.useSync((owner) =>
+            layerRuntime(client, { pacing, spared: owner.spared })
+          )
         ).pipe(
           Layer.provideMerge(layerOwnerConfiguration),
           Layer.provideMerge(
