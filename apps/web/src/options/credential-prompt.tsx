@@ -5,7 +5,7 @@
  * form is submitted, parsed as the API's own `CredentialValue`, straight to `Redacted`,
  * then emptied, which clears React DOM's tracker too, and the form reset. The value goes
  * to `PUT /api/credentials/{name}` and the option is pointed at it: a Network's through its
- * Configuration, and one under `store` or `uploads` by setting it to the Credential's name.
+ * Configuration, and one under `store`, `uploads`, or `previews` by setting it to the Credential's name.
  *
  * @packageDocumentation
  */

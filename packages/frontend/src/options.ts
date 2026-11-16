@@ -16,7 +16,7 @@
  * them, and a device may override any but those annotated shared only for itself, which
  * it never sends.
  *
- * The options under `store` and `uploads` are the Owner's too, each named in full, such as
+ * The options under `store`, `uploads`, and `previews` are the Owner's too, each named in full, such as
  * `store.s3.bucket`, and come from the contract's `OwnerOptions` the same way. They are not
  * a device's, so no device overrides them.
  *
@@ -195,7 +195,7 @@ export interface UiOption {
 }
 
 /**
- * One option under `store` or `uploads`, as the options view lists it: the Owner's, so the
+ * One option under `store`, `uploads`, or `previews`, as the options view lists it: the Owner's, so the
  * same on every device, and never overridden by one.
  */
 export interface OwnerOption {
@@ -550,7 +550,7 @@ export const fields: readonly Field[] = fieldsOf(NetworkConfiguration.ast, kindO
 /** Every option under `ui`, derived once from the contract's Schema. */
 export const uiFields: readonly Field[] = fieldsOf(UiOptions.ast, kindOf);
 
-/** Every option under `store` and `uploads`, keyed by its full name, derived once from the contract's Schema. */
+/** Every option under `store`, `uploads`, and `previews`, keyed by its full name, derived once from the contract's Schema. */
 export const ownerFields: readonly Field[] = fieldsOf(OwnerOptions.ast, kindOf);
 
 // JSON.
@@ -1066,7 +1066,7 @@ export const showText = (kind: Kind, value: Json): string => {
 
 /** What a name that names no option is told, of how options are named. */
 const optionsAreNamed =
-  "Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.";
+  "Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.";
 
 const networkIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
@@ -1375,15 +1375,15 @@ export const uiOptionsOf = (
   });
 };
 
-// The options under `store` and `uploads`.
+// The options under `store`, `uploads`, and `previews`.
 
-/** The first segment of each option's name under `store` and `uploads`. */
+/** The first segment of each option's name under `store`, `uploads`, and `previews`. */
 const ownerRoots: ReadonlySet<string> = new Set(
   ownerOptionNames.map((name) => name.slice(0, name.indexOf(".")))
 );
 
 /**
- * Whether a name is under `store` or `uploads`, so `resolveOwner` reads it rather than
+ * Whether a name is under `store`, `uploads`, or `previews`, so `resolveOwner` reads it rather than
  * `resolve`.
  * @param name - The name.
  * @returns Whether it is.
@@ -1391,7 +1391,7 @@ const ownerRoots: ReadonlySet<string> = new Set(
 export const isOwnerName = (name: string): boolean =>
   name.includes(".") && ownerRoots.has(name.slice(0, name.indexOf(".")));
 
-/** What a name under `store` or `uploads` resolves to: the option, and its field. */
+/** What a name under `store`, `uploads`, or `previews` resolves to: the option, and its field. */
 export interface ResolvedOwner {
   readonly option: OwnerOptionName;
   readonly field: Field;
@@ -1400,7 +1400,7 @@ export interface ResolvedOwner {
 const decodeOwnerName = Schema.decodeUnknownOption(OwnerOptionName);
 
 /**
- * The option a name under `store` or `uploads` names, read from the Schema alone: the
+ * The option a name under `store`, `uploads`, or `previews` names, read from the Schema alone: the
  * option's full name, such as `store.s3.bucket`.
  * @param name - The name.
  * @returns The option and its field, or why it names none.
@@ -1415,7 +1415,7 @@ export const resolveOwner = (name: string): Parsed<ResolvedOwner> => {
 };
 
 /**
- * An option's value under `store` or `uploads`, from its text syntax, parsed by its
+ * An option's value under `store`, `uploads`, or `previews`, from its text syntax, parsed by its
  * Schema, as the JSON the Daemon takes. A Credential option's value is never text.
  * @param option - The option.
  * @param text - The text.
@@ -1430,7 +1430,7 @@ export const parseOwnerText = (option: OwnerOptionName, text: string): Parsed<Js
   );
 
 /**
- * An option's value under `store` or `uploads` as JSON, as the Daemon takes it.
+ * An option's value under `store`, `uploads`, or `previews` as JSON, as the Daemon takes it.
  * @param option - The option.
  * @param value - Its value.
  * @returns The JSON.
@@ -1439,7 +1439,7 @@ const ownerValueJson = (option: OwnerOptionName, value: OwnerOptions[OwnerOption
   Schema.encodeUnknownSync(Schema.toCodecJson(OwnerOptions.fields[option]))(value);
 
 /**
- * What the Credential option under `store` or `uploads` that names none starts naming:
+ * What the Credential option under `store`, `uploads`, or `previews` that names none starts naming:
  * `Owner.` and the option's name, such as `Owner.store.s3.accessKeyId`. No Network's
  * Credential is ever named so, as a Network's id, which each of theirs starts with, starts
  * with a lower-case letter or a digit.
@@ -1449,7 +1449,7 @@ const ownerValueJson = (option: OwnerOptionName, value: OwnerOptions[OwnerOption
 export const derivedOwnerCredential = (option: OwnerOptionName): string => `Owner.${option}`;
 
 /**
- * The Credential a Credential option under `store` or `uploads` names, or the one it
+ * The Credential a Credential option under `store`, `uploads`, or `previews` names, or the one it
  * would name.
  * @param owner - The options in force.
  * @param option - The option.
@@ -1459,7 +1459,7 @@ export const ownerCredentialFor = (owner: OwnerOptions, option: OwnerOptionName)
   textOf(owner[option]) ?? derivedOwnerCredential(option);
 
 /**
- * Every option under `store` and `uploads`, in the Schema's order, each with its value in
+ * Every option under `store`, `uploads`, and `previews`, in the Schema's order, each with its value in
  * force, or what it starts as before they are read. A Credential option shows the
  * Credential it names, and whether the Vault holds it, never a value.
  * @param owner - The options in force, once read.
@@ -2424,7 +2424,7 @@ export interface Options {
   readonly networks: ReadonlyMap<NetworkId, Reading>;
   /** The options under `ui` every device shares, as last read or followed, once they are. */
   readonly ui: UiInForce | undefined;
-  /** The options under `store` and `uploads`, as last read or followed, once they are. */
+  /** The options under `store`, `uploads`, and `previews`, as last read or followed, once they are. */
   readonly owner: OwnerInForce | undefined;
   /** The names of the Credentials the Vault holds, once read. */
   readonly held: ReadonlySet<string> | undefined;
@@ -2440,7 +2440,7 @@ export interface Options {
 
 /**
  * A Credential option whose value is asked for: a Network's, by its Network and path, or
- * one under `store` or `uploads`, by its name.
+ * one under `store`, `uploads`, or `previews`, by its name.
  */
 export type Asked =
   | { readonly network: NetworkId; readonly path: Path }
@@ -2460,7 +2460,7 @@ export type Prompt = Asked & {
  * - `UiRead`: the options under `ui` were read, or followed.
  * - `UiForgotten`: the page signed out, so the shared `ui` options it held may no longer
  *   be the ones in force, and are read again once it signs in.
- * - `OwnerRead`, `OwnerForgotten`: the same, for the options under `store` and `uploads`.
+ * - `OwnerRead`, `OwnerForgotten`: the same, for the options under `store`, `uploads`, and `previews`.
  * - `Held`: the names of the Credentials the Vault holds.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
@@ -2619,7 +2619,7 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
  * @param filter - What the Owner typed to filter them.
  * @param device - This device's overrides of the options under `ui`.
  * @param missing - The fonts' families this device was found to lack.
- * @returns The options under `store` and `uploads`, then by Network in the order listed,
+ * @returns The options under `store`, `uploads`, and `previews`, then by Network in the order listed,
  *   then those under `ui`.
  */
 export const listed = (

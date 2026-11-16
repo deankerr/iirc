@@ -1,6 +1,7 @@
 /**
- * The Owner's options beyond `ui`, under the roots `store` and `uploads`: where Uploads'
- * bytes are kept, and how Uploads are served (ADR 0013, ADR 0016). They are the Owner's
+ * The Owner's options beyond `ui`, under the roots `store`, `uploads`, and `previews`: where
+ * Uploads' bytes are kept, how Uploads are served, and how many bytes Previews' images may
+ * take (ADR 0013, ADR 0016). They are the Owner's
  * rather than a device's, so no device overrides them. Each field is named in full, such as
  * `store.s3.bucket`, and says what it is and what it starts as in its annotations, which a
  * Frontend reads to offer every field as an option. A field with no `default` is unset until
@@ -203,12 +204,20 @@ export const expireAfterBounds = { maximum: 36_500, minimum: 1 } as const;
 /** 100 MiB, in bytes: what `uploads.maxSize` starts as. */
 export const defaultMaxSize = 104_857_600;
 
+/** 1 GiB, in bytes: what `previews.maxTotal` starts as. */
+export const defaultPreviewsMaxTotal = 1_073_741_824;
+
 /**
- * The options under `store` and `uploads`, each named in full, with its description, and
- * with what it starts as where it starts as anything. One with no `default` is optional,
+ * The options under `store`, `uploads`, and `previews`, each named in full, with its
+ * description, and with what it starts as where it starts as anything. One with no `default` is optional,
  * and absent until set.
  */
 export const OwnerOptions = Schema.Struct({
+  "previews.maxTotal": ByteCount.annotate({
+    default: defaultPreviewsMaxTotal,
+    description:
+      "The most bytes the store may hold for Previews' images. 1073741824, 1 GiB, unless set; the least recently shown lose their images first.",
+  }),
   "store.s3.accessKeyId": Schema.optionalKey(
     CredentialName.annotate({
       description: "The Credential holding the access key id of the bucket that keeps Uploads.",
@@ -265,19 +274,19 @@ export type OwnerOptions = typeof OwnerOptions.Type;
 
 /** An option's full name, such as `store.s3.bucket`: one of {@link OwnerOptions}' fields. */
 export const OwnerOptionName = Schema.Literals(Struct.keys(OwnerOptions.fields)).annotate({
-  description: "An option under store or uploads, such as uploads.maxSize.",
+  description: "An option under store, uploads, or previews, such as uploads.maxSize.",
   identifier: "OwnerOptionName",
 });
 
 /** The decoded form of {@link OwnerOptionName}. */
 export type OwnerOptionName = typeof OwnerOptionName.Type;
 
-/** Every option's full name under `store` and `uploads`, in the Schema's order. */
+/** Every option's full name under `store`, `uploads`, and `previews`, in the Schema's order. */
 export const ownerOptionNames: readonly OwnerOptionName[] = OwnerOptionName.literals;
 
 /**
- * What the options under `store` and `uploads` start as: each one with a `default`
- * annotation at it, and none of the others.
+ * What the options under `store`, `uploads`, and `previews` start as: each one with a
+ * `default` annotation at it, and none of the others.
  */
 export const ownerDefaults: OwnerOptions = Schema.decodeUnknownSync(OwnerOptions)(
   Object.fromEntries(
@@ -298,22 +307,22 @@ export const ownerCredentialOptions: readonly OwnerOptionName[] = ownerOptionNam
 );
 
 /**
- * How far the options under `store` and `uploads` have been changed: the sequence of the
+ * How far the options under `store`, `uploads`, and `previews` have been changed: the sequence of the
  * last Change of one, or `0` before any, to send back as `ifSequence` with a change made
  * from it.
  */
 export const OwnerSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * The options under `store` and `uploads` in force, each one set or with a default, and the
- * sequence of the last Change of one.
+ * The options under `store`, `uploads`, and `previews` in force, each one set or with a
+ * default, and the sequence of the last Change of one.
  */
 export const OwnerInForce = Schema.Struct({ options: OwnerOptions, sequence: OwnerSequence });
 
 /** The decoded form of {@link OwnerInForce}. */
 export type OwnerInForce = typeof OwnerInForce.Type;
 
-/** An option's value under `store` or `uploads`, decoded by its Schema. */
+/** An option's value under `store`, `uploads`, or `previews`, decoded by its Schema. */
 export type OwnerOptionValue = Exclude<OwnerOptions[OwnerOptionName], undefined>;
 
 /**

@@ -1,5 +1,5 @@
 /**
- * The Owner's options under `store` and `uploads`, as a projection of the Journal's Changes,
+ * The Owner's options under `store`, `uploads`, and `previews`, as a projection of the Journal's Changes,
  * as the `ui` options are (ADR 0015, ADR 0016): the latest Change of each option wins, an
  * unset one is back to its default, or to none, and a restart folds them again from the
  * Journal. A change is checked against the options it was made from and journaled in one
@@ -21,7 +21,7 @@ import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
 
-/** A Change of an option under `store` or `uploads`, the only kind this fold journals. */
+/** A Change of an option under `store`, `uploads`, or `previews`, the only kind this fold journals. */
 type OptionChange = Extract<Change, { readonly _tag: "OptionSet" | "OptionUnset" }>;
 
 /**
@@ -48,7 +48,7 @@ export const optionValueJson = (option: OwnerOptionName, value: OwnerOptionValue
   Schema.encodeSync(Schema.toCodecJson(OwnerOptions.fields[option]))(value);
 
 /**
- * Folds one Change of an option under `store` or `uploads`, and passes over any other. The
+ * Folds one Change of an option under `store`, `uploads`, or `previews`, and passes over any other. The
  * whole value of one option wins over what it held, and an unset returns it to its default,
  * or to none. A Change of an option this Daemon does not have, or of a value its Schema does
  * not take, changes no option, though its sequence is the last.
@@ -100,7 +100,7 @@ export class OptionsChangedSince extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("OptionsChangedSince", { sequence: Schema.Int }) {}
 
-/** The options under `store` and `uploads`, as the Daemon holds them. */
+/** The options under `store`, `uploads`, and `previews`, as the Daemon holds them. */
 export class OwnerConfiguration extends Context.Service<
   OwnerConfiguration,
   {
@@ -128,7 +128,7 @@ export class OwnerConfiguration extends Context.Service<
 >()("@iirc/daemon/OwnerConfiguration") {}
 
 /**
- * The options under `store` and `uploads` folded from every Change in the Journal as it
+ * The options under `store`, `uploads`, and `previews` folded from every Change in the Journal as it
  * starts, and kept as each Change is journaled through it, which is the only way one is.
  */
 export const layerOwnerConfiguration = Layer.effect(OwnerConfiguration)(

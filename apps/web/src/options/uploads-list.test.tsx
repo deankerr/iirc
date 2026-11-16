@@ -337,7 +337,11 @@ describe("the Uploads beside the options", () => {
     const fake = signedIn(cat);
 
     fake.daemon.owner = {
-      options: { "uploads.maxSize": 104_857_600, "uploads.publicUrl": "https://files.example.com" },
+      options: {
+        "previews.maxTotal": 1_073_741_824,
+        "uploads.maxSize": 104_857_600,
+        "uploads.publicUrl": "https://files.example.com",
+      },
       sequence: 1,
     };
 

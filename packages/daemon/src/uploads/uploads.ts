@@ -294,6 +294,8 @@ export class Uploads extends Context.Service<
      * `NoSuchUpload`, and one already deleted is answered as it is, with nothing journaled.
      */
     readonly delete: (id: UploadId) => Effect.Effect<Shown, NoSuchUpload | JournalFailed>;
+    /** Whether a live Upload, one not deleted, has the bytes under a hash. */
+    readonly holds: (hash: Sha256) => Effect.Effect<boolean>;
   }
 >()("@iirc/daemon/Uploads") {}
 
@@ -845,6 +847,7 @@ export const layerUploads = (dataDir: string) =>
               })
             )
           ),
+        holds: (hash: Sha256) => Effect.map(SubscriptionRef.get(held), (all) => liveHas(all, hash)),
         open,
         page,
         rename,

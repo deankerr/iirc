@@ -37,6 +37,20 @@ export const Kept = Schema.Struct({
 /** The decoded form of {@link Kept}. */
 export type Kept = typeof Kept.Type;
 
+/**
+ * An image some record holds: its hash, its size in bytes, and when it was last shown, each
+ * as milliseconds since the epoch, by the record shown latest of those that hold it. Its size
+ * is that its Ready Preview says, and 0 when no record that holds it is Ready.
+ */
+export const Held = Schema.Struct({
+  hash: Sha256,
+  shown: Schema.Int,
+  size: Schema.Int,
+}).annotate({ identifier: "Held" });
+
+/** The decoded form of {@link Held}. */
+export type Held = typeof Held.Type;
+
 /** The cache could not be written or read. */
 export class PreviewCacheFailed extends Schema.TaggedError<
   PreviewCacheFailed,
@@ -60,6 +74,19 @@ export interface PreviewCacheService {
   ) => Effect.Effect<Option.Option<Kept>, PreviewCacheFailed>;
   /** Whether any record kept holds the image with this hash. */
   readonly refers: (hash: Sha256) => Effect.Effect<boolean, PreviewCacheFailed>;
+  /**
+   * Each image some record holds, once, the one shown least recently first, and by hash
+   * among those shown at the same time.
+   */
+  readonly images: Effect.Effect<readonly Held[], PreviewCacheFailed>;
+  /**
+   * Drops the image with this hash from every record that holds it, in one write: the
+   * record's `image` and its Ready Preview's `image` become `null`, and `fetched` becomes `0`,
+   * the epoch, so the record reads as older than any ask would serve and is fetched again,
+   * while what it says of the page is still served. When it was shown, and everything else,
+   * is as it was. A hash no record holds changes nothing.
+   */
+  readonly evict: (hash: Sha256) => Effect.Effect<void, PreviewCacheFailed>;
 }
 
 /** The Preview cache port. */

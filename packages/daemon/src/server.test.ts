@@ -835,7 +835,7 @@ describe("the API over a real server", () => {
     });
   });
 
-  it("sets a store or uploads option over the wire, refuses an option it has not, a value it cannot take, and a stale write, and streams the options", async () => {
+  it("sets a store, uploads, or previews option over the wire, refuses an option it has not, a value it cannot take, and a stale write, and streams the options", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
         const first = yield* Effect.flatMap(served.request("/api/options/changes"), (response) =>
@@ -923,7 +923,7 @@ describe("the API over a real server", () => {
       bucket: [200, '{"sequence":1}'],
       first: [
         {
-          data: '{"options":{"uploads.maxSize":104857600},"sequence":0}',
+          data: '{"options":{"previews.maxTotal":1073741824,"uploads.maxSize":104857600},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -933,11 +933,11 @@ describe("the API over a real server", () => {
       notWhole: refused("uploads.maxSize"),
       read: [
         200,
-        '{"options":{"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+        '{"options":{"previews.maxTotal":1073741824,"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
       ],
       resumed: [
         {
-          data: '{"options":{"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+          data: '{"options":{"previews.maxTotal":1073741824,"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
           event: "changed",
           id: "3",
         },

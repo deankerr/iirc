@@ -337,7 +337,7 @@ export class UiGroup extends HttpApiGroup.make("ui")
   .middleware(Authorization) {}
 
 /**
- * The Owner's options under `store` and `uploads`, each by its full name, such as
+ * The Owner's options under `store`, `uploads`, and `previews`, each by its full name, such as
  * `store.s3.bucket`, as the `ui` group's are: read whole, set or unset one at a time, made
  * from the options read, and followed as Server-Sent Events, the options whole each time
  * they change.

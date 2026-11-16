@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
 import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList, UiInForce } from "@iirc/api";
+import { Sha256 } from "@iirc/byte-store";
 import { configured } from "@iirc/client/testing";
 import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType } from "@iirc/link-fetch";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
@@ -1291,7 +1292,7 @@ const expecting = (answer: Effect.Effect<Response>, status: number) =>
  * @param value - Its value.
  * @returns An Effect that sets it.
  */
-const setOption = (served: Served, option: string, value: string) =>
+const setOption = (served: Served, option: string, value: Schema.Json) =>
   expecting(served.request(`/api/options/${option}`, { method: "PUT", ...json({ value }) }), 200);
 
 /**
@@ -1680,6 +1681,432 @@ describe("a Preview's image over a real server", () => {
       hash: sha256(png),
       image: sha256(png),
       status: 200,
+    });
+  });
+});
+
+/**
+ * An image no other is the same as, and of the same size as every other: a PNG with four
+ * bytes after it, which a reader of the image does not mind.
+ * @param shade - What the four bytes are.
+ * @returns The bytes.
+ */
+const tinted = (shade: number) => Uint8Array.of(...png, shade, shade, shade, shade);
+
+/** How many bytes each {@link tinted} image holds. */
+const tintedSize = png.length + 4;
+
+/**
+ * What each link answers, for pages named for the images they hold: `https://<name>.example/`
+ * is a page whose `og:image` is `https://cdn.example/<name>.png`.
+ * @param images - Each page's name, and its image.
+ * @returns The answers.
+ */
+const pictured = (images: Readonly<Record<string, Uint8Array>>) => {
+  const answers: Record<string, Answer> = {};
+
+  for (const [name, bytes] of Object.entries(images)) {
+    answers[`https://${name}.example/`] = page(
+      `<title>${name}</title><meta property="og:image" content="https://cdn.example/${name}.png">`
+    );
+    answers[`https://cdn.example/${name}.png`] = { body: bytes, type: "image/png" };
+  }
+
+  return answers;
+};
+
+const pageOf = (name: string) => `https://${name}.example/`;
+
+/**
+ * Turns Previews on with a bucket, `previews.maxTotal` set, and a Message of a link to each
+ * page, and gives each Message's place.
+ * @param served - The server.
+ * @param names - The pages' names, in the order they are said.
+ * @param maxTotal - What `previews.maxTotal` is set to.
+ * @returns Each Message's place, in order.
+ */
+const pictures = (served: Served, names: readonly string[], maxTotal: number) =>
+  Effect.gen(function* () {
+    yield* setBucket(served);
+    yield* setOption(served, "previews.maxTotal", maxTotal);
+    yield* setPreviews(served, "on");
+    yield* talk(
+      served,
+      names.map((name) => `see ${pageOf(name)}`)
+    );
+
+    return yield* live(messages(served, names.length));
+  });
+
+/**
+ * What the cache holds of a page: the hash of its image, the one its Preview names, and when
+ * it was fetched and last shown.
+ * @param served - The server.
+ * @param name - The page's name.
+ * @returns What it holds, or nothing when it holds no record.
+ */
+const recordOf = (served: Served, name: string) =>
+  Effect.map(served.world.previews.get(pageOf(name)), (kept) =>
+    Option.isNone(kept)
+      ? undefined
+      : {
+          fetched: kept.value.fetched,
+          image: kept.value.image,
+          named: imageOf(kept.value.state)?.hash ?? null,
+          shown: kept.value.shown,
+        }
+  );
+
+/**
+ * Whether the store holds bytes.
+ * @param served - The server.
+ * @param bytes - The bytes.
+ * @returns Whether it does.
+ */
+const inStore = (served: Served, bytes: Uint8Array) =>
+  served.world.bytes.store.read(Sha256.make(sha256(bytes))).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false)
+  );
+
+/**
+ * A Message's Previews, asked until the image its Preview holds is there.
+ * @param served - The server.
+ * @param place - The Message's place.
+ * @returns Its items.
+ */
+const imaged = (served: Served, place: Place) =>
+  Effect.gen(function* () {
+    const items = yield* asking(served, place);
+
+    return items.every((one) => imageOf(one.state) !== null && imageOf(one.state) !== undefined)
+      ? items
+      : yield* new NotYet();
+  }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie);
+
+const first = 10 * day;
+
+describe("evicting Preview images over a real server", () => {
+  it("drops the image of the Preview shown least recently first, releasing its bytes", async () => {
+    const images = { aa: tinted(1), bb: tinted(2), cc: tinted(3) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, b, c] = yield* pictures(served, ["aa", "bb", "cc"], 2 * tintedSize);
+
+        if (a === undefined || b === undefined || c === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        yield* TestClock.adjust(1000);
+        yield* asking(served, a);
+        yield* TestClock.adjust(1000);
+        const held = yield* served.world.bytes.store.held;
+
+        yield* live(settled(served, c));
+
+        return {
+          before: held,
+          held: yield* served.world.bytes.store.held,
+          records: {
+            aa: yield* recordOf(served, "aa"),
+            bb: yield* recordOf(served, "bb"),
+            cc: yield* recordOf(served, "cc"),
+          },
+          stored: [
+            yield* inStore(served, images.aa),
+            yield* inStore(served, images.bb),
+            yield* inStore(served, images.cc),
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      before: 2 * tintedSize,
+      held: 2 * tintedSize,
+      records: {
+        aa: {
+          fetched: first,
+          image: sha256(images.aa),
+          named: sha256(images.aa),
+          shown: first + 1000 * 2,
+        },
+        bb: { fetched: 0, image: null, named: null, shown: first + 1000 },
+        cc: {
+          fetched: first + 1000 * 3,
+          image: sha256(images.cc),
+          named: sha256(images.cc),
+          shown: first + 1000 * 3,
+        },
+      },
+      stored: [true, false, true],
+    });
+  });
+
+  it("evicts down to a lowered previews.maxTotal even for an image a Preview already holds", async () => {
+    const images = { aa: tinted(1), bb: tinted(2), cc: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, b, c] = yield* pictures(served, ["aa", "bb", "cc"], 2 * tintedSize);
+
+        if (a === undefined || b === undefined || c === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        yield* TestClock.adjust(1000);
+        yield* setOption(served, "previews.maxTotal", tintedSize);
+        yield* live(settled(served, c));
+
+        return {
+          held: yield* served.world.bytes.store.held,
+          images: [
+            (yield* recordOf(served, "aa"))?.image,
+            (yield* recordOf(served, "bb"))?.image,
+            (yield* recordOf(served, "cc"))?.image,
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      held: tintedSize,
+      images: [null, sha256(images.bb), sha256(images.bb)],
+    });
+  });
+
+  it("serves an evicted Preview's text, and fetches it again, its image included, when it is asked", async () => {
+    const images = { aa: tinted(1), bb: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, b] = yield* pictures(served, ["aa", "bb"], tintedSize);
+
+        if (a === undefined || b === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        const evicted = yield* recordOf(served, "aa");
+        const text = yield* asking(served, a);
+        const again = yield* live(imaged(served, a));
+
+        return {
+          again: again.map((one) => imageOf(one.state)?.hash),
+          asked: (yield* served.asked).map(({ link }) => link),
+          evicted,
+          held: yield* served.world.bytes.store.held,
+          other: yield* recordOf(served, "bb"),
+          stored: [yield* inStore(served, images.aa), yield* inStore(served, images.bb)],
+          text: text.map((one) => [titles([one])[0], imageOf(one.state)]),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: [sha256(images.aa)],
+      asked: [
+        pageOf("aa"),
+        "https://cdn.example/aa.png",
+        pageOf("bb"),
+        "https://cdn.example/bb.png",
+        pageOf("aa"),
+        "https://cdn.example/aa.png",
+      ],
+      evicted: { fetched: 0, image: null, named: null, shown: first },
+      held: tintedSize,
+      other: { fetched: 0, image: null, named: null, shown: first + 1000 },
+      stored: [true, false],
+      text: [["aa", null]],
+    });
+  });
+
+  it("keeps an Upload's link while the Preview of the same bytes is evicted", async () => {
+    const images = { aa: png, bb: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, b] = yield* pictures(served, ["aa", "bb"], tintedSize);
+
+        if (a === undefined || b === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* setOption(served, "uploads.publicUrl", "https://up.example");
+        const sent = yield* served.request("/api/uploads", { body: png, method: "POST" });
+        const { id } = decodeUploaded(yield* bodyOf(sent));
+
+        yield* live(settled(served, a));
+        const before = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        const preview = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const upload = yield* served.request(`/api/uploads/${id}/content`);
+
+        return {
+          before: before.status,
+          held: yield* served.world.bytes.store.held,
+          preview: preview.status,
+          record: yield* recordOf(served, "aa"),
+          upload: { body: yield* bytesOf(upload), status: upload.status },
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      before: 200,
+      held: png.length + tintedSize,
+      preview: 404,
+      record: { fetched: 0, image: null, named: null, shown: first },
+      upload: { body: png, status: 200 },
+    });
+  });
+
+  it("keeps the references across a restart, so an image kept before it is evicted, and its bytes released, by one put after it", async () => {
+    const images = { aa: tinted(1), bb: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const file = `${dataDir}/previews.sqlite`;
+
+        const opened = makeSqlitePreviewCache(file).pipe(
+          Effect.provide(BunFileSystem.layer),
+          Effect.orDie
+        );
+
+        yield* TestClock.setTime(first);
+
+        const before = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const served = yield* serve(pictured(images), {
+              left: { dataDir, key },
+              previews: yield* opened,
+            });
+
+            const [a, b] = yield* pictures(served, ["aa", "bb"], tintedSize);
+
+            if (a === undefined || b === undefined) {
+              return yield* Effect.die(new Error("a Message is missing"));
+            }
+
+            yield* live(settled(served, a));
+
+            return {
+              left: { dataDir, journal: served.world.journal, key, store: served.world.store },
+              places: { a, b },
+            };
+          })
+        );
+
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const served = yield* serve(pictured(images), {
+              left: before.left,
+              previews: yield* opened,
+            });
+
+            // The bucket outlives the Daemon, which the world's store in memory does not.
+            yield* setBucket(served);
+            yield* served.world.bytes.store.put(Stream.make(images.aa));
+            yield* TestClock.adjust(1000);
+            const referred = yield* served.world.previews.refers(Sha256.make(sha256(images.aa)));
+
+            yield* live(settled(served, before.places.b));
+
+            return {
+              held: yield* served.world.bytes.store.held,
+              records: {
+                aa: yield* recordOf(served, "aa"),
+                bb: yield* recordOf(served, "bb"),
+              },
+              referred,
+              stored: [yield* inStore(served, images.aa), yield* inStore(served, images.bb)],
+            };
+          })
+        );
+      })
+    );
+
+    expect(result).toStrictEqual({
+      held: tintedSize,
+      records: {
+        aa: { fetched: 0, image: null, named: null, shown: first },
+        bb: {
+          fetched: first + 1000,
+          image: sha256(images.bb),
+          named: sha256(images.bb),
+          shown: first + 1000,
+        },
+      },
+      referred: true,
+      stored: [false, true],
+    });
+  });
+
+  it("keeps no image larger than previews.maxTotal, and evicts nothing for it", async () => {
+    const images = { aa: tinted(1), big: Uint8Array.of(...tinted(2), ...new Uint8Array(100)) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, big] = yield* pictures(served, ["aa", "big"], tintedSize);
+
+        if (a === undefined || big === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        yield* TestClock.adjust(1000);
+        const items = yield* live(settled(served, big));
+
+        return {
+          held: yield* served.world.bytes.store.held,
+          items: items.map((one) => [titles([one])[0], imageOf(one.state)]),
+          records: { aa: yield* recordOf(served, "aa"), big: yield* recordOf(served, "big") },
+          stored: yield* inStore(served, images.aa),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      held: tintedSize,
+      items: [["big", null]],
+      records: {
+        aa: {
+          fetched: first,
+          image: sha256(images.aa),
+          named: sha256(images.aa),
+          shown: first,
+        },
+        big: { fetched: first + 1000, image: null, named: null, shown: first + 1000 },
+      },
+      stored: true,
     });
   });
 });

@@ -931,13 +931,13 @@ export const UiEvent = Schema.Union([
 /** The decoded form of {@link UiEvent}. */
 export type UiEvent = typeof UiEvent.Type;
 
-// The options under `store` and `uploads`.
+// The options under `store`, `uploads`, and `previews`.
 
 /** A value for one option, as JSON, which the Daemon parses by that option's Schema. */
 export const OptionValue = Schema.Struct({ value: Schema.Json });
 
 /**
- * One event of the stream of the options under `store` and `uploads`, as {@link UiEvent}'s
+ * One event of the stream of the options under `store`, `uploads`, and `previews`, as {@link UiEvent}'s
  * are: `changed` carries the options in force, whole, with the sequence of the last Change
  * of one as its id, and `heartbeat` says the stream is alive.
  */

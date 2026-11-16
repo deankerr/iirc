@@ -212,7 +212,7 @@ const layerCore = (options: DaemonOptions) => {
   );
 
   // The `ui` options are folded from the Journal's Changes, beside the Runtime, and so are
-  // the Uploads. The options under `store` and `uploads` are folded before it starts, since
+  // the Uploads. The options under `store`, `uploads`, and `previews` are folded before it starts, since
   // it spares the Credentials they name, even as it finishes a removal cut short.
   const owned = previews.pipe(
     Layer.provideMerge(Layer.mergeAll(timelines, layerUiConfiguration, uploads)),

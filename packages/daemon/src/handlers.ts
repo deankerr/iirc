@@ -1061,7 +1061,7 @@ const ui = HttpApiBuilder.group(
 const optionsChanged = (error: OptionsChangedSince) =>
   new OptionsChanged({ sequence: error.sequence });
 
-// The options under `store` and `uploads`, as the `ui` options are: a value is parsed by its
+// The options under `store`, `uploads`, and `previews`, as the `ui` options are: a value is parsed by its
 // option's Schema before it is journaled, and journaled in its encoding.
 const options = HttpApiBuilder.group(
   DaemonApi,
@@ -1405,7 +1405,7 @@ const contentUnavailable = HttpRouter.middleware(
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
  * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the options
- * under `store` and `uploads`, the keys, and the sign-ins.
+ * under `store`, `uploads`, and `previews`, the keys, and the sign-ins.
  */
 export const ApiHandlers = Layer.mergeAll(
   signIn,
