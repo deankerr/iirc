@@ -14,7 +14,7 @@ export interface PlayerCandidate {
  * A video file a page names, as an address kept as data: nothing here fetches it. The type is
  * the page's own, parsed down to its essence.
  */
-export interface PageVideo {
+interface PageVideo {
   readonly link: string;
   readonly type: string;
 }
