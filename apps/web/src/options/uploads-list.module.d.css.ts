@@ -3,8 +3,10 @@ declare const styles: {
   readonly about: string;
   readonly actions: string;
   readonly copied: string;
+  readonly deleted: string;
   readonly details: string;
   readonly failure: string;
+  readonly head: string;
   readonly heading: string;
   readonly icon: string;
   readonly image: string;

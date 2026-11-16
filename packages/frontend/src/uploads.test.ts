@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  deletedText,
   editFailureText,
   initialUploadEdits,
   initialUploads,
@@ -64,6 +65,20 @@ const after = (...events: readonly UploadsEvent[]): Uploads => {
 
   return state;
 };
+
+/**
+ * An Upload as it is once the Daemon expired it.
+ * @param one - The Upload.
+ * @returns It, expired.
+ */
+const expired = (one: typeof a) =>
+  Schema.decodeSync(Upload)({
+    ...Schema.encodeSync(Upload)(one),
+    deleted: { at: 1_700_000_000_500, why: "expired" },
+    link: null,
+  });
+
+const shown: UploadsEvent = { _tag: "DeletedShown", shown: true };
 
 const ids = (state: Uploads) => state.uploads.map((one) => one.id[0]);
 
@@ -237,6 +252,75 @@ describe("the Uploads held", () => {
         { _tag: "Forgotten" }
       )
     ).toStrictEqual(initialUploads);
+  });
+});
+
+describe("the Uploads held while the deleted show", () => {
+  it("hides the deleted until asked, and starts the list over when that changes", () => {
+    const held = after({
+      _tag: "Paged",
+      after: undefined,
+      page: { next: c.id, through: 4, uploads: [d, c] },
+    });
+
+    expect(initialUploads.showDeleted).toBeFalsy();
+    expect(reduceUploads(held, { _tag: "DeletedShown", shown: false })).toBe(held);
+    expect(reduceUploads(held, shown)).toStrictEqual({ ...initialUploads, showDeleted: true });
+    expect(
+      reduceUploads(reduceUploads(held, shown), { _tag: "DeletedShown", shown: false })
+    ).toStrictEqual(initialUploads);
+  });
+
+  it("keeps a deleted Upload a page gives, in its place", () => {
+    const state = after(shown, {
+      _tag: "Paged",
+      after: undefined,
+      page: { next: null, through: 5, uploads: [d, expired(c), b] },
+    });
+
+    expect(ids(state)).toStrictEqual(["d", "c", "b"]);
+  });
+
+  it("replaces an Upload in place when a Change or an answer deletes it, rather than dropping it", () => {
+    const state = after(
+      shown,
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c, b] } },
+      { _tag: "Changed", sequence: 4, upload: expired(c) },
+      { _tag: "Answered", upload: deleted(b) }
+    );
+
+    expect(state.uploads.map((one) => [one.id[0], one.deleted?.why])).toStrictEqual([
+      ["d", undefined],
+      ["c", "expired"],
+      ["b", "owner"],
+    ]);
+    expect(state.through).toBe(4);
+  });
+
+  it("treats a deleted Upload not held as a live one would be", () => {
+    const state = after(
+      shown,
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [c, b] } },
+      { _tag: "Changed", sequence: 4, upload: expired(d) }
+    );
+
+    expect(ids(state)).toStrictEqual(["d", "c", "b"]);
+    expect(state.unpaged.size).toBe(0);
+  });
+
+  it("drops a deleted Upload as before while they are hidden", () => {
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [c, b] } },
+      { _tag: "Changed", sequence: 4, upload: expired(c) }
+    );
+
+    expect(ids(state)).toStrictEqual(["b"]);
+  });
+});
+
+describe("a deletion in words", () => {
+  it("says expired for the Daemon's and deleted for the Owner's", () => {
+    expect([deletedText("expired"), deletedText("owner")]).toStrictEqual(["expired", "deleted"]);
   });
 });
 

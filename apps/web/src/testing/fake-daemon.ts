@@ -1478,6 +1478,29 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * Expires an Upload held, as the Daemon does once it is old: marked deleted, why
+   * `expired`, with no link, and sent to every follower of the Uploads' Changes as it is now.
+   * @param id - The Upload's id.
+   */
+  const expire = (id: string) => {
+    const at = uploads.findIndex((held) => held.id === id && held.deleted === undefined);
+    const was = uploads[at];
+
+    if (was === undefined) {
+      throw new Error(`no live Upload ${id}`);
+    }
+
+    const now: typeof Upload.Encoded = {
+      ...was,
+      deleted: { at: 1_700_000_002_000, why: "expired" },
+      link: null,
+    };
+
+    uploads[at] = now;
+    changedUpload(now);
+  };
+
+  /**
    * A file sent to be kept: refused as the next of `uploadRefusals` says, or kept as an
    * Upload, newest of all, its link made from `uploads.publicUrl` in force, or `null`
    * without one.
@@ -2159,7 +2182,7 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, fetch, send, sendPreview, sendUi, upload };
+  return { daemon, endStreams, expire, fetch, send, sendPreview, sendUi, upload };
 };
 
 /**

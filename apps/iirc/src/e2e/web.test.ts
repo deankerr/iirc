@@ -3,14 +3,23 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { connectPeer, startErgo, startNgircd } from "@iirc/daemon/testing";
-import type { Ircd, Peer } from "@iirc/daemon/testing";
+import {
+  connectPeer,
+  freePort,
+  holdsBytes,
+  loopback,
+  seedUpload,
+  startErgo,
+  startMinio,
+  startNgircd,
+} from "@iirc/daemon/testing";
+import type { Ircd, Minio, Peer } from "@iirc/daemon/testing";
 import { Schema } from "effect";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { networkRow, run, startDaemon as startWith, watchedPage } from "./daemon.ts";
+import { networkRow, run, solidPng, startDaemon as startWith, watchedPage } from "./daemon.ts";
 import { privateNetwork as sharedNetwork } from "./testing/network.ts";
 import type { Preparing } from "./testing/network.ts";
 
@@ -63,6 +72,23 @@ const nordAlacritty = readFileSync(
 );
 
 /** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
+/** What the end-to-end run reads of a page of Uploads. */
+const decodeUploads = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      uploads: Schema.Array(
+        Schema.Struct({
+          deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
+          hash: Schema.String,
+          id: Schema.String,
+          link: Schema.NullOr(Schema.String),
+          safeName: Schema.String,
+        })
+      ),
+    })
+  )
+);
+
 const decodeHead = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 );
@@ -4587,6 +4613,196 @@ describe("the web frontend on iirc daemon --web", () => {
         child.kill("SIGTERM");
         await child.exited;
         await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "expires at start an Upload older than uploads.expireAfter, releasing its bytes, and the list shows it expired",
+    { timeout: 120_000 },
+    async () => {
+      const dataDir = path.join(directory, "expiring");
+      const minio: Minio = await startMinio();
+
+      // MinIO goes with the run, however far its setup got.
+      try {
+        const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+        const key = created.stdout.trim();
+        const listen = freePort();
+
+        const authorization = {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+        };
+
+        const kept = solidPng(8, [40, 96, 208]);
+        const aged = solidPng(8, [208, 96, 40]);
+        const day = 24 * 60 * 60 * 1000;
+        let child: Awaited<ReturnType<typeof startDaemon>>["child"] | undefined;
+
+        // One run of the Daemon on the data directory, its API called with the key.
+        const running = async () => {
+          const started = await startDaemon(dataDir);
+
+          ({ child } = started);
+
+          return {
+            api: async (
+              method: string,
+              route: string,
+              body: string | Uint8Array<ArrayBuffer> | null = null
+            ) =>
+              await fetch(`${started.base}/api${route}`, { body, headers: authorization, method }),
+            base: started.base,
+          };
+        };
+
+        const stopped = async () => {
+          child?.kill("SIGTERM");
+          await child?.exited;
+        };
+
+        try {
+          const first = await running();
+
+          const options = {
+            "store.s3.accessKeyId": "minio-key",
+            "store.s3.bucket": minio.bucket,
+            "store.s3.endpoint": minio.endpoint,
+            "store.s3.region": minio.region,
+            "store.s3.secretAccessKey": "minio-secret",
+            "uploads.listen": `${loopback}:${listen}`,
+            "uploads.publicUrl": `http://${loopback}:${listen}`,
+          };
+
+          await first.api(
+            "PUT",
+            "/credentials/minio-key",
+            JSON.stringify({ value: minio.accessKeyId })
+          );
+          await first.api(
+            "PUT",
+            "/credentials/minio-secret",
+            JSON.stringify({ value: minio.secretAccessKey })
+          );
+
+          for (const [option, value] of Object.entries(options)) {
+            // oxlint-disable-next-line no-await-in-loop -- set in order
+            await first.api("PUT", `/options/${option}`, JSON.stringify({ value }));
+          }
+
+          const uploaded = await first.api("POST", "/uploads?name=b.png", kept);
+
+          expect(uploaded.status).toBe(200);
+          await stopped();
+
+          // The Daemon cannot be aged, so A is journaled, with its bytes, three days ago
+          // while it is stopped.
+          const old = await seedUpload(minio, minio.bucket, dataDir, {
+            at: Date.now() - 3 * day,
+            bytes: aged,
+            name: "a.png",
+            type: "image/png",
+          });
+
+          const live = await running();
+
+          const listed = async (api: typeof live.api) => {
+            const answer = await api("GET", "/uploads?deleted=true");
+
+            return decodeUploads(await answer.text()).uploads;
+          };
+
+          const before = await listed(live.api);
+
+          const { page, problems } = await watchedPage(browser);
+
+          await page.goto(live.base);
+          await page.getByLabel("Key").fill(key);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await page.getByRole("button", { exact: true, name: "Options" }).click();
+
+          const uploads = page.getByRole("region", { name: "Uploads" });
+          const rows = uploads.getByRole("listitem");
+
+          await rows.filter({ hasText: "a.png" }).waitFor();
+          await rows.filter({ hasText: "b.png" }).waitFor();
+          const liveRows = await rows.count();
+
+          // Closed before its Daemon is, so its streams ending is not read as a failure.
+          await page.context().close();
+          await live.api("PUT", "/options/uploads.expireAfter", JSON.stringify({ value: 1 }));
+          await stopped();
+
+          const expiring = await running();
+          const after = await listed(expiring.api);
+          const aOf = after.find((upload) => upload.id === old.id);
+          const bOf = after.find((upload) => upload.safeName === "b.png");
+
+          const listener = (upload: { readonly id: string; readonly safeName: string }) =>
+            `http://${loopback}:${listen}/${upload.id}/${upload.safeName}`;
+
+          const aLink = await fetch(listener({ id: old.id, safeName: "a.png" }));
+          const bLink = await fetch(listener({ id: bOf?.id ?? "", safeName: "b.png" }));
+
+          // A fresh page, since the Daemon it was signed in to is gone.
+          const { page: later, problems: laterProblems } = await watchedPage(browser);
+
+          await later.goto(expiring.base);
+          await later.getByLabel("Key").fill(key);
+          await later.getByRole("button", { name: "Sign in" }).click();
+          await later.getByRole("button", { exact: true, name: "Options" }).click();
+
+          const laterUploads = later.getByRole("region", { name: "Uploads" });
+          const laterRows = laterUploads.getByRole("listitem");
+
+          await laterRows.filter({ hasText: "b.png" }).waitFor();
+
+          const hidden = await laterRows.filter({ hasText: "a.png" }).count();
+
+          await later.getByRole("button", { name: "Show deleted" }).click();
+
+          const expired = laterRows.filter({ hasText: "a.png" });
+
+          await expired.waitFor();
+          const expiredText = (await expired.textContent()) ?? "";
+
+          expect({
+            aBytes: await holdsBytes(minio, minio.bucket, old.hash),
+            aLink: aLink.status,
+            aLinkField: aOf?.link,
+            aRecord: aOf?.deleted?.why,
+            bBytes: await holdsBytes(minio, minio.bucket, bOf?.hash ?? ""),
+            bLink: [bLink.status, new Uint8Array(await bLink.arrayBuffer())],
+            bRecord: bOf?.deleted,
+            before: before.map((upload) => [upload.safeName, upload.deleted?.why]),
+            expiredText: expiredText.includes("expired"),
+            hidden,
+            liveRows,
+            problems: [...problems, ...laterProblems].filter((problem) => !problem.includes("401")),
+          }).toStrictEqual({
+            aBytes: false,
+            aLink: 404,
+            aLinkField: null,
+            aRecord: "expired",
+            bBytes: true,
+            bLink: [200, kept],
+            bRecord: undefined,
+            // Newest first: the one seeded after B is above it.
+            before: [
+              ["a.png", undefined],
+              ["b.png", undefined],
+            ],
+            expiredText: true,
+            hidden: 0,
+            liveRows: 2,
+            problems: [],
+          });
+        } finally {
+          await stopped();
+        }
+      } finally {
+        await minio.stop();
       }
     }
   );

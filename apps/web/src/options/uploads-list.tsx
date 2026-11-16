@@ -1,5 +1,7 @@
 /**
- * The Uploads, listed beside the options, newest first: an image the browser draws as a
+ * The Uploads, listed beside the options, newest first, the deleted ones too while "Show
+ * deleted" is on, muted, saying expired or deleted and when, with nothing to do to them
+ * and an icon for a thumbnail, as their bytes are gone: an image the browser draws as a
  * thumbnail of its own bytes, scaled down and fetched only once near the screen, an icon
  * for any other type, then its name, type, size, and when it was uploaded, and buttons
  * that copy its link, rename it in place, and delete it once the Owner confirms. The link
@@ -11,10 +13,17 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Upload } from "@iirc/api";
-import { editFailureText, linkOf, shownName, sizeText, thumbnailed } from "@iirc/frontend/uploads";
+import {
+  deletedText,
+  editFailureText,
+  linkOf,
+  shownName,
+  sizeText,
+  thumbnailed,
+} from "@iirc/frontend/uploads";
 import { useRef, useState } from "react";
 
-import { Button } from "../ui/button.tsx";
+import { Button, ToggleButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 import { Icon } from "../ui/icon.tsx";
@@ -25,9 +34,11 @@ import {
   askToDelete,
   copiedLink,
   copyLink,
+  deletedShown,
   moreUploads,
   publicUrl,
   renameUpload,
+  showDeleted,
   uploadEditsState,
   uploadsState,
 } from "./uploads.ts";
@@ -58,11 +69,17 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
   const when = formattedAt(datedClockFor(shown), upload.at) ?? "at a time unavailable";
   const name = shownName(upload);
   const waiting = doing?._tag === "Waiting" ? doing.of : undefined;
+  const { deleted } = upload;
+
+  const gone =
+    deleted === undefined
+      ? undefined
+      : `${deletedText(deleted.why)} ${formattedAt(datedClockFor(shown), deleted.at) ?? "at a time unavailable"}`;
 
   return (
-    <li className={styles.row} ref={row}>
+    <li className={gone === undefined ? styles.row : `${styles.row} ${styles.deleted}`} ref={row}>
       <span className={styles.thumbnail}>
-        {thumbnailed(upload.type) ? (
+        {thumbnailed(upload.type) && deleted === undefined ? (
           // The name beside it says what it is.
           <img
             alt=""
@@ -76,7 +93,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
         )}
       </span>
       <span className={styles.about}>
-        {renaming ? (
+        {renaming && deleted === undefined ? (
           <RenameField
             label={`New name for ${name}`}
             name={name}
@@ -97,7 +114,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
           </span>
         )}
         <span className={styles.details}>
-          <bdi>{upload.type}</bdi> · {sizeText(upload.size)} · {when}
+          <bdi>{upload.type}</bdi> · {sizeText(upload.size)} · {gone ?? when}
         </span>
         {doing?._tag === "Failed" ? (
           <span className={styles.failure} role="alert">
@@ -105,50 +122,52 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
           </span>
         ) : null}
       </span>
-      <span className={styles.actions}>
-        {link === undefined ? null : (
+      {deleted === undefined ? (
+        <span className={styles.actions}>
+          {link === undefined ? null : (
+            <Button
+              aria-label={`Copy the link to ${name}`}
+              onPress={() => {
+                copy({ id: upload.id, safeName: upload.safeName });
+              }}
+              size="small"
+              variant="quiet"
+            >
+              Copy link
+            </Button>
+          )}
+          {link === undefined ? null : (
+            <output aria-live="polite" className={styles.copied}>
+              {copied === link ? "copied" : ""}
+            </output>
+          )}
           <Button
-            aria-label={`Copy the link to ${name}`}
+            aria-label={`Rename ${name}`}
+            isDisabled={renaming || waiting === "Delete"}
+            isPending={waiting === "Rename"}
             onPress={() => {
-              copy({ id: upload.id, safeName: upload.safeName });
+              setRenaming(true);
+            }}
+            data-rename
+            size="small"
+            variant="quiet"
+          >
+            Rename
+          </Button>
+          <Button
+            aria-label={`Delete ${name}`}
+            isDisabled={waiting === "Rename"}
+            isPending={waiting === "Delete"}
+            onPress={() => {
+              askDelete(upload.id);
             }}
             size="small"
             variant="quiet"
           >
-            Copy link
+            Delete
           </Button>
-        )}
-        {link === undefined ? null : (
-          <output aria-live="polite" className={styles.copied}>
-            {copied === link ? "copied" : ""}
-          </output>
-        )}
-        <Button
-          aria-label={`Rename ${name}`}
-          isDisabled={renaming || waiting === "Delete"}
-          isPending={waiting === "Rename"}
-          onPress={() => {
-            setRenaming(true);
-          }}
-          data-rename
-          size="small"
-          variant="quiet"
-        >
-          Rename
-        </Button>
-        <Button
-          aria-label={`Delete ${name}`}
-          isDisabled={waiting === "Rename"}
-          isPending={waiting === "Delete"}
-          onPress={() => {
-            askDelete(upload.id);
-          }}
-          size="small"
-          variant="quiet"
-        >
-          Delete
-        </Button>
-      </span>
+        </span>
+      ) : null}
     </li>
   );
 };
@@ -161,10 +180,22 @@ export const UploadsList = () => {
   const { next, uploads } = useAtomValue(uploadsState);
   const base = useAtomValue(publicUrl);
   const more = useAtomSet(moreUploads);
+  const withDeleted = useAtomValue(deletedShown);
+  const showWithDeleted = useAtomSet(showDeleted);
 
   return (
     <section aria-label="Uploads" className={styles.view}>
-      <h2 className={styles.heading}>Uploads</h2>
+      <div className={styles.head}>
+        <h2 className={styles.heading}>Uploads</h2>
+        <ToggleButton
+          isSelected={withDeleted}
+          onChange={showWithDeleted}
+          size="small"
+          variant="quiet"
+        >
+          Show deleted
+        </ToggleButton>
+      </div>
       {base === undefined ? (
         <p className={styles.muted}>No link to copy until uploads.publicUrl is set.</p>
       ) : null}
