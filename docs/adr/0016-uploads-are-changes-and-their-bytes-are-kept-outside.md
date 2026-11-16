@@ -6,7 +6,7 @@ The bytes themselves are kept in a store, by their hash, and never in the Journa
 
 ## Consequences
 
-- Records outlive bytes. A `Deleted` Upload stays in the projection, marked deleted, while its hold on the bytes is released. Bytes are deleted from the store once no live Upload refers to their hash.
+- Records outlive bytes. A `Deleted` Upload stays in the projection, marked deleted, while its hold on the bytes is released. Bytes are deleted from the store once no live Upload and no Preview refers to their hash.
 - Whether an Upload's bytes are missing is a fact about the store, not a Change, so it is never journaled. The Daemon learns it from a store read and holds it beside the projection, and learns it again after a restart.
 - A Change may be made by the Daemon on the Owner's behalf, carrying out a standing option the Owner set. An Upload that passes `uploads.expireAfter` gets a `Deleted` Change marked expired, journaled by the Daemon. It is still a Change: the Owner chose it when they set the option, and recording it is what keeps the list derivable rather than computed from the clock at each read.
 - The Owner's options grow beyond `ui` to further roots, `store` and `uploads` first, in the same option tree as [ADR 0013](0013-configuration-is-an-option-tree.md). Their Schemas live in the contract, and the Daemon folds and serves them as it does `ui`. They are the Owner's, not a device's, so a device cannot override them.

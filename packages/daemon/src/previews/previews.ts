@@ -53,6 +53,7 @@ import {
   Stream,
 } from "effect";
 
+import { StoreBytes, hashOf } from "../store-bytes.ts";
 import { UiConfiguration } from "../ui.ts";
 import { animated } from "./animated.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
@@ -430,6 +431,7 @@ export const layerPreviews = Layer.effect(Previews)(
     const store = yield* TimelineStore;
     const ui = yield* UiConfiguration;
     const { made: bucket } = yield* previewStore;
+    const shared = yield* StoreBytes;
     const scope = yield* Scope.Scope;
     const flying = yield* Ref.make<ReadonlyMap<string, Flight>>(new Map());
     // Looking in flight and in the cache, and claiming a fetch, is one turn, and so is
@@ -470,11 +472,13 @@ export const layerPreviews = Layer.effect(Previews)(
     /**
      * Fetches an image as an image, through the same guard, and keeps its bytes in the store,
      * collected first, since the store may run what it is given more than once. No bucket
-     * means no fetch at all.
+     * means no fetch at all. Its hash is claimed in `holding` before the put, so no release
+     * of the same bytes takes them before the cache refers to them.
      * @param address - Where the image is.
+     * @param holding - The Scope the claim lasts for.
      * @returns The image as a Preview holds it.
      */
-    const keepImage = (address: string) =>
+    const keepImage = (address: string, holding: Scope.Scope) =>
       Effect.gen(function* () {
         const bytesStore = yield* bucket;
         const fetched = yield* links.fetch(address, { kind: "image" });
@@ -495,6 +499,7 @@ export const layerPreviews = Layer.effect(Previews)(
           return yield* new NoImage({ reason: "it is empty" });
         }
 
+        yield* Scope.provide(shared.claimed(hashOf(bytes)), holding);
         const stored = yield* bytesStore.put(Stream.make(bytes));
 
         return {
@@ -510,9 +515,10 @@ export const layerPreviews = Layer.effect(Previews)(
      * with the image, in any way at all, leaves the Preview as it was, with no image.
      * @param read - What the fetch came to.
      * @param shown - Whether Previews are `on` or `links only`, as they were when asked.
+     * @param holding - The Scope its image's claim lasts for.
      * @returns The state.
      */
-    const withImage = (read: Read, shown: PreviewsShown) => {
+    const withImage = (read: Read, shown: PreviewsShown, holding: Scope.Scope) => {
       const { image: address, state } = read;
 
       if (shown !== "on" || address === undefined || state._tag !== "Ready") {
@@ -527,7 +533,7 @@ export const layerPreviews = Layer.effect(Previews)(
           state
         );
 
-      return keepImage(address).pipe(
+      return keepImage(address, holding).pipe(
         Effect.map((image): Settled => ({ ...state, preview: { ...state.preview, image } })),
         Effect.catch((error) =>
           warned("reason" in error ? `${error._tag}, ${error.reason}` : error._tag)
@@ -546,8 +552,14 @@ export const layerPreviews = Layer.effect(Previews)(
         )
       ).pipe(
         Effect.catchDefect(() => Effect.succeed(failedRead("Unreachable"))),
-        Effect.flatMap((read) => withImage(read, shown)),
-        Effect.flatMap((state) => settle(key, link, state))
+        // An image stays claimed until the cache refers to it.
+        Effect.flatMap((read) =>
+          Effect.gen(function* () {
+            const state = yield* withImage(read, shown, yield* Scope.Scope);
+
+            yield* settle(key, link, state);
+          }).pipe(Effect.scoped)
+        )
       );
 
     /**
