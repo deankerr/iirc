@@ -193,6 +193,21 @@
   white-space: nowrap;
 }
 
+/* A kept file's link, as it went into the draft. */
+.link {
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Renaming a kept file, and dismissing it. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .progress {
   inline-size: 100%;
   block-size: 0.5lh;

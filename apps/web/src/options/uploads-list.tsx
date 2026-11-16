@@ -1,22 +1,36 @@
 /**
  * The Uploads, listed beside the options, newest first: an image the browser draws as a
  * thumbnail of its own bytes, scaled down and fetched only once near the screen, an icon
- * for any other type, then its name, type, size, and when it was uploaded, and a button
- * that copies its link. The link is made from the public URL in force as it is drawn, and
- * while none is set the list says so once rather than offering a link that would not work.
+ * for any other type, then its name, type, size, and when it was uploaded, and buttons
+ * that copy its link, rename it in place, and delete it once the Owner confirms. The link
+ * is made from the public URL in force as it is drawn, and while none is set the list says
+ * so once rather than offering a link that would not work. A rename or a delete waiting on
+ * the Daemon shows on its button, and one that failed says why in its row.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Upload } from "@iirc/api";
-import { linkOf, shownName, sizeText, thumbnailed } from "@iirc/frontend/uploads";
+import { editFailureText, linkOf, shownName, sizeText, thumbnailed } from "@iirc/frontend/uploads";
+import { useRef, useState } from "react";
 
 import { Button } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 import { Icon } from "../ui/icon.tsx";
+import { DeleteDialog } from "./delete-dialog.tsx";
+import { RenameField } from "./rename-field.tsx";
 import { timeShown } from "./ui.ts";
-import { copiedLink, copyLink, moreUploads, publicUrl, uploadsState } from "./uploads.ts";
+import {
+  askToDelete,
+  copiedLink,
+  copyLink,
+  moreUploads,
+  publicUrl,
+  renameUpload,
+  uploadEditsState,
+  uploadsState,
+} from "./uploads.ts";
 
 import styles from "./uploads-list.module.css";
 
@@ -36,11 +50,17 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
   const shown = useAtomValue(timeShown);
   const copied = useAtomValue(copiedLink);
   const copy = useAtomSet(copyLink);
+  const rename = useAtomSet(renameUpload);
+  const askDelete = useAtomSet(askToDelete);
+  const doing = useAtomValue(uploadEditsState).doing.get(upload.id);
+  const [renaming, setRenaming] = useState(false);
+  const row = useRef<HTMLLIElement>(null);
   const when = formattedAt(datedClockFor(shown), upload.at) ?? "at a time unavailable";
   const name = shownName(upload);
+  const waiting = doing?._tag === "Waiting" ? doing.of : undefined;
 
   return (
-    <li className={styles.row}>
+    <li className={styles.row} ref={row}>
       <span className={styles.thumbnail}>
         {thumbnailed(upload.type) ? (
           // The name beside it says what it is.
@@ -56,15 +76,37 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
         )}
       </span>
       <span className={styles.about}>
-        <span className={styles.name}>
-          <bdi>{name}</bdi>
-        </span>
+        {renaming ? (
+          <RenameField
+            label={`New name for ${name}`}
+            name={name}
+            onClose={() => {
+              setRenaming(false);
+              // Focus goes back to the button that opened the field.
+              requestAnimationFrame(() => {
+                row.current?.querySelector<HTMLElement>("[data-rename]")?.focus();
+              });
+            }}
+            onRename={(to) => {
+              rename({ id: upload.id, name: to });
+            }}
+          />
+        ) : (
+          <span className={styles.name}>
+            <bdi>{name}</bdi>
+          </span>
+        )}
         <span className={styles.details}>
           <bdi>{upload.type}</bdi> · {sizeText(upload.size)} · {when}
         </span>
+        {doing?._tag === "Failed" ? (
+          <span className={styles.failure} role="alert">
+            {editFailureText(doing.failure, name, doing.of)}
+          </span>
+        ) : null}
       </span>
-      {link === undefined ? null : (
-        <span className={styles.copy}>
+      <span className={styles.actions}>
+        {link === undefined ? null : (
           <Button
             aria-label={`Copy the link to ${name}`}
             onPress={() => {
@@ -75,11 +117,38 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
           >
             Copy link
           </Button>
+        )}
+        {link === undefined ? null : (
           <output aria-live="polite" className={styles.copied}>
             {copied === link ? "copied" : ""}
           </output>
-        </span>
-      )}
+        )}
+        <Button
+          aria-label={`Rename ${name}`}
+          isDisabled={renaming || waiting === "Delete"}
+          isPending={waiting === "Rename"}
+          onPress={() => {
+            setRenaming(true);
+          }}
+          data-rename
+          size="small"
+          variant="quiet"
+        >
+          Rename
+        </Button>
+        <Button
+          aria-label={`Delete ${name}`}
+          isDisabled={waiting === "Rename"}
+          isPending={waiting === "Delete"}
+          onPress={() => {
+            askDelete(upload.id);
+          }}
+          size="small"
+          variant="quiet"
+        >
+          Delete
+        </Button>
+      </span>
     </li>
   );
 };
@@ -118,6 +187,7 @@ export const UploadsList = () => {
           More
         </Button>
       )}
+      <DeleteDialog />
     </section>
   );
 };

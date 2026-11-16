@@ -856,6 +856,26 @@ const heldBackNow = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
 };
 
 /**
+ * Once a draft was sent and cleared, the files kept for it are let go of: their links went
+ * with it, so there is nothing left to rename them in.
+ * @param registry - The registry.
+ * @param timeline - Where the draft was sent from.
+ * @param intents - What the submit asked to carry out.
+ */
+const letGoOfKept = (
+  registry: AtomRegistry.AtomRegistry,
+  timeline: Place,
+  intents: readonly unknown[]
+) => {
+  if (intents.length > 0 && draftOf(registry.get(composerState), timeline).text === "") {
+    registry.set(
+      uploadingState,
+      reduceUploading(registry.get(uploadingState), { _tag: "Sent", place: timeline })
+    );
+  }
+};
+
+/**
  * Submits a Timeline's draft, and carries out what it asks, unless a file added to it is
  * still uploading.
  */
@@ -873,6 +893,7 @@ export const send = runtime
 
         replaced(registry, step.state);
         letGoOfTyped(registry, timeline);
+        letGoOfKept(registry, timeline, step.intents);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }
@@ -896,6 +917,7 @@ export const confirmSend = runtime
         const step = confirm(registry.get(composerState), timeline);
 
         replaced(registry, step.state);
+        letGoOfKept(registry, timeline, step.intents);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }

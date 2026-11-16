@@ -4,10 +4,12 @@
  * which puts a kept file's link into the draft where the caret was. Whether Uploads are on
  * is read from the Daemon as the files are added, never kept. A file is cancelled by
  * letting it go from what is pending: its fiber sees that and stops, which aborts its
- * request.
+ * request. A file kept can be renamed until its draft is sent, which puts its new link in
+ * the draft in place of the old.
  *
  * @packageDocumentation
  */
+import type { Upload } from "@iirc/api";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf } from "@iirc/frontend/composer";
 import {
@@ -16,6 +18,8 @@ import {
   checking,
   initialUploading,
   reduceUploading,
+  relinkedAt,
+  renamed,
   sending,
   uploaded,
 } from "@iirc/frontend/uploading";
@@ -27,6 +31,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { signedOut } from "../options/atoms.ts";
+import { sendEdit } from "../options/uploads.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { composerState, placeOf } from "./atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
@@ -103,36 +108,41 @@ const noneChecking = (registry: AtomRegistry.AtomRegistry, keys: readonly string
   );
 
 /**
- * A file kept: its link goes into its draft, and the selection, when the Owner is writing
- * there, stays where it was in the text around the link, both its ends.
+ * The selection in a composer's draft once its text changes under it, when the Owner is
+ * writing there, each end moved as given, or none. It is read before the text changes.
  * @param registry - The registry.
- * @param key - The file's key.
- * @param link - Its link, or `null` without a public URL.
+ * @param place - The composer's place.
+ * @param moved - Where a place in the text goes.
+ * @returns The selection after, or none.
  */
-const kept = (registry: AtomRegistry.AtomRegistry, key: string, link: string | null) => {
-  const step = uploaded(registry.get(uploadingState), registry.get(composerState), key, link);
-  const { inserted } = step;
+const selectionAfter = (
+  registry: AtomRegistry.AtomRegistry,
+  place: Place,
+  moved: (at: number) => number
+) => {
   const input = composerInput(document);
 
-  // The selection is read before the text changes under it.
-  const selection =
-    inserted !== undefined &&
-    input !== undefined &&
-    document.activeElement === input &&
-    placeOf(registry) === inserted.place
-      ? {
-          direction: input.selectionDirection ?? "none",
-          end: caretAfter(input.selectionEnd, inserted),
-          start: caretAfter(input.selectionStart, inserted),
-        }
-      : undefined;
+  return input !== undefined && document.activeElement === input && placeOf(registry) === place
+    ? {
+        direction: input.selectionDirection ?? "none",
+        end: moved(input.selectionEnd),
+        start: moved(input.selectionStart),
+      }
+    : undefined;
+};
 
-  // The core moved every other anchor past the link already, so the composers are set
-  // as they are, not followed again.
-  if (inserted !== undefined) {
-    cancelCompletion(registry);
-  }
-
+/**
+ * Sets what the core made of the composers and the files pending, which moved every anchor
+ * already, so the composers are not followed again, and moves the selection, if given.
+ * @param registry - The registry.
+ * @param step - The composers and what is pending, after.
+ * @param selection - Where the selection goes, if the text changed under the Owner.
+ */
+const stepped = (
+  registry: AtomRegistry.AtomRegistry,
+  step: Pick<ReturnType<typeof uploaded>, "composers" | "state">,
+  selection: ReturnType<typeof selectionAfter>
+) => {
   registry.set(composerState, step.composers);
   registry.set(uploadingState, step.state);
   letGoOfPreviews(registry);
@@ -140,6 +150,52 @@ const kept = (registry: AtomRegistry.AtomRegistry, key: string, link: string | n
   if (selection !== undefined) {
     registry.set(caretAsked, { asked: registry.get(caretAsked).asked + 1, selection });
   }
+};
+
+/**
+ * A file kept: its link goes into its draft, and the selection, when the Owner is writing
+ * there, stays where it was in the text around the link, both its ends.
+ * @param registry - The registry.
+ * @param key - The file's key.
+ * @param upload - Its Upload, its link `null` without a public URL.
+ */
+const kept = (registry: AtomRegistry.AtomRegistry, key: string, upload: Upload) => {
+  const step = uploaded(registry.get(uploadingState), registry.get(composerState), key, upload);
+  const { inserted } = step;
+
+  const selection =
+    inserted === undefined
+      ? undefined
+      : selectionAfter(registry, inserted.place, (at) => caretAfter(at, inserted));
+
+  if (inserted !== undefined) {
+    cancelCompletion(registry);
+  }
+
+  stepped(registry, step, selection);
+};
+
+/**
+ * A file kept was renamed: its new link goes into its draft in place of the old, and the
+ * selection, when the Owner is writing there, stays where it was in the text around it.
+ * @param registry - The registry.
+ * @param key - The file's key.
+ * @param upload - Its Upload, as the Daemon answered the rename.
+ */
+const relinked = (registry: AtomRegistry.AtomRegistry, key: string, upload: Upload) => {
+  const step = renamed(registry.get(uploadingState), registry.get(composerState), key, upload);
+  const { relinked: relink } = step;
+
+  const selection =
+    relink === undefined
+      ? undefined
+      : selectionAfter(registry, relink.place, (at) => relinkedAt(at, relink));
+
+  if (relink !== undefined) {
+    cancelCompletion(registry);
+  }
+
+  stepped(registry, step, selection);
 };
 
 /**
@@ -151,7 +207,7 @@ const kept = (registry: AtomRegistry.AtomRegistry, key: string, link: string | n
 const answered = (registry: AtomRegistry.AtomRegistry, key: string, answer: Answer) => {
   switch (answer._tag) {
     case "Kept": {
-      kept(registry, key, answer.link);
+      kept(registry, key, answer.upload);
       break;
     }
 
@@ -310,6 +366,36 @@ export const addFiles = runtime
 export const dropUpload = Atom.fnSync((key: string, get) => {
   happened(get.registry, { _tag: "Dropped", key });
 }).pipe(Atom.keepAlive);
+
+/**
+ * Renames a file kept, until its draft is sent: its new link goes into the draft in place
+ * of the old, or why it was not renamed is said under the composer. A name it already has
+ * sends nothing.
+ */
+export const renameKept = runtime
+  .fn(
+    ({ key, name }: { readonly key: string; readonly name: string }, get) =>
+      Effect.gen(function* () {
+        const { registry } = get;
+        const stage = registry.get(uploadingState).pending.find((one) => one.key === key)?.stage;
+
+        if (stage?._tag !== "Kept" || stage.upload.name === name) {
+          return;
+        }
+
+        happened(registry, { _tag: "Renaming", key });
+
+        const answer = yield* sendEdit(registry, stage.upload.id, { name, of: "Rename" });
+
+        if (answer._tag === "Done") {
+          relinked(registry, key, answer.upload);
+        } else if (answer._tag === "Failed") {
+          happened(registry, { _tag: "RenameFailed", failure: answer.failure, key });
+        }
+      }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
 
 /** Lets go of the note under a composer that Uploads are off. */
 export const dismissUploadNote = Atom.fnSync((place: Place, get) => {

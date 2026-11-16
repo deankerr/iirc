@@ -214,10 +214,12 @@ An option under `store` or `uploads` is named in full, such as `store.s3.bucket`
 
 ## Uploads
 
-The Uploads the options list, newest first, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
+The live Uploads the options list, newest first, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
 
 - **A page only extends the list at its end.** It is folded only when read from where the list stands, the first page into an empty list and each later one from `next`, so one read twice is folded once. The first page sets `through`.
-- **The stream only gives what is newer.** A Change after `through` moves it on, and one not held goes first, one held is replaced in place. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
+- **The stream only gives what is newer.** A Change after `through` moves it on. One held is replaced in place, or dropped once deleted. One not held goes first, unless it is deleted, or uploaded before the oldest held while more pages follow, as a rename of an old Upload is, which its page gives as it is. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
+- **The Daemon's answer to a rename or a delete is folded at once** (`Answered`), into an Upload held only, and moves nothing on, since the stream still gives its Change.
+- **What the Owner asked of each is beside them** (`reduceUploadEdits`): the Upload a delete is being confirmed for, and each rename or delete waiting on the Daemon or failed, until it is sent again. `nameOf` reads a typed name as the contract takes one, and `editFailureText` says a failure in words.
 - **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
 
 ## Uploading
@@ -228,6 +230,7 @@ The files added to a composer, as a reducer (`reduceUploading`) over what the ru
 - **A link is a word of its own.** `insertLink` adds a space on whichever side touches anything but whitespace, and `caretAfter` moves a caret at or after it past it. Files added at one caret land in the order added, whatever order they finish in.
 - **Whether Uploads are on is the Daemon's answer when the files were added, never kept.** Files are checking until it answers. While they are off, those files are let go of, and `offNote` names the options to set. A file over `maxSize` is refused before it is sent. A link of `null`, with no public URL, puts nothing in and notes it the same way.
 - **A draft waits for its links.** While a file added to it is checking or being sent, `heldBack` says to wait for it or cancel it, and nothing is sent. A failed file holds nothing back. What is kept of a send held back is only that it was, per composer (`HeldBack`), and `heldNoteIn` derives the words from the files still pending, so they name only those and go with the last of them, kept, failed, or cancelled, and never come back.
+- **A file kept stays listed until its draft is sent** (`Sent`), or it is dismissed, holding nothing back. Renamed, its new link goes into the draft in place of the old (`renamed`), wherever the old now stands, however the Owner edited around it, and every anchor and caret after it moves by the change in length (`relinkedAt`). Where the Owner edited it away, nothing is replaced.
 - **Every failure is said in words** by `failureText`, from the API's typed errors, and a request with no answer says only that whether the file was kept is unknown.
 
 ## Themes

@@ -1,0 +1,33 @@
+/* The field takes the row's width, its buttons after it. */
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.field {
+  flex: 1;
+  min-width: 12ch;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-input);
+}
+
+.input:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+.input[data-invalid] {
+  border-color: var(--color-danger);
+}

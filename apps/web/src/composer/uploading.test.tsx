@@ -263,6 +263,54 @@ const waitNotices = (container: HTMLElement) =>
     one.textContent?.startsWith("Wait for") ? [one.textContent] : []
   );
 
+/**
+ * Renames a kept file from its row under the composer: opens the field, types the name, and
+ * presses Enter in it, which saves.
+ * @param container - The page.
+ * @param name - The file's name.
+ * @param to - The name typed.
+ */
+const renameKept = async (container: HTMLElement, name: string, to: string) => {
+  await press(button(container, `Rename ${name}`));
+
+  const field = container.querySelector<HTMLInputElement>(
+    `input[aria-label="New name for ${name}"]`
+  );
+
+  if (field === null) {
+    throw new Error("no field");
+  }
+
+  await act(async () => {
+    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, to);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    const enterKey = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+    });
+
+    if (field.dispatchEvent(enterKey)) {
+      field.form?.requestSubmit();
+    }
+
+    await Promise.resolve();
+  });
+};
+
+/**
+ * The files listed under the composer, by name.
+ * @param container - The page.
+ * @returns Their names.
+ */
+const listedFiles = (container: HTMLElement) =>
+  [...container.querySelectorAll('ul[aria-label="Uploads"] > li bdi')].map(
+    (one) => one.textContent
+  );
+
 const linkOf = (id: number, name: string) => `${publicUrl}/${String(id).padStart(16, "0")}/${name}`;
 
 describe("uploading from the Composer", () => {
@@ -781,6 +829,99 @@ describe("uploading from the Composer", () => {
     await settled(() => daemon.says.length === 1);
 
     expect(daemon.says.map((one) => one.text)).toStrictEqual(["look"]);
+  });
+
+  it("keeps a kept file listed under the composer, with its link, until the draft is sent", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => composerOf(container).value.includes(publicUrl));
+
+    const kept = {
+      listed: listedFiles(container),
+      rename: button(container, "Rename cat.png") !== null,
+    };
+
+    await enter(container);
+    await settled(() => daemon.says.length === 1);
+
+    expect({ after: listedFiles(container), kept }).toStrictEqual({
+      after: [],
+      kept: { listed: ["cat.png"], rename: true },
+    });
+  });
+
+  it("renames a kept file before sending, putting its new link in the draft wherever the old now sits", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => composerOf(container).value.includes(publicUrl));
+    await typeIn(container, `oh ${composerOf(container).value} there`);
+    await renameKept(container, "cat.png", "tabby.png");
+    await settled(() => composerOf(container).value.includes("tabby.png"));
+
+    const draft = composerOf(container).value;
+
+    await enter(container);
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      draft,
+      edits: daemon.uploadEdits,
+      said: daemon.says.map((one) => one.text),
+    }).toStrictEqual({
+      draft: `oh look ${linkOf(10, "tabby.png")} there`,
+      edits: [{ id: String(10).padStart(16, "0"), method: "PATCH", name: "tabby.png" }],
+      said: [`oh look ${linkOf(10, "tabby.png")} there`],
+    });
+  });
+
+  it("renames a kept file whose link the Owner edited away, replacing nothing", async () => {
+    const { container, daemon } = await signedIn();
+
+    await paste(container, image("cat.png"));
+    await settled(() => composerOf(container).value.includes(publicUrl));
+    await typeIn(container, "never mind");
+    await renameKept(container, "cat.png", "tabby.png");
+    await settled(() => listedFiles(container).includes("tabby.png"));
+
+    expect({ edits: daemon.uploadEdits.length, value: composerOf(container).value }).toStrictEqual({
+      edits: 1,
+      value: "never mind",
+    });
+  });
+
+  it("says under the composer why a rename failed, leaving the draft as it was", async () => {
+    const { container, daemon } = await signedIn();
+
+    daemon.uploadEditRefusals.push({
+      body: { _tag: "JournalFailed", reason: "the disk is full" },
+      status: 500,
+    });
+    await paste(container, image("cat.png"));
+    await settled(() => composerOf(container).value.includes(publicUrl));
+    await renameKept(container, "cat.png", "tabby.png");
+    await settled(() => alerts(container).length === 1);
+
+    expect({ alerts: alerts(container), value: composerOf(container).value }).toStrictEqual({
+      alerts: ["The Daemon could not write its Journal, so cat.png was not renamed."],
+      value: linkOf(10, "cat.png"),
+    });
+  });
+
+  it("lets a kept file be dismissed, leaving its link in the draft", async () => {
+    const { container } = await signedIn();
+
+    await paste(container, image("cat.png"));
+    await settled(() => composerOf(container).value.includes(publicUrl));
+    await press(button(container, "Dismiss cat.png, leaving its link"));
+
+    expect({ listed: listedFiles(container), value: composerOf(container).value }).toStrictEqual({
+      listed: [],
+      value: linkOf(10, "cat.png"),
+    });
   });
 
   it("lets go of every upload on signing out, aborting its request and its preview", async () => {

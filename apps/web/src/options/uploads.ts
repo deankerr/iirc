@@ -5,13 +5,21 @@
  * it was read, and the stream is followed after that, or after the last Change folded in
  * when following again, so nothing is missed and nothing is given twice. An Upload's link
  * is derived from the public URL in force as it is drawn, never held, so a new public URL
- * changes every link copied from then on.
+ * changes every link copied from then on. Renaming and deleting one are sent from here,
+ * from the list and from the composer alike, and the Daemon's answer goes to the list at
+ * once, ahead of the Change the stream gives for it.
  *
  * @packageDocumentation
  */
-import type { UploadId } from "@iirc/api";
-import { initialUploads, linkOf, reduceUploads } from "@iirc/frontend/uploads";
-import type { UploadsEvent } from "@iirc/frontend/uploads";
+import type { Upload, UploadId } from "@iirc/api";
+import {
+  initialUploadEdits,
+  initialUploads,
+  linkOf,
+  reduceUploadEdits,
+  reduceUploads,
+} from "@iirc/frontend/uploads";
+import type { EditFailure, UploadEditsEvent, UploadsEvent } from "@iirc/frontend/uploads";
 import { Effect, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -24,6 +32,9 @@ import { optionsShown, optionsState, signedOut, told } from "./atoms.ts";
 
 /** The Uploads held, newest first, as the core folds them. */
 export const uploadsState = Atom.make(initialUploads).pipe(Atom.keepAlive);
+
+/** What the Owner asked of the Uploads listed, as the core folds it. */
+export const uploadEditsState = Atom.make(initialUploadEdits).pipe(Atom.keepAlive);
 
 /** The public URL in force, which every Upload's link is made from, or none while unset. */
 export const publicUrl = Atom.make(
@@ -44,6 +55,159 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: UploadsEvent) => {
     registry.set(uploadsState, reduceUploads(registry.get(uploadsState), event));
   }
 };
+
+/**
+ * Folds one event into what the Owner asked of the Uploads listed.
+ * @param registry - The registry.
+ * @param event - What happened.
+ */
+const edited = (registry: AtomRegistry.AtomRegistry, event: UploadEditsEvent) => {
+  registry.set(uploadEditsState, reduceUploadEdits(registry.get(uploadEditsState), event));
+};
+
+/** What the Owner asked of an Upload: a new name, or that it be deleted. */
+type Edit = { readonly of: "Rename"; readonly name: string } | { readonly of: "Delete" };
+
+/**
+ * What a rename or a delete came to: `Done`, with the Upload as the Daemon answered it,
+ * `Failed`, or `SignedOut`, the sign-in refused.
+ */
+type Edited =
+  | { readonly _tag: "Done"; readonly upload: Upload }
+  | { readonly _tag: "Failed"; readonly failure: EditFailure }
+  | { readonly _tag: "SignedOut" };
+
+// A gateway in front of the Daemon answers these when it could not reach it.
+const gatewayStatuses: ReadonlySet<number> = new Set([502, 504]);
+
+/**
+ * A rename or a delete that failed.
+ * @param failure - Why.
+ * @returns What it came to.
+ */
+const failed = (failure: EditFailure): Effect.Effect<Edited> =>
+  Effect.succeed({ _tag: "Failed", failure });
+
+/**
+ * Sends a rename or a delete of an Upload, and says what it came to, from the error's tag
+ * and status, never its text. Done, the list takes the Upload as answered at once. A
+ * refused sign-in signs the page out.
+ * @param registry - The registry.
+ * @param id - The Upload.
+ * @param edit - What was asked.
+ * @returns What it came to.
+ */
+export const sendEdit = (registry: AtomRegistry.AtomRegistry, id: UploadId, edit: Edit) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+
+    const sent =
+      edit.of === "Rename"
+        ? client.uploads.rename({ params: { id }, payload: { name: edit.name } })
+        : client.uploads.delete({ params: { id } });
+
+    const answer = yield* sent.pipe(
+      Effect.map((upload): Edited => ({ _tag: "Done", upload })),
+      Effect.catch((error) => {
+        switch (error._tag) {
+          case "Unauthorized": {
+            return Effect.succeed<Edited>({ _tag: "SignedOut" });
+          }
+
+          case "UnknownUpload":
+          case "JournalFailed": {
+            return failed({ _tag: error._tag });
+          }
+
+          case "HttpClientError": {
+            return failed({
+              _tag:
+                error.reason._tag === "TransportError" ||
+                (error.response !== undefined && gatewayStatuses.has(error.response.status))
+                  ? "NoAnswer"
+                  : "Unexpected",
+            });
+          }
+
+          case "CrossOrigin":
+          case "InvalidRequest":
+          case "SchemaError": {
+            return failed({ _tag: "Unexpected" });
+          }
+
+          default: {
+            return error satisfies never;
+          }
+        }
+      })
+    );
+
+    if (answer._tag === "Done") {
+      happened(registry, { _tag: "Answered", upload: answer.upload });
+    }
+
+    if (answer._tag === "SignedOut") {
+      signedOut(registry);
+    }
+
+    return answer;
+  });
+
+/**
+ * Sends what the Owner asked of an Upload in the list, and folds in what it came to.
+ * @param registry - The registry.
+ * @param id - The Upload.
+ * @param edit - What was asked.
+ * @returns Once answered.
+ */
+const editFromList = (registry: AtomRegistry.AtomRegistry, id: UploadId, edit: Edit) =>
+  Effect.gen(function* () {
+    edited(registry, { _tag: "Sent", id, of: edit.of });
+
+    const answer = yield* sendEdit(registry, id, edit);
+
+    if (answer._tag !== "SignedOut") {
+      edited(registry, {
+        _tag: "Answered",
+        failure: answer._tag === "Failed" ? answer.failure : undefined,
+        id,
+      });
+    }
+  });
+
+/** Renames an Upload from the list. */
+export const renameUpload = runtime
+  .fn(
+    ({ id, name }: { readonly id: UploadId; readonly name: string }, get) =>
+      editFromList(get.registry, id, { name, of: "Rename" }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
+
+/** Asks the Owner to confirm deleting an Upload, which sends nothing yet. */
+export const askToDelete = Atom.fnSync((id: UploadId, get) => {
+  edited(get.registry, { _tag: "AskedToDelete", id });
+}).pipe(Atom.keepAlive);
+
+/** The Owner let the question go, deleting nothing. */
+export const closeDelete = Atom.fnSync((_: undefined, get) => {
+  edited(get.registry, { _tag: "Closed" });
+}).pipe(Atom.keepAlive);
+
+/** Deletes the Upload the Owner confirmed deleting, once, which closes the question. */
+export const confirmDelete = runtime
+  .fn(
+    (_: undefined, get) =>
+      Effect.gen(function* () {
+        const id = get.registry.get(uploadEditsState).asking;
+
+        if (id !== undefined) {
+          yield* editFromList(get.registry, id, { of: "Delete" });
+        }
+      }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
 
 /**
  * Reads a page of the Uploads, from just after an Upload or from the newest, and folds it in
@@ -87,6 +251,7 @@ export const uploadsSync = runtime
 
       if (!get(signedIn)) {
         happened(registry, { _tag: "Forgotten" });
+        edited(registry, { _tag: "Forgotten" });
         registry.set(copiedLink, undefined);
 
         return;

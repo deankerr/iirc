@@ -1,6 +1,7 @@
 // The class names in composer.module.css, which CSS Modules exports.
 declare const styles: {
   readonly about: string;
+  readonly actions: string;
   readonly away: string;
   readonly camera: string;
   readonly candidate: string;
@@ -15,6 +16,7 @@ declare const styles: {
   readonly image: string;
   readonly input: string;
   readonly line: string;
+  readonly link: string;
   readonly name: string;
   readonly note: string;
   readonly notice: string;

@@ -3,19 +3,22 @@
  * each pending until the Daemon answers, and where its link goes in the draft. Each has an
  * anchor, the place in the draft where the caret was when it was added, which follows the
  * draft as it is edited, so the link goes in where the Owner meant it whatever they type
- * meanwhile. The link is only text in the draft, said when the Owner sends it.
+ * meanwhile. The link is only text in the draft, said when the Owner sends it. A file kept
+ * stays listed under its composer until its draft is sent, or it is dismissed, so it can be
+ * renamed first, which puts its new link in the draft in place of the old.
  *
  * The runtime names each file with a key, since the core makes no randomness, sends it,
  * and folds back what became of it.
  *
  * @packageDocumentation
  */
-import type { OwnerOptionName, UploadsStatus } from "@iirc/api";
+import type { OwnerOptionName, Upload, UploadsStatus } from "@iirc/api";
 
 import { typesCredential } from "./commands.ts";
 import { draftOf, linesOf, reduceComposers } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
 import { sizeText } from "./uploads.ts";
+import type { EditFailure } from "./uploads.ts";
 
 /** A file the Owner added, as the runtime names and reads it. */
 export interface AddedFile {
@@ -53,6 +56,9 @@ export type UploadFailure =
  * - `Sending`: it is being sent, with how much of it was, of how much, as the browser last
  *   said, if it has.
  * - `Failed`: it was not kept, or might not have been, and is shown until dismissed.
+ * - `Kept`: it was kept as `upload`, as last answered, and `link` went into the draft, while
+ *   a rename is `renaming`, and why the last one failed, if it did. It is shown until its
+ *   draft is sent or it is dismissed.
  */
 export type Stage =
   | { readonly _tag: "Checking" }
@@ -60,7 +66,14 @@ export type Stage =
       readonly _tag: "Sending";
       readonly progress: { readonly loaded: number; readonly total: number } | undefined;
     }
-  | { readonly _tag: "Failed"; readonly failure: UploadFailure };
+  | { readonly _tag: "Failed"; readonly failure: UploadFailure }
+  | {
+      readonly _tag: "Kept";
+      readonly upload: Upload;
+      readonly link: string;
+      readonly renaming: boolean;
+      readonly failure: EditFailure | undefined;
+    };
 
 /** A file pending in a composer, from the moment it was added until it is let go of. */
 export interface Pending extends AddedFile {
@@ -108,6 +121,9 @@ export type Readiness = UploadsStatus | { readonly _tag: "NoAnswer" };
  *   it was not sent. The composer says why for as long as a file added to it waits.
  * - `NoteDismissed`: the note under a composer was dismissed, and what it says of a draft
  *   held back.
+ * - `Renaming`: a rename of a file kept was sent.
+ * - `RenameFailed`: it did not go as asked, or might not have.
+ * - `Sent`: a composer's draft was sent, so the files kept for it are let go of.
  */
 export type UploadingEvent =
   | {
@@ -127,7 +143,10 @@ export type UploadingEvent =
   | { readonly _tag: "Off"; readonly key: string; readonly missing: readonly OwnerOptionName[] }
   | { readonly _tag: "Dropped"; readonly key: string }
   | { readonly _tag: "HeldBack"; readonly place: Place }
-  | { readonly _tag: "NoteDismissed"; readonly place: Place };
+  | { readonly _tag: "NoteDismissed"; readonly place: Place }
+  | { readonly _tag: "Renaming"; readonly key: string }
+  | { readonly _tag: "RenameFailed"; readonly key: string; readonly failure: EditFailure }
+  | { readonly _tag: "Sent"; readonly place: Place };
 
 /**
  * The files pending under a composer, in the order added.
@@ -189,6 +208,14 @@ const withNote = (
 };
 
 /**
+ * Whether a file holds its draft back: it is still being checked or sent.
+ * @param file - The file.
+ * @returns Whether it waits.
+ */
+const waits = (file: Pick<Pending, "stage">) =>
+  file.stage._tag === "Checking" || file.stage._tag === "Sending";
+
+/**
  * A state with no composer held back that has no file waiting, so a draft held back once
  * says nothing once its files are in, failed, or cancelled, and nothing later brings it
  * back.
@@ -196,9 +223,7 @@ const withNote = (
  * @returns What is pending now.
  */
 const settled = (state: Uploading): Uploading => {
-  const waiting = new Set(
-    state.pending.filter((one) => one.stage._tag !== "Failed").map((one) => one.place)
-  );
+  const waiting = new Set(state.pending.filter(waits).map((one) => one.place));
 
   return [...state.held].every((place) => waiting.has(place))
     ? state
@@ -345,6 +370,31 @@ const folded = (state: Uploading, event: UploadingEvent): Uploading => {
       held.delete(event.place);
 
       return withNote({ ...state, held }, event.place, undefined);
+    }
+
+    case "Renaming": {
+      return changed(state, event.key, (one) =>
+        one.stage._tag === "Kept"
+          ? { ...one, stage: { ...one.stage, failure: undefined, renaming: true } }
+          : one
+      );
+    }
+
+    case "RenameFailed": {
+      return changed(state, event.key, (one) =>
+        one.stage._tag === "Kept"
+          ? { ...one, stage: { ...one.stage, failure: event.failure, renaming: false } }
+          : one
+      );
+    }
+
+    case "Sent": {
+      return {
+        ...state,
+        pending: state.pending.filter(
+          (one) => !(one.place === event.place && one.stage._tag === "Kept")
+        ),
+      };
     }
 
     default: {
@@ -564,23 +614,24 @@ export interface Kept {
 }
 
 /**
- * A file was kept, and the Daemon gave its link: it is no longer pending, and its link goes
+ * A file was kept, and the Daemon gave its Upload: it stays listed, kept, and its link goes
  * into its draft at its anchor. Every other anchor after it moves on past the link, and
  * one at the same place too when it was added later, so files added at one caret land in
  * the order added, whatever order they finish in. With no link, as when no public URL is
- * set, nothing goes in, and the composer notes that Uploads are off.
+ * set, nothing goes in, the file is let go of, and the composer notes that Uploads are off.
  * @param state - What is pending.
  * @param composers - The composers.
  * @param key - The file's key.
- * @param link - Its link, or `null` without a public URL.
+ * @param upload - Its Upload, as the Daemon answered.
  * @returns What it came to.
  */
 export const uploaded = (
   state: Uploading,
   composers: Composers,
   key: string,
-  link: string | null
+  upload: Upload
 ): Kept => {
+  const { link } = upload;
   const index = state.pending.findIndex((one) => one.key === key);
   const file = state.pending[index];
 
@@ -599,16 +650,20 @@ export const uploaded = (
   const { place } = file;
   const insertion = insertLink(draftOf(composers, place).text, file.anchor, link);
 
-  const pending = state.pending.flatMap((one, at) => {
+  const pending = state.pending.map((one, at): Pending => {
     if (one.key === key) {
-      return [];
+      return {
+        ...one,
+        anchor: insertion.at,
+        stage: { _tag: "Kept", failure: undefined, link, renaming: false, upload },
+      };
     }
 
     const moves =
       one.place === place &&
       (one.anchor > insertion.at || (one.anchor === insertion.at && at > index));
 
-    return [moves ? { ...one, anchor: one.anchor + insertion.length } : one];
+    return moves ? { ...one, anchor: one.anchor + insertion.length } : one;
   });
 
   return {
@@ -619,6 +674,122 @@ export const uploaded = (
     }),
     inserted: { ...insertion, place },
     state: settled({ ...state, pending }),
+  };
+};
+
+/**
+ * A link put into a draft once more, renamed: where the old one stood in the text before,
+ * as many times as it did, oldest place first, and how long the old and new links are.
+ */
+export interface Relink {
+  readonly starts: readonly number[];
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * Where a place in a draft goes once a link in it was relinked: on by the change in length
+ * of each link wholly before it, and to the end of the new link when it was within the
+ * old, so a caret or an anchor stays in the text around it.
+ * @param at - Where it was.
+ * @param relink - What was relinked.
+ * @returns Where it goes.
+ */
+export const relinkedAt = (at: number, relink: Relink): number => {
+  const { from, starts, to } = relink;
+  let moved = 0;
+
+  for (const start of starts) {
+    if (at >= start + from) {
+      moved += to - from;
+    } else {
+      return at > start ? start + moved + to : at + moved;
+    }
+  }
+
+  return at + moved;
+};
+
+/**
+ * Where a link stands in a text, as many times as it does, each after the last.
+ * @param text - The text.
+ * @param link - The link.
+ * @returns Where each begins.
+ */
+const placesOf = (text: string, link: string): readonly number[] => {
+  const starts: number[] = [];
+  let at = text.indexOf(link);
+
+  while (at !== -1) {
+    starts.push(at);
+    at = text.indexOf(link, at + link.length);
+  }
+
+  return starts;
+};
+
+/** What a file kept came to once renamed: the composers and what is pending, and what was relinked. */
+export interface Renamed {
+  readonly state: Uploading;
+  readonly composers: Composers;
+  /** Where its old link stood in which composer, or none when nothing was replaced. */
+  readonly relinked: (Relink & { readonly place: Place }) | undefined;
+}
+
+/**
+ * A file kept was renamed, and the Daemon gave its Upload as it is now: it is held as that,
+ * and its new link goes into its draft in place of its old, wherever the old now stands,
+ * however the Owner edited around it. Every other anchor there follows, by `relinkedAt`.
+ * Where the Owner edited the old link away, or no public URL gives a new one, the draft
+ * stays as it is.
+ * @param state - What is pending.
+ * @param composers - The composers.
+ * @param key - The file's key.
+ * @param upload - Its Upload, as the Daemon answered the rename.
+ * @returns What it came to.
+ */
+export const renamed = (
+  state: Uploading,
+  composers: Composers,
+  key: string,
+  upload: Upload
+): Renamed => {
+  const file = state.pending.find((one) => one.key === key);
+
+  if (file?.stage._tag !== "Kept") {
+    return { composers, relinked: undefined, state };
+  }
+
+  const { place, stage } = file;
+  const was = stage.link;
+  const now = upload.link ?? was;
+  const { text } = draftOf(composers, place);
+  const starts = now === was ? [] : placesOf(text, was);
+
+  const held = changed(state, key, (one) => ({
+    ...one,
+    stage: { ...stage, link: now, renaming: false, upload },
+  }));
+
+  if (starts.length === 0) {
+    return { composers, relinked: undefined, state: held };
+  }
+
+  const relink: Relink = { from: was.length, starts, to: now.length };
+
+  return {
+    composers: reduceComposers(composers, {
+      _tag: "Edited",
+      text: text.split(was).join(now),
+      timeline: place,
+    }),
+    relinked: { ...relink, place },
+    state: {
+      ...held,
+      pending: held.pending.map((one) =>
+        one.place === place ? { ...one, anchor: relinkedAt(one.anchor, relink) } : one
+      ),
+    },
   };
 };
 
@@ -650,8 +821,8 @@ export const offNote = (missing: readonly OwnerOptionName[]): string => {
 
 /**
  * Why a composer's draft cannot be sent yet, or none: a file added to it is still being
- * checked or sent, so its link is not in yet. A failed file holds nothing back, and nor
- * does a draft that types a Credential's value, which is let go of as it is submitted.
+ * checked or sent, so its link is not in yet. A failed or kept file holds nothing back, and
+ * nor does a draft that types a Credential's value, which is let go of as it is submitted.
  * @param state - What is pending.
  * @param composers - The composers.
  * @param place - The composer's place.
@@ -662,7 +833,7 @@ export const heldBack = (
   composers: Composers,
   place: Place
 ): string | undefined => {
-  const waiting = pendingIn(state, place).filter((one) => one.stage._tag !== "Failed");
+  const waiting = pendingIn(state, place).filter(waits);
 
   if (
     waiting.length === 0 ||

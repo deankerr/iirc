@@ -25,7 +25,7 @@
   list-style: none;
 }
 
-/* The thumbnail, what the Upload is, and copying its link. */
+/* The thumbnail, what the Upload is, and what can be done with it. */
 .row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -74,8 +74,16 @@
   overflow-wrap: anywhere;
 }
 
-.copy {
+.failure {
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}
+
+/* Copying its link, renaming it, and deleting it, wrapping on a narrow screen. */
+.actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
 }
