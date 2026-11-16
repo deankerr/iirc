@@ -15,6 +15,7 @@ import {
   Layer,
   Option,
   Schema,
+  Schedule,
   Scope,
   Stream,
 } from "effect";
@@ -2280,6 +2281,393 @@ describe("renaming and deleting an Upload", () => {
     expect(result.seen.map((event) => event.id)).toStrictEqual(result.journaled);
     expect(result.resumed).toStrictEqual(
       result.seen.slice(1).map(({ id }) => ({ id, upload: result.uploads[2] }))
+    );
+  });
+});
+
+const probeText = "probe\n";
+
+/**
+ * Binds the link listener at a port that this test alone holds. A free port can be taken by
+ * anything between being found and being bound, even another test's link listener, and this
+ * one then stays closed. So upload a probe, and keep a port only once the probe's link
+ * answers there with its bytes, which only this listener holds.
+ * @param served - The server, with Uploads on.
+ * @returns The port the link listener is bound at.
+ */
+const linkPort = (served: Served) =>
+  Effect.gen(function* () {
+    const probePath = pathOf((yield* uploaded(served, probeText, "probe.txt")).link);
+
+    const listenAt = (tries: number): Effect.Effect<number> =>
+      Effect.gen(function* () {
+        const port = freePort();
+
+        yield* setOption(served, "uploads.listen", `${loopback}:${port}`);
+
+        const bound = yield* Effect.tryPromise(async () => {
+          const answer = await fetch(`http://${loopback}:${port}${probePath}`);
+
+          return answer.status === 200 && (await answer.text()) === probeText;
+        }).pipe(
+          Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }),
+          Effect.orElseSucceed(() => false)
+        );
+
+        if (bound) {
+          return port;
+        }
+
+        return tries > 1
+          ? yield* listenAt(tries - 1)
+          : yield* Effect.die(
+              new Error("the link listener bound at none of the ports it was given")
+            );
+      });
+
+    return yield* listenAt(5);
+  });
+
+const digits = "0123456789";
+
+const digitsName = "digits.txt";
+
+const unknownId = "0000000000000000";
+
+/** A request as the routes below take it. */
+interface Ask {
+  readonly method?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+const routeNames = ["the link listener", "the API's content route"] as const;
+
+type RouteName = (typeof routeNames)[number];
+
+/**
+ * Uploads ten known bytes, and gives a way to ask the route under test for any id: the link
+ * listener's `/<id>/<name>`, or the API's `/api/uploads/<id>/content`.
+ * @param served - The server.
+ * @param routeName - The route.
+ * @returns The record, and how to ask the route for an id and read the whole answer.
+ */
+const digitsOn = (served: Served, routeName: RouteName) =>
+  Effect.gen(function* () {
+    yield* turnOn(served);
+    const port = yield* linkPort(served);
+    const record = yield* uploaded(served, digits, digitsName);
+
+    const at = (id: string, ask: Ask = {}): Effect.Effect<Response> =>
+      routeName === "the link listener"
+        ? Effect.promise(
+            async () => await fetch(`http://${loopback}:${port}/${id}/${digitsName}`, ask)
+          )
+        : served.request(`/api/uploads/${id}/content`, ask);
+
+    const answering = (id: string, ask: Ask = {}) => Effect.flatMap(at(id, ask), wholly);
+
+    return { answering, at, record, served };
+  });
+
+/**
+ * The headers every successful answer carries: the safety headers, revalidation on every use,
+ * and the Upload's id as a strong ETag.
+ * @param id - The Upload's id.
+ * @returns The headers.
+ */
+const revalidating = (id: string) => ({ ...safety, "cache-control": "no-cache", etag: `"${id}"` });
+
+/**
+ * An answer with an id said in its body masked. What an unknown id's answer says of the id is
+ * its own, so two answers to different ids may differ in nothing else.
+ * @param answer - The answer.
+ * @param id - The id.
+ * @returns The answer.
+ */
+const masked = <A extends { readonly body: string }>(answer: A, id: string): A => ({
+  ...answer,
+  body: answer.body.replaceAll(id, "<id>"),
+});
+
+// The requests that must not tell a deleted Upload from one that never was, by an id.
+const unrevealing: readonly (readonly [string, (id: string) => Ask])[] = [
+  ["a plain GET", () => ({})],
+  ["a HEAD", () => ({ method: "HEAD" })],
+  ["a GET with a Range", () => ({ headers: { range: "bytes=0-1" } })],
+  ["a GET with If-None-Match of the ETag", (id) => ({ headers: { "if-none-match": `"${id}"` } })],
+  ["a GET with If-None-Match of an asterisk", () => ({ headers: { "if-none-match": "*" } })],
+];
+
+describe("seeking and revalidation", () => {
+  it("answers a ranged request to the API's content route without a key or cookie with 401", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, digits, digitsName);
+
+        return statusOf(
+          yield* served.request(`/api/uploads/${record.id}/content`, {
+            headers: { range: "bytes=2-5" },
+            key: null,
+          })
+        );
+      })
+    );
+
+    expect(result).toBe(401);
+  });
+
+  describe.each(routeNames)("on %s", (routeName) => {
+    const onDigits = async <A, E>(
+      test: (
+        fixture: Effect.Success<ReturnType<typeof digitsOn>>
+      ) => Effect.Effect<A, E, Scope.Scope>
+    ) => await run((served) => digitsOn(served, routeName).pipe(Effect.flatMap(test)));
+
+    it("serves the bytes of a range as 206 with its Content-Range and length", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.map(answering(record.id, { headers: { range: "bytes=2-5" } }), (answer) => ({
+          ...answer,
+          id: record.id,
+        }))
+      );
+
+      expect(result.status).toBe(206);
+      expect(result.body).toBe("2345");
+      expect(result.headers).toMatchObject({
+        ...revalidating(result.id),
+        "accept-ranges": "bytes",
+        "content-length": "4",
+        "content-range": "bytes 2-5/10",
+      });
+    });
+
+    it.each([
+      ["an open-ended range", "bytes=7-", "789", "bytes 7-9/10"],
+      ["a suffix range", "bytes=-3", "789", "bytes 7-9/10"],
+      ["a range whose end is past the last byte, clamped", "bytes=8-100", "89", "bytes 8-9/10"],
+    ])("serves %s as 206", async (_edge, range, body, contentRange) => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
+          ...answer,
+          id: record.id,
+        }))
+      );
+
+      expect(result.status).toBe(206);
+      expect(result.body).toBe(body);
+      expect(result.headers).toMatchObject({
+        ...revalidating(result.id),
+        "accept-ranges": "bytes",
+        "content-length": String(body.length),
+        "content-range": contentRange,
+      });
+    });
+
+    it("serves the whole body as 200 for several ranges", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.map(answering(record.id, { headers: { range: "bytes=0-1,4-5" } }), (answer) => ({
+          ...answer,
+          id: record.id,
+        }))
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.body).toBe(digits);
+      expect(result.headers).toMatchObject({
+        ...revalidating(result.id),
+        "accept-ranges": "bytes",
+        "content-length": "10",
+      });
+    });
+
+    it.each([
+      ["starts at the size", "bytes=10-"],
+      ["starts past the size", "bytes=20-30"],
+    ])("answers a range that %s with 416 and the size", async (_edge, range) => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
+          ...answer,
+          id: record.id,
+        }))
+      );
+
+      expect(result.status).toBe(416);
+      expect(result.headers).toMatchObject({
+        ...revalidating(result.id),
+        "content-range": "bytes */10",
+      });
+    });
+
+    it.each([
+      ["another unit", "items=0-1"],
+      ["a range that ends before it starts", "bytes=5-2"],
+      ["a range that is not numbers", "bytes=abc"],
+    ])("ignores %s, and serves the whole body as 200", async (_edge, range) => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
+          ...answer,
+          id: record.id,
+        }))
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.body).toBe(digits);
+      expect(result.headers).toMatchObject({
+        ...revalidating(result.id),
+        "accept-ranges": "bytes",
+        "content-length": "10",
+      });
+      expect(result.headers["content-range"]).toBeUndefined();
+    });
+
+    it("gives exactly the Upload's id in quotes as the ETag, never its hash, on 200, 206, 304, and HEAD", async () => {
+      const result = await onDigits(({ at, record }) =>
+        Effect.gen(function* () {
+          const etags: (string | null)[] = [];
+
+          for (const ask of [
+            {},
+            { headers: { range: "bytes=2-5" } },
+            { headers: { "if-none-match": `"${record.id}"` } },
+            { method: "HEAD" },
+          ] satisfies Ask[]) {
+            etags.push((yield* at(record.id, ask)).headers.get("etag"));
+          }
+
+          return { etags, hash: record.hash, id: record.id };
+        })
+      );
+
+      expect(result.etags).toStrictEqual(Array.from({ length: 4 }, () => `"${result.id}"`));
+      expect(result.etags.join(" ")).not.toContain(result.hash);
+    });
+
+    it.each([
+      ["the strong ETag", (id: string) => `"${id}"`],
+      ["the weak form of the ETag", (id: string) => `W/"${id}"`],
+      ["an asterisk", () => "*"],
+      ["a list that holds the ETag", (id: string) => `"other", "${id}"`],
+    ])(
+      "answers If-None-Match with %s with 304, an empty body, and the ETag",
+      async (_edge, header) => {
+        const result = await onDigits(({ answering, record }) =>
+          Effect.map(
+            answering(record.id, { headers: { "if-none-match": header(record.id) } }),
+            (answer) => ({ ...answer, id: record.id })
+          )
+        );
+
+        expect(result.status).toBe(304);
+        expect(result.body).toBe("");
+        expect(result.headers).toMatchObject(revalidating(result.id));
+      }
+    );
+
+    it("answers If-None-Match with another ETag alone with 200 and the whole body", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        answering(record.id, { headers: { "if-none-match": '"other"' } })
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.body).toBe(digits);
+    });
+
+    it.each([
+      ["a whole request", {}],
+      ["a ranged request", { range: "bytes=2-5" }],
+    ])("answers HEAD for %s with GET's status and headers and no body", async (_edge, headers) => {
+      const result = await onDigits(({ answering, record }) =>
+        Effect.gen(function* () {
+          const get = yield* answering(record.id, { headers });
+          const head = yield* answering(record.id, { headers, method: "HEAD" });
+
+          return { get, head };
+        })
+      );
+
+      expect(result.head.body).toBe("");
+      expect(result.head.status).toBe(result.get.status);
+      expect(result.head.headers).toStrictEqual(result.get.headers);
+    });
+
+    it("answers HEAD with If-None-Match of the ETag with 304", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        answering(record.id, { headers: { "if-none-match": `"${record.id}"` }, method: "HEAD" })
+      );
+
+      expect(result.status).toBe(304);
+      expect(result.body).toBe("");
+    });
+
+    it("serves a range when If-Range holds the current ETag", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        answering(record.id, { headers: { "if-range": `"${record.id}"`, range: "bytes=2-5" } })
+      );
+
+      expect(result.status).toBe(206);
+      expect(result.body).toBe("2345");
+    });
+
+    it("serves the whole body as 200 when If-Range holds another ETag", async () => {
+      const result = await onDigits(({ answering, record }) =>
+        answering(record.id, { headers: { "if-range": '"other"', range: "bytes=2-5" } })
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.body).toBe(digits);
+    });
+
+    describe.each([
+      ["was deleted", true],
+      ["never existed", false],
+    ])("for an Upload that %s", (_kind, deleted) => {
+      it.each(unrevealing)(
+        "answers %s exactly as it answers an id no Upload ever had",
+        async (_edge, asking) => {
+          const result = await onDigits(({ answering, record, served }) =>
+            Effect.gen(function* () {
+              if (deleted) {
+                yield* expecting(remove(served, record.id), 200);
+              }
+
+              const id = deleted ? record.id : unknownId;
+
+              const baseline = yield* answering(unknownId, {
+                method: asking(unknownId).method ?? "GET",
+              });
+
+              const asked = yield* answering(id, asking(id));
+
+              return { asked: masked(asked, id), baseline: masked(baseline, unknownId) };
+            })
+          );
+
+          expect(result.baseline.status).toBe(404);
+          expect(result.asked).toStrictEqual(result.baseline);
+        }
+      );
+    });
+
+    it.each([
+      ["a plain GET", {}],
+      ["a HEAD", { method: "HEAD" }],
+    ] satisfies [string, Ask][])(
+      "answers 404, never 304, to %s with If-None-Match of the ETag when the store confirms the bytes are gone",
+      async (_edge, ask) => {
+        const result = await onDigits(({ answering, record, served }) =>
+          Effect.gen(function* () {
+            yield* served.world.bytes.store.delete(Sha256.make(record.hash)).pipe(Effect.orDie);
+
+            return yield* answering(record.id, {
+              ...ask,
+              headers: { "if-none-match": `"${record.id}"` },
+            });
+          })
+        );
+
+        expect(result.status).toBe(404);
+      }
     );
   });
 });
