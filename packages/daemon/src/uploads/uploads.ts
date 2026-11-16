@@ -526,14 +526,27 @@ const liveHas = (held: Held, hash: string) => {
 };
 
 /**
- * The hashes a read of the store confirmed are gone from it, and a count of the puts and
- * changes of store since the Uploads were folded, so a read begun before one of those, and
- * answered after it, marks nothing.
+ * The hashes a read of the store confirmed are gone from it, how many times the store has
+ * changed, and how many times each hash was put, so a read answered by a store since
+ * changed marks nothing and takes nothing away, and one begun before its own bytes were put
+ * again marks nothing.
  */
 interface Marks {
   readonly gone: HashSet.HashSet<Sha256>;
-  readonly epoch: number;
+  readonly store: number;
+  readonly puts: HashMap.HashMap<Sha256, number>;
 }
+
+/**
+ * What a read is answered against: the store it asked, and the puts of its hash then.
+ * @param marks - The marks as the read begins.
+ * @param hash - The hash it reads.
+ * @returns Them.
+ */
+const askedOf = (marks: Marks, hash: Sha256) => ({
+  puts: Option.getOrElse(HashMap.get(marks.puts, hash), () => 0),
+  store: marks.store,
+});
 
 /**
  * The ids of the live Uploads whose bytes are gone, oldest first.
@@ -596,33 +609,50 @@ export const layerUploads = (dataDir: string) =>
       );
 
       const held = yield* SubscriptionRef.make(folded);
-      const marks = yield* SubscriptionRef.make<Marks>({ epoch: 0, gone: HashSet.empty() });
+
+      const marks = yield* SubscriptionRef.make<Marks>({
+        gone: HashSet.empty(),
+        puts: HashMap.empty(),
+        store: 0,
+      });
+
       const turn = yield* Semaphore.make(1);
 
-      // Bytes are put again, or the store moved, so what was learnt of them before is not
-      // known now, and a read begun before this marks nothing.
-      const unlearn = (hash: Sha256 | undefined) =>
-        SubscriptionRef.update(marks, ({ epoch, gone }) => ({
-          epoch: epoch + 1,
-          gone: hash === undefined ? HashSet.empty() : HashSet.remove(gone, hash),
+      // Bytes were put again, so they are held, and a read of them begun before this marks
+      // nothing.
+      const put = (hash: Sha256) =>
+        SubscriptionRef.update(marks, (now) => ({
+          ...now,
+          gone: HashSet.remove(now.gone, hash),
+          puts: HashMap.set(now.puts, hash, askedOf(now, hash).puts + 1),
         }));
 
-      // A read found the bytes, so they are not missing, whenever the read began.
-      const found = (hash: Sha256) =>
+      // The store moved, so nothing learnt of the one before holds, and a read it answers
+      // marks nothing and takes nothing away.
+      const moved = SubscriptionRef.update(marks, (now) => ({
+        gone: HashSet.empty(),
+        puts: now.puts,
+        store: now.store + 1,
+      }));
+
+      // A read found the bytes, so they are not missing, unless the store it asked has moved.
+      const found = (hash: Sha256, asked: ReturnType<typeof askedOf>) =>
         SubscriptionRef.updateSome(marks, (now) =>
-          HashSet.has(now.gone, hash)
+          now.store === asked.store && HashSet.has(now.gone, hash)
             ? Option.some({ ...now, gone: HashSet.remove(now.gone, hash) })
             : Option.none()
         );
 
-      // A read confirmed the bytes are gone, and neither a put nor a move of the store came
-      // between its asking and its answer.
-      const lost = (hash: Sha256, asked: number) =>
-        SubscriptionRef.updateSome(marks, (now) =>
-          now.epoch === asked && !HashSet.has(now.gone, hash)
+      // A read confirmed the bytes are gone, and neither a move of the store nor a put of
+      // these bytes came between its asking and its answer.
+      const lost = (hash: Sha256, asked: ReturnType<typeof askedOf>) =>
+        SubscriptionRef.updateSome(marks, (now) => {
+          const at = askedOf(now, hash);
+
+          return at.store === asked.store && at.puts === asked.puts && !HashSet.has(now.gone, hash)
             ? Option.some({ ...now, gone: HashSet.add(now.gone, hash) })
-            : Option.none()
-        );
+            : Option.none();
+        });
 
       const switchNow = owner.inForce.pipe(Effect.map(({ options }) => switchOf(options)));
 
@@ -743,7 +773,7 @@ export const layerUploads = (dataDir: string) =>
           }
 
           // Every live Upload holding these bytes is served again.
-          yield* unlearn(stored.hash);
+          yield* put(stored.hash);
 
           const kept: Kept = {
             at: Instant.make(yield* Clock.currentTimeMillis),
@@ -784,12 +814,12 @@ export const layerUploads = (dataDir: string) =>
           const opened: Opened = {
             read: (range) =>
               Effect.gen(function* () {
-                const { epoch } = yield* SubscriptionRef.get(marks);
+                const asked = askedOf(yield* SubscriptionRef.get(marks), record.hash);
 
                 return yield* store.read(record.hash, range).pipe(
-                  Effect.tap(() => found(record.hash)),
+                  Effect.tap(() => found(record.hash, asked)),
                   Effect.catchTag("ByteStoreNotFound", () =>
-                    Effect.andThen(lost(record.hash, epoch), Effect.fail(new NoSuchUpload()))
+                    Effect.andThen(lost(record.hash, asked), Effect.fail(new NoSuchUpload()))
                   )
                 );
               }),
@@ -941,7 +971,7 @@ export const layerUploads = (dataDir: string) =>
         }),
         Stream.changes,
         Stream.drop(1),
-        Stream.runForEach(() => unlearn(undefined)),
+        Stream.runForEach(() => moved),
         Effect.forkScoped
       );
 

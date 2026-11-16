@@ -3187,6 +3187,99 @@ describe("an Upload whose bytes are missing", () => {
     expect(result).toStrictEqual({ marked: true, moved: undefined, read: 404, relearnt: true });
   });
 
+  it("is marked by a read that found its bytes gone though other bytes were uploaded while it was answered", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const answered = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+
+        // A store whose reads answer, then wait before the answer is taken.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            read: (hash, range) =>
+              Effect.exit(store.read(hash, range)).pipe(
+                Effect.tap(() => answered.open),
+                Effect.tap(() => go.await),
+                Effect.flatten
+              ),
+          } satisfies ByteStoreService,
+        });
+
+        yield* lose(served, record.hash);
+        const reading = yield* Effect.forkChild(contentStatus(served, record.id));
+
+        yield* answered.await;
+        yield* uploaded(served, encoder.encode("other"), "other.txt");
+        yield* go.open;
+        const read = yield* Fiber.join(reading);
+
+        return { missing: (yield* readRecord(served, record.id)).missing, read };
+      })
+    );
+
+    expect(result).toStrictEqual({ missing: true, read: 404 });
+  });
+
+  it("is not taken away by a read the store before a change of the bucket answered", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const answered = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+        let first = true;
+
+        // A store whose first read answers, then waits before the answer is taken.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            read: (hash, range) =>
+              Effect.suspend(() => {
+                const held = first;
+
+                first = false;
+
+                return held
+                  ? Effect.exit(store.read(hash, range)).pipe(
+                      Effect.tap(() => answered.open),
+                      Effect.tap(() => go.await),
+                      Effect.flatten
+                    )
+                  : store.read(hash, range);
+              }),
+          } satisfies ByteStoreService,
+        });
+
+        const old = yield* Effect.forkChild(contentStatus(served, record.id));
+
+        yield* answered.await;
+        yield* setOption(served, "store.s3.bucket", "elsewhere");
+        yield* lose(served, record.hash);
+
+        const marked = yield* settled(
+          Effect.andThen(contentStatus(served, record.id), readRecord(served, record.id)),
+          (one) => one.missing === true
+        );
+
+        yield* go.open;
+        const oldRead = yield* Fiber.join(old);
+
+        return {
+          after: (yield* readRecord(served, record.id)).missing,
+          marked: marked.missing,
+          oldRead,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ after: true, marked: true, oldRead: 200 });
+  });
+
   it("is sent on the stream of Upload Changes whole, as it opens and each time it changes, with no id", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
