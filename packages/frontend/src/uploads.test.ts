@@ -31,6 +31,7 @@ const upload = (letter: string, name?: string, at = 1_700_000_000_000) => {
     id: letter.repeat(16),
     link: null,
     safeName: `${letter}.png`,
+    said: [],
     size: 10,
     type: "image/png",
   };

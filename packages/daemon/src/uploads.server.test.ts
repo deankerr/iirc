@@ -1,10 +1,12 @@
 import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
-import { Upload, UploadsStatus } from "@iirc/api";
+import { SearchResults, Upload, UploadsStatus } from "@iirc/api";
 import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import type { ByteStoreService } from "@iirc/byte-store";
+import { configured } from "@iirc/client/testing";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
+import type { TestCall } from "@iirc/runtime/testing";
 import {
   Context,
   Duration,
@@ -26,9 +28,12 @@ import { describe, expect, it } from "vitest";
 import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { freePort, loopback } from "./testing/children.ts";
 import {
+  heard,
   layerWorld,
   makeKey,
   makeWorld,
+  registerOnFloor,
+  say,
   temporaryDirectory,
   unreachableEndpoint,
 } from "./testing/world.ts";
@@ -49,6 +54,8 @@ const decodeUpload = Schema.decodeUnknownSync(Schema.fromJsonString(Upload));
 const decodeStatus = Schema.decodeUnknownSync(Schema.fromJsonString(UploadsStatus));
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+
+const decodeResults = Schema.decodeUnknownSync(Schema.fromJsonString(SearchResults));
 
 /** A request's body, as these tests send it. */
 type Body = Uint8Array | string | ReadableStream<Uint8Array>;
@@ -463,6 +470,7 @@ describe("Uploads over the API", () => {
       link: `${publicUrl}/${id}/cat.png`,
       name: "cat.png",
       safeName: "cat.png",
+      said: [],
       size: png.length,
       type: "image/png",
     });
@@ -3551,4 +3559,198 @@ describe("uploads.maxTotal over the API", () => {
 
     expect(result).toStrictEqual({ failed: 503, retry: 200 });
   });
+});
+
+/**
+ * Configures a Network on the floor Ircd, registers it, and joins `#iirc` there.
+ * @param served - The server.
+ * @param network - The Network's id.
+ * @returns The Ircd's side of its Connection.
+ */
+const joined = (served: Served, network: string) =>
+  Effect.gen(function* () {
+    yield* expecting(
+      served.request(`/api/networks/${network}`, {
+        body: JSON.stringify(configured({ ircds: [{ host: "irc.test", port: 6667, tls: false }] })),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      }),
+      200
+    );
+
+    const call = yield* registerOnFloor(served.world.memory);
+
+    yield* say(call, ":iirc!u@h JOIN #iirc");
+
+    return call;
+  });
+
+/**
+ * Has Self say a Message on a Network, and the Ircd hear it.
+ * @param served - The server.
+ * @param call - The Ircd's side of the Network's Connection.
+ * @param network - The Network's id.
+ * @param target - Where it is said.
+ * @param text - What is said.
+ * @returns An Effect that says it.
+ */
+const sayAs = (served: Served, call: TestCall, network: string, target: string, text: string) =>
+  Effect.gen(function* () {
+    // A say before the welcome and the JOIN are stepped is refused, so it is tried until
+    // the Client takes it.
+    yield* settled(
+      Effect.map(
+        served.request(`/api/networks/${network}/say`, {
+          body: JSON.stringify({ kind: "Privmsg", target, text }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+        (response) => response.status
+      ),
+      (status) => status === 200
+    );
+
+    let line = yield* heard(call);
+
+    // The Client asks of a Channel once it has stepped our JOIN, as for its modes.
+    while (!line.startsWith("PRIVMSG ")) {
+      line = yield* heard(call);
+    }
+
+    expect(line).toBe(`PRIVMSG ${target} :${text}`);
+  });
+
+/**
+ * How many Messages a search of the Timelines finds.
+ * @param served - The server.
+ * @param text - What is searched for.
+ * @returns How many.
+ */
+const searched = (served: Served, text: string) =>
+  Effect.map(
+    Effect.flatMap(served.request(`/api/search?text=${encodeURIComponent(text)}`), textOf),
+    (body) => decodeResults(body).items.length
+  );
+
+/**
+ * Where an Upload was said, in short: the Network, the Target, and the text of each, its
+ * link written `<link>`.
+ * @param upload - The Upload.
+ * @returns Each place.
+ */
+const placesOf = (upload: Upload) =>
+  upload.said.flatMap(({ content, network }) =>
+    content._tag === "Message"
+      ? [
+          {
+            network,
+            target: content.target,
+            text: content.text.replace(upload.link ?? "", "<link>"),
+          },
+        ]
+      : []
+  );
+
+describe("where an Upload was said", () => {
+  it("is none until a Message of ours holds its link, and then that Message, on its read and in the list", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const call = yield* joined(served, "libera");
+        const text = `look ${record.link}`;
+
+        yield* sayAs(served, call, "libera", "#iirc", text);
+        const found = yield* settled(read(served, record.id), (one) => one.said.length > 0);
+        const listed = yield* pageOf(yield* served.request("/api/uploads"));
+
+        return {
+          before: record.said,
+          listed: listed.uploads.map(placesOf),
+          read: placesOf(found),
+          timeline: found.said.map((item) => item.timeline.length > 0),
+        };
+      })
+    );
+
+    const place = { network: "libera", target: "#iirc", text: "look <link>" };
+
+    expect(result).toStrictEqual({
+      before: [],
+      listed: [[place]],
+      read: [place],
+      timeline: [true],
+    });
+  });
+
+  it("does not count a Message from someone else holding its link", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const call = yield* joined(served, "libera");
+
+        yield* say(call, `:peer!u@h PRIVMSG #iirc :${record.link}`);
+        yield* say(call, `:peer!u@h PRIVMSG iirc :${record.link}`);
+        // Something of ours after them, so once it is folded, theirs are too.
+        yield* sayAs(served, call, "libera", "#iirc", "folded now");
+        yield* settled(searched(served, "folded"), (found) => found > 0);
+
+        return placesOf(yield* read(served, record.id));
+      })
+    );
+
+    expect(result).toStrictEqual([]);
+  });
+
+  it("lists both Networks a link was said on, newest first", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const libera = yield* joined(served, "libera");
+        const oftc = yield* joined(served, "oftc");
+
+        yield* sayAs(served, libera, "libera", "#iirc", `first ${record.link}`);
+        yield* sayAs(served, oftc, "oftc", "friend", `then ${record.link}`);
+
+        return placesOf(yield* settled(read(served, record.id), (one) => one.said.length === 2));
+      })
+    );
+
+    expect(result).toStrictEqual([
+      { network: "oftc", target: "friend", text: "then <link>" },
+      { network: "libera", target: "#iirc", text: "first <link>" },
+    ]);
+  });
+
+  it("counts a link pasted by hand later, after other traffic", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const other = yield* uploaded(served, encoder.encode("other\n"), "other.txt");
+        const call = yield* joined(served, "libera");
+
+        yield* sayAs(served, call, "libera", "#iirc", `fresh ${record.link}`);
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :nice");
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :where was it again?");
+        yield* sayAs(served, call, "libera", "#iirc", `pasted again: ${record.link} here`);
+
+        return {
+          other: placesOf(yield* read(served, other.id)),
+          said: placesOf(yield* settled(read(served, record.id), (one) => one.said.length === 2)),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      other: [],
+      said: [
+        { network: "libera", target: "#iirc", text: "pasted again: <link> here" },
+        { network: "libera", target: "#iirc", text: "fresh <link>" },
+      ],
+    });
+    // Past the Runtime's burst, each Line waits its turn.
+  }, 10_000);
 });

@@ -145,9 +145,12 @@ export const sendEdit = (registry: AtomRegistry.AtomRegistry, id: UploadId, edit
             });
           }
 
+          // A rename or a delete done, whose Upload's Timelines could not be read, is as
+          // unknown as an answer that could not be.
           case "CrossOrigin":
           case "InvalidRequest":
-          case "SchemaError": {
+          case "SchemaError":
+          case "TimelinesFailed": {
             return failed({ _tag: "Unexpected" });
           }
 

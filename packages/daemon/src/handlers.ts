@@ -58,7 +58,7 @@ import type { JournalFailed as RuntimeJournalFailed } from "@iirc/runtime/journa
 import { Vault } from "@iirc/runtime/vault";
 import type { VaultFailed as RuntimeVaultFailed } from "@iirc/runtime/vault";
 import { TimelineStore } from "@iirc/timeline-store";
-import type { Anchor, Changed, TimelineStoreFailed, Window } from "@iirc/timeline-store";
+import type { Anchor, Changed, Item, TimelineStoreFailed, Window } from "@iirc/timeline-store";
 import type { TimelineId } from "@iirc/timelines";
 import {
   ByteSize,
@@ -98,6 +98,7 @@ import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
 import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
+import { saidOf } from "./uploads/said.ts";
 import { servedUpload } from "./uploads/serving.ts";
 import { Uploads } from "./uploads/uploads.ts";
 import type { Shown } from "./uploads/uploads.ts";
@@ -1160,14 +1161,16 @@ const credentials = HttpApiBuilder.group(
 /**
  * An Upload as the wire carries it.
  * @param shown - Its record, its link while there is a public URL, and whether it is missing.
+ * @param said - The Messages of ours that hold its link, newest first.
  * @returns The wire form.
  */
-const upload = ({ link, missing, record }: Shown): Upload => ({
+const upload = ({ link, missing, record }: Shown, said: readonly Item[]): Upload => ({
   at: record.at,
   hash: record.hash,
   id: record.id,
   link: link ?? null,
   safeName: record.safeName,
+  said: said.map(timelineItem),
   size: record.size,
   type: record.type,
   ...(record.name !== undefined && { name: record.name }),
@@ -1195,6 +1198,14 @@ const uploads = HttpApiBuilder.group(
   "uploads",
   Effect.fn(function* (handlers) {
     const held = yield* Uploads;
+    const store = yield* TimelineStore;
+
+    // An Upload with where it was said, read from the Timelines as they are now.
+    const said = (shown: Shown) =>
+      saidOf(store, shown.record.id).pipe(
+        Effect.map((items) => upload(shown, items)),
+        Effect.mapError(timelinesFailed)
+      );
 
     return handlers
       .handleRaw("upload", ({ query, request }) =>
@@ -1220,12 +1231,14 @@ const uploads = HttpApiBuilder.group(
             Effect.fail(new StoreUnavailable({ reason: "the Daemon is stopping" }))
           );
 
+          // Its id was drawn just now, so no Message has said it yet.
           return upload(
             yield* Effect.raceFirst(Fiber.join(fiber), stopped).pipe(
               Effect.onExit((exit) =>
                 Exit.isSuccess(exit) ? Effect.void : Effect.forkDetach(Fiber.interrupt(fiber))
               )
-            )
+            ),
+            []
           );
         }).pipe(
           Effect.catchTags({
@@ -1247,12 +1260,18 @@ const uploads = HttpApiBuilder.group(
       )
       .handle("list", ({ query }) =>
         held.page(query.after, query.limit ?? windowLimit.default, query.deleted === "true").pipe(
-          Effect.map(({ next, through, uploads: page }) => ({
-            more: next !== undefined,
-            next: next ?? null,
-            through,
-            uploads: page.map(upload),
-          })),
+          Effect.flatMap(({ next, through, uploads: page }) =>
+            Effect.map(
+              // One at a time, as the store reads.
+              Effect.forEach(page, said, { concurrency: 1 }),
+              (uploads) => ({
+                more: next !== undefined,
+                next: next ?? null,
+                through,
+                uploads,
+              })
+            )
+          ),
           Effect.catchTags({
             NoSuchUpload: () =>
               Effect.fail(
@@ -1272,11 +1291,13 @@ const uploads = HttpApiBuilder.group(
           // Each event is an Upload whole, as it is now, so a Frontend replaces what it holds,
           // and the missing ones are whole too, with no id, as no Change made them so.
           const changed = held.changes(after).pipe(
-            Stream.map(({ sequence, shown }): UploadsEvent => ({
-              data: upload(shown),
-              event: "changed",
-              id: sequence,
-            }))
+            Stream.mapEffect(({ sequence, shown }) =>
+              Effect.map(said(shown), (data): UploadsEvent => ({
+                data,
+                event: "changed",
+                id: sequence,
+              }))
+            )
           );
 
           const missing = held.missing.pipe(
@@ -1287,11 +1308,13 @@ const uploads = HttpApiBuilder.group(
         })
       )
       .handle("read", ({ params }) =>
-        Effect.flatMap(held.find(params.id), (found) =>
-          Option.isNone(found)
-            ? Effect.fail(new UnknownUpload({ id: params.id }))
-            : Effect.succeed(upload(found.value))
-        )
+        Effect.gen(function* () {
+          const found = yield* held.find(params.id);
+
+          return Option.isNone(found)
+            ? yield* new UnknownUpload({ id: params.id })
+            : yield* said(found.value);
+        })
       )
       .handleRaw("content", ({ params, request }) =>
         held.open(params.id).pipe(
@@ -1305,7 +1328,7 @@ const uploads = HttpApiBuilder.group(
       )
       .handle("rename", ({ params, payload }) =>
         held.rename(params.id, payload.name).pipe(
-          Effect.map(upload),
+          Effect.flatMap(said),
           Effect.catchTags({
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
             NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
@@ -1314,7 +1337,7 @@ const uploads = HttpApiBuilder.group(
       )
       .handle("delete", ({ params }) =>
         held.delete(params.id).pipe(
-          Effect.map(upload),
+          Effect.flatMap(said),
           Effect.catchTags({
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
             NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),

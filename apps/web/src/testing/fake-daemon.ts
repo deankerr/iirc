@@ -1557,6 +1557,7 @@ export const fakeDaemon = () => {
       id,
       link: publicUrl === undefined ? null : `${publicUrl}/${id}/${safeName}`,
       safeName,
+      said: [],
       size,
       type: "image/png",
     };

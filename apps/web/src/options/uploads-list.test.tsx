@@ -56,6 +56,7 @@ const uploadOf = (letter: string, type: string, name?: string): typeof Upload.En
     // Never what is copied: a link is made from the public URL in force.
     link: "https://stale.example.com/never-used",
     safeName: `${letter}-safe.${type === "image/png" ? "png" : "bin"}`,
+    said: [],
     size: 1_258_291,
     type,
   };
