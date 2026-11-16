@@ -7,6 +7,7 @@ import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
 import { ByteCount, OwnerOptionName, OwnerSequence } from "./options.ts";
+import { PreviewFailure, PreviewId } from "./previews.ts";
 import { CallerIntent, Cursor, NetworkId, Sequence } from "./schemas.ts";
 import { UiSequence } from "./ui.ts";
 import { UploadId } from "./uploads.ts";
@@ -173,6 +174,34 @@ export class NotWaiting extends Schema.TaggedError<NotWaiting, { readonly brand:
   { link: Schema.Int, position: Cursor, timeline: TimelineId },
   { httpApiStatus: 409 }
 ) {}
+
+/**
+ * Previews are `links only` for the Timeline, so no video or sound is streamed. Asking again
+ * once they are `on` succeeds: a 409.
+ */
+export class LinksOnly extends Schema.TaggedError<LinksOnly, { readonly brand: unique symbol }>()(
+  "LinksOnly",
+  { timeline: TimelineId },
+  { httpApiStatus: 409 }
+) {}
+
+/**
+ * No link of the Message has a ready Preview of a video or a sound with this id, so nothing
+ * is streamed: a 404.
+ */
+export class UnknownStream extends Schema.TaggedError<
+  UnknownStream,
+  { readonly brand: unique symbol }
+>()("UnknownStream", { id: PreviewId }, { httpApiStatus: 404 }) {}
+
+/**
+ * The media address gave nothing to stream: it was refused, unreachable, too slow, too large,
+ * or answered with something other than video or sound: a 502.
+ */
+export class StreamFailed extends Schema.TaggedError<
+  StreamFailed,
+  { readonly brand: unique symbol }
+>()("StreamFailed", { id: PreviewId, reason: PreviewFailure }, { httpApiStatus: 502 }) {}
 
 /** No Preview holds an image with this hash, so none is served: a 404. */
 export class UnknownMedia extends Schema.TaggedError<

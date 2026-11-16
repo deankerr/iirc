@@ -94,6 +94,7 @@ describe("the contract", () => {
       "GET /api/options/changes",
       "GET /api/previews/changes",
       "GET /api/previews/media/{hash}",
+      "GET /api/previews/{id}/stream",
       "GET /api/search",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",

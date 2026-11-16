@@ -30,6 +30,7 @@ export {
   LifeChanged,
   NetworkStopped,
   NotAChannel,
+  LinksOnly,
   NotInChannel,
   NotWaiting,
   OptionsChanged,
@@ -42,7 +43,9 @@ export {
   UnknownMessage,
   UnknownNetwork,
   UnknownTimeline,
+  StreamFailed,
   UnknownMedia,
+  UnknownStream,
   UnknownUpload,
   UploadTooLarge,
   UploadUnreadable,
@@ -249,6 +252,7 @@ export {
   PreviewsEvent,
   PreviewsRequest,
   PressRequest,
+  StreamQuery,
 } from "./previews.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

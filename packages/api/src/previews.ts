@@ -6,6 +6,7 @@
  *
  * @packageDocumentation
  */
+import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
 import { Cursor, Untrusted } from "./schemas.ts";
@@ -191,3 +192,12 @@ export const PressRequest = Schema.Struct({
 
 /** The decoded form of {@link PressRequest}. */
 export type PressRequest = typeof PressRequest.Type;
+
+/**
+ * Which Message's link a stream is of: the Message's place in its Timeline, as for an ask.
+ * The stream answers only for a link of that Message, while its Timeline's mode is `on`.
+ */
+export const StreamQuery = Schema.Struct({ position: Cursor, timeline: TimelineId });
+
+/** The decoded form of {@link StreamQuery}. */
+export type StreamQuery = typeof StreamQuery.Type;
