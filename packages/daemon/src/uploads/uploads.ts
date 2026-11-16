@@ -2,7 +2,8 @@
  * The Uploads: a projection of the Journal's Upload Changes (ADR 0016), in the order they
  * were uploaded, whether they are on, derived from the options in force, the byte store
  * those options name, the path from an arriving body to a kept, recorded Upload, and
- * renaming and deleting one.
+ * renaming one, and deleting one, which the Owner does and `uploads.expireAfter` does once
+ * an Upload is old enough.
  *
  * @packageDocumentation
  */
@@ -27,12 +28,14 @@ import {
   Clock,
   Context,
   Data,
+  Duration,
   Effect,
   FileSystem,
   HashMap,
   Layer,
   Option,
   Redacted,
+  Schedule,
   Schema,
   Semaphore,
   Stream,
@@ -292,12 +295,20 @@ export class Uploads extends Context.Service<
      * released from the store unless a live Upload, an upload still being kept, or a Preview
      * has the same, and a store that cannot release them is logged, not failed. One no Upload has is
      * `NoSuchUpload`, and one already deleted is answered as it is, with nothing journaled.
+     * The Daemon deletes the same way, `why` `expired`, once an Upload is older than
+     * `uploads.expireAfter` days, when it starts and every hour after.
      */
     readonly delete: (id: UploadId) => Effect.Effect<Shown, NoSuchUpload | JournalFailed>;
     /** Whether a live Upload, one not deleted, has the bytes under a hash. */
     readonly holds: (hash: Sha256) => Effect.Effect<boolean>;
   }
 >()("@iirc/daemon/Uploads") {}
+
+/** A day, which `uploads.expireAfter` counts in. */
+const dayMillis = 86_400_000;
+
+/** How often the Uploads are checked for any that have expired, as well as once at start. */
+const expiryEvery = Duration.hours(1);
 
 const keptOf = Schema.decodeUnknownOption(Kept);
 
@@ -792,6 +803,56 @@ export const layerUploads = (dataDir: string) =>
           Effect.tap((record) => release(record.hash)),
           Effect.flatMap(shown)
         );
+
+      // Deletes each live Upload strictly older than `uploads.expireAfter` days, by the
+      // Daemon's own clock, and releases its bytes as the Owner's delete does. None is old
+      // while the option is unset. `amend` checks again inside its turn that the Upload is
+      // still live, so one the Owner deleted meanwhile is left to them.
+      const expire = Effect.gen(function* () {
+        const { options } = yield* owner.inForce;
+        const days = options["uploads.expireAfter"];
+
+        if (days === undefined) {
+          return;
+        }
+
+        const now = yield* Clock.currentTimeMillis;
+        const age = days * dayMillis;
+        const all = yield* SubscriptionRef.get(held);
+
+        const old = Chunk.toReadonlyArray(all.order)
+          .map((id) => HashMap.getUnsafe(all.byId, id))
+          .filter(({ record }) => record.deleted === undefined && now - record.at > age);
+
+        // Each is its own turn, in the order uploaded.
+        for (const { record } of old) {
+          const expired = yield* amend(
+            record.id,
+            (current) =>
+              Effect.succeed(
+                current.deleted === undefined
+                  ? Option.some<Change>({
+                      _tag: "Deleted",
+                      at: Instant.make(now),
+                      id: record.id,
+                      why: "expired",
+                    })
+                  : Option.none()
+              ),
+            "Expired an Upload"
+          );
+
+          if (expired.deleted?.why === "expired") {
+            yield* release(expired.hash);
+          }
+        }
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not expire Uploads, and will try again", { error: error._tag })
+        )
+      );
+
+      yield* expire.pipe(Effect.repeat(Schedule.spaced(expiryEvery)), Effect.forkScoped);
 
       const page = (after: UploadId | undefined, limit: number, withDeleted: boolean) =>
         Effect.gen(function* () {

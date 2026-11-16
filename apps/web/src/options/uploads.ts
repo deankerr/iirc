@@ -11,7 +11,7 @@
  *
  * @packageDocumentation
  */
-import type { Upload, UploadId } from "@iirc/api";
+import type { Upload, UploadId, UploadsQuery } from "@iirc/api";
 import {
   initialUploadEdits,
   initialUploads,
@@ -32,6 +32,13 @@ import { optionsShown, optionsState, signedOut, told } from "./atoms.ts";
 
 /** The Uploads held, newest first, as the core folds them. */
 export const uploadsState = Atom.make(initialUploads).pipe(Atom.keepAlive);
+
+/**
+ * Whether the deleted Uploads show, which the Uploads held say, so it lives in one place.
+ * It changes only when the Owner switches it, so what depends on it is not run again for
+ * any other change of the Uploads.
+ */
+export const deletedShown = Atom.make((get) => get(uploadsState).showDeleted);
 
 /** What the Owner asked of the Uploads listed, as the core folds it. */
 export const uploadEditsState = Atom.make(initialUploadEdits).pipe(Atom.keepAlive);
@@ -184,6 +191,11 @@ export const renameUpload = runtime
   )
   .pipe(Atom.keepAlive);
 
+/** Chooses whether the deleted Uploads show, which reads the list again from its first page. */
+export const showDeleted = Atom.fnSync((shown: boolean, get) => {
+  happened(get.registry, { _tag: "DeletedShown", shown });
+}).pipe(Atom.keepAlive);
+
 /** Asks the Owner to confirm deleting an Upload, which sends nothing yet. */
 export const askToDelete = Atom.fnSync((id: UploadId, get) => {
   edited(get.registry, { _tag: "AskedToDelete", id });
@@ -210,8 +222,23 @@ export const confirmDelete = runtime
   .pipe(Atom.keepAlive);
 
 /**
- * Reads a page of the Uploads, from just after an Upload or from the newest, and folds it in
- * only when the page stayed signed in the whole time the read took.
+ * What a read of a page asks, from where it begins and whether it takes the deleted too.
+ * @param after - Where the page begins, or none for the first.
+ * @param deleted - Whether the deleted Uploads are asked for.
+ * @returns The query.
+ */
+const pageQuery = (after: UploadId | undefined, deleted: boolean): UploadsQuery => {
+  if (deleted) {
+    return after === undefined ? { deleted: "true" } : { after, deleted: "true" };
+  }
+
+  return after === undefined ? {} : { after };
+};
+
+/**
+ * Reads a page of the Uploads, from just after an Upload or from the newest, with the
+ * deleted ones too while they show, and folds it in only when the page stayed signed in and
+ * kept showing or hiding the deleted as it was asked, the whole time the read took.
  * @param registry - The registry.
  * @param after - Where the page begins, or none for the first.
  * @returns Once read.
@@ -219,6 +246,7 @@ export const confirmDelete = runtime
 const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefined) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
+    const deleted = registry.get(deletedShown);
     let stayed = registry.get(signedIn);
 
     const page = yield* Effect.acquireUseRelease(
@@ -227,11 +255,11 @@ const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefin
           stayed &&= now;
         })
       ),
-      () => client.uploads.list({ query: after === undefined ? {} : { after } }),
+      () => client.uploads.list({ query: pageQuery(after, deleted) }),
       (unsubscribe) => Effect.sync(unsubscribe)
     );
 
-    if (stayed) {
+    if (stayed && registry.get(deletedShown) === deleted) {
       happened(registry, { _tag: "Paged", after, page });
     }
   });
@@ -242,7 +270,9 @@ const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefin
  * Upload shows. Whenever the stream ends, or gives nothing for longer than three
  * heartbeats, it is followed again from there, and what is held stays valid, `next` too,
  * since the Daemon sends exactly the Changes after it. A refusal signs the page out, and
- * signed out, the Uploads are forgotten. Mounted once.
+ * signed out, the Uploads are forgotten. It depends on whether the deleted show, so
+ * switching that starts it again: the list was started over, so the first page is read
+ * with or without the deleted, and the stream followed from its `through`. Mounted once.
  */
 export const uploadsSync = runtime
   .atom((get) =>
@@ -260,6 +290,10 @@ export const uploadsSync = runtime
       if (!get(optionsShown)) {
         return;
       }
+
+      // Read for the dependency alone: the list says what it shows, and this runs again
+      // when that changes.
+      get(deletedShown);
 
       const client = yield* DaemonClient;
       const { idle, reconnect } = yield* Waits;

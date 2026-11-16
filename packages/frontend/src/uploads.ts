@@ -1,6 +1,7 @@
 /**
  * The Uploads, as a list the options show beside them: every live one held, newest first,
- * as pages read and the stream of their Changes give them, where the next page begins, and
+ * and the deleted ones too while those are asked for, as pages read and the stream of
+ * their Changes give them, where the next page begins, and
  * the sequence of the last Change folded in, which the stream is followed after. A page only
  * ever extends the list at its end, and the stream only ever gives what is newer than
  * everything held, so an Upload is held once. Its link, whether it gets a thumbnail, and its
@@ -18,18 +19,21 @@ import type { Upload, UploadId } from "@iirc/api";
  * read, and `through` the sequence of the last Upload Change folded in. Both are none
  * before the first page was read. `unpaged` holds each Upload a Change gave that was not
  * held, as that Change gave it, so a later page read before the Change, and arriving after
- * it, is folded as the Change left it rather than bringing back what it undid.
+ * it, is folded as the Change left it rather than bringing back what it undid. Whether
+ * deleted Uploads are shown is `showDeleted`: while it is not, a deleted one is never held.
  */
 export interface Uploads {
+  readonly showDeleted: boolean;
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null | undefined;
   readonly through: number | undefined;
   readonly unpaged: ReadonlyMap<UploadId, Upload>;
 }
 
-/** Nothing held, and no page read. */
+/** Nothing held, no page read, and the deleted not shown. */
 export const initialUploads: Uploads = {
   next: undefined,
+  showDeleted: false,
   through: undefined,
   unpaged: new Map(),
   uploads: [],
@@ -49,34 +53,42 @@ export interface UploadsPage {
  * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
  * - `Answered`: the Daemon answered a rename or a delete with the Upload as it is now,
  *   ahead of the Change the stream gives for it.
+ * - `DeletedShown`: the Owner chose whether the deleted Uploads show, which starts the list
+ *   over, to be read again with them or without.
  * - `Forgotten`: the page signed out, so nothing is held.
  */
 export type UploadsEvent =
   | { readonly _tag: "Paged"; readonly after: UploadId | undefined; readonly page: UploadsPage }
   | { readonly _tag: "Changed"; readonly sequence: number; readonly upload: Upload }
   | { readonly _tag: "Answered"; readonly upload: Upload }
+  | { readonly _tag: "DeletedShown"; readonly shown: boolean }
   | { readonly _tag: "Forgotten" };
 
 /**
+ * Whether an Upload is held in the list: any while the deleted show, else only a live one.
+ * @param state - The Uploads held, for whether the deleted show.
+ * @param upload - The Upload.
+ * @returns Whether the list holds it.
+ */
+const listed = (state: Pick<Uploads, "showDeleted">, upload: Upload): boolean =>
+  state.showDeleted || upload.deleted === undefined;
+
+/**
  * A page's Uploads after those held, passing over any already held, each as a Change since
- * gave it, if one did, and passing over any deleted.
- * @param held - The Uploads held.
+ * gave it, if one did, and passing over any deleted unless they show.
+ * @param state - The Uploads held.
  * @param page - The page's Uploads, newest first.
- * @param unpaged - The Uploads Changes gave that were not held.
  * @returns The Uploads held now.
  */
-const extended = (
-  held: readonly Upload[],
-  page: readonly Upload[],
-  unpaged: ReadonlyMap<UploadId, Upload>
-): readonly Upload[] => {
+const extended = (state: Uploads, page: readonly Upload[]): readonly Upload[] => {
+  const { unpaged, uploads: held } = state;
   const ids = new Set(held.map((upload) => upload.id));
   const added: Upload[] = [];
 
   for (const read of page) {
     const upload = unpaged.get(read.id) ?? read;
 
-    if (!ids.has(upload.id) && upload.deleted === undefined) {
+    if (!ids.has(upload.id) && listed(state, upload)) {
       ids.add(upload.id);
       added.push(upload);
     }
@@ -86,16 +98,16 @@ const extended = (
 };
 
 /**
- * The Uploads held once one is as an answer or a Change gives it: dropped when deleted,
- * since the list shows the live ones, and otherwise replaced in place.
- * @param held - The Uploads held.
+ * The Uploads held once one is as an answer or a Change gives it: replaced in place, or
+ * dropped when deleted unless the deleted show.
+ * @param state - The Uploads held.
  * @param upload - The Upload, as it is now.
  * @returns The Uploads held now.
  */
-const replaced = (held: readonly Upload[], upload: Upload): readonly Upload[] =>
-  upload.deleted === undefined
-    ? held.map((one) => (one.id === upload.id ? upload : one))
-    : held.filter((one) => one.id !== upload.id);
+const replaced = (state: Uploads, upload: Upload): readonly Upload[] =>
+  listed(state, upload)
+    ? state.uploads.map((one) => (one.id === upload.id ? upload : one))
+    : state.uploads.filter((one) => one.id !== upload.id);
 
 /**
  * Whether a Change gives an Upload that a page not yet read holds: one uploaded before the
@@ -118,10 +130,13 @@ const unread = (state: Uploads, upload: Upload): boolean => {
  * the list stands, the first page into an empty list and each later one from `next`, so one
  * read twice, or late, is folded once. Only the first page says how far the list was folded,
  * since the stream gives what is newer than any later page. A Change is folded only when it
- * is after the last folded in: one held is replaced in place, or dropped once deleted, and
- * one not held is newer than all, so it goes first, unless it is deleted, or a page not yet
- * read holds it, when it is kept aside for that page. An answer to a rename or a delete is folded at once, into one held only,
- * and moves nothing on, since the stream still gives its Change.
+ * is after the last folded in: one held is replaced in place, or dropped once deleted unless
+ * the deleted show, and one not held is newer than all, so it goes first, unless it is
+ * deleted and the deleted do not show, or a page not yet read holds it, when it is kept
+ * aside for that page. An answer to a rename or a delete is folded at once, into one held
+ * only, and moves nothing on, since the stream still gives its Change. Choosing whether the
+ * deleted show starts the list over, as it was before any page was read, and changes
+ * nothing when it is chosen as it already is.
  * @param state - The Uploads held.
  * @param event - What happened.
  * @returns The Uploads held now.
@@ -143,9 +158,10 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
 
       return {
         next: page.next,
+        showDeleted: state.showDeleted,
         through: state.through ?? page.through,
         unpaged,
-        uploads: extended(state.uploads, page.uploads, state.unpaged),
+        uploads: extended(state, page.uploads),
       };
     }
 
@@ -160,10 +176,10 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       const after = { ...state, through: sequence };
 
       if (known) {
-        return { ...after, uploads: replaced(state.uploads, upload) };
+        return { ...after, uploads: replaced(state, upload) };
       }
 
-      return upload.deleted !== undefined || unread(state, upload)
+      return !listed(state, upload) || unread(state, upload)
         ? { ...after, unpaged: new Map(state.unpaged).set(upload.id, upload) }
         : { ...after, uploads: [upload, ...state.uploads] };
     }
@@ -172,8 +188,14 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       const { upload } = event;
 
       return state.uploads.some((one) => one.id === upload.id)
-        ? { ...state, uploads: replaced(state.uploads, upload) }
+        ? { ...state, uploads: replaced(state, upload) }
         : state;
+    }
+
+    case "DeletedShown": {
+      return event.shown === state.showDeleted
+        ? state
+        : { ...initialUploads, showDeleted: event.shown };
     }
 
     case "Forgotten": {
@@ -185,6 +207,15 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
     }
   }
 };
+
+/**
+ * An Upload's deletion in words, for the row to say beside when: `expired` when the Daemon
+ * deleted it once it was old, else `deleted`.
+ * @param why - Why it was deleted.
+ * @returns The word.
+ */
+export const deletedText = (why: NonNullable<Upload["deleted"]>["why"]): "expired" | "deleted" =>
+  why === "expired" ? "expired" : "deleted";
 
 /** What the Owner asked of an Upload in the list: a new name, or that it be deleted. */
 export type Asked = "Rename" | "Delete";

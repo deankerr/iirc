@@ -20,6 +20,7 @@ import {
   Stream,
 } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
@@ -2702,5 +2703,195 @@ describe("seeking and revalidation", () => {
         expect(result.status).toBe(404);
       }
     );
+  });
+});
+
+const day = 86_400_000;
+
+/**
+ * Runs a test on the TestClock, which only the test moves, over a served Daemon. What a
+ * test waits for on the real clock is wrapped in {@link live}.
+ * @param test - The test.
+ * @returns What the test returned.
+ */
+const runClocked = async <A, E>(test: (served: Served) => Effect.Effect<A, E, Scope.Scope>) =>
+  await Effect.runPromise(
+    Effect.scoped(serve.pipe(Effect.flatMap(test))).pipe(Effect.provide(TestClock.layer()))
+  );
+
+/** Waits on the real clock, within a test on the TestClock. */
+const live = TestClock.withLive;
+
+const read = (served: Served, id: string) =>
+  Effect.flatMap(served.request(`/api/uploads/${id}`), recordOf);
+
+/**
+ * Reads an Upload until it is deleted, or two seconds pass, and gives its last record.
+ * @param served - The server.
+ * @param id - The Upload's id.
+ * @returns The record.
+ */
+const readDeleted = (served: Served, id: string) =>
+  live(settled(read(served, id), (record) => record.deleted !== undefined));
+
+/**
+ * Opens the stream of every Upload Change, which answers once its first heartbeat is sent,
+ * so the TestClock is moved to send it.
+ * @param served - The server.
+ * @returns The response.
+ */
+const openingChanges = (served: Served) =>
+  Effect.gen(function* () {
+    const opening = yield* Effect.forkScoped(served.request("/api/uploads/changes?after=0"));
+
+    yield* live(Effect.sleep("200 millis"));
+    yield* TestClock.adjust(50);
+
+    return yield* Fiber.join(opening);
+  });
+
+const expiries = (world: World) =>
+  Effect.map(journaledChanges(world), (all) =>
+    all.flatMap(({ change }) =>
+      change._tag === "Deleted" ? [{ id: change.id, why: change.why }] : []
+    )
+  );
+
+describe("expiring Uploads", () => {
+  it("never expires an Upload while uploads.expireAfter is unset, however old, across a tick and a restart", async () => {
+    const result = await runClocked((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "old.png");
+
+        yield* TestClock.setTime(30 * day);
+        yield* live(Effect.sleep("200 millis"));
+        const ticked = yield* read(served, record.id);
+
+        yield* served.restart;
+        yield* live(Effect.sleep("200 millis"));
+        const restarted = yield* read(served, record.id);
+
+        return { expiries: yield* expiries(served.world), record, restarted, ticked };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      expiries: [],
+      record: result.record,
+      restarted: result.record,
+      ticked: result.record,
+    });
+  });
+
+  it("expires an Upload older than uploads.expireAfter on the timer, keeps a younger one, and releases only its own bytes", async () => {
+    const port = freePort();
+
+    const result = await runClocked((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        yield* setOption(served, "uploads.expireAfter", 1);
+        const first = yield* uploaded(served, png, "first.png");
+        const link = pathOf(first.link);
+
+        yield* TestClock.adjust(12 * 3_600_000);
+        const second = yield* uploaded(served, "second body\n", "second.txt");
+
+        yield* TestClock.adjust(13 * 3_600_000 + 3_600_000);
+        const expired = yield* readDeleted(served, first.id);
+        const stream = yield* following(yield* openingChanges(served));
+
+        const listed = yield* Effect.flatMap(served.request("/api/uploads?deleted=true"), pageOf);
+        const events = yield* live(changesOf(stream, 3));
+
+        return {
+          content: yield* Effect.map(served.request(`/api/uploads/${first.id}/content`), statusOf),
+          events: events.map((event) => [event.upload.id, event.upload.deleted?.why]),
+          expired,
+          expiries: yield* expiries(served.world),
+          first,
+          firstHeld: yield* inStore(served, first.hash),
+          link: yield* Effect.map(live(fromLinks(port, link)), statusOf),
+          listed: listed.uploads.map((one) => [one.id, one.deleted?.why]),
+          second,
+          secondHeld: yield* inStore(served, second.hash),
+          secondRead: yield* read(served, second.id),
+        };
+      })
+    );
+
+    expect(result.expired.deleted?.why).toBe("expired");
+    expect(result.expired.deleted?.at).toBeGreaterThan(result.first.at + day);
+    expect(result).toMatchObject({
+      content: 404,
+      // Each Change is sent with its Upload as it is now, so the first is seen expired too.
+      events: [
+        [result.first.id, "expired"],
+        [result.second.id, undefined],
+        [result.first.id, "expired"],
+      ],
+      expiries: [{ id: result.first.id, why: "expired" }],
+      firstHeld: false,
+      link: 404,
+      listed: [
+        [result.second.id, undefined],
+        [result.first.id, "expired"],
+      ],
+      secondHeld: true,
+      secondRead: result.second,
+    });
+  });
+
+  it("expires at start an Upload that is already too old, without waiting for the timer", async () => {
+    const result = await runClocked((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "old.png");
+
+        // Nothing is set, so the timer's ticks on the way expire nothing.
+        yield* TestClock.setTime(2 * day);
+        yield* setOption(served, "uploads.expireAfter", 1);
+        yield* live(Effect.sleep("200 millis"));
+        const before = yield* read(served, record.id);
+
+        yield* served.restart;
+
+        return { after: yield* readDeleted(served, record.id), before, record };
+      })
+    );
+
+    expect(result.before).toStrictEqual(result.record);
+    expect(result.after.deleted).toStrictEqual({ at: 2 * day, why: "expired" });
+  });
+
+  it("keeps bytes another Upload shares when the older one expires", async () => {
+    const result = await runClocked((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.expireAfter", 1);
+        const first = yield* uploaded(served, png, "first.png");
+
+        yield* TestClock.adjust(12 * 3_600_000);
+        const second = yield* uploaded(served, png, "second.png");
+
+        yield* TestClock.adjust(14 * 3_600_000);
+        const expired = yield* readDeleted(served, first.id);
+        const shared = yield* served.request(`/api/uploads/${second.id}/content`);
+
+        return {
+          expired: expired.deleted?.why,
+          held: yield* inStore(served, first.hash),
+          same: first.hash === second.hash,
+          shared: [shared.status, yield* bytesOf(shared)],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      expired: "expired",
+      held: true,
+      same: true,
+      shared: [200, png],
+    });
   });
 });
