@@ -39,7 +39,11 @@ const optionName = Schema.decodeUnknownOption(UiOptionName);
  * @returns The value, decoded.
  */
 export const parseUiValue = (option: UiOptionName, value: Schema.Json): Option.Option<UiValue> =>
-  Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(value);
+  // A key its Schema refuses, such as a Timeline's id that is none, refuses the value whole,
+  // never dropped, so what is journaled is what was sent.
+  Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(value, {
+    onExcessProperty: "error",
+  });
 
 /**
  * A `ui` option's value as JSON, as a Change journals it.

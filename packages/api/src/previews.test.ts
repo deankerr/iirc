@@ -12,6 +12,7 @@ import {
   PreviewState,
   PreviewsEvent,
   PreviewsRequest,
+  PressRequest,
 } from "./previews.ts";
 import { UiOptions, uiDefaults, uiSharedOnly } from "./ui.ts";
 
@@ -113,6 +114,42 @@ describe("Previews on the wire", () => {
     ]).toStrictEqual([Option.some({ position }), Option.none(), Option.none()]);
   });
 
+  it("takes a press as a Message's place and the index of one of its links, from 0", () => {
+    const position = { at: Instant.make(1_762_560_000_000), n: 2, sequence: 7 };
+    const decode = Schema.decodeUnknownOption(PressRequest);
+
+    expect([
+      decode({ link: 0, position: cursorOf(position) }),
+      decode({ link: 2, position: cursorOf(position) }),
+      decode({ link: -1, position: cursorOf(position) }),
+      decode({ link: 1.5, position: cursorOf(position) }),
+      decode({ link: "0", position: cursorOf(position) }),
+      decode({ position: cursorOf(position) }),
+      decode({ link: 0, position: "7.2" }),
+    ]).toStrictEqual([
+      Option.some({ link: 0, position }),
+      Option.some({ link: 2, position }),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+    ]);
+  });
+
+  it("presses by POST beside the ask, behind a key or a sign-in, and says 409 for a link not waiting", () => {
+    const document = OpenApi.fromApi(DaemonApi);
+    const press = document.paths["/api/timelines/{timeline}/previews/press"]?.post;
+
+    expect({
+      security: press?.security,
+      statuses: Object.keys(press?.responses ?? {}).toSorted(),
+    }).toStrictEqual({
+      security: [{ bearer: [] }, { signIn: [] }],
+      statuses: ["200", "400", "401", "403", "404", "409", "503"],
+    });
+  });
+
   it("carries each change with no event id, and a heartbeat", () => {
     const item = { id, link: page.link, state: { _tag: "Ready", preview: page } };
 
@@ -156,8 +193,63 @@ describe("ui.previews", () => {
       ),
     }).toStrictEqual({
       default: "off",
-      sharedOnly: ["previews"],
+      sharedOnly: ["previews", "previews.timelines"],
       taken: [true, true, true, false, false, false],
     });
+  });
+});
+
+describe("ui.previews.timelines", () => {
+  const timeline = "0000000000001a-00000000-00000001";
+  const other = "0000000000001b-00000000-00000000";
+
+  it("maps a Timeline's id to off, links only, or on, empty by default, and shared only", () => {
+    const options = Schema.decodeUnknownOption(UiOptions);
+
+    const given = (each: Schema.Json) =>
+      Option.getOrNull(
+        Option.map(
+          options({ ...uiDefaults, "previews.timelines": each }),
+          (one) => one["previews.timelines"]
+        )
+      );
+
+    expect({
+      default: uiDefaults["previews.timelines"],
+      sharedOnly: uiSharedOnly.has("previews.timelines"),
+      taken: [
+        {},
+        { [timeline]: "off" },
+        { [other]: "on", [timeline]: "links only" },
+        { [timeline]: "links" },
+        { [timeline]: "default" },
+        { [timeline]: true },
+        [],
+        null,
+      ].map(given),
+    }).toStrictEqual({
+      default: {},
+      sharedOnly: true,
+      taken: [
+        {},
+        { [timeline]: "off" },
+        { [other]: "on", [timeline]: "links only" },
+        null,
+        null,
+        null,
+        null,
+        null,
+      ],
+    });
+  });
+
+  it("keeps no entry whose key is not a Timeline's id", () => {
+    const options = Schema.decodeUnknownSync(UiOptions);
+
+    expect(
+      options({ ...uiDefaults, "previews.timelines": { "#iirc": "on", [timeline]: "off" } })[
+        "previews.timelines"
+      ]
+    ).toStrictEqual({ [timeline]: "off" });
   });
 });

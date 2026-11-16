@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
-import { MessagePreviews, PreviewsEvent, TimelineList } from "@iirc/api";
-import type { PreviewItem } from "@iirc/api";
+import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType } from "@iirc/link-fetch";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
@@ -152,6 +151,8 @@ const decodeList = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineList))
 
 const decodePreviews = Schema.decodeUnknownSync(Schema.fromJsonString(MessagePreviews));
 
+const decodeItem = Schema.decodeUnknownSync(Schema.fromJsonString(PreviewItem));
+
 const decodeEvent = Schema.decodeUnknownSync(PreviewsEvent);
 
 const decodeError = Schema.decodeUnknownSync(
@@ -188,15 +189,18 @@ const setPreviews = (served: Served, value: string) =>
     expect(response.status).toBe(200);
   });
 
+/** Where a peer speaks to Self: in the Channel, or in a Direct Message. */
+type Where = "#iirc" | "iirc";
+
 /**
  * Configures `libera`, registers it on the floor, joins `#iirc`, and has a peer say each
- * text there, or to Self in a Direct Message.
+ * text in each place, a Channel or a Direct Message to Self.
  * @param served - The server.
  * @param texts - What the peer says.
  * @param where - Where it says them.
  * @returns An Effect that does it.
  */
-const talk = (served: Served, texts: readonly string[], where: "#iirc" | "iirc" = "#iirc") =>
+const talk = (served: Served, texts: readonly string[], where: readonly Where[] = ["#iirc"]) =>
   Effect.gen(function* () {
     const configured = yield* served.request("/api/networks/libera", {
       method: "PUT",
@@ -209,7 +213,9 @@ const talk = (served: Served, texts: readonly string[], where: "#iirc" | "iirc" 
     yield* say(call, ":iirc!u@h JOIN #iirc");
 
     for (const text of texts) {
-      yield* say(call, `:peer!u@h PRIVMSG ${where} :${text}`);
+      for (const place of where) {
+        yield* say(call, `:peer!u@h PRIVMSG ${place} :${text}`);
+      }
     }
   });
 
@@ -694,7 +700,7 @@ describe("Previews over a real server", () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
         yield* setPreviews(served, "on");
-        yield* talk(served, ["https://cats.example/"], "iirc");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
         const [message] = yield* messages(served, 1, "Direct");
         const items = yield* settled(served, message ?? { position: "", text: "", timeline: "" });
 
@@ -1637,5 +1643,380 @@ describe("a Preview's image over a real server", () => {
       { cache: "no-store", status: 503 },
       { cache: "no-store", status: 503 },
     ]);
+  });
+});
+
+/**
+ * Presses a link of a Message waiting for a press.
+ * @param served - The server.
+ * @param place - The Message's place.
+ * @param link - The link's index among the Message's links.
+ * @param init - Headers and the key, to press otherwise than with the key.
+ * @returns The response.
+ */
+const press = (
+  served: Served,
+  place: Pick<Place, "timeline" | "position">,
+  link: number,
+  init: RequestInit & { readonly key?: string | null } = {}
+) =>
+  served.request(`/api/timelines/${place.timeline}/previews/press`, {
+    method: "POST",
+    ...json({ link, position: place.position }),
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...Object.fromEntries(new Headers(init.headers)),
+    },
+  });
+
+/**
+ * Sets `ui.previews.timelines`, whole.
+ * @param served - The server.
+ * @param timelines - Each Timeline's id, and its mode.
+ * @returns An Effect that sets it.
+ */
+const setOverrides = (served: Served, timelines: Readonly<Record<string, string>>) =>
+  expecting(
+    served.request("/api/ui/previews.timelines", { method: "PUT", ...json({ value: timelines }) }),
+    200
+  );
+
+/**
+ * The place of the one Message in a kind of Timeline, once it is there.
+ * @param served - The server.
+ * @param kind - The Timeline's kind.
+ * @returns Its place.
+ */
+const only = (served: Served, kind: "Channel" | "Direct") =>
+  Effect.gen(function* () {
+    const [place] = yield* messages(served, 1, kind);
+
+    return place ?? { position: "", text: "", timeline: "" };
+  });
+
+/**
+ * A status and the error's tag a response answered, to compare.
+ * @param response - The response.
+ * @returns The status and the tag.
+ */
+const refusal = (response: Response) =>
+  Effect.gen(function* () {
+    return [response.status, decodeError(yield* bodyOf(response))._tag] as const;
+  });
+
+describe("a Direct Message's press and a Timeline's override over a real server", () => {
+  it("fetches a link of a Direct Message once it is pressed, answering it pending, and refuses a second press", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "on");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* only(served, "Direct");
+        const before = yield* settled(served, place);
+        const pressed = yield* expecting(press(served, place, 0), 200);
+        const answered = decodeItem(yield* bodyOf(pressed));
+        const after = yield* settled(served, place);
+        const again = yield* refusal(yield* press(served, place, 0));
+
+        return {
+          again,
+          answered: answered.state,
+          asked: yield* served.asked,
+          before: before.map(stateOf),
+          titles: titles(after),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: [409, "NotWaiting"],
+      answered: { _tag: "Pending" },
+      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      before: [{ _tag: "WaitingForPress" }],
+      titles: ["Cats"],
+    });
+  });
+
+  it("streams a pressed link's changes, pending then ready, to a Frontend that did not press", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "links only");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* only(served, "Direct");
+        const following = yield* served.request("/api/previews/changes");
+
+        // The stream is followed before the press, which its first heartbeat says.
+        const body: ReadableStream<Uint8Array> | null = following.body;
+        const reader = body?.getReader();
+        const decoder = new TextDecoder();
+        let text = "";
+
+        const until = (done: (text: string) => boolean) =>
+          Effect.promise(async () => {
+            while (!done(text)) {
+              // oxlint-disable-next-line no-await-in-loop -- reading a stream in order
+              const chunk = await reader?.read();
+
+              if (chunk === undefined || chunk.done) {
+                return;
+              }
+
+              text += decoder.decode(chunk.value, { stream: true });
+            }
+          });
+
+        yield* until((read) => read.includes("event: heartbeat"));
+        yield* press(served, place, 0);
+        yield* until((read) => read.includes('"Ready"'));
+        yield* Effect.promise(async () => await reader?.cancel());
+
+        return [...text.matchAll(/"_tag":"(?<tag>Pending|Ready)"/gu)].map(
+          (found) => found.groups?.tag
+        );
+      })
+    );
+
+    expect(result).toStrictEqual(["Pending", "Ready"]);
+  });
+
+  it("refuses a press of a link that is not waiting, with 409, and fetches nothing", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "on");
+        yield* talk(served, ["https://cats.example/"], ["#iirc", "iirc"]);
+        const channel = yield* only(served, "Channel");
+        const direct = yield* only(served, "Direct");
+        const inChannel = yield* refusal(yield* press(served, channel, 0));
+        const past = yield* refusal(yield* press(served, direct, 1));
+
+        yield* setOverrides(served, { [direct.timeline]: "links only" });
+        const overridden = yield* refusal(yield* press(served, direct, 0));
+
+        return { asked: yield* served.asked, inChannel, overridden, past };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [],
+      inChannel: [409, "NotWaiting"],
+      overridden: [409, "NotWaiting"],
+      past: [409, "NotWaiting"],
+    });
+  });
+
+  it("refuses a press of an unknown Timeline or Message, or while Previews are off", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* only(served, "Direct");
+        const off = yield* refusal(yield* press(served, place, 0));
+
+        yield* setPreviews(served, "on");
+
+        const timeline = yield* refusal(
+          yield* press(served, { ...place, timeline: "0000000000ffff-00000000-00000000" }, 0)
+        );
+
+        const message = yield* refusal(
+          yield* press(
+            served,
+            { ...place, position: place.position.replace(/-[0-9a-f]{8}$/u, "-0000ffff") },
+            0
+          )
+        );
+
+        return { asked: yield* served.asked, message, off, timeline };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [],
+      message: [404, "UnknownMessage"],
+      off: [409, "PreviewsOff"],
+      timeline: [404, "UnknownTimeline"],
+    });
+  });
+
+  it("takes a press only with a key, and by a sign-in's cookie only from the Daemon's own origin", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "on");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* only(served, "Direct");
+
+        const signedIn = yield* served.request("/api/sign-in", {
+          ...json({ key: served.key }),
+          headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+          key: null,
+          method: "POST",
+        });
+
+        const token = /^iirc_sign_in=(?<token>[^;]+)/u.exec(
+          signedIn.headers.getSetCookie()[0] ?? ""
+        )?.groups?.token;
+
+        const asBrowser = (site: string) =>
+          press(served, place, 0, {
+            headers: { cookie: `iirc_sign_in=${token ?? ""}`, "sec-fetch-site": site },
+            key: null,
+          });
+
+        const keyless = yield* refusal(yield* press(served, place, 0, { key: null }));
+        const crossSite = yield* refusal(yield* asBrowser("cross-site"));
+        const fetchedAfterRefusals = (yield* served.asked).length;
+        const sameOrigin = yield* asBrowser("same-origin");
+
+        return { crossSite, fetchedAfterRefusals, keyless, sameOrigin: sameOrigin.status };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      crossSite: [403, "CrossOrigin"],
+      fetchedAfterRefusals: 0,
+      keyless: [401, "Unauthorized"],
+      sameOrigin: 200,
+    });
+  });
+
+  it("fetches a Direct Message's link unasked once the Timeline is overridden on, or links only", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "off");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* only(served, "Direct");
+
+        yield* setOverrides(served, { [place.timeline]: "on" });
+        const items = yield* settled(served, place);
+
+        return { asked: yield* served.asked, titles: titles(items) };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      titles: ["Cats"],
+    });
+  });
+
+  it("answers Previews off for a Channel overridden off while ui.previews is on, and fetches nothing", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "on");
+        yield* talk(served, ["https://cats.example/"]);
+        const place = yield* only(served, "Channel");
+
+        yield* setOverrides(served, { [place.timeline]: "off" });
+        const refused = yield* refusal(yield* ask(served, place));
+
+        return { asked: yield* served.asked, refused };
+      })
+    );
+
+    expect(result).toStrictEqual({ asked: [], refused: [409, "PreviewsOff"] });
+  });
+
+  it("fetches a Channel's link overridden on while ui.previews is off", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* talk(served, ["https://cats.example/"]);
+        const place = yield* only(served, "Channel");
+
+        yield* setOverrides(served, { [place.timeline]: "on" });
+        const items = yield* settled(served, place);
+
+        return { asked: yield* served.asked, titles: titles(items) };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      titles: ["Cats"],
+    });
+  });
+
+  it("serves a link a Channel fetched in a Direct Message with no press, fetching nothing more", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "links only");
+        yield* talk(served, ["https://cats.example/"], ["#iirc", "iirc"]);
+        const channel = yield* only(served, "Channel");
+        const direct = yield* only(served, "Direct");
+        const waiting = yield* asking(served, direct);
+
+        yield* settled(served, channel);
+        const served_ = yield* asking(served, direct);
+
+        return {
+          asked: (yield* served.asked).length,
+          served: titles(served_),
+          waiting: waiting.map(stateOf),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: 1,
+      served: ["Cats"],
+      waiting: [{ _tag: "WaitingForPress" }],
+    });
+  });
+
+  it("refuses an override whose key is not a Timeline's id with 400, keeping what was set", async () => {
+    const result = await run({}, (served) =>
+      Effect.gen(function* () {
+        const refused = yield* refusal(
+          yield* served.request("/api/ui/previews.timelines", {
+            method: "PUT",
+            ...json({ value: { "#iirc": "on" } }),
+          })
+        );
+
+        const read = yield* served.request("/api/ui");
+
+        const { options } = (yield* Effect.promise(async () => read.json())) as {
+          readonly options: Readonly<Record<string, unknown>>;
+        };
+
+        return { refused, timelines: options["previews.timelines"] };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      refused: [400, "InvalidRequest"],
+      timelines: {},
+    });
+  });
+
+  it("accepts an override for a Timeline that does not exist, and changes nothing", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "links only");
+        yield* talk(served, ["https://cats.example/"], ["#iirc", "iirc"]);
+        const channel = yield* only(served, "Channel");
+        const direct = yield* only(served, "Direct");
+        const before = yield* asking(served, direct);
+
+        yield* setOverrides(served, { "0000000000ffff-00000000-00000000": "off" });
+        const waiting = yield* asking(served, direct);
+        const fetchedByThen = (yield* served.asked).length;
+        const items = yield* settled(served, channel);
+
+        return {
+          asked: (yield* served.asked).length,
+          before: before.map(stateOf),
+          fetchedByThen,
+          titles: titles(items),
+          waiting: waiting.map(stateOf),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: 1,
+      before: [{ _tag: "WaitingForPress" }],
+      fetchedByThen: 0,
+      titles: ["Cats"],
+      waiting: [{ _tag: "WaitingForPress" }],
+    });
   });
 });
