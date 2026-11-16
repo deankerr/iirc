@@ -3,10 +3,11 @@
 The guard: an adapter of the link fetch port on Bun's own `fetch`, which connects only to an address it checked. It provides `LinkFetch` given iirc's version.
 
 ```ts
-import { layerBunLinkFetch, makeBunLinkFetch, systemResolver } from "@iirc/link-fetch-bun";
+import { layerBunLinkFetch, makeBunLinkFetch, sniff, sniffed, systemResolver } from "@iirc/link-fetch-bun";
 
 layerBunLinkFetch({ version, policy?, resolver?, trust? }): Layer<LinkFetch>
 makeBunLinkFetch({ version, policy?, resolver?, trust? }): LinkFetchService
+sniff(leading): string | undefined   // the image type at least `sniffed` (1024) leading bytes show
 
 Resolver: { resolve(name): Effect<readonly string[], LinkUnreachable> }   // every A and AAAA
 ```

@@ -62,6 +62,7 @@ const kept: Kept = {
     _tag: "Ready",
     preview: {
       description: null,
+      image: null,
       kind: "page",
       link,
       site: "example.com",
@@ -136,13 +137,27 @@ describe("a file it cannot use", () => {
     );
   });
 
+  it("makes a file of the layout before images were referred to again", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (cache) => cache.put(kept));
+        raw(file, "DROP INDEX previews_image");
+        raw(file, "PRAGMA user_version = 1");
+
+        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.none());
+      })
+    );
+  });
+
   it("makes a file of this version whose table lacks a column again", async () => {
     await run(
       Effect.gen(function* () {
         const file = yield* temporaryFile;
 
         yield* using(file, (cache) => cache.put(kept));
-        raw(file, "ALTER TABLE previews DROP COLUMN image");
+        raw(file, "ALTER TABLE previews DROP COLUMN fetched");
 
         expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.none());
       })

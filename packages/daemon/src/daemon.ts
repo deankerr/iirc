@@ -196,15 +196,16 @@ const layerCore = (options: DaemonOptions) => {
 
   const linkFetch = options.linkFetch ?? layerBunLinkFetch({ version: options.version ?? "0.0.0" });
 
-  // Previews read the Timelines and the `ui` options, fetch through the link fetch, and are
-  // kept in the Preview cache.
+  // Previews read the Timelines and the `ui` options, fetch through the link fetch, are
+  // kept in the Preview cache, and keep their images in the bucket the options name.
   const previews = layerPreviews.pipe(
     Layer.provide(
-      Layer.merge(
+      Layer.mergeAll(
         linkFetch,
         layerSqlitePreviewCache(`${dataDir}/previews.sqlite`).pipe(
           Layer.provide(BunFileSystem.layer)
-        )
+        ),
+        Layer.succeed(ByteStoreMaker, makeS3ByteStore)
       )
     )
   );

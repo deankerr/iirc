@@ -16,11 +16,12 @@ Both open the file, creating it when it does not exist, and close it when their 
 ```sql
 CREATE TABLE previews (link TEXT PRIMARY KEY, state TEXT NOT NULL, image TEXT,
   fetched INTEGER NOT NULL, shown INTEGER NOT NULL) STRICT;
-PRAGMA user_version = 1;  -- the layout's version
+CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL;
+PRAGMA user_version = 2;  -- the layout's version
 ```
 
 - **`state` is the JSON text of `Settled`'s encoding.** Every read decodes it, and a row that does not decode fails that read with `PreviewCacheFailed`.
-- **`image` is a hash, or `NULL`.** `fetched` and `shown` are milliseconds since the epoch.
+- **`image` is a hash, or `NULL`,** indexed, so `refers` is one lookup. `fetched` and `shown` are milliseconds since the epoch.
 - **`shown` is one statement,** `UPDATE ... SET shown = max(shown, ?) ... RETURNING`, so it never moves backward and a read after it sees it.
 - **`journal_mode` is `WAL` and `synchronous` is `NORMAL`.** A power failure may lose the last commits, which costs only fetches, never part of one.
 

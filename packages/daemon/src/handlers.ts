@@ -29,6 +29,7 @@ import {
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
+  UnknownMedia,
   UnknownUpload,
   UploadTooLarge,
   UploadUnreadable,
@@ -89,6 +90,7 @@ import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
 import type { OptionsChangedSince } from "./options.ts";
 import { Previews } from "./previews/previews.ts";
+import { servedMedia } from "./previews/serving.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
@@ -1335,6 +1337,14 @@ const previews = HttpApiBuilder.group(
           ),
           { data: {}, event: "heartbeat" }
         )
+      )
+      .handleRaw("media", ({ params, request }) =>
+        servedMedia(held, params.hash, request.headers["if-none-match"]).pipe(
+          Effect.catchTags({
+            ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
+            NoSuchMedia: () => Effect.fail(new UnknownMedia({ hash: params.hash })),
+          })
+        )
       );
   })
 );
@@ -1366,11 +1376,12 @@ const bodyLimit = HttpRouter.middleware(
   { global: true }
 );
 
-// `/api/uploads/<id>/content`.
-const contentPath = /^\/api\/uploads\/[^/]+\/content$/u;
+// `/api/uploads/<id>/content` and `/api/previews/media/<hash>`.
+const contentPath = /^\/api\/(?:uploads\/[^/]+\/content|previews\/media\/[^/]+)$/u;
 
-// An Upload's bytes the store could not give are never kept by a cache, as at its link. The
-// contract's errors carry no headers, so this is set on the way out.
+// An Upload's bytes, or a Preview's image, the store could not give are never kept by a
+// cache, as at an Upload's link. The contract's errors carry no headers, so this is set on
+// the way out.
 const contentUnavailable = HttpRouter.middleware(
   (app) =>
     Effect.gen(function* () {

@@ -37,6 +37,6 @@ A link is parsed by the WHATWG URL parser first, and what it produced is checked
 
 ## Testing
 
-`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers)` answers recorded responses or failures by link, as the parser normalises it, and records each fetch asked of it, in `asked`. A link with no answer is unreachable.
+`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers)` answers recorded responses or failures by link, as the parser normalises it, and records each fetch asked of it, in `asked`. A link with no answer is unreachable. A recorded response is answered as the guard would for the purpose, by its declared type alone: a type the purpose does not take is `LinkWrongType`, a page is cut at its bound, and any other body over its bound fails with `LinkTooLarge` as it is read.
 
 Production code may not import `@iirc/link-fetch/testing`.

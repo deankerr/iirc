@@ -1,17 +1,27 @@
 /**
  * Previews: a Message's links, fetched through the link fetch when a Frontend asks, read
  * into a Preview, and kept in the Preview cache by link, so one link in many Messages is
- * fetched once. A Preview is a cache outside the Journal (ADR 0017): nothing here is
- * journaled, and losing the cache loses nothing but fetches.
+ * fetched once. Under `on`, a Preview's image is fetched too, kept in the store, and served
+ * from the Daemon's own origin. A Preview is a cache outside the Journal (ADR 0017): nothing
+ * here is journaled, and losing the cache loses nothing but fetches.
  *
  * @packageDocumentation
  */
 import { createHash } from "node:crypto";
 
-import { PreviewId, PreviewsOff, UnknownMessage, UnknownTimeline } from "@iirc/api";
-import type { PreviewFailure, PreviewItem, PreviewState } from "@iirc/api";
+import { MediaType, PreviewId, PreviewsOff, UnknownMessage, UnknownTimeline } from "@iirc/api";
+import type {
+  MediaHash,
+  PreviewFailure,
+  PreviewImage,
+  PreviewItem,
+  PreviewsShown,
+  PreviewState,
+} from "@iirc/api";
+import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import { LinkFetch } from "@iirc/link-fetch";
 import type { Fetched, LinkFetchFailure, LinkFetchService } from "@iirc/link-fetch";
+import { sniff, sniffed } from "@iirc/link-fetch-bun";
 import { PreviewCache } from "@iirc/preview-cache";
 import type { Kept, Settled } from "@iirc/preview-cache";
 import { previewableLinksOf } from "@iirc/protocol/links";
@@ -22,6 +32,7 @@ import type { Position, TimelineId } from "@iirc/timelines";
 import {
   Clock,
   Context,
+  Data,
   Duration,
   Effect,
   Layer,
@@ -31,12 +42,24 @@ import {
   Schema,
   Scope,
   Semaphore,
+  Sink,
   Stream,
 } from "effect";
 
 import { UiConfiguration } from "../ui.ts";
+import { animated } from "./animated.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
+import { previewStore } from "./store.ts";
+
+/** No Preview holds an image with the hash, or the store no longer holds its bytes. */
+export class NoSuchMedia extends Data.TaggedError("NoSuchMedia") {}
+
+/** An image a Preview holds, as it is served: its type, read from its bytes, and they. */
+export interface Media {
+  readonly type: MediaType;
+  readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
+}
 
 /** What the Daemon offers of Previews. */
 export class Previews extends Context.Service<
@@ -55,6 +78,19 @@ export class Previews extends Context.Service<
     >;
     /** Each link's item, every time its Preview's state changes, from now on. */
     readonly changes: Stream.Stream<PreviewItem>;
+    /**
+     * The image a Preview holds, by its hash, with its type read from its leading bytes,
+     * which are read before it answers. A hash no record kept refers to, or bytes of none
+     * of the image types, is `NoSuchMedia`.
+     */
+    readonly media: (
+      hash: MediaHash
+    ) => Effect.Effect<Media, NoSuchMedia | ByteStoreUnavailable, Scope.Scope>;
+    /**
+     * Whether any Preview kept holds the image with the hash, without reading its bytes. A
+     * cache that cannot be read is as unavailable as the store.
+     */
+    readonly refers: (hash: MediaHash) => Effect.Effect<boolean, ByteStoreUnavailable>;
   }
 >()("@iirc/daemon/Previews") {}
 
@@ -97,19 +133,42 @@ const hostOf = (link: string): string => URL.parse(link)?.host ?? link;
 const failed = (reason: PreviewFailure): Settled => ({ _tag: "Failed", reason });
 
 /**
+ * What a fetch of a link came to, and the address of the image it names, if any: a page's
+ * own, or the link itself when it is an image.
+ */
+interface Read {
+  readonly state: Settled;
+  readonly image?: string | undefined;
+}
+
+const failedRead = (reason: PreviewFailure): Read => ({ state: failed(reason) });
+
+/**
  * A text Preview of a link to media itself, from its type alone: its body is never read.
+ * A link to an image names itself as the image.
  * @param link - The link it answered as.
  * @param type - Its media type.
- * @returns The state, or nothing to show when the type is not media.
+ * @returns What it came to, or nothing to show when the type is not media.
  */
-const mediaPreview = (link: string, type: string): Settled => {
+const mediaPreview = (link: string, type: string): Read => {
   const kind = readMedia(type);
 
   return kind === undefined
-    ? failed("NothingToShow")
+    ? failedRead("NothingToShow")
     : {
-        _tag: "Ready",
-        preview: { description: null, kind, link, site: hostOf(link), title: null, type },
+        image: kind === "image" ? link : undefined,
+        state: {
+          _tag: "Ready",
+          preview: {
+            description: null,
+            image: null,
+            kind,
+            link,
+            site: hostOf(link),
+            title: null,
+            type,
+          },
+        },
       };
 };
 
@@ -117,24 +176,24 @@ const mediaPreview = (link: string, type: string): Settled => {
  * What a fetch that failed shows: the reason, or for an answer of another type than a page,
  * a text Preview of it when it is media.
  * @param failure - Why the fetch gave no page.
- * @returns The state.
+ * @returns What it came to.
  */
-const failedFetch = (failure: LinkFetchFailure): Settled => {
+const failedFetch = (failure: LinkFetchFailure): Read => {
   switch (failure._tag) {
     case "LinkRefused": {
-      return failed("Refused");
+      return failedRead("Refused");
     }
 
     case "LinkUnreachable": {
-      return failed("Unreachable");
+      return failedRead("Unreachable");
     }
 
     case "LinkTimedOut": {
-      return failed("TimedOut");
+      return failedRead("TimedOut");
     }
 
     case "LinkTooLarge": {
-      return failed("TooLarge");
+      return failedRead("TooLarge");
     }
 
     case "LinkWrongType": {
@@ -198,10 +257,10 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 
 /**
  * What a page's answer shows: a Preview of media from its type alone, or of the page read
- * from its head and filled from the oEmbed address it names.
+ * from its head and filled from the oEmbed address it names, with the image it names.
  * @param links - The link fetch.
  * @param fetched - The answer.
- * @returns The state.
+ * @returns What it came to.
  */
 const answered = (links: LinkFetchService, fetched: Fetched) =>
   Effect.gen(function* () {
@@ -216,20 +275,50 @@ const answered = (links: LinkFetchService, fetched: Fetched) =>
       readPage({ contentType: fetched.headers["content-type"], head, link: fetched.link })
     );
 
-    return page.title === undefined && page.description === undefined
-      ? failed("NothingToShow")
-      : ({
-          _tag: "Ready",
-          preview: {
-            description: page.description ?? null,
-            kind: "page",
-            link: fetched.link,
-            site: page.site ?? hostOf(fetched.link),
-            title: page.title ?? null,
-            type: null,
-          },
-        } satisfies Settled);
+    if (page.title === undefined && page.description === undefined) {
+      return failedRead("NothingToShow");
+    }
+
+    const read: Read = {
+      image: page.image,
+      state: {
+        _tag: "Ready",
+        preview: {
+          description: page.description ?? null,
+          image: null,
+          kind: "page",
+          link: fetched.link,
+          site: page.site ?? hostOf(fetched.link),
+          title: page.title ?? null,
+          type: null,
+        },
+      },
+    };
+
+    return read;
   });
+
+const decodeMediaType = Schema.decodeUnknownOption(MediaType);
+
+/** Why an image was not kept, beyond what the fetch and the store say. */
+class NoImage extends Data.TaggedError("NoImage")<{ readonly reason: string }> {}
+
+/** Leading chunks of a stream, and how many bytes they hold. */
+interface Leading {
+  readonly chunks: readonly Uint8Array[];
+  readonly size: number;
+}
+
+/**
+ * Leading bytes of a stream, at least {@link sniffed} of them unless it is shorter, and the
+ * stream from where they end.
+ */
+const head = Sink.fold(
+  (): Leading => ({ chunks: [], size: 0 }),
+  ({ size }) => size < sniffed,
+  ({ chunks, size }, chunk: Uint8Array) =>
+    Effect.succeed({ chunks: [...chunks, chunk], size: size + chunk.length })
+);
 
 /** A Direct Message's link that is not yet kept: fetched only once the Owner presses it. */
 const waiting: PreviewState = { _tag: "WaitingForPress" };
@@ -298,6 +387,7 @@ export const layerPreviews = Layer.effect(Previews)(
     const cache = yield* PreviewCache;
     const store = yield* TimelineStore;
     const ui = yield* UiConfiguration;
+    const { made: bucket } = yield* previewStore;
     const scope = yield* Scope.Scope;
     const flying = yield* Ref.make<ReadonlyMap<string, Flight>>(new Map());
     // Looking in flight and in the cache, and claiming a fetch, is one turn, and so is
@@ -312,8 +402,16 @@ export const layerPreviews = Layer.effect(Previews)(
             const fetched = yield* Clock.currentTimeMillis;
             const flight = (yield* Ref.get(flying)).get(key);
 
+            const image = state._tag === "Ready" ? (state.preview.image?.hash ?? null) : null;
+
             yield* cache
-              .put({ fetched, image: null, link: key, shown: flight?.shown ?? fetched, state })
+              .put({
+                fetched,
+                image: image === null ? null : Sha256.make(image),
+                link: key,
+                shown: flight?.shown ?? fetched,
+                state,
+              })
               .pipe(Effect.catch(warn("written")));
             yield* Ref.update(flying, (now) => {
               const rest = new Map(now);
@@ -327,16 +425,86 @@ export const layerPreviews = Layer.effect(Previews)(
         yield* PubSub.publish(changed, { id: idOf(key), link, state });
       });
 
+    /**
+     * Fetches an image as an image, through the same guard, and keeps its bytes in the store,
+     * collected first, since the store may run what it is given more than once. No bucket
+     * means no fetch at all.
+     * @param address - Where the image is.
+     * @returns The image as a Preview holds it.
+     */
+    const keepImage = (address: string) =>
+      Effect.gen(function* () {
+        const bytesStore = yield* bucket;
+        const fetched = yield* links.fetch(address, { kind: "image" });
+
+        if (fetched.status < 200 || fetched.status > 299) {
+          return yield* new NoImage({ reason: `it answered ${fetched.status}` });
+        }
+
+        const type = decodeMediaType(fetched.type);
+
+        if (Option.isNone(type)) {
+          return yield* new NoImage({ reason: `it is of the type ${fetched.type}` });
+        }
+
+        const bytes = joined(yield* Stream.runCollect(fetched.body));
+
+        if (bytes.length === 0) {
+          return yield* new NoImage({ reason: "it is empty" });
+        }
+
+        const stored = yield* bytesStore.put(Stream.make(bytes));
+
+        return {
+          animated: animated(bytes),
+          hash: stored.hash,
+          size: stored.size,
+          type: type.value,
+        } satisfies PreviewImage;
+      }).pipe(Effect.scoped);
+
+    /**
+     * A Preview with its image, when it names one and Previews are `on`. Whatever goes wrong
+     * with the image, in any way at all, leaves the Preview as it was, with no image.
+     * @param read - What the fetch came to.
+     * @param shown - Whether Previews are `on` or `links only`, as they were when asked.
+     * @returns The state.
+     */
+    const withImage = (read: Read, shown: PreviewsShown) => {
+      const { image: address, state } = read;
+
+      if (shown !== "on" || address === undefined || state._tag !== "Ready") {
+        return Effect.succeed(state);
+      }
+
+      const warned = (reason: string) =>
+        Effect.as(
+          Effect.logWarning(`A Preview's image was not kept: ${reason}`).pipe(
+            Effect.annotateLogs({ image: address })
+          ),
+          state
+        );
+
+      return keepImage(address).pipe(
+        Effect.map((image): Settled => ({ ...state, preview: { ...state.preview, image } })),
+        Effect.catch((error) =>
+          warned("reason" in error ? `${error._tag}, ${error.reason}` : error._tag)
+        ),
+        Effect.catchDefect(() => warned("it failed unforeseen"))
+      );
+    };
+
     // Every failure of the fetch is answered with its reason, and anything unforeseen with
     // `Unreachable`, so no Preview stays pending for ever.
-    const fetchOne = (key: string, link: string) =>
+    const fetchOne = (key: string, link: string, shown: PreviewsShown) =>
       Effect.scoped(
         links.fetch(key, { kind: "page" }).pipe(
           Effect.flatMap((fetched) => answered(links, fetched)),
           Effect.catch((error) => Effect.succeed(failedFetch(error)))
         )
       ).pipe(
-        Effect.catchDefect(() => Effect.succeed(failed("Unreachable"))),
+        Effect.catchDefect(() => Effect.succeed(failedRead("Unreachable"))),
+        Effect.flatMap((read) => withImage(read, shown)),
         Effect.flatMap((state) => settle(key, link, state))
       );
 
@@ -390,9 +558,10 @@ export const layerPreviews = Layer.effect(Previews)(
      * Direct Message, waiting for a press until it is kept.
      * @param link - The link, as the URL parser wrote it.
      * @param direct - Whether it is in a Direct Message.
+     * @param shown - Whether Previews are `on` or `links only`, which a fetch it starts keeps.
      * @returns Its item.
      */
-    const stateOf = (link: string, direct: boolean) =>
+    const stateOf = (link: string, direct: boolean, shown: PreviewsShown) =>
       Effect.gen(function* () {
         const key = keyOf(link);
         const { publish, started, state } = yield* claim(key, direct);
@@ -402,13 +571,23 @@ export const layerPreviews = Layer.effect(Previews)(
         }
 
         if (started) {
-          yield* Effect.forkIn(fetchOne(key, link), scope);
+          yield* Effect.forkIn(fetchOne(key, link, shown), scope);
         }
 
         const item: PreviewItem = { id: idOf(key), link, state };
 
         return item;
       });
+
+    const refers = (hash: MediaHash) =>
+      cache.refers(Sha256.make(hash)).pipe(
+        Effect.mapError(
+          (error) =>
+            new ByteStoreUnavailable({
+              reason: `the Preview cache could not be read: ${error.reason}`,
+            })
+        )
+      );
 
     return {
       ask: (timeline, position) =>
@@ -438,10 +617,37 @@ export const layerPreviews = Layer.effect(Previews)(
           const shown = ours?.delivery._tag === "Confirmed" ? ours.delivery.text : text;
 
           return yield* Effect.forEach(previewableLinksOf(shown), (found) =>
-            stateOf(found.href, direct)
+            stateOf(found.href, direct, options.previews)
           );
         }),
       changes: Stream.fromPubSub(changed),
+      media: (hash) =>
+        Effect.gen(function* () {
+          if (!(yield* refers(hash))) {
+            return yield* new NoSuchMedia();
+          }
+
+          const bytesStore = yield* bucket;
+
+          const bytes = yield* bytesStore
+            .read(Sha256.make(hash))
+            .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchMedia())));
+
+          // The type is read from the bytes as they are served, never from what was recorded,
+          // and bytes of none of the image types are not served at all.
+          const [leading, rest] = yield* Stream.peel(bytes, head);
+          const type = decodeMediaType(sniff(joined(leading.chunks)));
+
+          if (Option.isNone(type)) {
+            return yield* new NoSuchMedia();
+          }
+
+          return {
+            bytes: Stream.concat(Stream.fromIterable(leading.chunks), rest),
+            type: type.value,
+          } satisfies Media;
+        }),
+      refers,
     };
   })
 );

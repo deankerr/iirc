@@ -30,6 +30,7 @@ const ready = (link: string, overrides: Partial<Kept> = {}): Kept => ({
     _tag: "Ready",
     preview: {
       description: "A page about nothing",
+      image: null,
       kind: "page",
       link,
       site: "example.com",
@@ -70,6 +71,7 @@ const putThenGet: PreviewCacheLaw = {
           _tag: "Ready",
           preview: {
             description: "Ünïcode — 日本語 🙂\nand a second line",
+            image: { animated: true, hash, size: 1234, type: "image/gif" },
             kind: "player",
             link: "https://example.com/é/日本語?q=ключ#🙂",
             site: "Exämple",
@@ -84,6 +86,7 @@ const putThenGet: PreviewCacheLaw = {
           _tag: "Ready",
           preview: {
             description: null,
+            image: null,
             kind: "image",
             link: "https://example.com/bare",
             site: "example.com",
@@ -176,6 +179,25 @@ const shownEarlier: PreviewCacheLaw = {
   name: "shown with an earlier time leaves when it was last shown, and still gives the record",
 };
 
+const other = Sha256.make("cd".repeat(32));
+
+const refers: PreviewCacheLaw = {
+  check: (cache) =>
+    Effect.gen(function* () {
+      yield* same("refers in an empty cache", yield* cache.refers(hash), false);
+      yield* cache.put(ready(a, { image: hash }));
+      yield* cache.put(failed(b, "Refused"));
+      yield* same("refers to a kept record's image", yield* cache.refers(hash), true);
+      yield* same("refers to an image no record holds", yield* cache.refers(other), false);
+      yield* cache.put({ ...failed(b, "TimedOut"), image: hash });
+      yield* cache.put(ready(a));
+      yield* same("refers while another record holds it", yield* cache.refers(hash), true);
+      yield* cache.put(failed(b, "TimedOut"));
+      yield* same("refers once no record holds it", yield* cache.refers(hash), false);
+    }),
+  name: "refers says whether any record kept holds the image, as records are replaced",
+};
+
 /** The laws every Preview cache adapter keeps. */
 export const previewCacheLaws: readonly PreviewCacheLaw[] = [
   unknownLink,
@@ -185,4 +207,5 @@ export const previewCacheLaws: readonly PreviewCacheLaw[] = [
   shownUnknown,
   shownMoves,
   shownEarlier,
+  refers,
 ];
