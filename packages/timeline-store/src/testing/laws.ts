@@ -776,7 +776,7 @@ const marking: Interruption = {
       ...before.items,
       {
         changed: sequence,
-        content: said(`late${sequence}`),
+        content: said("late"),
         level: "Highlight",
         network: libera,
         position: position(sequence * 10 + 9, sequence),
@@ -794,13 +794,16 @@ const marking: Interruption = {
         : each;
     }),
   }),
+  // The seeds share their texts across steps, as the late Messages do. A snapshot searches
+  // each distinct text, so a text per step would make the law quadratic in its steps, while a
+  // shared text's search still places every Message that holds it.
   seed: (sequence) =>
     levels.flatMap((level, n) => [
       added(
         sequence,
         channel,
         position(sequence * 10 + n, sequence, n),
-        said(`${level}${sequence}`),
+        said(level),
         undefined,
         libera,
         level
@@ -809,7 +812,7 @@ const marking: Interruption = {
         sequence,
         channel,
         position(sequence * 10 + 5 + n, sequence, n + 4),
-        said(`${level}+${sequence}`),
+        said(`${level}+`),
         undefined,
         libera,
         level
@@ -823,7 +826,7 @@ const marking: Interruption = {
       sequence,
       channel,
       position(sequence * 10 + 9, sequence),
-      said(`late${sequence}`),
+      said("late"),
       undefined,
       libera,
       "Highlight"
