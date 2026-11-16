@@ -1158,10 +1158,10 @@ const credentials = HttpApiBuilder.group(
 
 /**
  * An Upload as the wire carries it.
- * @param shown - Its record, and its link while there is a public URL.
+ * @param shown - Its record, its link while there is a public URL, and whether it is missing.
  * @returns The wire form.
  */
-const upload = ({ link, record }: Shown): Upload => ({
+const upload = ({ link, missing, record }: Shown): Upload => ({
   at: record.at,
   hash: record.hash,
   id: record.id,
@@ -1172,6 +1172,7 @@ const upload = ({ link, record }: Shown): Upload => ({
   ...(record.name !== undefined && { name: record.name }),
   ...(record.renamedAt !== undefined && { renamedAt: record.renamedAt }),
   ...(record.deleted !== undefined && { deleted: record.deleted }),
+  ...(missing && { missing: true }),
 });
 
 const storeUnavailable = (error: { readonly reason: string }) =>
@@ -1266,7 +1267,8 @@ const uploads = HttpApiBuilder.group(
           // As for News, the header comes with the URL first used, so it wins.
           const after = headers["last-event-id"] ?? query.after;
 
-          // Each event is an Upload whole, as it is now, so a Frontend replaces what it holds.
+          // Each event is an Upload whole, as it is now, so a Frontend replaces what it holds,
+          // and the missing ones are whole too, with no id, as no Change made them so.
           const changed = held.changes(after).pipe(
             Stream.map(({ sequence, shown }): UploadsEvent => ({
               data: upload(shown),
@@ -1275,7 +1277,11 @@ const uploads = HttpApiBuilder.group(
             }))
           );
 
-          return followed(changed, { data: {}, event: "heartbeat" });
+          const missing = held.missing.pipe(
+            Stream.map((ids): UploadsEvent => ({ data: { uploads: ids }, event: "missing" }))
+          );
+
+          return followed(Stream.merge(changed, missing), { data: {}, event: "heartbeat" });
         })
       )
       .handle("read", ({ params }) =>

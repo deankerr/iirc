@@ -2938,3 +2938,374 @@ describe("expiring Uploads", () => {
     });
   });
 });
+
+/**
+ * Takes an Upload's bytes from the world's store, as a bucket that lost them would.
+ * @param served - The server.
+ * @param hash - The bytes' hash.
+ * @returns An Effect that loses them.
+ */
+const lose = (served: Served, hash: string) =>
+  served.world.bytes.store.delete(Sha256.make(hash)).pipe(Effect.orDie);
+
+/**
+ * An Upload's record, as `GET /api/uploads/{id}` answers it.
+ * @param served - The server.
+ * @param id - The Upload's id.
+ * @returns The record.
+ */
+const readRecord = (served: Served, id: string) =>
+  Effect.flatMap(served.request(`/api/uploads/${id}`), recordOf);
+
+/**
+ * The status an Upload's bytes are answered with on the API's own origin.
+ * @param served - The server.
+ * @param id - The Upload's id.
+ * @returns The status.
+ */
+const contentStatus = (served: Served, id: string) =>
+  Effect.map(served.request(`/api/uploads/${id}/content`), (response) => response.status);
+
+const decodeMissing = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ uploads: Schema.Array(Schema.String) }))
+);
+
+const missingOf = (events: readonly Sse[]) =>
+  events.flatMap((event) => (event.event === "missing" ? [decodeMissing(event.data)] : []));
+
+/**
+ * Every `missing` event a stream carries, once it has carried `count`.
+ * @param stream - The stream.
+ * @param count - How many.
+ * @returns Their ids.
+ */
+const missingSent = (stream: Following, count: number) =>
+  Effect.map(
+    stream.until((events) => missingOf(events).length >= count),
+    (events) => missingOf(events).map((event) => event.uploads)
+  );
+
+describe("an Upload whose bytes are missing", () => {
+  it("is marked missing in its record and the list once a read confirms its bytes are gone, and its link answers 404", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+        const kept = yield* uploaded(served, encoder.encode("kept"), "kept.txt");
+
+        yield* lose(served, record.hash);
+        const unread = yield* readRecord(served, record.id);
+        const link = statusOf(yield* fromBound(port, pathOf(record.link)));
+        const page = yield* Effect.flatMap(served.request("/api/uploads"), pageOf);
+
+        return {
+          content: yield* contentStatus(served, record.id),
+          kept: (yield* readRecord(served, kept.id)).missing,
+          link,
+          listed: page.uploads.map((one) => [one.id, one.missing]),
+          read: yield* readRecord(served, record.id),
+          record,
+          unread,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      content: 404,
+      kept: undefined,
+      link: 404,
+      listed: [
+        [expect.any(String), undefined],
+        [result.record.id, true],
+      ],
+      read: { ...result.record, missing: true },
+      record: result.record,
+      unread: result.record,
+    });
+  });
+
+  it("is never marked while the store cannot be reached, which answers 503, and a mark already made stays", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const lost = yield* uploaded(served, png, "lost.png");
+        const held = yield* uploaded(served, encoder.encode("held"), "held.txt");
+
+        yield* lose(served, lost.hash);
+        yield* contentStatus(served, lost.id);
+        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+
+        return {
+          answered: [yield* contentStatus(served, held.id), yield* contentStatus(served, lost.id)],
+          held: (yield* readRecord(served, held.id)).missing,
+          lost: (yield* readRecord(served, lost.id)).missing,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ answered: [503, 503], held: undefined, lost: undefined });
+  });
+
+  it("is learnt again after a restart on the same Journal, on the next read", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* lose(served, record.hash);
+        yield* contentStatus(served, record.id);
+        const before = (yield* readRecord(served, record.id)).missing;
+
+        yield* served.restart;
+        const restarted = (yield* readRecord(served, record.id)).missing;
+        const read = yield* contentStatus(served, record.id);
+
+        return {
+          before,
+          read,
+          relearnt: (yield* readRecord(served, record.id)).missing,
+          restarted,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ before: true, read: 404, relearnt: true, restarted: undefined });
+  });
+
+  it("can have its record deleted, which is then deleted and no longer missing", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* lose(served, record.hash);
+        yield* contentStatus(served, record.id);
+        const deleted = yield* served.request(`/api/uploads/${record.id}`, { method: "DELETE" });
+
+        return {
+          deleted: [deleted.status, yield* recordOf(deleted)],
+          read: yield* readRecord(served, record.id),
+        };
+      })
+    );
+
+    expect(result.deleted[0]).toBe(200);
+    expect(result.deleted[1]).toStrictEqual(result.read);
+    expect(result.read).toMatchObject({ deleted: { why: "owner" }, link: null });
+    expect(result.read).not.toHaveProperty("missing");
+  });
+
+  it("is restored, while live, by uploading the same bytes again, though a deleted one's link stays 404", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const deleted = yield* uploaded(served, png, "deleted.png");
+        const live = yield* uploaded(served, png, "live.png");
+
+        yield* expecting(remove(served, deleted.id), 200);
+        yield* lose(served, live.hash);
+        yield* contentStatus(served, live.id);
+        const marked = (yield* readRecord(served, live.id)).missing;
+        const again = yield* uploaded(served, png, "again.png");
+
+        return {
+          again: again.hash === live.hash,
+          deleted: [
+            statusOf(yield* fromBound(port, pathOf(`${publicUrl}/${deleted.id}/deleted.png`))),
+            yield* contentStatus(served, deleted.id),
+          ],
+          live: [
+            statusOf(yield* fromBound(port, pathOf(live.link))),
+            yield* contentStatus(served, live.id),
+            (yield* readRecord(served, live.id)).missing,
+          ],
+          marked,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: true,
+      deleted: [404, 404],
+      live: [200, 200, undefined],
+      marked: true,
+    });
+  });
+
+  it("is restored once a read finds its bytes again, as after they are put back by hand", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* lose(served, record.hash);
+        yield* contentStatus(served, record.id);
+        const marked = (yield* readRecord(served, record.id)).missing;
+
+        yield* served.world.bytes.store.put(Stream.make(png)).pipe(Effect.orDie);
+        const read = yield* contentStatus(served, record.id);
+
+        return { after: (yield* readRecord(served, record.id)).missing, marked, read };
+      })
+    );
+
+    expect(result).toStrictEqual({ after: undefined, marked: true, read: 200 });
+  });
+
+  it("is forgotten when the store options change, to be learnt of the new store on its next read", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* lose(served, record.hash);
+        yield* contentStatus(served, record.id);
+        const marked = (yield* readRecord(served, record.id)).missing;
+
+        yield* setOption(served, "store.s3.bucket", "elsewhere");
+
+        const moved = yield* settled(
+          readRecord(served, record.id),
+          (one) => one.missing === undefined
+        );
+
+        const read = yield* contentStatus(served, record.id);
+
+        return {
+          marked,
+          moved: moved.missing,
+          read,
+          relearnt: (yield* readRecord(served, record.id)).missing,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ marked: true, moved: undefined, read: 404, relearnt: true });
+  });
+
+  it("is marked by a read that found its bytes gone though other bytes were uploaded while it was answered", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const answered = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+
+        // A store whose reads answer, then wait before the answer is taken.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            read: (hash, range) =>
+              Effect.exit(store.read(hash, range)).pipe(
+                Effect.tap(() => answered.open),
+                Effect.tap(() => go.await),
+                Effect.flatten
+              ),
+          } satisfies ByteStoreService,
+        });
+
+        yield* lose(served, record.hash);
+        const reading = yield* Effect.forkChild(contentStatus(served, record.id));
+
+        yield* answered.await;
+        yield* uploaded(served, encoder.encode("other"), "other.txt");
+        yield* go.open;
+        const read = yield* Fiber.join(reading);
+
+        return { missing: (yield* readRecord(served, record.id)).missing, read };
+      })
+    );
+
+    expect(result).toStrictEqual({ missing: true, read: 404 });
+  });
+
+  it("is not taken away by a read the store before a change of the bucket answered", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const answered = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+        let first = true;
+
+        // A store whose first read answers, then waits before the answer is taken.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            read: (hash, range) =>
+              Effect.suspend(() => {
+                const held = first;
+
+                first = false;
+
+                return held
+                  ? Effect.exit(store.read(hash, range)).pipe(
+                      Effect.tap(() => answered.open),
+                      Effect.tap(() => go.await),
+                      Effect.flatten
+                    )
+                  : store.read(hash, range);
+              }),
+          } satisfies ByteStoreService,
+        });
+
+        const old = yield* Effect.forkChild(contentStatus(served, record.id));
+
+        yield* answered.await;
+        yield* setOption(served, "store.s3.bucket", "elsewhere");
+        yield* lose(served, record.hash);
+
+        const marked = yield* settled(
+          Effect.andThen(contentStatus(served, record.id), readRecord(served, record.id)),
+          (one) => one.missing === true
+        );
+
+        yield* go.open;
+        const oldRead = yield* Fiber.join(old);
+
+        return {
+          after: (yield* readRecord(served, record.id)).missing,
+          marked: marked.missing,
+          oldRead,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ after: true, marked: true, oldRead: 200 });
+  });
+
+  it("is sent on the stream of Upload Changes whole, as it opens and each time it changes, with no id", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const stream = yield* openChanges(served);
+
+        yield* lose(served, record.hash);
+        yield* contentStatus(served, record.id);
+        yield* missingSent(stream, 2);
+        yield* uploaded(served, png, "again.png");
+        const sent = yield* missingSent(stream, 3);
+        const events = yield* stream.until(() => true);
+
+        return {
+          ids: events.filter((event) => event.event === "missing").map((event) => event.id),
+          record: record.id,
+          sent,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      ids: [undefined, undefined, undefined],
+      record: result.record,
+      sent: [[], [result.record], []],
+    });
+  });
+});

@@ -1,9 +1,10 @@
 /**
  * The Uploads the options list beside them, as atoms: followed from the Daemon while the
  * page is signed in and the options show, so another device's Upload shows without a
- * reload, read a page at a time, and forgotten on signing out. The first page says how far
- * it was read, and the stream is followed after that, or after the last Change folded in
- * when following again, so nothing is missed and nothing is given twice. An Upload's link
+ * reload, read a page at a time, and forgotten on signing out. The stream also says which
+ * Uploads' bytes the Daemon found gone, whole, and a row asks only whether its own is. The
+ * first page says how far it was read, and the stream is followed after that, or after the
+ * last Change folded in when following again, so nothing is missed and nothing is given twice. An Upload's link
  * is derived from the public URL in force as it is drawn, never held, so a new public URL
  * changes every link copied from then on. Renaming and deleting one are sent from here,
  * from the list and from the composer alike, and the Daemon's answer goes to the list at
@@ -39,6 +40,14 @@ export const uploadsState = Atom.make(initialUploads).pipe(Atom.keepAlive);
  * any other change of the Uploads.
  */
 export const deletedShown = Atom.make((get) => get(uploadsState).showDeleted);
+
+/**
+ * Whether the Daemon found one Upload's bytes gone, which the Uploads held say, so a row
+ * redraws only when its own answer changes, not for any other change of the Uploads.
+ */
+export const uploadMissing = Atom.family((id: UploadId) =>
+  Atom.make((get) => get(uploadsState).missing.has(id))
+);
 
 /** What the Owner asked of the Uploads listed, as the core folds it. */
 export const uploadEditsState = Atom.make(initialUploadEdits).pipe(Atom.keepAlive);
@@ -323,6 +332,10 @@ export const uploadsSync = runtime
             Effect.sync(() => {
               if (event.event === "changed") {
                 happened(registry, { _tag: "Changed", sequence: event.id, upload: event.data });
+              }
+
+              if (event.event === "missing") {
+                happened(registry, { _tag: "Missing", ids: event.data.uploads });
               }
             })
           )

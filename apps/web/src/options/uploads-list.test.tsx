@@ -829,6 +829,88 @@ describe("the Uploads beside the options", () => {
     });
   });
 
+  it("marks an Upload whose bytes are missing, with no thumbnail fetched and no link to copy, and clears it when a later event leaves it out", async () => {
+    const fake = signedIn(cat, notes);
+
+    withPublicUrl(fake);
+    fake.daemon.uploadsMissing.push(cat.id);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await settled(() => listed(container).at(0)?.details?.endsWith("missing") === true);
+
+    const marked = {
+      copy: copyButtons(container),
+      details: listed(container).map((row) => row.details?.endsWith("missing")),
+      offered: offered(container),
+      thumbnails: listed(container).map((row) => row.thumbnail),
+    };
+
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await doing(() => {
+      fake.lose();
+    });
+    await settled(() => listed(container).at(0)?.details?.endsWith("missing") === false);
+
+    expect({
+      copyAfter: copyButtons(container),
+      marked,
+      thumbnails: listed(container).map((row) => row.thumbnail),
+    }).toStrictEqual({
+      copyAfter: ["Copy the link to Cat picture.png", "Copy the link to b-safe.bin"],
+      marked: {
+        copy: ["Copy the link to b-safe.bin"],
+        details: [true, false],
+        offered: [
+          ["Rename Cat picture.png", "Delete Cat picture.png"],
+          ["Copy the link to b-safe.bin", "Rename b-safe.bin", "Delete b-safe.bin"],
+        ],
+        thumbnails: ["icon", "icon"],
+      },
+      thumbnails: [`/api/uploads/${cat.id}/content`, "icon"],
+    });
+  });
+
+  it("marks an Upload the stream says is missing after the list was read", async () => {
+    const fake = signedIn(cat, notes);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await doing(() => {
+      fake.lose(notes.id);
+    });
+    await settled(() => listed(container).at(1)?.details?.includes("missing") === true);
+
+    expect(listed(container).map((row) => row.details?.includes("missing"))).toStrictEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("does not show a deleted Upload as missing", async () => {
+    const fake = signedIn(cat, notes);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await toggleDeleted(container);
+    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await doing(() => {
+      fake.lose(cat.id);
+    });
+    await settled(() => listed(container).at(0)?.details?.includes("missing") === true);
+    await doing(() => {
+      fake.expire(cat.id);
+    });
+    await settled(() => listed(container).at(0)?.details?.includes("expired") === true);
+
+    expect(listed(container).map((row) => row.details?.includes("missing"))).toStrictEqual([
+      false,
+      false,
+    ]);
+  });
+
   it("forgets the Uploads on signing out", async () => {
     const fake = signedIn(cat, notes);
     const { container, registry } = await page(fake);

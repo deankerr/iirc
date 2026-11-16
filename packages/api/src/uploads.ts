@@ -58,8 +58,9 @@ export const UploadDeleted = Schema.Struct({ at: Instant, why: UploadDeletedWhy 
  * An Upload: its id, the name it was given or last renamed to, if any, the safe name its
  * link and download use, the type read from its bytes, their size and SHA-256 hash, when it
  * was uploaded, when it was last renamed, if it was, when and why it was deleted, if it was,
- * and its link, `<uploads.publicUrl>/<id>/<safeName>` from the public URL in force, or
- * `null` while none is set or once it is deleted.
+ * `missing` once a read of the store confirmed a live Upload's bytes are gone from it, and
+ * its link, `<uploads.publicUrl>/<id>/<safeName>` from the public URL in force, or `null`
+ * while none is set or once it is deleted.
  */
 export const Upload = Schema.Struct({
   at: Instant,
@@ -67,6 +68,7 @@ export const Upload = Schema.Struct({
   hash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u)),
   id: UploadId,
   link: Schema.NullOr(Schema.String),
+  missing: Schema.optionalKey(Schema.Literal(true)),
   name: Schema.optionalKey(Schema.String),
   renamedAt: Schema.optionalKey(Instant),
   safeName: Schema.String,
@@ -134,13 +136,20 @@ export type UploadPage = typeof UploadPage.Type;
 /**
  * One event of the stream of Upload Changes: `changed` carries an Upload whole, as it is
  * after the Change, with the Change's sequence as its id, so a Frontend replaces what it
- * holds under that id; and `heartbeat` says the stream is alive.
+ * holds under that id; `missing` carries the ids of every live Upload whose bytes a read of
+ * the store confirmed are gone, whole, first as the stream opens and again each time they
+ * change, with no id, since it is a fact about the store and no Change; and `heartbeat` says
+ * the stream is alive.
  */
 export const UploadsEvent = Schema.Union([
   Schema.Struct({
     data: Schema.fromJsonString(Upload),
     event: Schema.Literal("changed"),
     id: After,
+  }),
+  Schema.Struct({
+    data: Schema.fromJsonString(Schema.Struct({ uploads: Schema.Array(UploadId) })),
+    event: Schema.Literal("missing"),
   }),
   Schema.Struct({
     data: Schema.fromJsonString(Schema.Struct({})),

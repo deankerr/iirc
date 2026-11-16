@@ -4,7 +4,10 @@
  * and an icon for a thumbnail, as their bytes are gone: an image the browser draws as a
  * thumbnail of its own bytes, scaled down and fetched only once near the screen, an icon
  * for any other type, then its name, type, size, and when it was uploaded, and buttons
- * that copy its link, rename it in place, and delete it once the Owner confirms. The link
+ * that copy its link, rename it in place, and delete it once the Owner confirms. A live
+ * one whose bytes the Daemon found gone has an icon too, since nothing is to be fetched,
+ * says "missing" in the danger colour where the time would be, and offers no link, which
+ * would only answer not found, leaving the Owner to rename it or delete its record. The link
  * is made from the public URL in force as it is drawn, and while none is set the list says
  * so once rather than offering a link that would not work. A rename or a delete waiting on
  * the Daemon shows on its button, and one that failed says why in its row.
@@ -40,6 +43,7 @@ import {
   renameUpload,
   showDeleted,
   uploadEditsState,
+  uploadMissing,
   uploadsState,
 } from "./uploads.ts";
 
@@ -53,45 +57,80 @@ import styles from "./uploads-list.module.css";
 const contentOf = (upload: Upload) => `/api/uploads/${upload.id}/content`;
 
 /**
+ * An Upload's thumbnail: its own bytes, for an image the browser draws while they are held,
+ * else an icon, which is also all a missing Upload gets, since nothing is to be fetched.
+ * @param props - The Upload, and whether its bytes are missing.
+ * @returns The thumbnail.
+ */
+const Thumbnail = ({ missing, upload }: { readonly upload: Upload; readonly missing: boolean }) => (
+  <span className={styles.thumbnail}>
+    {thumbnailed(upload.type) && upload.deleted === undefined && !missing ? (
+      // The name beside it says what it is.
+      <img
+        alt=""
+        className={styles.image}
+        decoding="async"
+        loading="lazy"
+        src={contentOf(upload)}
+      />
+    ) : (
+      <Icon className={styles.icon} name="file" />
+    )}
+  </span>
+);
+
+/**
+ * An Upload's details: its type, size, and when it was uploaded, or in that place when its
+ * bytes are missing, that they are, or when and why it was deleted.
+ * @param props - The Upload, and whether its bytes are missing.
+ * @returns The details.
+ */
+const Details = ({ missing, upload }: { readonly upload: Upload; readonly missing: boolean }) => {
+  const shown = useAtomValue(timeShown);
+  const { deleted } = upload;
+
+  const at = (instant: number) =>
+    formattedAt(datedClockFor(shown), instant) ?? "at a time unavailable";
+
+  let said = at(upload.at);
+
+  if (deleted !== undefined) {
+    said = `${deletedText(deleted.why)} ${at(deleted.at)}`;
+  }
+
+  return (
+    <span className={styles.details}>
+      <bdi>{upload.type}</bdi> · {sizeText(upload.size)} ·{" "}
+      {missing ? <span className={styles.missing}>missing</span> : said}
+    </span>
+  );
+};
+
+/**
  * One Upload's row.
  * @param props - The Upload, and its link, if a public URL is set.
  * @returns The row.
  */
 const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string | undefined }) => {
-  const shown = useAtomValue(timeShown);
   const copied = useAtomValue(copiedLink);
   const copy = useAtomSet(copyLink);
   const rename = useAtomSet(renameUpload);
   const askDelete = useAtomSet(askToDelete);
   const doing = useAtomValue(uploadEditsState).doing.get(upload.id);
+  const { deleted } = upload;
+  // Only a live Upload can be missing: a deleted one's bytes are meant to be gone.
+  const missing = useAtomValue(uploadMissing(upload.id)) && deleted === undefined;
   const [renaming, setRenaming] = useState(false);
   const row = useRef<HTMLLIElement>(null);
-  const when = formattedAt(datedClockFor(shown), upload.at) ?? "at a time unavailable";
   const name = shownName(upload);
   const waiting = doing?._tag === "Waiting" ? doing.of : undefined;
-  const { deleted } = upload;
-
-  const gone =
-    deleted === undefined
-      ? undefined
-      : `${deletedText(deleted.why)} ${formattedAt(datedClockFor(shown), deleted.at) ?? "at a time unavailable"}`;
 
   return (
-    <li className={gone === undefined ? styles.row : `${styles.row} ${styles.deleted}`} ref={row}>
-      <span className={styles.thumbnail}>
-        {thumbnailed(upload.type) && deleted === undefined ? (
-          // The name beside it says what it is.
-          <img
-            alt=""
-            className={styles.image}
-            decoding="async"
-            loading="lazy"
-            src={contentOf(upload)}
-          />
-        ) : (
-          <Icon className={styles.icon} name="file" />
-        )}
-      </span>
+    <li
+      className={deleted === undefined ? styles.row : `${styles.row} ${styles.deleted}`}
+      ref={row}
+    >
+      <Thumbnail missing={missing} upload={upload} />
       <span className={styles.about}>
         {renaming && deleted === undefined ? (
           <RenameField
@@ -113,9 +152,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
             <bdi>{name}</bdi>
           </span>
         )}
-        <span className={styles.details}>
-          <bdi>{upload.type}</bdi> · {sizeText(upload.size)} · {gone ?? when}
-        </span>
+        <Details missing={missing} upload={upload} />
         {doing?._tag === "Failed" ? (
           <span className={styles.failure} role="alert">
             {editFailureText(doing.failure, name, doing.of)}
@@ -124,7 +161,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
       </span>
       {deleted === undefined ? (
         <span className={styles.actions}>
-          {link === undefined ? null : (
+          {link === undefined || missing ? null : (
             <Button
               aria-label={`Copy the link to ${name}`}
               onPress={() => {
@@ -136,7 +173,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
               Copy link
             </Button>
           )}
-          {link === undefined ? null : (
+          {link === undefined || missing ? null : (
             <output aria-live="polite" className={styles.copied}>
               {copied === link ? "copied" : ""}
             </output>

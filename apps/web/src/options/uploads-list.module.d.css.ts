@@ -11,6 +11,7 @@ declare const styles: {
   readonly icon: string;
   readonly image: string;
   readonly list: string;
+  readonly missing: string;
   readonly more: string;
   readonly muted: string;
   readonly name: string;

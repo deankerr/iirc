@@ -3,7 +3,9 @@
  * were uploaded, whether they are on, derived from the options in force, the byte store
  * those options name, the path from an arriving body to a kept, recorded Upload, and
  * renaming one, and deleting one, which the Owner does and `uploads.expireAfter` does once
- * an Upload is old enough.
+ * an Upload is old enough. Beside the projection, and never journaled, it holds which bytes a
+ * read of the store confirmed are gone from it, a fact about the store, which marks each live
+ * Upload holding them missing (ADR 0016).
  *
  * @packageDocumentation
  */
@@ -32,6 +34,7 @@ import {
   Effect,
   FileSystem,
   HashMap,
+  HashSet,
   Layer,
   Option,
   Redacted,
@@ -105,12 +108,14 @@ const Renaming = Schema.Struct({
 const Deleting = Schema.Struct({ at: Instant, id: UploadId, why: Deletion.fields.why });
 
 /**
- * What a Frontend is shown of an Upload: its record, and its link while there is a public
- * URL and it is not deleted.
+ * What a Frontend is shown of an Upload: its record, its link while there is a public URL
+ * and it is not deleted, and whether it is live and a read of the store confirmed its bytes
+ * are gone.
  */
 export interface Shown {
   readonly record: Recorded;
   readonly link: string | undefined;
+  readonly missing: boolean;
 }
 
 /**
@@ -254,6 +259,14 @@ export class Uploads extends Context.Service<
      */
     readonly changes: (after: number | undefined) => Stream.Stream<Changed>;
     /**
+     * The ids of every live Upload whose bytes a read of the store confirmed are gone,
+     * oldest first: as they are now, and then whole again each time they change. A read that
+     * finds the bytes, an upload that puts them again, and a change of the store's options
+     * each take the mark away, and a store that cannot be reached neither makes nor takes
+     * one. None is journaled, so after a restart each is learnt again on the next read.
+     */
+    readonly missing: Stream.Stream<readonly UploadId[]>;
+    /**
      * Stages a body, reads its type from its bytes, strips it if it is an image, puts it to
      * the store, and journals its `Uploaded`, in that order, with `uploads.maxSize` read once
      * as it begins. A body that passes it is cut off unread, and an image that cannot be
@@ -276,8 +289,9 @@ export class Uploads extends Context.Service<
     /**
      * An Upload's record, and how to read its bytes, or one range of them, for its link. A
      * deleted one is `NoSuchUpload`, as an id no Upload has, before the store is asked. Each
-     * read asks the store, and bytes it confirms are gone are `NoSuchUpload` too. Whether
-     * they are held is decided before any flows.
+     * read asks the store, and bytes it confirms are gone are `NoSuchUpload` too, and mark
+     * the Upload missing, as a read that finds them takes the mark away. Whether they are
+     * held is decided before any flows.
      */
     readonly open: (id: UploadId) => Effect.Effect<Opened, NoSuchUpload | ByteStoreUnavailable>;
     /**
@@ -512,6 +526,47 @@ const liveHas = (held: Held, hash: string) => {
 };
 
 /**
+ * The hashes a read of the store confirmed are gone from it, how many times the store has
+ * changed, and how many times each hash was put, so a read answered by a store since
+ * changed marks nothing and takes nothing away, and one begun before its own bytes were put
+ * again marks nothing.
+ */
+interface Marks {
+  readonly gone: HashSet.HashSet<Sha256>;
+  readonly store: number;
+  readonly puts: HashMap.HashMap<Sha256, number>;
+}
+
+/**
+ * What a read is answered against: the store it asked, and the puts of its hash then.
+ * @param marks - The marks as the read begins.
+ * @param hash - The hash it reads.
+ * @returns Them.
+ */
+const askedOf = (marks: Marks, hash: Sha256) => ({
+  puts: Option.getOrElse(HashMap.get(marks.puts, hash), () => 0),
+  store: marks.store,
+});
+
+/**
+ * The ids of the live Uploads whose bytes are gone, oldest first.
+ * @param held - The Uploads.
+ * @param gone - The hashes confirmed gone.
+ * @returns Them.
+ */
+const missingOf = (held: Held, gone: HashSet.HashSet<Sha256>): readonly UploadId[] =>
+  HashSet.isEmpty(gone)
+    ? []
+    : Chunk.toReadonlyArray(held.order).filter((id) => {
+        const { record } = HashMap.getUnsafe(held.byId, id);
+
+        return record.deleted === undefined && HashSet.has(gone, record.hash);
+      });
+
+const sameIds = (one: readonly UploadId[], other: readonly UploadId[]) =>
+  one.length === other.length && one.every((id, index) => id === other[index]);
+
+/**
  * The sequence of the latest Upload Change, or `0` with none.
  * @param held - The Uploads.
  * @returns It.
@@ -554,7 +609,50 @@ export const layerUploads = (dataDir: string) =>
       );
 
       const held = yield* SubscriptionRef.make(folded);
+
+      const marks = yield* SubscriptionRef.make<Marks>({
+        gone: HashSet.empty(),
+        puts: HashMap.empty(),
+        store: 0,
+      });
+
       const turn = yield* Semaphore.make(1);
+
+      // Bytes were put again, so they are held, and a read of them begun before this marks
+      // nothing.
+      const put = (hash: Sha256) =>
+        SubscriptionRef.update(marks, (now) => ({
+          ...now,
+          gone: HashSet.remove(now.gone, hash),
+          puts: HashMap.set(now.puts, hash, askedOf(now, hash).puts + 1),
+        }));
+
+      // The store moved, so nothing learnt of the one before holds, and a read it answers
+      // marks nothing and takes nothing away.
+      const moved = SubscriptionRef.update(marks, (now) => ({
+        gone: HashSet.empty(),
+        puts: now.puts,
+        store: now.store + 1,
+      }));
+
+      // A read found the bytes, so they are not missing, unless the store it asked has moved.
+      const found = (hash: Sha256, asked: ReturnType<typeof askedOf>) =>
+        SubscriptionRef.updateSome(marks, (now) =>
+          now.store === asked.store && HashSet.has(now.gone, hash)
+            ? Option.some({ ...now, gone: HashSet.remove(now.gone, hash) })
+            : Option.none()
+        );
+
+      // A read confirmed the bytes are gone, and neither a move of the store nor a put of
+      // these bytes came between its asking and its answer.
+      const lost = (hash: Sha256, asked: ReturnType<typeof askedOf>) =>
+        SubscriptionRef.updateSome(marks, (now) => {
+          const at = askedOf(now, hash);
+
+          return at.store === asked.store && at.puts === asked.puts && !HashSet.has(now.gone, hash)
+            ? Option.some({ ...now, gone: HashSet.add(now.gone, hash) })
+            : Option.none();
+        });
 
       const switchNow = owner.inForce.pipe(Effect.map(({ options }) => switchOf(options)));
 
@@ -589,8 +687,8 @@ export const layerUploads = (dataDir: string) =>
       // A link needs only the public URL, so it is shown while one is set, whether or not
       // new Uploads may be made, and until the Upload is deleted.
       const shown = (record: Recorded): Effect.Effect<Shown> =>
-        owner.inForce.pipe(
-          Effect.map(({ options }) => {
+        Effect.all([owner.inForce, SubscriptionRef.get(marks)]).pipe(
+          Effect.map(([{ options }, { gone }]) => {
             const publicUrl = options["uploads.publicUrl"];
 
             return {
@@ -598,6 +696,7 @@ export const layerUploads = (dataDir: string) =>
                 publicUrl === undefined || record.deleted !== undefined
                   ? undefined
                   : linkOf(publicUrl, record),
+              missing: record.deleted === undefined && HashSet.has(gone, record.hash),
               record,
             };
           })
@@ -673,6 +772,9 @@ export const layerUploads = (dataDir: string) =>
             return yield* Effect.die(new Error("the store kept other bytes than were meant"));
           }
 
+          // Every live Upload holding these bytes is served again.
+          yield* put(stored.hash);
+
           const kept: Kept = {
             at: Instant.make(yield* Clock.currentTimeMillis),
             hash: stored.hash,
@@ -685,7 +787,7 @@ export const layerUploads = (dataDir: string) =>
 
           yield* record(kept);
 
-          return { link: linkOf(now.publicUrl, kept), record: kept };
+          return { link: linkOf(now.publicUrl, kept), missing: false, record: kept };
         }).pipe(Effect.scoped, Effect.provideContext(provided));
 
       const open = (id: UploadId) =>
@@ -697,7 +799,7 @@ export const layerUploads = (dataDir: string) =>
             return yield* new NoSuchUpload();
           }
 
-          const found = kept.value.record;
+          const { record } = kept.value;
 
           const now = yield* switchNow;
 
@@ -707,12 +809,21 @@ export const layerUploads = (dataDir: string) =>
 
           const store = yield* storeOf(now.bucket);
 
+          // Only a store that answered says whether the bytes are held: one that could not
+          // be reached marks nothing, and takes no mark away.
           const opened: Opened = {
             read: (range) =>
-              store
-                .read(found.hash, range)
-                .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchUpload()))),
-            record: found,
+              Effect.gen(function* () {
+                const asked = askedOf(yield* SubscriptionRef.get(marks), record.hash);
+
+                return yield* store.read(record.hash, range).pipe(
+                  Effect.tap(() => found(record.hash, asked)),
+                  Effect.catchTag("ByteStoreNotFound", () =>
+                    Effect.andThen(lost(record.hash, asked), Effect.fail(new NoSuchUpload()))
+                  )
+                );
+              }),
+            record,
           };
 
           return opened;
@@ -850,6 +961,20 @@ export const layerUploads = (dataDir: string) =>
 
       yield* expire.pipe(Effect.repeat(Schedule.spaced(expiryEvery)), Effect.forkScoped);
 
+      // What was learnt of one store says nothing of another, so a change of where the
+      // bucket is, or of its keys, forgets it, and Uploads going off and on again too.
+      yield* owner.changes.pipe(
+        Stream.map(({ options }) => {
+          const now = switchOf(options);
+
+          return now._tag === "On" ? JSON.stringify(now.bucket) : "";
+        }),
+        Stream.changes,
+        Stream.drop(1),
+        Stream.runForEach(() => moved),
+        Effect.forkScoped
+      );
+
       const page = (after: UploadId | undefined, limit: number, withDeleted: boolean) =>
         Effect.gen(function* () {
           const all = yield* SubscriptionRef.get(held);
@@ -905,6 +1030,13 @@ export const layerUploads = (dataDir: string) =>
             )
           ),
         holds: (hash: Sha256) => Effect.map(SubscriptionRef.get(held), (all) => liveHas(all, hash)),
+        missing: Stream.zipLatest(
+          SubscriptionRef.changes(held),
+          SubscriptionRef.changes(marks)
+        ).pipe(
+          Stream.map(([all, { gone }]) => missingOf(all, gone)),
+          Stream.changesWith(sameIds)
+        ),
         open,
         page,
         rename,

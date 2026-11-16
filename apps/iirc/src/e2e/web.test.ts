@@ -8,6 +8,7 @@ import {
   freePort,
   holdsBytes,
   loopback,
+  loseBytes,
   seedUpload,
   startErgo,
   startMinio,
@@ -19,7 +20,14 @@ import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { networkRow, run, solidPng, startDaemon as startWith, watchedPage } from "./daemon.ts";
+import {
+  networkRow,
+  run,
+  screenshot,
+  solidPng,
+  startDaemon as startWith,
+  watchedPage,
+} from "./daemon.ts";
 import { privateNetwork as sharedNetwork } from "./testing/network.ts";
 import type { Preparing } from "./testing/network.ts";
 
@@ -72,21 +80,21 @@ const nordAlacritty = readFileSync(
 );
 
 /** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
+/** What the end-to-end run reads of an Upload. */
+const UploadRead = Schema.Struct({
+  deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
+  hash: Schema.String,
+  id: Schema.String,
+  link: Schema.NullOr(Schema.String),
+  missing: Schema.optionalKey(Schema.Boolean),
+  safeName: Schema.String,
+});
+
+const decodeUpload = Schema.decodeUnknownSync(Schema.fromJsonString(UploadRead));
+
 /** What the end-to-end run reads of a page of Uploads. */
 const decodeUploads = Schema.decodeUnknownSync(
-  Schema.fromJsonString(
-    Schema.Struct({
-      uploads: Schema.Array(
-        Schema.Struct({
-          deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
-          hash: Schema.String,
-          id: Schema.String,
-          link: Schema.NullOr(Schema.String),
-          safeName: Schema.String,
-        })
-      ),
-    })
-  )
+  Schema.fromJsonString(Schema.Struct({ uploads: Schema.Array(UploadRead) }))
 );
 
 const decodeHead = Schema.decodeUnknownSync(
@@ -4800,6 +4808,147 @@ describe("the web frontend on iirc daemon --web", () => {
           });
         } finally {
           await stopped();
+        }
+      } finally {
+        await minio.stop();
+      }
+    }
+  );
+
+  it(
+    "marks an Upload whose bytes vanished from the Store as missing in the list, live, and clears it when the same bytes are uploaded again",
+    { timeout: 120_000 },
+    async () => {
+      const dataDir = path.join(directory, "vanishing");
+      const minio: Minio = await startMinio();
+
+      // MinIO goes with the run, however far its setup got.
+      try {
+        const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+        const key = created.stdout.trim();
+        const listen = freePort();
+        const lost = solidPng(8, [208, 96, 40]);
+        const kept = solidPng(8, [40, 96, 208]);
+        const started = await startDaemon(dataDir);
+
+        try {
+          const api = async (
+            method: string,
+            route: string,
+            body: string | Uint8Array<ArrayBuffer> | null = null
+          ) =>
+            await fetch(`${started.base}/api${route}`, {
+              body,
+              headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+              method,
+            });
+
+          const options = {
+            "store.s3.accessKeyId": "minio-key",
+            "store.s3.bucket": minio.bucket,
+            "store.s3.endpoint": minio.endpoint,
+            "store.s3.region": minio.region,
+            "store.s3.secretAccessKey": "minio-secret",
+            "uploads.listen": `${loopback}:${listen}`,
+            "uploads.publicUrl": `http://${loopback}:${listen}`,
+          };
+
+          await api("PUT", "/credentials/minio-key", JSON.stringify({ value: minio.accessKeyId }));
+          await api(
+            "PUT",
+            "/credentials/minio-secret",
+            JSON.stringify({ value: minio.secretAccessKey })
+          );
+
+          for (const [option, value] of Object.entries(options)) {
+            // oxlint-disable-next-line no-await-in-loop -- set in order
+            await api("PUT", `/options/${option}`, JSON.stringify({ value }));
+          }
+
+          const first = await api("POST", "/uploads?name=lost.png", lost);
+          const second = await api("POST", "/uploads?name=kept.png", kept);
+
+          expect([first.status, second.status]).toStrictEqual([200, 200]);
+
+          const lostUpload = decodeUpload(await first.text());
+          const link = `http://${loopback}:${listen}/${lostUpload.id}/${lostUpload.safeName}`;
+
+          const { page, problems } = await watchedPage(browser);
+
+          await page.goto(started.base);
+          await page.getByLabel("Key").fill(key);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await page.getByRole("button", { exact: true, name: "Options" }).click();
+
+          const uploads = page.getByRole("region", { name: "Uploads" });
+          const rows = uploads.getByRole("listitem");
+          const lostRow = rows.filter({ hasText: "lost.png" });
+          const keptRow = rows.filter({ hasText: "kept.png" });
+
+          await lostRow.waitFor();
+          await keptRow.waitFor();
+          await screenshot(page, "156-before.png");
+
+          const copyBefore = await lostRow.getByRole("button", { name: /^Copy the link/u }).count();
+
+          // Taken out of the bucket behind the Daemon's back, which no Change says.
+          await loseBytes(minio, minio.bucket, lostUpload.hash);
+
+          // The read of the link finds them gone, which marks the Upload and tells the page
+          // by the stream, so it needs no reload.
+          const gone = await fetch(link);
+
+          await gone.arrayBuffer();
+          await lostRow.getByText("missing").waitFor();
+          await screenshot(page, "156-after.png");
+
+          const marked = {
+            copy: await lostRow.getByRole("button", { name: /^Copy the link/u }).count(),
+            keptMissing: await keptRow.getByText("missing").count(),
+            lostOffers: await lostRow.getByRole("button").allTextContents(),
+          };
+
+          const record = async () => {
+            const read = await api("GET", "/uploads");
+            const { uploads: held } = decodeUploads(await read.text());
+
+            return held.find((upload) => upload.id === lostUpload.id);
+          };
+
+          const recordBefore = await record();
+
+          // The same bytes again: the Upload's bytes are back, so it is no longer missing.
+          const again = await api("POST", "/uploads?name=lost-again.png", lost);
+
+          await uploads.getByText("missing").waitFor({ state: "detached" });
+
+          const back = await fetch(link);
+          const recordAfter = await record();
+
+          expect({
+            again: again.status,
+            backBytes: [back.status, new Uint8Array(await back.arrayBuffer())],
+            copyBefore,
+            gone: gone.status,
+            marked,
+            missingRecord: recordBefore?.missing,
+            problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+            recordAfter: recordAfter?.missing,
+            storeHolds: await holdsBytes(minio, minio.bucket, lostUpload.hash),
+          }).toStrictEqual({
+            again: 200,
+            backBytes: [200, lost],
+            copyBefore: 1,
+            gone: 404,
+            marked: { copy: 0, keptMissing: 0, lostOffers: ["Rename", "Delete"] },
+            missingRecord: true,
+            problems: [],
+            recordAfter: undefined,
+            storeHolds: true,
+          });
+        } finally {
+          started.child.kill("SIGTERM");
+          await started.child.exited;
         }
       } finally {
         await minio.stop();
