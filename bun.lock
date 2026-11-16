@@ -219,8 +219,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
-        "@iirc/api": "workspace:*",
-        "@iirc/byte-store": "workspace:*",
         "@iirc/preview-cache": "workspace:*",
         "effect": "catalog:",
       },
