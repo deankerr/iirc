@@ -197,6 +197,15 @@ describe("the fake link fetch", () => {
       });
     });
 
+    it("answers a recorded 416 to a stream whatever its type, as the guard does", async () => {
+      const result = await streaming(
+        { headers: { "content-range": "bytes */100" }, status: 416, type: "text/html" },
+        { start: 500 }
+      );
+
+      expect(result).toMatchObject({ headers: { "content-range": "bytes */100" }, status: 416 });
+    });
+
     it("answers no range with the whole body and the recorded status", async () => {
       const result = await streaming({ body: bytes, type: "video/mp4" });
 

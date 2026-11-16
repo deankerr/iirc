@@ -162,7 +162,10 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
   const content = contentOf(recorded);
   const answeredAs = recorded.link === undefined ? link : normalised(recorded.link);
   const declared = recorded.type.split(";")[0]?.trim().toLowerCase() ?? "";
-  const type = takes[purpose.kind](declared);
+
+  // A stream's 416 carries no media, so its type is taken as it is, as the guard takes it.
+  const type =
+    purpose.kind === "stream" && recorded.status === 416 ? declared : takes[purpose.kind](declared);
 
   if (type === undefined) {
     return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));

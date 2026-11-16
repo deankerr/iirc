@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib";
 import { limits } from "@iirc/link-fetch";
 import type { Purpose } from "@iirc/link-fetch";
 import { loopbackPolicy } from "@iirc/link-fetch/testing";
-import { Effect, Schedule, Stream } from "effect";
+import { Effect, Option, Schedule, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
@@ -1002,6 +1002,46 @@ describe("what is sent", () => {
     );
 
     expect(headers?.range).toBe("bytes=500-");
+  });
+
+  it.each([
+    ["no type", {}],
+    ["an HTML type", { "content-type": "text/html" }],
+  ])("a stream's 416 with %s is answered with its Content-Range", async (_, type) => {
+    const { outcome } = await sent({ kind: "stream", range: { start: 5000 } }, (__, response) => {
+      response.writeHead(416, { "content-range": "bytes */1000", ...type });
+      response.end();
+    });
+
+    expect(outcome).toMatchObject({
+      answer: { headers: { "content-range": "bytes */1000" }, status: 416 },
+    });
+  });
+
+  it("a stream that declares more than its cap is answered, to be cut off as it streams", async () => {
+    const answered = await run(
+      Effect.gen(function* () {
+        const site = yield* serve((_, response) => {
+          response.writeHead(200, {
+            "content-length": String(limits.stream + 1),
+            "content-type": "video/mp4",
+          });
+          response.write("....");
+        });
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(site.port),
+          version: "1.2.3",
+        });
+
+        const answer = yield* service.fetch(`http://127.0.0.1:${site.port}/`, { kind: "stream" });
+        const first = yield* Stream.runHead(answer.body);
+
+        return { first: Option.getOrUndefined(first)?.length, status: answer.status };
+      }).pipe(Effect.scoped)
+    );
+
+    expect(answered).toStrictEqual({ first: 4, status: 200 });
   });
 });
 

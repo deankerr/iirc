@@ -21,7 +21,7 @@ Production gives the version alone, so it fetches under the fixed policy, resolv
 - **Redirects are followed by hand,** at most three. Each `Location` is resolved against the link that redirected, by name, then parsed, checked, and pinned as a new link. A fourth is refused, and a redirect's body is never read.
 - **`proxy: false` always,** so `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` are ignored.
 - **What is sent:** `User-Agent: iirc/<version> (+https://github.com/deankerr/iirc) bot`, an `Accept` for the purpose, `Accept-Language: en, *;q=0.5`, and never a cookie or a `Referer`. A stream asks for its bytes as the host keeps them, with one `Range` when it has one, and a `206` is answered as it came.
-- **The body is read as a stream and never whole.** Bun decompresses it, and the bounds count what it gives. An image's first KiB is read before it is answered, to match it to its header: a magic number, or for an SVG a root `<svg` element after any XML declaration, comments, and DOCTYPE. A declared length over the bound, of bytes not compressed, is refused before any byte is read.
+- **The body is read as a stream and never whole.** Bun decompresses it, and the bounds count what it gives. An image's first KiB is read before it is answered, to match it to its header: a magic number, or for an SVG a root `<svg` element after any XML declaration, comments, and DOCTYPE. A declared length over the bound, of bytes not compressed, is refused before any byte is read, except a stream's, which is cut off at its bound as it streams.
 
 ## Failure
 
