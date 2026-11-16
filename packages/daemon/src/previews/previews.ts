@@ -286,8 +286,11 @@ export const layerPreviews = Layer.effect(Previews)(
           }
 
           const direct = summary.value.kind === "Direct";
+          const { ours, text } = item.content;
+          // What is shown is the echo's text once the Ircd confirmed it, which may differ from ours.
+          const shown = ours?.delivery._tag === "Confirmed" ? ours.delivery.text : text;
 
-          return yield* Effect.forEach(previewableLinksOf(item.content.text), (found) =>
+          return yield* Effect.forEach(previewableLinksOf(shown), (found) =>
             stateOf(found.href, direct)
           );
         }),

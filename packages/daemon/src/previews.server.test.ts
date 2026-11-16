@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
 import {
+  heard,
   layerWorld,
   makeKey,
   makeWorld,
@@ -209,6 +210,23 @@ const messages = (served: Served, count: number, kind: "Channel" | "Direct" = "C
   }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie);
 
 /**
+ * Our own Message, once the Ircd has confirmed it with text of its own.
+ * @param served - The server.
+ * @returns Its place.
+ */
+const confirmed = (served: Served) =>
+  Effect.gen(function* () {
+    const places = yield* messages(served, 1);
+    const [place] = places;
+
+    const window = yield* bodyOf(
+      yield* served.request(`/api/timelines/${place?.timeline}?limit=50`)
+    );
+
+    return window.includes('"Confirmed"') ? places : yield* new NotYet();
+  }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie);
+
+/**
  * Asks for a Message's Previews.
  * @param served - The server.
  * @param place - The Message's place.
@@ -319,6 +337,59 @@ describe("Previews over a real server", () => {
     });
     expect(result.after[0]?.id).toMatch(/^[0-9a-f]{32}$/u);
   });
+
+  it("previews the links of the echo's text, not ours, for a Message Self said and the Ircd confirmed", async () => {
+    const result = await run(
+      { "https://cats.example/": cats, "https://ours.example/": cats },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setPreviews(served, "links only");
+
+          const configured = yield* served.request("/api/networks/libera", {
+            method: "PUT",
+            ...json(floor),
+          });
+
+          expect(configured.status).toBe(200);
+          const call = yield* served.world.memory.ircd.accept;
+
+          yield* call.open;
+          yield* heard(call);
+          yield* heard(call);
+          yield* heard(call);
+          yield* say(call, ":irc.test CAP * LS :batch echo-message labeled-response");
+          yield* heard(call);
+          yield* say(call, ":irc.test CAP * ACK :batch echo-message labeled-response");
+          yield* heard(call);
+          yield* say(call, ":irc.test 001 iirc :Welcome");
+          yield* say(call, ":iirc!u@h JOIN #iirc");
+
+          const said = yield* served.request("/api/networks/libera/say", {
+            method: "POST",
+            ...json({ kind: "Privmsg", target: "#iirc", text: "see https://ours.example/" }),
+          });
+
+          expect(said.status).toBe(200);
+          let got = yield* heard(call);
+
+          while (!got.startsWith("@label=")) {
+            got = yield* heard(call);
+          }
+
+          const [tags = ""] = got.split(" ");
+
+          yield* say(call, `${tags} :iirc!u@h PRIVMSG #iirc :see https://cats.example/`);
+
+          const [place] = yield* confirmed(served);
+
+          return (yield* settled(served, place ?? { position: "", text: "", timeline: "" })).map(
+            (one) => one.link
+          );
+        })
+    );
+
+    expect(result).toStrictEqual(["https://cats.example/"]);
+  }, 20_000);
 
   it("gives three items for a Message of four links, in its order, each fetched once", async () => {
     const links = [
