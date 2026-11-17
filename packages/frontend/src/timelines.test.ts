@@ -2945,6 +2945,27 @@ describe("the Panes", () => {
     });
   });
 
+  it("draws an empty Pane as a wait while a kept layout waits, and as empty once it is let go", () => {
+    const layout = single({ ...emptyView, open: one });
+
+    // The Timelines are not read yet, so the layout kept waits.
+    const waiting = reduceTimelines(timelinesWith(windowCap), { _tag: "Restore", layout });
+
+    // The Owner went elsewhere first, so the layout kept is let go at once.
+    const letGo = reduceTimelines(
+      { ...following(), layout: single(emptyView) },
+      { _tag: "Restore", layout }
+    );
+
+    expect({
+      letGo: [opened(letGo)._tag, paneName(letGo)],
+      waiting: [opened(waiting)._tag, paneName(waiting)],
+    }).toStrictEqual({
+      letGo: ["Closed", "empty"],
+      waiting: ["Restoring", "…"],
+    });
+  });
+
   it("refuses a kept layout that is not one, and opens a Timeline kept twice once", () => {
     const twice = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(3))));
 

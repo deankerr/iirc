@@ -886,6 +886,8 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
       return <p className={styles.placeholder}>The Daemon has no such Timeline.</p>;
     }
 
+    // The layout this device kept is not taken yet, so the Pane is not known to be empty.
+    case "Restoring":
     case "Reading": {
       return <p className={styles.placeholder}>Reading…</p>;
     }

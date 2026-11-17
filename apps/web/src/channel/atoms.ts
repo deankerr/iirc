@@ -47,7 +47,10 @@ const paneChannel = Atom.family((pane: string) =>
   Atom.make((get) => {
     const shown = opened(get(timelinesState), pane);
 
-    return channelIn(get(channelState), shown._tag === "Closed" ? undefined : shown.timeline);
+    return channelIn(
+      get(channelState),
+      shown._tag === "Closed" || shown._tag === "Restoring" ? undefined : shown.timeline
+    );
   })
 );
 

@@ -340,5 +340,10 @@ export const lookingAt = (state: Timelines, page: Page, timeline: Timeline["id"]
     const shown = opened(state, pane);
     const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
 
-    return view?.main._tag === "Timeline" && shown._tag !== "Closed" && shown.timeline === timeline;
+    return (
+      view?.main._tag === "Timeline" &&
+      shown._tag !== "Closed" &&
+      shown._tag !== "Restoring" &&
+      shown.timeline === timeline
+    );
   });
