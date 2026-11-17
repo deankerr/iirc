@@ -479,6 +479,48 @@ export const PreviewsAnimate = Schema.Boolean.annotate({
 export type PreviewsAnimate = typeof PreviewsAnimate.Type;
 
 /**
+ * How rich a page's Preview looks: `line`, its site and title alone; `thumbnail`, its text
+ * with its image small on the right; or `card`, its text with its image below. A link that
+ * is itself an image or a video, a poster, and a player are drawn whole in every style. It
+ * is a device's own to choose, since a device draws it.
+ */
+export const PreviewsStyle = Schema.Literals(["line", "thumbnail", "card"]).annotate({
+  default: "thumbnail",
+  description:
+    "How a page's Preview looks: line, its site and title alone; thumbnail, with its image small on the right; or card, with its description and its image below. Images, videos and players show in every style.",
+});
+
+/** The decoded form of {@link PreviewsStyle}. */
+export type PreviewsStyle = typeof PreviewsStyle.Type;
+
+/**
+ * Whether a Message's Previews start folded: `open`, each drawn whole; `summary`, each with
+ * more to show folded to its one line until pressed; or `chip`, all of them one `[+n]`,
+ * which a press opens. A device chooses its own.
+ */
+export const PreviewsFolded = Schema.Literals(["open", "summary", "chip"]).annotate({
+  default: "summary",
+  description:
+    "Whether Previews start folded: open, drawn whole; summary, each folded to its site and title until pressed; or chip, a Message's Previews as one [+n] until pressed.",
+});
+
+/** The decoded form of {@link PreviewsFolded}. */
+export type PreviewsFolded = typeof PreviewsFolded.Type;
+
+/**
+ * How tall a Preview's image, video, poster, or player is drawn at most: `small`, 160
+ * pixels; `medium`, 260; or `large`, 400. A device chooses its own.
+ */
+export const PreviewsMediaHeight = Schema.Literals(["small", "medium", "large"]).annotate({
+  default: "medium",
+  description:
+    "How tall a Preview's image, video or player is at most: small, 160 pixels; medium, 260; or large, 400.",
+});
+
+/** The decoded form of {@link PreviewsMediaHeight}. */
+export type PreviewsMediaHeight = typeof PreviewsMediaHeight.Type;
+
+/**
  * Each Timeline's own choice of whether the Daemon previews its links, by its id, over
  * `ui.previews`: `off`, `links only`, or `on`. A Timeline it does not name follows
  * `ui.previews`, and an entry for a Timeline that no longer exists does nothing. A Direct
@@ -550,7 +592,10 @@ export const UiOptions = Schema.Struct({
   light: themeForScheme("light", "solarized-light"),
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
+  "previews.folded": PreviewsFolded,
+  "previews.mediaHeight": PreviewsMediaHeight,
   "previews.players": PreviewsPlayers,
+  "previews.style": PreviewsStyle,
   "previews.timelines": PreviewsByTimeline,
   read: ReadRule,
   size: TextSize,
