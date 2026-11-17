@@ -18,7 +18,7 @@ import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
-import { activityShown, leadingShown, sizeShown } from "../options/ui.ts";
+import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
@@ -254,6 +254,7 @@ const Lines = ({
   const activity = useAtomValue(activityShown);
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);
+  const line = useAtomValue(lineShown);
   const cap = useAtomValue(windowCapOf);
   // Whether the page before can be read without asking, as scrolling near the top, or a
   // view that cannot be scrolled, reads it. Where it cannot, the view offers to read it on
@@ -794,6 +795,8 @@ const Lines = ({
     <div
       aria-label={label}
       className={styles.scroller}
+      // The rows' CSS reads this, so every row is one run of text, as a narrow Pane draws it.
+      data-line={line === "inline" ? line : undefined}
       onScroll={(event) => {
         const element = event.currentTarget;
 

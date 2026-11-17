@@ -156,12 +156,20 @@
   outline: var(--border-width) solid var(--color-focus);
 }
 
-/* With no columns, a page's image is smaller. */
+/*
+ * With no columns, a page's image is smaller: in a narrow Timeline, and under `ui.line`
+ * inline, as the Timeline's `data-line` says. The two rules must stay alike.
+ */
 @container (max-width: 36em) {
   .thumbnail {
     width: 3em;
     height: 3em;
   }
+}
+
+:global([data-line="inline"]) .thumbnail {
+  width: 3em;
+  height: 3em;
 }
 
 @media (pointer: coarse) {

@@ -45,6 +45,7 @@ import {
   NickSuffix,
   nickSuffixMaxLength,
   SpellcheckShown,
+  LineLayout,
   ReadRule,
 } from "./ui.ts";
 import { UploadId, UploadName } from "./uploads.ts";
@@ -475,6 +476,7 @@ describe("the contract", () => {
         font: "system",
         leading: 1.45,
         light: "light",
+        line: "columns",
         previews: "off",
         "previews.animate": false,
         "previews.folded": "summary",
@@ -507,6 +509,7 @@ describe("the contract", () => {
         "font",
         "leading",
         "light",
+        "line",
         "previews",
         "previews.animate",
         "previews.folded",
@@ -670,6 +673,20 @@ describe("the contract", () => {
     ).toStrictEqual(["shown", "latest", "asked", null, null, null, null]);
   });
 
+  it("takes a line's layout as columns or inline, columns to start, and nothing else", () => {
+    const layout = Schema.decodeUnknownOption(LineLayout);
+
+    expect({
+      layout: ["columns", "inline", "Inline", "stacked", "", null].map((each) =>
+        Option.getOrNull(layout(each))
+      ),
+      start: uiDefaults.line,
+    }).toStrictEqual({
+      layout: ["columns", "inline", null, null, null, null],
+      start: "columns",
+    });
+  });
+
   it("takes the Composer's habits: what Enter does, spellcheck, and a short suffix with no control character", () => {
     const enter = Schema.decodeUnknownOption(EnterKey);
     const spellcheck = Schema.decodeUnknownOption(SpellcheckShown);
@@ -725,12 +742,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },
