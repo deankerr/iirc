@@ -707,7 +707,7 @@ const escaped = (
 ): Completed => {
   const { phase } = state;
 
-  if (phase._tag === "Listed" && phase.place === event.place && phase.index !== undefined) {
+  if (phase._tag === "Listed" && phase.place === event.place) {
     const restored = typedOf(phase.spot);
 
     return {

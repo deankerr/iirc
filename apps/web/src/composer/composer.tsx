@@ -20,7 +20,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
 import type { CommandContext } from "@iirc/frontend/commands";
-import { announced, completes, listOf, owns } from "@iirc/frontend/completion";
+import { completes } from "@iirc/frontend/completion";
 import type { List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
@@ -52,7 +52,7 @@ import {
   takeUp,
 } from "./atoms.ts";
 import { completionState } from "./completion-state.ts";
-import { escapeCompletion, moved, pick, sourcesAt, tab, typed } from "./completion.ts";
+import { completionShown, escapeCompletion, moved, pick, tab, typed } from "./completion.ts";
 import { PendingUploads } from "./pending-uploads.tsx";
 import { caretAsked } from "./uploading-state.ts";
 import { addFiles } from "./uploading.ts";
@@ -398,7 +398,7 @@ const Composer = ({
   const restore = useAtomSet(escapeCompletion);
   const pickNow = useAtomSet(pick);
   const moveNow = useAtomSet(moved);
-  const sources = useAtomValue(sourcesAt(timeline));
+  const { list, owned, said } = useAtomValue(completionShown(timeline));
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
   const dropNow = useAtomSet(dropReply);
@@ -433,8 +433,6 @@ const Composer = ({
   const listId = `${id}-list`;
   const { answering, confirming, notice } = draft;
   // Whether a list is shown and whether completion owns the keys are one: what the core says.
-  const list = listOf(completion, timeline, draft.text, sources);
-  const owned = owns(completion, timeline, draft.text, sources);
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
   // end of its draft, which may have just been replaced.
@@ -484,7 +482,8 @@ const Composer = ({
     const changed = () => {
       const element = input.current;
 
-      if (element !== null) {
+      // A selection anywhere else, such as a drag across a Timeline, moves no caret here.
+      if (element !== null && document.activeElement === element) {
         moveNow({
           end: element.selectionEnd,
           place: timeline,
@@ -805,7 +804,7 @@ const Composer = ({
       )}
       {/* A status, polite, present while the composer is, so what the list holds is announced. */}
       <output aria-live="polite" className={styles.status}>
-        {announced(completion, timeline, draft.text, sources)}
+        {said}
       </output>
       <div className={styles.line}>
         {before}

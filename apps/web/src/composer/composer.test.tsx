@@ -192,8 +192,10 @@ const pressIn = async (container: HTMLElement, key: string, held: KeyboardEventI
  * @param container - The page.
  * @param caret - Where it goes.
  */
+// Only the composer in focus has a caret the Owner can move.
 const moveCaret = async (container: HTMLElement, caret: number) => {
   await act(async () => {
+    composerOf(container).focus();
     composerOf(container).setSelectionRange(caret, caret);
     document.dispatchEvent(new Event("selectionchange"));
     await Promise.resolve();

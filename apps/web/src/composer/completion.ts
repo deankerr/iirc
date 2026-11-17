@@ -8,13 +8,16 @@
  */
 import type { NetworkId } from "@iirc/api";
 import {
+  announced,
   chantypesWanted,
+  listOf,
   nicksLimit,
   nicksWanted,
+  owns,
   reduceCompletion,
   sourcesOf,
 } from "@iirc/frontend/completion";
-import type { Completed, CompletionEvent, Sources } from "@iirc/frontend/completion";
+import type { Completed, CompletionEvent, List, Sources } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { listed } from "@iirc/frontend/options";
@@ -29,12 +32,12 @@ import { optionsState, signedOut } from "../options/atoms.ts";
 import { uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
-import { composerState, edited, placeOf, setComposers } from "./atoms.ts";
+import { composerState, draft, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 
 /** What a word typed at a place can be completed from, as things are now. */
-export const sourcesAt = Atom.family((place: Place) =>
+const sourcesAt = Atom.family((place: Place) =>
   Atom.make((get): Sources =>
     sourcesOf(
       get(timelinesState),
@@ -44,6 +47,38 @@ export const sourcesAt = Atom.family((place: Place) =>
       get(uiInEffect).suffix
     )
   )
+);
+
+/** What a composer shows of completion: the list, whether completion owns the keys, and what a screen reader is told. */
+export interface CompletionShown {
+  readonly list: List | undefined;
+  readonly owned: boolean;
+  readonly said: string;
+}
+
+const nothingShown: CompletionShown = { list: undefined, owned: false, said: "" };
+
+/**
+ * What a composer shows of completion, read from the sources only while completion is
+ * under way, so a Message arriving with nothing being completed re-renders nothing.
+ */
+export const completionShown = Atom.family((place: Place) =>
+  Atom.make((get): CompletionShown => {
+    const state = get(completionState);
+
+    if (state.phase._tag === "Idle") {
+      return nothingShown;
+    }
+
+    const { text } = get(draft(place));
+    const sources = get(sourcesAt(place));
+
+    return {
+      list: listOf(state, place, text, sources),
+      owned: owns(state, place, text, sources),
+      said: announced(state, place, text, sources),
+    };
+  })
 );
 
 /**
