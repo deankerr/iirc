@@ -1,5 +1,5 @@
 /**
- * The Uploads, listed beside the options, newest first, the deleted ones too while "Show
+ * The Uploads view, in a Pane of its own: the Uploads, newest first, the deleted ones too while "Show
  * deleted" is on, muted, saying expired or deleted and when, with nothing to do to them
  * and an icon for a thumbnail, as their bytes are gone: an image the browser draws as a
  * thumbnail of its own bytes, scaled down and fetched only once near the screen, an icon
@@ -12,11 +12,15 @@
  * would only answer not found, leaving the Owner to rename it or delete its record. The link
  * is made from the public URL in force as it is drawn, and while none is set the list says
  * so once rather than offering a link that would not work. A rename or a delete waiting on
- * the Daemon shows on its button, and one that failed says why in its row.
+ * the Daemon shows on its button, and one that failed says why in its row. Until the first
+ * page is read, it says it is being read, never that nothing was uploaded, and until the
+ * options are read, it says nothing of the public URL. Escape, or the close button on its
+ * Pane's status bar, shows what the Pane showed before. Where the view is wide, a row lies
+ * on one line.
  *
  * @packageDocumentation
  */
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem, Upload } from "@iirc/api";
 import {
   deletedText,
@@ -27,13 +31,17 @@ import {
   sizeText,
   thumbnailed,
 } from "@iirc/frontend/uploads";
-import { useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import { useContext, useRef, useState } from "react";
 
+import { composerFocus } from "../composer/atoms.ts";
+import { PaneBar } from "../panes/pane-bar.tsx";
 import { jumpTo } from "../search/atoms.ts";
-import { Button, ToggleButton } from "../ui/button.tsx";
+import { Button, IconButton, ToggleButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 import { Icon } from "../ui/icon.tsx";
+import { closeUploads } from "./atoms.ts";
 import { DeleteDialog } from "./delete-dialog.tsx";
 import { RenameField } from "./rename-field.tsx";
 import { timeShown } from "./ui.ts";
@@ -45,13 +53,14 @@ import {
   deletedShown,
   moreUploads,
   publicUrl,
+  publicUrlUnset,
   renameUpload,
   showDeleted,
   uploadEditsState,
   uploadMissing,
 } from "./uploads.ts";
 
-import styles from "./uploads-list.module.css";
+import styles from "./uploads-view.module.css";
 
 /**
  * Where an Upload's bytes are read on the API's own origin, under the page's sign-in.
@@ -256,20 +265,53 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
 };
 
 /**
- * The Uploads, newest first, with "More" while more follow.
- * @returns The list.
+ * The Uploads view, in a Pane.
+ * @param props - The Pane.
+ * @returns The view.
  */
-export const UploadsList = () => {
+export const UploadsView = ({ pane }: { readonly pane: string }) => {
   const { next, uploads } = useAtomValue(uploadsState);
   const base = useAtomValue(publicUrl);
+  const unset = useAtomValue(publicUrlUnset);
   const more = useAtomSet(moreUploads);
   const withDeleted = useAtomValue(deletedShown);
   const showWithDeleted = useAtomSet(showDeleted);
+  const close = useAtomSet(closeUploads);
+  const registry = useContext(RegistryContext);
+
+  // Closing shows what the Pane showed before, and gives the composer the focus, as closing
+  // the options does.
+  const closeNow = () => {
+    close();
+    registry.set(composerFocus, registry.get(composerFocus) + 1);
+  };
+
+  // Escape closes the view, unless something in it took it first: a rename field, or the
+  // question about a delete.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      closeNow();
+    }
+  };
 
   return (
-    <section aria-label="Uploads" className={styles.view}>
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
+    <section aria-label="Uploads" className={styles.view} onKeyDown={onKeyDown}>
+      <PaneBar
+        end={
+          <IconButton
+            icon="close"
+            keys="Esc"
+            label="Close the Uploads"
+            onPress={closeNow}
+            size="small"
+          />
+        }
+        name="uploads"
+        pane={pane}
+      />
       <div className={styles.head}>
-        <h2 className={styles.heading}>Uploads</h2>
         <ToggleButton
           isSelected={withDeleted}
           onChange={showWithDeleted}
@@ -278,29 +320,32 @@ export const UploadsList = () => {
         >
           Show deleted
         </ToggleButton>
+        {unset ? (
+          <p className={styles.muted}>No link to copy until uploads.publicUrl is set.</p>
+        ) : null}
       </div>
-      {base === undefined ? (
-        <p className={styles.muted}>No link to copy until uploads.publicUrl is set.</p>
-      ) : null}
-      {next !== undefined && uploads.length === 0 ? (
-        <p className={styles.muted}>Nothing uploaded yet.</p>
-      ) : null}
-      <ul aria-label="Uploads" className={styles.list}>
-        {uploads.map((upload) => (
-          <Row key={upload.id} link={linkOf(base, upload)} upload={upload} />
-        ))}
-      </ul>
-      {next === undefined || next === null ? null : (
-        <Button
-          className={styles.more}
-          onPress={() => {
-            more(undefined);
-          }}
-          size="small"
-        >
-          More
-        </Button>
-      )}
+      <div className={styles.body}>
+        {next === undefined ? <p className={styles.muted}>Reading…</p> : null}
+        {next !== undefined && uploads.length === 0 ? (
+          <p className={styles.muted}>Nothing uploaded yet.</p>
+        ) : null}
+        <ul aria-label="Uploads" className={styles.list}>
+          {uploads.map((upload) => (
+            <Row key={upload.id} link={linkOf(base, upload)} upload={upload} />
+          ))}
+        </ul>
+        {next === undefined || next === null ? null : (
+          <Button
+            className={styles.more}
+            onPress={() => {
+              more(undefined);
+            }}
+            size="small"
+          >
+            More
+          </Button>
+        )}
+      </div>
       <DeleteDialog />
     </section>
   );

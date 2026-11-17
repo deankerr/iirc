@@ -325,6 +325,18 @@ describe("reading a line", () => {
     ]);
   });
 
+  it("shows the Uploads with `/uploads`, from anywhere, and takes nothing after it", () => {
+    expect([
+      interpret("/uploads", nowhere),
+      interpret("/UPLOADS ", inChannel),
+      message("/uploads all", inChannel),
+    ]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "OpenUploads" }] },
+      { _tag: "Parsed", value: [{ _tag: "OpenUploads" }] },
+      "/uploads takes nothing after it.",
+    ]);
+  });
+
   it("refuses an unknown command, and a bare `/`, sending nothing", () => {
     expect([message("/frobnicate x", inChannel), message("/ x", inChannel)]).toStrictEqual([
       "There is no command /frobnicate. Start with // to say text that begins with /.",
@@ -456,6 +468,7 @@ describe("reading a line", () => {
       "timeline.query": "Required",
       "timeline.read": "Optional",
       "timeline.unread": "None",
+      "uploads.open": "None",
     });
   });
 });

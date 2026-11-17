@@ -10,8 +10,7 @@
  * with its Timelines kept, to drop them. Escape anywhere else in it, or the close button on
  * its Pane's status bar, shows what the Pane showed before. An edit is a plain,
  * uncontrolled input read once when Enter is pressed. A Credential's value is never edited
- * here. The Uploads are listed beside the options where the view is wide, and under them
- * where it is not.
+ * here.
  *
  * @packageDocumentation
  */
@@ -44,7 +43,6 @@ import {
 import { changeOwnerOption } from "./owner.ts";
 import { askToRemove } from "./removal.ts";
 import { changeUiOption } from "./ui.ts";
-import { UploadsList } from "./uploads-list.tsx";
 
 import styles from "./options-view.module.css";
 
@@ -477,9 +475,6 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
               </GridListItem>
             )}
           </GridList>
-        </div>
-        <div className={styles.uploads}>
-          <UploadsList />
         </div>
       </div>
     </section>

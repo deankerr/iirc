@@ -210,6 +210,19 @@ describe("the options view, under store, uploads, and previews", () => {
     ]);
   });
 
+  it("has the Pane's whole width, with no Uploads listed beside it", async () => {
+    const fake = signedIn();
+    const { container, registry, type } = await page(fake);
+
+    await type("/set uploads");
+    await readAt(registry, 0);
+
+    expect({
+      options: container.querySelector('section[aria-label="Options"]') !== null,
+      uploads: container.querySelector('section[aria-label="Uploads"]'),
+    }).toStrictEqual({ options: true, uploads: null });
+  });
+
   it("lists the Previews' option from the Schema, at its default", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);

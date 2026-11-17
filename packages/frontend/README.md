@@ -56,11 +56,11 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 ### What a Pane shows
 
 - **A Timeline is open in one Pane at most.** Opening one that another Pane has open focuses that Pane. Two Panes at different places in one Timeline would need every rule of reading to say which Pane wins, for little gain.
-- **A Pane shows its Timeline, or something in front of it:** the options, the search, or a Direct Message not yet begun. It remembers one step back, which closing shows again. The options and the search each show in one Pane at most.
+- **A Pane shows its Timeline, or something in front of it:** the options, the Uploads, the search, or a Direct Message not yet begun. It remembers one step back, which closing shows again. The options, the Uploads, and the search each show in one Pane at most.
 - **A Direct Message not yet begun is a view, not a Timeline.** The API makes a Timeline only when something is said. The draft shows its Timeline as soon as one is listed, matched by the casemapping read when the draft was made, never one held from another time, which could match another User's Timeline.
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
 - **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
-- **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped.
+- **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped. A Pane showing the Uploads comes back showing them, and a layout kept before they had a view comes back as it was.
 
 ## Panes
 
@@ -103,7 +103,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Lookups | `/whois`, `/whowas`, `/bans`, `/exceptions`, `/invexes` |
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
-| Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
+| Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
@@ -218,7 +218,7 @@ An option under `store`, `uploads`, or `previews` is named in full, such as `sto
 
 ## Uploads
 
-The Uploads the options list, newest first, live ones only unless the deleted are shown, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
+The Uploads view lists the Uploads, newest first, live ones only unless the deleted are shown, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
 
 - **A page only extends the list at its end.** It is folded only when read from where the list stands, the first page into an empty list and each later one from `next`, so one read twice is folded once. The first page sets `through`.
 - **The stream only gives what is newer.** A Change after `through` moves it on. One held is replaced in place, or dropped once deleted. One not held goes first, unless it is deleted, or uploaded before the oldest held while more pages follow, as a rename of an old Upload is. Those are kept aside, and a later page read before the Change but folded after it takes the Upload as the Change left it, so a delete is never undone by a slow page. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.

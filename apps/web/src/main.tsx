@@ -47,7 +47,7 @@ registry.mount(optionsSync);
 // The options under store, uploads, and previews are followed while they show, as nothing else draws on them.
 registry.mount(ownerSync);
 
-// The Uploads listed beside them likewise.
+// The Uploads, followed while a Pane shows them.
 registry.mount(uploadsSync);
 
 registry.mount(marking);

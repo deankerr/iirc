@@ -474,7 +474,18 @@ const navigated = (registry: AtomRegistry.AtomRegistry, event: TimelinesEvent) =
 };
 
 /** Whether a Pane shows the options, however they came to show. */
-export const optionsShown = Atom.make((get) => get(optionsFilter) !== undefined);
+const optionsShown = Atom.make((get) => get(optionsFilter) !== undefined);
+
+/** Whether a Pane shows the Uploads, however they came to show. */
+export const uploadsShown = Atom.make((get) =>
+  panesOf(get(timelinesState).layout.root).some((pane) => pane.view.main._tag === "Uploads")
+);
+
+/**
+ * Whether the options under `store`, `uploads`, and `previews` are wanted: the options show
+ * them, and the Uploads make their links from one of them.
+ */
+export const ownerWanted = Atom.make((get) => get(optionsShown) || get(uploadsShown));
 
 /**
  * Reads every Network's Configuration, and the Credentials held, each time the options come
@@ -513,6 +524,19 @@ export const openOptions = runtime
     })
   )
   .pipe(Atom.keepAlive);
+
+/**
+ * Shows the Uploads in the Pane they show in, or the focused one, in front of what it
+ * showed. What they show is read by `uploadsSync`, as they come to show.
+ */
+export const openUploads = Atom.fnSync((_, get) => {
+  navigated(get.registry, { _tag: "UploadsShown" });
+}).pipe(Atom.keepAlive);
+
+/** Closes the Uploads, showing what their Pane showed before them. */
+export const closeUploads = Atom.fnSync((_, get) => {
+  navigated(get.registry, { _tag: "UploadsClosed" });
+}).pipe(Atom.keepAlive);
 
 /** Closes the options, showing what their Pane showed before them. */
 export const closeOptions = Atom.fnSync((_, get) => {

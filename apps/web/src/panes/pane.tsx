@@ -1,6 +1,6 @@
 /**
- * One Pane: its status bar, and under it its open Timeline, the options, the search, or a
- * Direct Message not yet begun, each of which draws the bar it needs, and its Channel's
+ * One Pane: its status bar, and under it its open Timeline, the options, the Uploads, the
+ * search, or a Direct Message not yet begun, each of which draws the bar it needs, and its Channel's
  * members under the bar while they show. Among
  * several shown, the one with the focus is marked along its top and its bottom. A press or
  * the focus moving anywhere in it gives it the focus, so the composer then writes to its
@@ -17,6 +17,7 @@ import { useRef } from "react";
 import { MembersPanel } from "../channel/members-panel.tsx";
 import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { OptionsView } from "../options/options-view.tsx";
+import { UploadsView } from "../options/uploads-view.tsx";
 import { SearchView } from "../search/search-view.tsx";
 import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
@@ -27,7 +28,7 @@ import { RemovedNote } from "./removed-note.tsx";
 import styles from "./pane.module.css";
 
 /**
- * What a Pane shows in its main place: the options, the search, a Direct Message not yet
+ * What a Pane shows in its main place: the options, the Uploads, the search, a Direct Message not yet
  * begun, or its Timeline.
  * @param pane - The Pane.
  * @returns The view.
@@ -36,6 +37,10 @@ const main = (pane: PaneOf<PaneView>) => {
   switch (pane.view.main._tag) {
     case "Options": {
       return <OptionsView pane={pane.id} />;
+    }
+
+    case "Uploads": {
+      return <UploadsView pane={pane.id} />;
     }
 
     case "Search": {

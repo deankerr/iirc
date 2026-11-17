@@ -28,7 +28,7 @@ import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { dismissCard } from "../lookup/atoms.ts";
-import { closeOptions, mainView } from "../options/atoms.ts";
+import { closeOptions, closeUploads, mainView } from "../options/atoms.ts";
 import { enterShown, spellcheckShown } from "../options/ui.ts";
 import { keyOf } from "../palette/press.ts";
 import { openPalette, platform } from "../palette/state.ts";
@@ -316,6 +316,7 @@ const Composer = ({
   const closeTheDraft = useAtomSet(closeDraft);
   const closeTheOptions = useAtomSet(closeOptions);
   const closeTheSearch = useAtomSet(closeSearch);
+  const closeTheUploads = useAtomSet(closeUploads);
   const main = useAtomValue(mainView);
   const pane = useAtomValue(focusedId);
   const focusAsked = useAtomValue(composerFocus);
@@ -470,7 +471,7 @@ const Composer = ({
 
   // Escape lets go of a notice or a confirmation first, then of what the draft answers. With
   // none, it closes what stands in front of the focused Pane's Timeline, the options, the
-  // search, or a draft, and with nothing in front, puts its Lookup card away.
+  // Uploads, the search, or a draft, and with nothing in front, puts its Lookup card away.
   const escaped = () => {
     if (notice !== undefined || confirming !== undefined) {
       dismissNow(timeline);
@@ -487,6 +488,11 @@ const Composer = ({
     switch (main._tag) {
       case "Options": {
         closeTheOptions();
+        break;
+      }
+
+      case "Uploads": {
+        closeTheUploads();
         break;
       }
 

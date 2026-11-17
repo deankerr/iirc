@@ -68,38 +68,18 @@
   background: var(--color-surface);
 }
 
-/* The options and the Uploads, one under the other in one scroll, or side by side, each
-   scrolling on its own, where the view is wide enough for both. */
+/* The options scroll under the filter, across the whole view. */
 .body {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.scroller {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
-}
-
-.uploads {
-  border-top: var(--border-width) solid var(--color-border);
-}
-
-@container (min-width: 120ch) {
-  .body {
-    flex-direction: row;
-    overflow: hidden;
-  }
-
-  .scroller {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-  }
-
-  .uploads {
-    flex: 0 0 44ch;
-    overflow-y: auto;
-    border-top: none;
-    border-left: var(--border-width) solid var(--color-border);
-  }
 }
 
 .list {

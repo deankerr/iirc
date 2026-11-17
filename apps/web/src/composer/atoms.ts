@@ -51,6 +51,7 @@ import {
   addNetwork,
   configure,
   openOptions,
+  openUploads,
   promptCredential,
   signedOut,
 } from "../options/atoms.ts";
@@ -322,6 +323,7 @@ type Local = Extract<
   {
     readonly _tag:
       | "OpenOptions"
+      | "OpenUploads"
       | "PromptCredential"
       | "Open"
       | "Latest"
@@ -350,6 +352,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "Open",
   "OpenOptions",
   "OpenPalette",
+  "OpenUploads",
   "Pane",
   "PromptCredential",
   "Search",
@@ -365,7 +368,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
 const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
- * Carries out an intent in the page: shows the options, the search, or a Timeline, jumps
+ * Carries out an intent in the page: shows the options, the Uploads, the search, or a Timeline, jumps
  * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
  * starting an empty draft with text, shows or hides the members or the sidebar, changes
  * the Panes, or starts a Lookup, which goes on beside the composer's turn.
@@ -377,6 +380,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
   switch (intent._tag) {
     case "OpenOptions": {
       registry.set(openOptions, intent.filter);
+      break;
+    }
+
+    case "OpenUploads": {
+      registry.set(openUploads, undefined);
       break;
     }
 
