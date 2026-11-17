@@ -511,12 +511,12 @@ const factOf = (run: Run, nick: string, field: Refreshed): Fact<unknown> => {
 
   const seen = open?.users.get(folder(run.state)(nick));
 
-  return seen === undefined || field === "account" || field === "realname" ? unknown : seen[field];
+  return seen === undefined ? unknown : seen[field];
 };
 
 // What a reply says of a User the Client already models, as `replied`, as of the Line
-// that said it: Self's mask, realname, account, and away, and another User's mask and
-// away, while they share a Channel with Self. Each is refreshed only when Knowledge holds
+// that said it: Self's mask, realname, account, and away, and another User's, while they
+// share a Channel with Self. Each is refreshed only when Knowledge holds
 // the very fact it held when that Line came: State is never changed in place, so any
 // word on it since, such as a `305`, replaced that fact, and is never undone.
 // Away is set only by a `301`: the protocol does not say a reply without one means the
@@ -565,8 +565,10 @@ const learn = (run: Run, looking: Looking, profile: Profile): void => {
 
   see(run, profile.nick, (seen) => ({
     ...seen,
+    account: replied<string | null>("account", account, seen.account),
     away: replied<{ readonly message: string } | null>("away", message, seen.away),
     mask: replied("mask", mask, seen.mask),
+    realname: replied("realname", realname, seen.realname),
   }));
 };
 

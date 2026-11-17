@@ -137,8 +137,8 @@ Every rule is decided from commands, parameters, `CHANTYPES`, `PREFIX`, and `STA
 - **A Direct Message** belongs to the other participant, whichever way it went.
 - **Any other Message** belongs to the Network: one from a server, to a mask, or to someone other than Self.
 - **`Joined`, `Parted`, `Kicked`, `TopicChanged`, and a Channel's `ModeChanged`** belong to their Channel.
-- **Another User's `Quit` or `NickChanged`** belongs to every Channel they shared with Self, and to their Direct Messages if those exist. A live rename moves the Direct Message Timeline. One from history renames nothing, since the old nick may be someone else's by now.
-- **Self's `NickChanged`, `Quit`, and `AwayChanged`** belong to the Network, the first two to every Channel Self is in as well.
+- **Another User's `Quit`, `NickChanged`, or `AccountChanged`** belongs to every Channel they shared with Self, and to their Direct Messages if those exist. A live rename moves the Direct Message Timeline. One from history renames nothing, since the old nick may be someone else's by now.
+- **Self's `NickChanged`, `Quit`, `AwayChanged`, and `AccountChanged`** belong to the Network, the first two to every Channel Self is in as well.
 - **A list of Targets is never one Timeline.** Each item is placed by itself, and a `Say` to a list is `Unsendable`.
 - **History is placed as the present is,** by what is known as it arrives.
 
@@ -157,6 +157,7 @@ A `Refused` for an `Act` names no Message, so it carries `action`: what was trie
 - **Users are those who share a Channel with Self, and Self.** What was seen of a User is forgotten once they share none.
 - **Self's away status is as the Ircd confirmed it,** never as the Owner asked.
 - **A Channel's `wanted` says whether the Owner wants Self in it.**
+- **A User's account is `null` when known to be logged out, and `Unknown` when not known.** Another User's is learned only from the caps below, or a `WHOIS`.
 
 Every fact is a `Fact<T>`:
 
@@ -305,6 +306,9 @@ A `Look` asks the Network something and collects the reply, which may span many 
 | Standard replies | `standard-replies` | Asks for the cap, so the Ircd may send any well-formed `FAIL`, `WARN`, or `NOTE`. They are read whether or not it was asked for. | `caps.test.ts`, `standard-replies.test.ts` |
 | Member prefixes | `multi-prefix` | A `NAMES` listing shows every prefix, so a member's prefixes are known, not partial. | `prefixes.test.ts` |
 | Away status | `away-notify` | Away status is kept up to date, and goes stale when the cap is deleted. | `away.test.ts` |
+| Account tags | `account-tag` | A User's Message or Activity without an `account` tag says they are logged out, and with one, their account. A tag with no value says nothing. | `accounts.test.ts` |
+| Account changes | `account-notify` | An `ACCOUNT` Line is `AccountChanged` Activity, `*` meaning logged out, and Self's is Self's own account. Accounts go stale when the cap is deleted. | `accounts.test.ts` |
+| Extended joins | `extended-join` | A `JOIN` with an account and a realname sets both, `*` meaning logged out. | `accounts.test.ts` |
 | UTF-8 only | the ISUPPORT token `UTF8ONLY` | Bytes are read as UTF-8 with no fallback, and nothing leaves that is not UTF-8. | `utf8.test.ts` |
 
 `seam.test.ts` drives each stage of the seam with Features of its own, and `laws.test.ts` runs the four laws over every Feature in the registry.

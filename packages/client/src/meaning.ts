@@ -314,6 +314,9 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
             }),
           ],
   ],
+  // `ACCOUNT <account>` means something only to `account-notify`, which reads it. Without
+  // that, it is a Line the core knows nothing of, and changes nothing.
+  ["ACCOUNT", () => []],
   [
     // `353 <client> <symbol> <channel> :<names>`, where an old Ircd may leave out the symbol.
     "353",

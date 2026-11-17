@@ -96,10 +96,15 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
         break;
       }
 
-      case "user.account": {
+      case "user.account":
+      case "user.account.tagged":
+      case "user.account.joined": {
         updateOpen(run, (open) => ({
           ...open,
-          presence: { ...open.presence, account: staled(open.presence.account, since) },
+          users: usersStaled(open.users, (seen) => ({
+            ...seen,
+            account: staled(seen.account, since),
+          })),
         }));
         break;
       }
@@ -107,10 +112,10 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
       case "user.realname": {
         updateOpen(run, (open) => ({
           ...open,
-          presence:
-            open.presence._tag === "Session"
-              ? { ...open.presence, realname: staled(open.presence.realname, since) }
-              : open.presence,
+          users: usersStaled(open.users, (seen) => ({
+            ...seen,
+            realname: staled(seen.realname, since),
+          })),
         }));
         break;
       }

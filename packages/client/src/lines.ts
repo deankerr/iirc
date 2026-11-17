@@ -204,6 +204,20 @@ const isSameNick = (run: Run, first: string, second: string): boolean => {
   return fold(first) === fold(second);
 };
 
+// A nick changed, live: Self's answers the Line that asked for it, and another User's may
+// free a nick Self wants back.
+const nickSettled = (run: Run, from: string, to: string): void => {
+  if (isSelf(run, from)) {
+    // The Client's own ask answers a change to its nick when it was sent first.
+    if (!reclaimTaken(run, to)) {
+      answered(run, "NICK", [to]);
+    }
+  } else if (!isSameNick(run, from, to)) {
+    // A case-only change keeps the nick, so it leaves nothing to take.
+    reclaim(run, from);
+  }
+};
+
 // What Self did, live, answers the Line of an action that asked for it, Self's own
 // `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to them, and
 // a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
@@ -230,15 +244,7 @@ const settled = (run: Run, activity: Activity): void => {
     }
 
     case "NickChanged": {
-      if (isSelf(run, activity.from)) {
-        // The Client's own ask answers a change to its nick when it was sent first.
-        if (!reclaimTaken(run, activity.to)) {
-          answered(run, "NICK", [activity.to]);
-        }
-      } else if (!isSameNick(run, activity.from, activity.to)) {
-        // A case-only change keeps the nick, so it leaves nothing to take.
-        reclaim(run, activity.from);
-      }
+      nickSettled(run, activity.from, activity.to);
 
       break;
     }
@@ -259,6 +265,7 @@ const settled = (run: Run, activity: Activity): void => {
     }
 
     case "Joined":
+    case "AccountChanged":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
@@ -294,6 +301,49 @@ const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): Read
   return new Set(listedWith(refined, "Known").filter((key) => partial.has(key)));
 };
 
+// What a live Line said of a User who shares a Channel with Self: each fact it gave.
+const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
+  const { account, realname } = meant;
+
+  see(run, meant.nick, (seen) => ({
+    ...seen,
+    account:
+      account === undefined
+        ? seen.account
+        : { _tag: "Known", at: run.at, from: "ircd", value: account },
+    realname:
+      realname === undefined
+        ? seen.realname
+        : { _tag: "Known", at: run.at, from: "ircd", value: realname },
+  }));
+};
+
+type ModelOnly = Extract<Meant, { readonly _tag: "Listed" | "Described" }>;
+
+const isModelOnly = (meant: Meant): meant is ModelOnly =>
+  meant._tag === "Listed" || meant._tag === "Described";
+
+// Folds what only the model sees: a `NAMES` listing, and what a Line said of a User. Neither
+// is News, and history changes nothing.
+const foldModelOnly = (
+  run: Run,
+  meant: ModelOnly,
+  live: boolean,
+  completed: ReadonlySet<string>
+): void => {
+  if (!live) {
+    return;
+  }
+
+  if (meant._tag === "Listed") {
+    foldListed(run, meant.channel, meant.members, (nick) =>
+      completed.has(memberKey(meant.channel, nick))
+    );
+  } else {
+    described(run, meant);
+  }
+};
+
 // Folds live Activity into the Channels, and asks the modes of one Self joined.
 const foldLive = (run: Run, activity: Activity): void => {
   foldActivity(run, activity, rulesNow(run), channelTest(run));
@@ -313,12 +363,8 @@ const fold = (
 ): void => {
   const { line, live } = arrival;
 
-  if (meant._tag === "Listed") {
-    if (live) {
-      foldListed(run, meant.channel, meant.members, (nick) =>
-        completed.has(memberKey(meant.channel, nick))
-      );
-    }
+  if (isModelOnly(meant)) {
+    foldModelOnly(run, meant, live, completed);
 
     return;
   }

@@ -309,9 +309,11 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
 
   updateOpen(run, (open) => {
     const was: Seen = open.users.get(folded) ?? {
+      account: { _tag: "Unknown" },
       away: { _tag: "Unknown" },
       mask: { _tag: "Unknown" },
       nick,
+      realname: { _tag: "Unknown" },
     };
 
     return { ...open, users: new Map(open.users).set(folded, change(was)) };
@@ -461,6 +463,27 @@ const prefixed = (
   return members;
 };
 
+// Self joined a Channel, or another User did, and is a member from now.
+const memberJoined = (run: Run, channel: string, nick: string): void => {
+  if (isSelf(run, nick)) {
+    joinedSelf(run, channel);
+
+    return;
+  }
+
+  const folded = folder(run.state)(nick);
+  const member = fresh(run, nick);
+
+  changeJoined(run, channel, (joined) => ({
+    ...joined,
+    listing:
+      joined.listing === undefined
+        ? undefined
+        : changeListing(joined.listing, (listed) => withMember(listed, folded, member)),
+    members: withMember(joined.members, folded, member),
+  }));
+};
+
 /**
  * Folds an Activity into the Channels it touches.
  * @param run - The step.
@@ -492,23 +515,7 @@ export const foldActivity = (
     }
 
     case "Joined": {
-      if (isSelf(run, activity.nick)) {
-        joinedSelf(run, activity.channel);
-
-        return;
-      }
-
-      const folded = fold(activity.nick);
-      const member = fresh(run, activity.nick);
-
-      changeJoined(run, activity.channel, (joined) => ({
-        ...joined,
-        listing:
-          joined.listing === undefined
-            ? undefined
-            : changeListing(joined.listing, (listed) => withMember(listed, folded, member)),
-        members: withMember(joined.members, folded, member),
-      }));
+      memberJoined(run, activity.channel, activity.nick);
 
       return;
     }
@@ -613,6 +620,18 @@ export const foldActivity = (
         ...seen,
         away: { _tag: "Known", at: run.at, from: "ircd", value: activity.away },
       }));
+
+      return;
+    }
+
+    case "AccountChanged": {
+      const known = { _tag: "Known", at: run.at, from: "ircd", value: activity.account } as const;
+
+      if (isSelf(run, activity.nick)) {
+        updateOpen(run, (open) => ({ ...open, presence: { ...open.presence, account: known } }));
+      } else {
+        see(run, activity.nick, (seen) => ({ ...seen, account: known }));
+      }
 
       return;
     }

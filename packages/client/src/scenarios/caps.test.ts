@@ -25,7 +25,7 @@ const welcome = lines("<< :irc.test 001 iirc :Welcome", "?? session-began iirc")
 
 // Every cap a Feature in the registry asks for, in the order it asks.
 const all =
-  "cap-notify sasl message-tags server-time batch echo-message labeled-response multi-prefix away-notify";
+  "cap-notify sasl message-tags server-time batch echo-message labeled-response multi-prefix away-notify account-tag account-notify extended-join";
 
 describe("asking for caps", () => {
   it("asks for every cap a Feature needs, in registry order, whatever order they are offered in", () => {
@@ -49,6 +49,9 @@ describe("asking for caps", () => {
       "echo-message",
       "multi-prefix",
       "away-notify",
+      "account-tag",
+      "account-notify",
+      "extended-join",
     ]);
   });
 
@@ -109,7 +112,7 @@ describe("asking for caps", () => {
   it("asks for nothing when no Feature wants what is offered", () => {
     play(client, {
       configuration: base,
-      transcript: registered(base, { offered: ["chghost", "account-notify"], requested: [] }),
+      transcript: registered(base, { offered: ["chghost", "setname"], requested: [] }),
     });
 
     expect.assertions(0);

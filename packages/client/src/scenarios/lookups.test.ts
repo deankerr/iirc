@@ -203,7 +203,7 @@ describe("a WHOIS on the floor", () => {
     });
   });
 
-  it("refreshes a User's mask and away status it models, as replied", () => {
+  it("refreshes a User's mask, away status, account, and realname it models, as replied", () => {
     const run = played([
       ...inChannel(),
       lines(
@@ -225,9 +225,10 @@ describe("a WHOIS on the floor", () => {
     const known = client.known(run.state);
 
     expect(known.users.get("peer")).toMatchObject({
-      account: { _tag: "Unknown" },
+      account: { _tag: "Known", from: "replied", value: "acct" },
       away: { _tag: "Known", from: "replied", value: { message: "away" } },
       mask: { _tag: "Known", from: "replied", value: { host: "peer.test", user: "~u" } },
+      realname: { _tag: "Known", from: "replied", value: "Peer" },
     });
     expect(known.self).toMatchObject({
       account: { _tag: "Known", from: "replied", value: "mine" },

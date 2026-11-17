@@ -191,6 +191,38 @@ const renamedDirect = (run: Run, naming: Naming, from: string, to: string): read
     ? []
     : [{ _tag: "DirectRenamed", ...named(run, from), to: named(run, to) }];
 
+// Another User's Direct Messages, when their name is a nick, as a Message's sender is.
+const theirs = (run: Run, naming: Naming, nick: string): readonly Where[] =>
+  parseNick(naming, nick) === undefined ? [] : [direct(run, nick, true)];
+
+/**
+ * The Timelines a nick change touches: Self's goes where Self is, and another User's to
+ * the Channels they share, and their Direct Messages, which follow the nick.
+ * @param run - The step, before the change is folded in.
+ * @param naming - The Network's naming rules.
+ * @param activity - The nick change.
+ * @param live - Whether it is happening now, rather than read from history.
+ * @returns The Timelines.
+ */
+const nickChangedWhere = (
+  run: Run,
+  naming: Naming,
+  activity: Extract<Activity, { readonly _tag: "NickChanged" }>,
+  live: boolean
+): readonly Where[] => {
+  if (isSelf(run, activity.from)) {
+    return [network, ...ownChannels(run)];
+  }
+
+  // Only a rename that is happening now moves a Timeline. From history, the old nick may
+  // be someone else's by now, so it is shown where it belongs and moves nothing.
+  const renamed = live
+    ? renamedDirect(run, naming, activity.from, activity.to)
+    : theirs(run, naming, activity.from);
+
+  return [...sharedChannels(run, activity.from), ...renamed];
+};
+
 /**
  * The Timelines an Activity touches, before {@link placed}.
  * @param run - The step, before the Activity is folded in.
@@ -205,10 +237,6 @@ const activityTimelines = (
   activity: Activity,
   live: boolean
 ): readonly Where[] => {
-  // Another User's Direct Messages, when their name is a nick, as a Message's sender is.
-  const theirs = (nick: string): readonly Where[] =>
-    parseNick(naming, nick) === undefined ? [] : [direct(run, nick, true)];
-
   // An answer to Self's `OPER` is the Network's, and so is an invitation, which is to a
   // Channel Self is not in.
   if (isNetworkOnly(activity)) {
@@ -232,25 +260,23 @@ const activityTimelines = (
     case "Quit": {
       return isSelf(run, activity.nick)
         ? [network, ...ownChannels(run)]
-        : [...sharedChannels(run, activity.nick), ...theirs(activity.nick)];
+        : [...sharedChannels(run, activity.nick), ...theirs(run, naming, activity.nick)];
     }
 
     case "NickChanged": {
-      if (isSelf(run, activity.from)) {
-        return [network, ...ownChannels(run)];
-      }
-
-      // Only a rename that is happening now moves a Timeline. From history, the old nick may
-      // be someone else's by now, so it is shown where it belongs and moves nothing.
-      const renamed = live
-        ? renamedDirect(run, naming, activity.from, activity.to)
-        : theirs(activity.from);
-
-      return [...sharedChannels(run, activity.from), ...renamed];
+      return nickChangedWhere(run, naming, activity, live);
     }
 
     case "AwayChanged": {
-      return isSelf(run, activity.nick) ? [network] : theirs(activity.nick);
+      return isSelf(run, activity.nick) ? [network] : theirs(run, naming, activity.nick);
+    }
+
+    // Self's account is the Network's, and another User's is told where they are, as a
+    // `Quit` is.
+    case "AccountChanged": {
+      return isSelf(run, activity.nick)
+        ? [network]
+        : [...sharedChannels(run, activity.nick), ...theirs(run, naming, activity.nick)];
     }
 
     // The core places a standard reply where what it answers belongs, and a CTCP by who
