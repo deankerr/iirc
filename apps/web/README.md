@@ -151,7 +151,7 @@ Whether the screen is compact is `(max-width: 640px)`, past every phone held upr
 - **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. React Aria would inject one inline `<style>` for its pressable elements, so `public/pressable.css` carries the same rule under the id React Aria looks for. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses: the page still works, and only that rule is lost.
 - **An instant out of a `Date`'s range never takes the page down.** A Network can give any integer, so every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
 - **The composer is no keyboard trap.** Tab is taken only when there is a word to complete, or while its list is open.
-- **The composer's list is a listbox its textarea controls,** which keeps the focus: `aria-controls`, `aria-expanded`, and `aria-activedescendant` name the candidate highlighted as it moves.
+- **The composer's list is a listbox its textarea controls,** which keeps the focus: `aria-controls` names the list while it is shown, and `aria-activedescendant` the candidate highlighted as it moves. A textarea takes no `aria-expanded`. The list shows exactly while it owns Tab, the arrows, and Escape, and moving the caret without typing lets go of it.
 
 ### The fonts
 

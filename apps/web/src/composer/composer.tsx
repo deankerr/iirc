@@ -20,7 +20,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
 import type { CommandContext } from "@iirc/frontend/commands";
-import { active, announced, completes, listOf } from "@iirc/frontend/completion";
+import { announced, completes, listOf, owns } from "@iirc/frontend/completion";
 import type { List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
@@ -52,7 +52,7 @@ import {
   takeUp,
 } from "./atoms.ts";
 import { completionState } from "./completion-state.ts";
-import { escapeCompletion, pick, tab, typed } from "./completion.ts";
+import { escapeCompletion, moved, pick, sourcesAt, tab, typed } from "./completion.ts";
 import { PendingUploads } from "./pending-uploads.tsx";
 import { caretAsked } from "./uploading-state.ts";
 import { addFiles } from "./uploading.ts";
@@ -397,6 +397,8 @@ const Composer = ({
   const complete = useAtomSet(tab);
   const restore = useAtomSet(escapeCompletion);
   const pickNow = useAtomSet(pick);
+  const moveNow = useAtomSet(moved);
+  const sources = useAtomValue(sourcesAt(timeline));
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
   const dropNow = useAtomSet(dropReply);
@@ -430,7 +432,9 @@ const Composer = ({
   const answeringId = `${id}-answering`;
   const listId = `${id}-list`;
   const { answering, confirming, notice } = draft;
-  const list = listOf(completion, timeline, draft.text);
+  // Whether a list is shown and whether completion owns the keys are one: what the core says.
+  const list = listOf(completion, timeline, draft.text, sources);
+  const owned = owns(completion, timeline, draft.text, sources);
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
   // end of its draft, which may have just been replaced.
@@ -473,6 +477,29 @@ const Composer = ({
       element?.removeEventListener("beforeinput", before);
     };
   }, []);
+
+  // Each time the caret moves without typing, as an arrow, Home, or a click moves it,
+  // completion is told, and lets go of a list it left the caret elsewhere for.
+  useEffect(() => {
+    const changed = () => {
+      const element = input.current;
+
+      if (element !== null) {
+        moveNow({
+          end: element.selectionEnd,
+          place: timeline,
+          start: element.selectionStart,
+          text: element.value,
+        });
+      }
+    };
+
+    document.addEventListener("selectionchange", changed);
+
+    return () => {
+      document.removeEventListener("selectionchange", changed);
+    };
+  }, [moveNow, timeline]);
 
   // Each time a link goes into the draft while the Owner writes in it, the selection goes
   // where the core says, both its ends, once the new text is in the textarea.
@@ -532,21 +559,20 @@ const Composer = ({
   const { offline, placeholder } = sayable(context);
 
   /**
-   * Tab completes the word at the caret, Shift+Tab backwards, and while the list is open,
+   * Tab completes the word at the caret, Shift+Tab backwards, and while the list is shown,
    * Down and Up move through it as they do. Escape gives back what was typed while
-   * completing. With no word there, and nothing being completed, Tab moves focus on, as it
-   * does anywhere.
+   * completion owns the keys. With no word there, and nothing being completed, Tab moves
+   * focus on, as it does anywhere.
    * @param event - The key.
    * @returns Whether completion took it.
    */
   const completionKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const { selectionEnd, selectionStart, value } = event.currentTarget;
-    const completing = active(completion, timeline, { caret: selectionStart, text: value });
     const bare = !event.altKey && !event.ctrlKey && !event.metaKey;
     const arrow = event.key === "ArrowDown" || event.key === "ArrowUp";
 
     // An arrow with a modifier stays the keymap's.
-    if (arrow && bare && !event.shiftKey && completing && list !== undefined) {
+    if (arrow && bare && !event.shiftKey && list !== undefined) {
       event.preventDefault();
       complete({
         backwards: event.key === "ArrowUp",
@@ -562,7 +588,7 @@ const Composer = ({
       event.key === "Tab" &&
       bare &&
       selectionStart === selectionEnd &&
-      (completing || completes(value, selectionStart))
+      (owned || completes(value, selectionStart))
     ) {
       event.preventDefault();
       complete({ backwards: event.shiftKey, caret: selectionStart, place: timeline, text: value });
@@ -570,7 +596,7 @@ const Composer = ({
       return true;
     }
 
-    if (event.key === "Escape" && completing) {
+    if (event.key === "Escape" && owned) {
       event.preventDefault();
       restore(timeline);
 
@@ -779,7 +805,7 @@ const Composer = ({
       )}
       {/* A status, polite, present while the composer is, so what the list holds is announced. */}
       <output aria-live="polite" className={styles.status}>
-        {announced(completion, timeline, draft.text)}
+        {announced(completion, timeline, draft.text, sources)}
       </output>
       <div className={styles.line}>
         {before}

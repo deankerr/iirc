@@ -186,6 +186,20 @@ const pressIn = async (container: HTMLElement, key: string, held: KeyboardEventI
   return left;
 };
 
+/**
+ * Moves the composer's caret without typing, as an arrow, Home, or a click does, and says
+ * so as the browser does, with a `selectionchange` on the document.
+ * @param container - The page.
+ * @param caret - Where it goes.
+ */
+const moveCaret = async (container: HTMLElement, caret: number) => {
+  await act(async () => {
+    composerOf(container).setSelectionRange(caret, caret);
+    document.dispatchEvent(new Event("selectionchange"));
+    await Promise.resolve();
+  });
+};
+
 const sendButton = (container: HTMLElement) =>
   container.querySelector<HTMLButtonElement>('button[aria-label="Send"]');
 
@@ -658,6 +672,39 @@ describe("the Composer's list", () => {
       highlighted: 0,
       names: ["peer"],
       texts: ["peer"],
+    });
+  });
+
+  it("lets go of the list when the caret moves, leaving Up to recall and Escape to what else is open", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "said before");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    await typeIn(container, "/jo");
+    const open = listIn(container).names;
+
+    await moveCaret(container, 1);
+    const moved = listIn(container);
+    const escape = await pressIn(container, "Escape");
+    const escaped = composerOf(container).value;
+
+    await pressIn(container, "ArrowUp");
+
+    expect({
+      escape,
+      escaped,
+      moved,
+      open,
+      recalled: composerOf(container).value,
+    }).toStrictEqual({
+      // Not completion's: it is the composer's own, with nothing to let go of.
+      escape: false,
+      escaped: "/jo",
+      moved: { controls: null, list: undefined },
+      open: ["/join"],
+      recalled: "said before",
     });
   });
 

@@ -14,7 +14,7 @@ import {
   reduceCompletion,
   sourcesOf,
 } from "@iirc/frontend/completion";
-import type { Completed, CompletionEvent } from "@iirc/frontend/completion";
+import type { Completed, CompletionEvent, Sources } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { listed } from "@iirc/frontend/options";
@@ -33,6 +33,19 @@ import { composerState, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 
+/** What a word typed at a place can be completed from, as things are now. */
+export const sourcesAt = Atom.family((place: Place) =>
+  Atom.make((get): Sources =>
+    sourcesOf(
+      get(timelinesState),
+      place,
+      listed(get(optionsState), ""),
+      get(chantypesState),
+      get(uiInEffect).suffix
+    )
+  )
+);
+
 /**
  * Folds one event into completion, from what a word can be completed from at the place it
  * is under way, and puts what it says in the composer's draft.
@@ -41,14 +54,7 @@ import { completionState } from "./completion-state.ts";
  * @param event - What happened.
  */
 const completing = (registry: AtomRegistry.AtomRegistry, place: Place, event: CompletionEvent) => {
-  const sources = sourcesOf(
-    registry.get(timelinesState),
-    place,
-    listed(registry.get(optionsState), ""),
-    registry.get(chantypesState),
-    registry.get(uiInEffect).suffix
-  );
-
+  const sources = registry.get(sourcesAt(place));
   const step: Completed = reduceCompletion(registry.get(completionState), event, sources);
 
   registry.set(completionState, step.state);
@@ -110,6 +116,21 @@ export const tab = Atom.fnSync(
 export const escapeCompletion = Atom.fnSync((place: Place, get) => {
   completing(get.registry, place, { _tag: "Escaped", place });
 }).pipe(Atom.keepAlive);
+
+/** The selection in a composer moved without its text changing, from `start` to `end`. */
+export const moved = Atom.fnSync(
+  (
+    input: {
+      readonly place: Place;
+      readonly text: string;
+      readonly start: number;
+      readonly end: number;
+    },
+    get
+  ) => {
+    completing(get.registry, input.place, { _tag: "Moved", ...input });
+  }
+).pipe(Atom.keepAlive);
 
 /** A candidate picked from a composer's list, as by a tap, while it showed `text`. */
 export const pick = Atom.fnSync(
