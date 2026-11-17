@@ -158,7 +158,7 @@
 
 /*
  * With no columns, a page's image is smaller: in a narrow Timeline, and under `ui.line`
- * inline, as the Timeline's `data-line` says. The two rules must stay alike.
+ * inline or stacked, as the Timeline's `data-line` says. The two rules must stay alike.
  */
 @container (max-width: 36em) {
   .thumbnail {
@@ -167,7 +167,7 @@
   }
 }
 
-:global([data-line="inline"]) .thumbnail {
+:global([data-line]) .thumbnail {
   width: 3em;
   height: 3em;
 }

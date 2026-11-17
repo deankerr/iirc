@@ -5466,3 +5466,207 @@ describe("where the day changes", () => {
     ).toStrictEqual(["Day", [2, 2], "Day", [3, undefined]]);
   });
 });
+
+const minute = 60_000;
+
+// A Message in the open Channel, from a sender, of a kind, at an instant.
+const said = (
+  sequence: number,
+  at: number,
+  sender = "alice",
+  kind: "Privmsg" | "Action" | "Notice" = "Privmsg"
+) =>
+  decodeItem({
+    answered: null,
+    changed: sequence,
+    content: {
+      _tag: "Message",
+      answers: null,
+      at: unknown,
+      context: null,
+      id: unknown,
+      kind,
+      live: true,
+      ours: null,
+      sender,
+      tags: [],
+      target: "#c",
+      text: `m${sequence}`,
+    },
+    level: "Message",
+    network: "alpha",
+    position: cursor(at, sequence),
+    sequence,
+    timeline: idOf(3),
+  });
+
+// An Activity in the open Channel: someone joining, or a numeric the Ircd sent.
+const happened = (sequence: number, at: number, numeric = false) =>
+  decodeItem({
+    answered: null,
+    changed: sequence,
+    content: {
+      _tag: "Activity",
+      activity: numeric
+        ? { _tag: "Numeric", numeric: "372", params: ["us", "- hello"] }
+        : { _tag: "Joined", channel: "#c", nick: "bob" },
+      at: unknown,
+      id: unknown,
+      live: true,
+    },
+    level: "Activity",
+    network: "alpha",
+    position: cursor(at, sequence),
+    sequence,
+    timeline: idOf(3),
+  });
+
+/**
+ * The rows of a window of the open Channel holding these items, each as its sequence, with
+ * `+` before one that continues a run, and the rest as `rowText` says.
+ * @param items - The items, in order.
+ * @param options - The window's Gaps, its divider, which items are drawn, its zone, and whether it holds the Timeline's start.
+ * @returns Each row's text.
+ */
+const runRows = (
+  items: readonly ReturnType<typeof said>[],
+  options: {
+    readonly gaps?: readonly (typeof WindowGap.Encoded)[];
+    readonly divider?: Divider;
+    readonly shows?: (item: TimelineItem) => boolean;
+    readonly zone?: Zone;
+    readonly earlier?: boolean;
+  } = {}
+) => {
+  const state = reduceTimelines(following(), {
+    _tag: "WindowRead",
+    read: latestOf(three, 0),
+    window: decodeWindow({
+      earlier: options.earlier ?? false,
+      gaps: [...(options.gaps ?? [])],
+      items: encodedItems(items),
+      later: false,
+      network: "alpha",
+      through: 5,
+      timeline: idOf(3),
+      version: 1,
+    }),
+  });
+
+  const shown = opened(state);
+
+  const rows =
+    shown._tag === "Shown"
+      ? rowsOf(shown.window, options.divider, options.shows, options.zone)
+      : [];
+
+  return rows.map((row) =>
+    row._tag === "Item" && row.continues === true ? `+${row.item.sequence}` : rowText(row)
+  );
+};
+
+describe("a run of Messages under one nick", () => {
+  const at = midnightUtc + 12 * hour;
+
+  it("joins consecutive plain Messages from one User, the first heading the run", () => {
+    expect(runRows([said(1, at), said(2, at + minute), said(3, at + 2 * minute)])).toStrictEqual([
+      1,
+      "+2",
+      "+3",
+    ]);
+  });
+
+  it("takes a nick in any case as the same User", () => {
+    expect(runRows([said(1, at, "Alice"), said(2, at + minute, "aLICE")])).toStrictEqual([1, "+2"]);
+  });
+
+  it("ends when another User speaks", () => {
+    expect(
+      runRows([said(1, at), said(2, at + minute, "bob"), said(3, at + 2 * minute)])
+    ).toStrictEqual([1, 2, 3]);
+  });
+
+  it("ends at any Activity, a numeric of the Ircd's among it", () => {
+    expect(
+      runRows([
+        said(1, at),
+        happened(2, at + minute),
+        said(3, at + 2 * minute),
+        happened(4, at + 3 * minute, true),
+        said(5, at + 4 * minute),
+      ])
+    ).toStrictEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("is not ended by an Activity that is not drawn", () => {
+    expect(
+      runRows([said(1, at), happened(2, at + minute), said(3, at + 2 * minute)], {
+        shows: (item) => item.content._tag === "Message",
+      })
+    ).toStrictEqual([1, "+3"]);
+  });
+
+  it("ends at an action or a notice, which is in no run", () => {
+    expect(
+      runRows([
+        said(1, at),
+        said(2, at + minute, "alice", "Action"),
+        said(3, at + 2 * minute),
+        said(4, at + 3 * minute, "alice", "Notice"),
+        said(5, at + 4 * minute, "alice", "Notice"),
+        said(6, at + 5 * minute),
+      ])
+    ).toStrictEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("ends when more than five minutes separate a Message from the one before it, either way", () => {
+    expect(
+      runRows([
+        said(1, at),
+        said(2, at + 5 * minute),
+        said(3, at + 10 * minute + 1),
+        said(4, at - hour),
+      ])
+    ).toStrictEqual([1, "+2", 3, 4]);
+  });
+
+  it("ends at a Gap", () => {
+    const gap = {
+      count: 1,
+      from: cursor(at + minute, 1),
+      to: cursor(at + minute, 1),
+    };
+
+    expect(runRows([said(1, at), said(2, at + 2 * minute)], { gaps: [gap] })).toStrictEqual([
+      1,
+      "gap 1",
+      2,
+    ]);
+  });
+
+  it("ends at the day's line", () => {
+    const late = midnightUtc + 24 * hour - minute;
+
+    expect(runRows([said(1, late), said(2, late + 2 * minute)], { zone: fixed(0) })).toStrictEqual([
+      `day ${late}`,
+      1,
+      `day ${late + 2 * minute}`,
+      2,
+    ]);
+  });
+
+  it("ends at the Read Marker's line", () => {
+    expect(
+      runRows([said(1, at), said(2, at + minute)], {
+        divider: { read: said(1, at).position.at, timeline: three },
+      })
+    ).toStrictEqual([1, "new", 2]);
+  });
+
+  it("heads with the first Message of a window that starts mid-run", () => {
+    expect(runRows([said(5, at), said(6, at + minute)], { earlier: true })).toStrictEqual([
+      5,
+      "+6",
+    ]);
+  });
+});

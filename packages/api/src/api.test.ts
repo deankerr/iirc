@@ -673,16 +673,16 @@ describe("the contract", () => {
     ).toStrictEqual(["shown", "latest", "asked", null, null, null, null]);
   });
 
-  it("takes a line's layout as columns or inline, columns to start, and nothing else", () => {
+  it("takes a line's layout as columns, inline, or stacked, columns to start, and nothing else", () => {
     const layout = Schema.decodeUnknownOption(LineLayout);
 
     expect({
-      layout: ["columns", "inline", "Inline", "stacked", "", null].map((each) =>
+      layout: ["columns", "inline", "stacked", "Stacked", "", null].map((each) =>
         Option.getOrNull(layout(each))
       ),
       start: uiDefaults.line,
     }).toStrictEqual({
-      layout: ["columns", "inline", null, null, null, null],
+      layout: ["columns", "inline", "stacked", null, null, null],
       start: "columns",
     });
   });
