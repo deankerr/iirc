@@ -17,8 +17,10 @@ import type {
   PreviewId,
   PreviewItem,
   PreviewsByTimeline,
+  PreviewsFolded,
   PreviewsPlayers,
   PreviewsShown,
+  PreviewsStyle,
   TimelineId,
   UiInForce,
 } from "@iirc/api";
@@ -599,13 +601,13 @@ const linkShown = (link: string): LinkShown => {
  * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
  * its link; where the Daemon serves it, from its own origin and never the host it came
  * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary,
- * `Whole` for a link that is itself the image, or `Poster` for a player's or a video's,
- * which a play button is drawn over.
+ * `Card` under a page's text, `Whole` for a link that is itself the image, or `Poster` for
+ * a player's or a video's, which a play button is drawn over.
  */
 export interface ImageShown {
   readonly alt: string;
   readonly animated: boolean;
-  readonly drawn: "Poster" | "Thumbnail" | "Whole";
+  readonly drawn: "Card" | "Poster" | "Thumbnail" | "Whole";
   readonly src: string;
 }
 
@@ -662,12 +664,21 @@ export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): Pr
   return motion === "Still" ? "Play" : "Stop";
 };
 
+/** How each style draws a page's image, or a sound's: beside its text, under it, or not at all. */
+const besideText: Readonly<Record<PreviewsStyle, ImageShown["drawn"] | undefined>> = {
+  card: "Card",
+  line: undefined,
+  thumbnail: "Thumbnail",
+};
+
 /**
- * How a Preview's image is drawn, by what the Preview is.
+ * How a Preview's image is drawn, by what the Preview is and `ui.previews.style`: a page's
+ * or a sound's beside its text, under it as a card, or not at all on its one line.
  * @param kind - The Preview's kind.
- * @returns How its image is drawn.
+ * @param style - `ui.previews.style` on this device.
+ * @returns How its image is drawn, or none.
  */
-const drawnOf = (kind: Preview["kind"]): ImageShown["drawn"] => {
+const drawnOf = (kind: Preview["kind"], style: PreviewsStyle): ImageShown["drawn"] | undefined => {
   switch (kind) {
     case "image": {
       return "Whole";
@@ -680,7 +691,7 @@ const drawnOf = (kind: Preview["kind"]): ImageShown["drawn"] => {
 
     case "page":
     case "audio": {
-      return "Thumbnail";
+      return besideText[style];
     }
 
     default: {
@@ -692,19 +703,43 @@ const drawnOf = (kind: Preview["kind"]): ImageShown["drawn"] => {
 /**
  * A ready Preview's image as drawn.
  * @param preview - The Preview.
- * @returns The image, or none when the Daemon kept none.
+ * @param style - `ui.previews.style` on this device.
+ * @returns The image, or none when the Daemon kept none or the style draws none.
  */
-const imageOf = (preview: Preview): ImageShown | undefined =>
-  preview.image === null
+const imageOf = (preview: Preview, style: PreviewsStyle): ImageShown | undefined => {
+  const drawn = drawnOf(preview.kind, style);
+
+  return preview.image === null || drawn === undefined
     ? undefined
     : {
         alt: contained(
           preview.title === null || preview.title === "" ? preview.link : preview.title
         ),
         animated: preview.image.animated,
-        drawn: drawnOf(preview.kind),
+        drawn,
         src: `/api/previews/media/${preview.image.hash}`,
       };
+};
+
+/**
+ * A page's description, as drawn: `Pressed`, behind a press of its summary, beside a
+ * thumbnail; or `Below`, always under its summary, cut to a few lines, as a card is.
+ */
+export interface DescriptionShown {
+  readonly drawn: "Below" | "Pressed";
+  readonly text: string;
+}
+
+/**
+ * A ready Preview's description as drawn: none on its one line, or when it has none.
+ * @param preview - The Preview.
+ * @param style - `ui.previews.style` on this device.
+ * @returns The description, or none.
+ */
+const descriptionOf = (preview: Preview, style: PreviewsStyle): DescriptionShown | undefined =>
+  preview.description === null || preview.description === "" || style === "line"
+    ? undefined
+    : { drawn: style === "card" ? "Below" : "Pressed", text: contained(preview.description) };
 
 /**
  * A video or a sound, a link that is itself one or a page that names a video file, as drawn: which, where the Daemon streams it
@@ -820,10 +855,10 @@ const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
  * One Preview, as drawn:
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
- * - `Ready`: its summary, opening to its description when it has one, its image when the
+ * - `Ready`: its summary, with its description when it has one, its image when the
  *   Daemon kept one, for a video or a sound, its media, and for a player, where it plays
  *   from. A video's image is its poster. Images, media, and players are shown only under
- *   `on`.
+ *   `on`. `ui.previews.style` decides how a page's description and image are drawn.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
  * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
  *   Message's links, as the Daemon holds it until the Owner presses.
@@ -835,7 +870,7 @@ export type PreviewShown =
       readonly key: string;
       readonly link: LinkShown;
       readonly summary: string;
-      readonly description: string | undefined;
+      readonly description: DescriptionShown | undefined;
       readonly image: ImageShown | undefined;
       readonly media: MediaShown | undefined;
       readonly player: PlayerShown | undefined;
@@ -860,7 +895,7 @@ export type PreviewShown =
  * @param address - The link as the Message holds it.
  * @param index - Which of its Message's links it is.
  * @param on - Whether Previews are `on`, as images and media are shown only then.
- * @param players - The hosts `ui.previews.players` lists now.
+ * @param drawing - The hosts `ui.previews.players` lists now, and `ui.previews.style`.
  * @param timeline - The Message's Timeline.
  * @param position - Its place there.
  * @returns It.
@@ -870,7 +905,7 @@ const itemShown = (
   address: string,
   index: number,
   on: boolean,
-  players: PreviewsPlayers,
+  drawing: PreviewsDrawing,
   timeline: TimelineId,
   position: Position
 ): PreviewShown => {
@@ -883,15 +918,12 @@ const itemShown = (
     }
 
     case "Ready": {
-      const preview = listedNow(item.state.preview, players);
+      const preview = listedNow(item.state.preview, drawing.players);
 
       return {
         _tag: "Ready",
-        description:
-          preview.description === null || preview.description === ""
-            ? undefined
-            : contained(preview.description),
-        image: on ? imageOf(preview) : undefined,
+        description: descriptionOf(preview, drawing.style),
+        image: on ? imageOf(preview, drawing.style) : undefined,
         key,
         link,
         media: on ? mediaOf(preview, item.id, timeline, position) : undefined,
@@ -943,6 +975,12 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
   return asksFor(mode) && text !== undefined && previewableLinksOf(text).length > 0;
 };
 
+/** What decides how a Preview is drawn: the hosts `ui.previews.players` lists now, and `ui.previews.style` on this device. */
+export interface PreviewsDrawing {
+  readonly players: PreviewsPlayers;
+  readonly style: PreviewsStyle;
+}
+
 /**
  * What a Message shows below it: nothing while its Timeline's mode does not ask, or for a Message
  * with no link that may be previewed, or one the Daemon refused; the items the Daemon
@@ -953,7 +991,7 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
  * @param timeline - The Message's Timeline.
  * @param position - Its place.
  * @param content - What it holds.
- * @param players - The hosts `ui.previews.players` lists now.
+ * @param drawing - The hosts `ui.previews.players` lists now, and `ui.previews.style`.
  * @returns Its Previews, in its order.
  */
 export const previewsOf = (
@@ -962,7 +1000,7 @@ export const previewsOf = (
   timeline: TimelineId,
   position: Position,
   content: ItemContent,
-  players: PreviewsPlayers
+  drawing: PreviewsDrawing
 ): readonly PreviewShown[] => {
   const text = messageText(content);
 
@@ -992,7 +1030,7 @@ export const previewsOf = (
               found[index]?.href ?? item.item.link,
               index,
               mode === "on",
-              players,
+              drawing,
               timeline,
               position
             ),
@@ -1006,3 +1044,113 @@ export const previewsOf = (
     link: linkShown(link.href),
   }));
 };
+
+/**
+ * How one Preview stands under `ui.previews.folded`: `Folded`, its summary line alone,
+ * which a press opens; `Opened`, pressed open from that, its description shown; or `Open`,
+ * drawn as its style draws it.
+ */
+export type Fold = "Folded" | "Open" | "Opened";
+
+/** One Preview as a Message draws it, and how it stands folded. */
+export interface PreviewRow {
+  readonly fold: Fold;
+  readonly shown: PreviewShown;
+}
+
+/**
+ * A Message's Previews under `ui.previews.folded`: one `[+n]` that a press opens, for
+ * `count` of them, or each in its row.
+ */
+export type PreviewsFolding =
+  | { readonly _tag: "Chip"; readonly count: number }
+  | { readonly _tag: "Rows"; readonly rows: readonly PreviewRow[] };
+
+/**
+ * Which Previews the Owner pressed open, each by its Message's key and its own, as one
+ * text. A Preview opened stays open.
+ * @param key - Its Message's key.
+ * @param shown - The Preview.
+ * @returns Its key among those opened.
+ */
+const openedKey = (key: string, shown: PreviewShown): string => `${key} ${shown.key}`;
+
+/**
+ * Whether a Preview shows more than its summary line, so folding it hides something: a
+ * ready one with a description, an image, media, or a player, as its style draws it.
+ * @param shown - The Preview.
+ * @returns Whether it does.
+ */
+const showsMore = (shown: PreviewShown): boolean =>
+  shown._tag === "Ready" &&
+  (shown.description !== undefined ||
+    shown.image !== undefined ||
+    shown.media !== undefined ||
+    shown.player !== undefined);
+
+/**
+ * A Message's Previews as `ui.previews.folded` draws them. Under `open`, each is open.
+ * Under `summary`, each that shows more than its summary line is folded to it until it is
+ * pressed open, and any other, pending, failed, waiting for a press, or with nothing more,
+ * is drawn as it is. Under `chip`, they are one `[+n]` until it is pressed, which opens
+ * them all, each that shows more `Opened`, as a summary pressed is.
+ * @param folded - `ui.previews.folded` on this device.
+ * @param opened - The Previews pressed open, as {@link opening} keeps them.
+ * @param key - The Message's key.
+ * @param shown - Its Previews, as {@link previewsOf} draws them.
+ * @returns How they are drawn.
+ */
+export const foldedOf = (
+  folded: PreviewsFolded,
+  opened: ReadonlySet<string>,
+  key: string,
+  shown: readonly PreviewShown[]
+): PreviewsFolding => {
+  const open = (one: PreviewShown): PreviewRow => ({ fold: "Open", shown: one });
+
+  switch (folded) {
+    case "open": {
+      return { _tag: "Rows", rows: shown.map(open) };
+    }
+
+    case "summary": {
+      return {
+        _tag: "Rows",
+        rows: shown.map((one) => {
+          if (!showsMore(one)) {
+            return open(one);
+          }
+
+          return { fold: opened.has(openedKey(key, one)) ? "Opened" : "Folded", shown: one };
+        }),
+      };
+    }
+
+    case "chip": {
+      return shown.every((one) => opened.has(openedKey(key, one)))
+        ? {
+            _tag: "Rows",
+            rows: shown.map((one) => (showsMore(one) ? { fold: "Opened", shown: one } : open(one))),
+          }
+        : { _tag: "Chip", count: shown.length };
+    }
+
+    default: {
+      return folded satisfies never;
+    }
+  }
+};
+
+/**
+ * The Previews pressed open, with some of one Message's opened too: one, as a folded
+ * summary is pressed, or all of them, as a chip is.
+ * @param opened - The Previews pressed open before.
+ * @param key - The Message's key.
+ * @param shown - Its Previews pressed open.
+ * @returns The Previews pressed open now.
+ */
+export const opening = (
+  opened: ReadonlySet<string>,
+  key: string,
+  shown: readonly PreviewShown[]
+): ReadonlySet<string> => new Set([...opened, ...shown.map((one) => openedKey(key, one))]);

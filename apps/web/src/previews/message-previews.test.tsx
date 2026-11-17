@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId, uiDefaults } from "@iirc/api";
-import type { PreviewItem, Timeline, TimelineItem } from "@iirc/api";
+import type { PreviewItem, Timeline, TimelineItem, UiOptions } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -298,6 +298,9 @@ const layOut = () => {
   });
 };
 
+/** How rich a Preview looks: `ui.previews.style`, `folded`, and `mediaHeight`. */
+type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight" | "previews.style">>;
+
 /**
  * The Frontend signed in, with `ui.previews` as given and `#iirc` open, holding a Message
  * with a link to a page, which the Daemon answers for with the item given.
@@ -305,13 +308,16 @@ const layOut = () => {
  * @param answer - What the Daemon answers for the Message, as it stands then.
  * @param timelines - `ui.previews.timelines`, none unless given.
  * @param animate - `ui.previews.animate`, shared, off unless given.
+ * @param also - How rich a Preview looks, shared, `open` unless given so each is drawn
+ *   whole, and a second link's answer, which the Message then holds after the first.
  * @returns The fake, the registry, and the page.
  */
 const opened = async (
   previews: "off" | "links only" | "on",
   answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" }),
   timelines: { readonly [timeline: string]: "off" | "links only" | "on" } = {},
-  animate = false
+  animate = false,
+  also: { readonly look?: Look; readonly dogs?: typeof PreviewItem.Encoded | undefined } = {}
 ) => {
   const fake = fakeDaemon();
 
@@ -321,17 +327,27 @@ const opened = async (
       ...uiDefaults,
       previews,
       "previews.animate": animate,
+      "previews.folded": "open",
       "previews.timelines": timelines,
+      ...also.look,
     },
     sequence: 1,
   };
   fake.daemon.through = 2;
-  fake.daemon.previews.set(cursor(2), [answer]);
+  fake.daemon.previews.set(cursor(2), also.dogs === undefined ? [answer] : [answer, also.dogs]);
   fake.daemon.timelines.set("libera", [
     { gaps: [], items: [], timeline: listed(own, "libera", "Network") },
     {
       gaps: [],
-      items: [message(1, "no link here"), message(2, "look https://example.com/cats")],
+      items: [
+        message(1, "no link here"),
+        message(
+          2,
+          also.dogs === undefined
+            ? "look https://example.com/cats"
+            : "look https://example.com/cats and https://example.com/dogs"
+        ),
+      ],
       timeline: listed(iirc, "#iirc", "Channel"),
     },
   ]);
@@ -390,6 +406,12 @@ const drawn = () =>
     state: one.dataset.preview,
     text: one.textContent,
   }));
+
+/**
+ * How tall the Message's Previews draw their media at most.
+ * @returns The height, as the list's custom property holds it.
+ */
+const mediaHeight = () => list()?.style.getPropertyValue("--preview-media-height");
 
 /**
  * The summary line of the Message's first Preview, without the description under it.
@@ -1667,5 +1689,202 @@ describe("a Message's Previews", () => {
       state: drawn()[0]?.state,
       text: summaryLine(),
     }).toStrictEqual({ image: 0, state: "ready", text: "example.com · Cats" });
+  });
+
+  describe("how rich a Preview looks", () => {
+    /**
+     * The Frontend with the Message's Preview answered as given and seen, under a look.
+     * @param answer - The Preview's state.
+     * @param look - The look, shared.
+     * @param dogs - A second link's answer, if the Message holds one.
+     * @returns The fake.
+     */
+    const seenWith = async (
+      answer: (typeof PreviewItem.Encoded)["state"],
+      look: Look,
+      dogs?: typeof PreviewItem.Encoded
+    ) => {
+      const fake = await opened("on", catsItem(answer), {}, false, { dogs, look });
+
+      await settled(() => fake.daemon.previewFollowers.length === 1 && list() !== null);
+      await scrolledIntoView();
+      await settled(() => fake.daemon.previewAsks.length === 1);
+
+      return fake;
+    };
+
+    const dogsItem = {
+      ...catsItem(readyWithImage("image")),
+      id: "fedcba9876543210fedcba9876543210",
+      link: "https://example.com/dogs",
+    } as const;
+
+    it("draws a page on a line as its site and title alone, with no image or description", async () => {
+      await seenWith(readyWithImage("page"), { "previews.style": "line" });
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({
+        buttons: list()?.querySelectorAll("button").length,
+        drawn: drawn(),
+        image: list()?.querySelector("[data-loaded]"),
+      }).toStrictEqual({
+        buttons: 0,
+        drawn: [{ state: "ready", text: "example.com · Cats" }],
+        image: null,
+      });
+    });
+
+    it("draws a link that is itself an image whole on a line too", async () => {
+      await seenWith(readyWithImage("image"), { "previews.style": "line" });
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("img") !== null);
+
+      expect(list()?.querySelector("img")?.dataset.drawn).toBe("whole");
+    });
+
+    it("draws a page as a thumbnail beside its summary, its description behind a press", async () => {
+      await seenWith(readyWithImage("page"), { "previews.style": "thumbnail" });
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("img") !== null);
+
+      expect({
+        drawn: list()?.querySelector("img")?.dataset.drawn,
+        expanded: list()?.querySelector("button")?.getAttribute("aria-expanded"),
+      }).toStrictEqual({ drawn: "thumbnail", expanded: "false" });
+    });
+
+    it("draws a page as a card, its description shown and its image under its text", async () => {
+      await seenWith(readyWithImage("page"), { "previews.style": "card" });
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("img") !== null);
+
+      const row = list()?.querySelector<HTMLElement>('[data-preview="ready"]');
+
+      expect({
+        drawn: list()?.querySelector("img")?.dataset.drawn,
+        last: row?.querySelector<HTMLElement>(":scope > :last-child")?.dataset.loaded,
+        text: row?.firstElementChild?.textContent,
+      }).toStrictEqual({
+        drawn: "card",
+        last: "true",
+        text: "example.com · CatsA page about cats.",
+      });
+    });
+
+    it("folds a ready Preview with more to show to its summary line, which a press opens", async () => {
+      await seenWith(readyWithImage("page"), { "previews.folded": "summary" });
+      await settled(() => drawn()[0]?.state === "folded");
+
+      const folded = { drawn: drawn(), image: list()?.querySelector("[data-loaded]") };
+
+      await pressed(list()?.querySelector("button") ?? null);
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({
+        folded,
+        opened: {
+          description: list()?.textContent?.includes("A page about cats."),
+          image: list()?.querySelector("[data-loaded]") !== null,
+        },
+      }).toStrictEqual({
+        folded: { drawn: [{ state: "folded", text: "example.com · Cats" }], image: null },
+        opened: { description: true, image: true },
+      });
+    });
+
+    it("opens under summary only the Preview pressed", async () => {
+      await seenWith(readyWithImage("page"), { "previews.folded": "summary" }, dogsItem);
+      await settled(() => drawn().length === 2 && drawn().every((one) => one.state === "folded"));
+
+      await pressed(list()?.querySelector("button") ?? null);
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect(drawn().map((one) => one.state)).toStrictEqual(["ready", "folded"]);
+    });
+
+    it("leaves under summary a Preview with nothing more to show, and a failure, as they are", async () => {
+      await seenWith(
+        { _tag: "Ready", preview: { ...ready.preview, description: null } },
+        { "previews.folded": "summary" },
+        { ...dogsItem, state: { _tag: "Failed", reason: "Unreachable" } }
+      );
+      await settled(() => drawn().length === 2 && drawn()[0]?.state === "ready");
+
+      expect(drawn().map((one) => one.state)).toStrictEqual(["ready", "failed"]);
+    });
+
+    it("folds a Message's Previews into one chip under chip, which a press opens, all of them, descriptions shown", async () => {
+      await seenWith(readyWithImage("page"), { "previews.folded": "chip" }, dogsItem);
+      await settled(() => drawn()[0]?.state === "chip");
+
+      const chip = drawn();
+
+      await pressed(list()?.querySelector("button") ?? null);
+      await settled(() => drawn().length === 2);
+
+      const expanded = [...(list()?.querySelectorAll('[slot="trigger"]') ?? [])].map((one) =>
+        one.getAttribute("aria-expanded")
+      );
+
+      expect({ chip, expanded, opened: drawn().map((one) => one.state) }).toStrictEqual({
+        chip: [{ state: "chip", text: "[+2]" }],
+        expanded: ["true"],
+        opened: ["ready", "ready"],
+      });
+    });
+
+    /**
+     * Whether a Message folded as given is asked for before and once it comes into view.
+     * @param folded - `ui.previews.folded`.
+     * @returns The asks made, and how its first Preview is drawn, before and after.
+     */
+    const asked = async (folded: "summary" | "chip") => {
+      const { daemon } = await opened("on", catsItem(readyWithImage("page")), {}, false, {
+        look: { "previews.folded": folded },
+      });
+
+      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+
+      const before = { asks: daemon.previewAsks.length, drawn: drawn()[0]?.state };
+
+      await scrolledIntoView();
+      await settled(() => daemon.previewAsks.length === 1);
+      await settled(() => drawn()[0]?.state !== "pending");
+
+      const after = { asks: daemon.previewAsks.length, drawn: drawn()[0]?.state };
+
+      for (const unmount of mounted.splice(0)) {
+        act(unmount);
+      }
+
+      observers.clear();
+
+      return { after, before };
+    };
+
+    it("asks for a folded or chipped Message only once it comes into view", async () => {
+      expect({ chip: await asked("chip"), summary: await asked("summary") }).toStrictEqual({
+        chip: { after: { asks: 1, drawn: "chip" }, before: { asks: 0, drawn: "chip" } },
+        summary: { after: { asks: 1, drawn: "folded" }, before: { asks: 0, drawn: "pending" } },
+      });
+    });
+
+    it("sets the media's height from ui.previews.mediaHeight, which a device may override", async () => {
+      const { registry } = await seenWith(readyWithImage("page"), {
+        "previews.mediaHeight": "large",
+      });
+
+      const shared = mediaHeight();
+
+      await act(async () => {
+        registry.set(deviceUi, { "previews.mediaHeight": "small" });
+        await Promise.resolve();
+      });
+
+      expect({ device: mediaHeight(), shared }).toStrictEqual({ device: "160px", shared: "400px" });
+    });
   });
 });

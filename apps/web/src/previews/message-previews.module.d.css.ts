@@ -1,6 +1,9 @@
 // The class names in message-previews.module.css, which CSS Modules exports.
 declare const styles: {
   readonly audio: string;
+  readonly below: string;
+  readonly card: string;
+  readonly chip: string;
   readonly description: string;
   readonly failed: string;
   readonly media: string;
