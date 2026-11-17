@@ -106,24 +106,70 @@
   box-shadow: inset var(--space-1) 0 0 var(--color-focus);
 }
 
-/* The candidates a Tab cycles through, the one in place accented. */
-.candidates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 var(--space-3);
-  max-height: calc(2 * var(--line-height) * 1em);
+/*
+ * What it can complete, just above its line, as the palette lists: a candidate's name, and
+ * what a command takes and does, dim, in columns down the list. The Panes give it room, so
+ * nothing in a Timeline is hidden behind it. It is bounded so the composer stays in view,
+ * on a phone with its keyboard up too, and scrolls.
+ */
+.list {
+  display: grid;
+  grid-template-columns: fit-content(24ch) fit-content(28ch) minmax(0, 1fr);
+  align-content: start;
+  max-height: min(calc(12 * var(--line-height) * 1em), 40dvh);
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-background);
+  overscroll-behavior: contain;
+}
+
+.option {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  cursor: default;
+}
+
+.option[aria-selected="true"] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.candidate,
+.usage,
+.description {
   overflow: hidden;
-  padding: var(--space-2) var(--space-3) 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage,
+.description {
   color: var(--color-muted);
 }
 
-.candidate {
-  white-space: nowrap;
+.option[aria-selected="true"] .usage,
+.option[aria-selected="true"] .description {
+  color: inherit;
 }
 
-.chosen {
-  color: var(--color-accent);
-  white-space: nowrap;
+/* Narrow, what a command takes follows its name, and what it does goes under both. */
+@media (max-width: 640px) {
+  .list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .option {
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  }
+
+  .description {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Heard, not seen. */

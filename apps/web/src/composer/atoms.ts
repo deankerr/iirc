@@ -809,19 +809,27 @@ export const draftsCarried = runtime
   )
   .pipe(Atom.keepAlive);
 
+/** An edit of a Timeline's draft, and where the Owner's selection was if they typed it. */
+interface Edit {
+  readonly timeline: Place;
+  readonly text: string;
+  readonly typing?: Typing;
+}
+
+/**
+ * Edits a Timeline's draft at once, which lets go of what was being completed, for what
+ * follows the edit to fold in after it.
+ * @param registry - The registry.
+ * @param change - The edit.
+ */
+export const edited = (registry: AtomRegistry.AtomRegistry, { text, timeline, typing }: Edit) => {
+  happened(registry, { _tag: "Edited", text, timeline }, typing);
+};
+
 /** Edits a Timeline's draft, where the Owner's selection was if they typed it. */
-export const edit = Atom.fnSync(
-  (
-    {
-      text,
-      timeline,
-      typing,
-    }: { readonly timeline: Place; readonly text: string; readonly typing?: Typing },
-    get
-  ) => {
-    happened(get.registry, { _tag: "Edited", text, timeline }, typing);
-  }
-).pipe(Atom.keepAlive);
+export const edit = Atom.fnSync((change: Edit, get) => {
+  edited(get.registry, change);
+}).pipe(Atom.keepAlive);
 
 /** Recalls what was sent from a Timeline, older or newer. */
 export const recall = Atom.fnSync(
