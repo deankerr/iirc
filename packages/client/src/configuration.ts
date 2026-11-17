@@ -5,6 +5,7 @@ import {
   OperName,
   ServiceTarget,
 } from "@iirc/protocol/line";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
@@ -122,6 +123,15 @@ const Highlights = Schema.Array(
   })
 ).check(Schema.isMaxLength(maxHighlights));
 
+/** How many ignore masks a Network may have. */
+const maxIgnores = 64;
+
+/**
+ * Masks of the Users to ignore: at most 64, since every Message and Activity from a User
+ * is matched against each.
+ */
+const Ignores = Schema.Array(IgnoreMask).check(Schema.isMaxLength(maxIgnores));
+
 /**
  * What the Owner wants to be true of one Network. It always arrives whole, and the
  * Client works out what changed, so joining, parting, and quitting are all a change of
@@ -180,6 +190,22 @@ export const NetworkConfiguration = Schema.Struct({
       default: [],
       description:
         "Words that make a Message a Highlight, as Self's nick does, matched as whole words in any case: at most 64, of at most 64 characters each.",
+    }),
+  /**
+   * Masks of the Users to ignore. A Journal written before the field existed holds
+   * `Configured` inputs without it, which decode as none.
+   */
+  ignores: Schema.optionalKey(Schema.Array(Schema.String))
+    .pipe(
+      Schema.decodeTo(Ignores, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => [])),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: [],
+      description:
+        "Users to ignore by mask, nick!user@host with * and ?: what they say is kept but not shown, counted or notified. At most 64.",
     }),
   ircds: Schema.NonEmptyArray(IrcdAddress).annotate({
     description: "The Ircds to connect to, tried in turn.",

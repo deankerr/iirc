@@ -136,8 +136,9 @@ const partnersAfter = (
   partners: ReadonlyMap<string, string>,
   news: News
 ): Map<string, string> | undefined => {
+  // An ignored User's Message is hidden, so it opens no partner to monitor.
   if (news._tag === "Message") {
-    return afterMessage(partners, news.where);
+    return news.ignored === undefined ? afterMessage(partners, news.where) : undefined;
   }
 
   if (news._tag === "Activity") {
@@ -594,13 +595,18 @@ const told = (run: Run, arrival: Arrival, nick: string, here: boolean): void => 
   }
 
   run.news.push(
-    routeActivity(run, {
-      _tag: "Activity",
-      activity: { _tag: here ? "CameOnline" : "WentOffline", nick },
-      at: arrival.time,
-      id: { _tag: "Unknown" },
-      live: true,
-    })
+    routeActivity(
+      run,
+      {
+        _tag: "Activity",
+        activity: { _tag: here ? "CameOnline" : "WentOffline", nick },
+        at: arrival.time,
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      // The Ircd tells it, not the partner, so no ignore mask applies.
+      undefined
+    )
   );
 };
 

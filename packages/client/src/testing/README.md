@@ -63,6 +63,7 @@ The changes `!! configure` takes, separated by one space:
 | `decline=multi-prefix`, `accept=multi-prefix` | Decline a Feature, or stop declining it. |
 | `realname=new`, `nicks=one,two` | The realname registration sends, with no space, or the nicks it offers, in order. |
 | `highlights=release,iirc`, `highlights=` | The words that make a Message a Highlight, or none. |
+| `ignores=spam!*@*,*!*@bad.test`, `ignores=` | The masks of the Users to ignore, or none. A mask the schema would refuse is a transcript error. |
 | `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw`, `login=service,NickServ,iirc,pw,5` | How Self logs in: not at all, with SASL to an account, with its Credential's name, required or optional, or by telling a service, named first, with the seconds Channels wait last. A login the Configuration's schema would refuse, such as a wait over its bound, is a transcript error. |
 | `oper=none`, `oper=admin,pw` | Whether Self opers as each Session begins: not at all, or as a name, with its Credential's name. One the schema would refuse is a transcript error. |
 
@@ -82,11 +83,12 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
 | `Refolded` | `?? refolded ascii` |
 | `ReadMarker` | `?? read-marker t+5s in=channel:#iirc`, `?? read-marker t+1s in=network` |
-| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+reply="m0" answers=m0 ours=i1 echo :hi`, with `context=#iirc` after `answers` for a Direct Message said in a Channel's context, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi`, or `self` there for one Self said that is not ours: `?? message Privmsg iirc #iirc self in=channel:#iirc :from my phone` |
+| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+reply="m0" answers=m0 ours=i1 echo :hi`, with `context=#iirc` after `answers` for a Direct Message said in a Channel's context, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi`, or `self` there for one Self said that is not ours: `?? message Privmsg iirc #iirc self in=channel:#iirc :from my phone`, and `ignored=` with each mask its sender matched, quoted and separated by commas, after those and before `in=`: `?? message Privmsg spam #iirc ignored="spam!*@*" in=channel:#iirc :hi` |
 | `Confirmed` | `?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello` |
+| `Unignored` | `?? unignored "spam!*@*" "{foo}!*@*"`, each mask quoted |
 | `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer`, `?? activity StandardReply WARN TOPIC TRUNCATED context=#iirc in=channel:#iirc :shortened`, `?? activity CtcpRequest peer iirc PING answered=1 in=existing-direct:peer in=network :1`, with `unanswered=Limited` and the like for one not answered, `?? activity CtcpReply peer iirc VERSION in=existing-direct:peer in=network :irssi`, with `round-trip=250ms` after the command for a reply to Self's `PING`, `?? activity CtcpSent peer PING in=existing-direct:peer in=network :1767225600000`, `?? activity CtcpUnsent peer #iirc VERSION in=channel:#iirc`, `?? activity Invited #elsewhere by=peer in=network`, `?? activity OperGranted iirc in=network`, `?? activity OperRefused iirc reply=464 in=network` |
 
-A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, `highlight`, and `self`. A Read Marker's one `where` is written the same way, after its instant.
+A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, `highlight`, `self`, and `ignored`. A Read Marker's one `where` is written the same way, after its instant.
 
 | `where` | Written |
 | --- | --- |

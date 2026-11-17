@@ -62,6 +62,47 @@ describe("highlight words", () => {
   });
 });
 
+describe("ignore masks", () => {
+  const old = {
+    channels: [],
+    declined: [],
+    enabled: true,
+    fallbackEncoding: "windows-1252",
+    ircds: [{ host: "irc.test", port: 6697, tls: true }],
+    login: { _tag: "None" },
+    nicks: ["iirc"],
+    realname: "iirc",
+    username: "iirc",
+  };
+
+  it("decode as none from a Configuration written before they existed", () => {
+    expect(Schema.decodeUnknownSync(NetworkConfiguration)(old).ignores).toStrictEqual([]);
+  });
+
+  it("are kept, and encoded as given", () => {
+    const decoded = Schema.decodeUnknownSync(NetworkConfiguration)({
+      ...old,
+      ignores: ["spam!*@*", "*!*@bad.test"],
+    });
+
+    expect(decoded.ignores).toStrictEqual(["spam!*@*", "*!*@bad.test"]);
+    expect(Schema.encodeSync(NetworkConfiguration)(decoded)).toMatchObject({
+      ignores: ["spam!*@*", "*!*@bad.test"],
+    });
+  });
+
+  const takes = (ignores: readonly string[]) =>
+    Result.isSuccess(Schema.decodeUnknownResult(NetworkConfiguration)({ ...old, ignores }));
+
+  it("are at most 64, and each a mask", () => {
+    expect([
+      takes(Array.from({ length: 64 }, () => "x!*@*")),
+      takes(Array.from({ length: 65 }, () => "x!*@*")),
+      takes(["spam"]),
+    ]).toStrictEqual([true, false, false]);
+  });
+});
+
 describe("answering CTCP", () => {
   const old = {
     channels: [],

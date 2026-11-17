@@ -10,7 +10,14 @@ import { holds } from "@iirc/runtime/testing";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { TimelineStoreService } from "@iirc/timeline-store";
 import { timelineStoreLaws } from "@iirc/timeline-store/testing";
-import { SearchText, emptyDirectory, searchFolding, step, timelineIdOf } from "@iirc/timelines";
+import {
+  IgnoreMask,
+  SearchText,
+  emptyDirectory,
+  searchFolding,
+  step,
+  timelineIdOf,
+} from "@iirc/timelines";
 import type { Change, Position } from "@iirc/timelines";
 import { Effect, Layer, Option, Schema } from "effect";
 import type { Scope } from "effect";
@@ -56,6 +63,7 @@ const network = timelineIdOf(1, 0, 0);
 const channel = timelineIdOf(1, 0, 1);
 const other = timelineIdOf(1, 0, 2);
 const third = timelineIdOf(1, 0, 3);
+const spam = IgnoreMask.make("spam!*@*");
 
 const said = (
   sequence: number,
@@ -80,6 +88,7 @@ const said = (
     target: "#a",
     text,
   },
+  ignored: [],
   intent: IntentId.make(`intent-${text}`),
   level: undefined,
   messageId: id === undefined ? undefined : MessageId.make(id),
@@ -90,7 +99,11 @@ const said = (
 });
 
 // Something someone else said, which counts as unread.
-const heard = (sequence: number, text: string, timeline = channel): Change => ({
+const heard = (
+  sequence: number,
+  text: string,
+  timeline = channel
+): Extract<Change, { readonly _tag: "Added" }> => ({
   _tag: "Added",
   content: {
     _tag: "Message",
@@ -106,6 +119,7 @@ const heard = (sequence: number, text: string, timeline = channel): Change => ({
     target: "#a",
     text,
   },
+  ignored: [],
   intent: undefined,
   level: "Message",
   messageId: undefined,
@@ -132,6 +146,7 @@ const replied = (sequence: number): Change => ({
     id: { _tag: "Unknown" },
     live: true,
   },
+  ignored: [],
   intent: undefined,
   level: "Activity",
   messageId: undefined,
@@ -186,6 +201,7 @@ const asked = (sequence: number): readonly Change[] =>
       id: { _tag: "Unknown" },
       live: true,
     },
+    ignored: [],
     intent: undefined,
     level: "Activity",
     messageId: undefined,
@@ -752,6 +768,22 @@ describe("the file", () => {
               timeline: yield* emitted(store.timeline(channel)),
               timelineMerged: yield* emitted(store.timeline(third)),
               timelines: yield* emitted(store.timelines(libera, { after: network, limit: 1 })),
+              // A mask dropped, which reads only the Network's hidden items, shows one again,
+              // and counts its Timeline again.
+              unignore: yield* Effect.andThen(
+                store.apply({
+                  changes: [{ ...heard(10, "hidden"), ignored: [spam] }],
+                  directory: directoryAt(10),
+                  through: 10,
+                }),
+                emitted(
+                  store.apply({
+                    changes: [{ _tag: "Unignored", masks: [spam], network: libera, sequence: 11 }],
+                    directory: directoryAt(11),
+                    through: 11,
+                  })
+                )
+              ),
               windowAfter: yield* emitted(
                 store.window(channel, { _tag: "After", position: at }, 1)
               ),
@@ -821,12 +853,17 @@ describe("the file", () => {
               .map(byLevel),
             limited: (sql.match(/LIMIT/gu) ?? []).length,
           })),
+          // Dropping a mask reads the Network's hidden items alone, never every item it has.
+          hidden: planned
+            .filter((each) => each.read === "unignore" && each.sql.includes("ignored IS NOT NULL"))
+            .map(({ plan }) => plan),
           unbounded: byLevel(unbounded),
         }).toStrictEqual({
           bounded: [
             { counts: [true, true, true, true], limited: 4 },
             { counts: [true, true, true, true], limited: 4 },
           ],
+          hidden: ["SEARCH items USING INDEX items_hidden (network=?)"],
           unbounded: false,
         });
 

@@ -14,6 +14,7 @@ import type {
   DeliveryChange,
   Descriptor,
   Directory,
+  IgnoreMask,
   Position,
   TimelineId,
 } from "@iirc/timelines";
@@ -37,12 +38,15 @@ import type {
 } from "../store.ts";
 import { answeredOf, noneUnread, unreadOf } from "../store.ts";
 
-/** An item and what it is found by. */
+/** An item, what it is found by, and the ignore masks that hide it, empty while it is shown. */
 interface Stored {
   readonly item: Item;
   readonly messageId: MessageId | undefined;
   readonly intent: IntentId | undefined;
+  readonly ignored: readonly IgnoreMask[];
 }
+
+const shown = (stored: Stored) => stored.ignored.length === 0;
 
 /**
  * A Timeline, its Read Marker, when its head last changed, whether its Network was removed,
@@ -135,7 +139,7 @@ const touch = (memory: Memory, timeline: TimelineId, sequence: number) => {
 };
 
 /**
- * The item a Timeline holds now under a message id.
+ * The item a Timeline holds now under a message id, hidden or not.
  * @param memory - The store.
  * @param timeline - The Timeline.
  * @param id - The message id, or `undefined` for none.
@@ -146,21 +150,29 @@ const heldAs = (memory: Memory, timeline: TimelineId, id: MessageId | undefined)
     ? undefined
     : [...(memory.items.get(timeline)?.values() ?? [])].find(({ messageId }) => messageId === id);
 
+// The items of a Timeline a read gives: every one no mask hides.
+const shownIn = (memory: Memory, timeline: TimelineId) =>
+  [...(memory.items.get(timeline)?.values() ?? [])].filter(shown);
+
 const answersOf = ({ content }: { readonly content: Content }) =>
   content._tag === "Message" ? content.answers : undefined;
 
-// An item as read, with the Message it answers as the store holds it now.
+// An item as read, with the Message it answers as the store holds it now, unless hidden.
 const resolved = (memory: Memory, item: Item): Item => {
   const found = heldAs(memory, item.timeline, answersOf(item));
 
   return {
     ...item,
-    answered: found === undefined ? undefined : answeredOf(found.item.position, found.item.content),
+    answered:
+      found === undefined || !shown(found)
+        ? undefined
+        : answeredOf(found.item.position, found.item.content),
   };
 };
 
 /**
- * Keeps an item in a Timeline unless one already stands at its position or has its id.
+ * Keeps an item in a Timeline unless one already stands at its position or has its id,
+ * hidden or not. A hidden item changes nothing a read gives, so it touches no Timeline.
  * @param memory - The store.
  * @param stored - The item.
  */
@@ -175,7 +187,10 @@ const keep = (memory: Memory, stored: Stored) => {
 
   if (!taken) {
     items.set(cursor, stored);
-    touch(memory, stored.item.timeline, stored.item.changed);
+
+    if (shown(stored)) {
+      touch(memory, stored.item.timeline, stored.item.changed);
+    }
   }
 };
 
@@ -226,16 +241,14 @@ const deliver = (memory: Memory, change: DeliveryChange) => {
 };
 
 /**
- * Whether a Timeline is closed: it was closed, and no item stands in it from a later step.
+ * Whether a Timeline is closed: it was closed, and no item shown stands in it from a later step.
  * @param memory - The store.
  * @param entry - The Timeline.
  * @returns Whether it is.
  */
 const isClosed = (memory: Memory, { closed, descriptor }: Entry) =>
   closed !== undefined &&
-  [...(memory.items.get(descriptor.id)?.values() ?? [])].every(
-    ({ item }) => item.position.sequence <= closed
-  );
+  shownIn(memory, descriptor.id).every(({ item }) => item.position.sequence <= closed);
 
 // Only forward, whatever the change says.
 const markRead = (memory: Memory, change: Extract<Change, { readonly _tag: "ReadMarker" }>) => {
@@ -348,11 +361,53 @@ const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Remove
   memory.gaps.delete(change.network);
 };
 
+/**
+ * Takes masks off each of a Network's hidden items. One left with none is shown where it
+ * stood, changed now, and a Timeline it shows again in was closed as of now when it was
+ * closed before, so what is shown again reopens nothing.
+ * @param memory - The store.
+ * @param change - The masks, and their Network.
+ */
+const unignore = (memory: Memory, change: Extract<Change, { readonly _tag: "Unignored" }>) => {
+  const dropped = new Set(change.masks);
+
+  for (const [timeline, items] of memory.items) {
+    const entry = memory.timelines.get(timeline);
+    const wasClosed = entry !== undefined && isClosed(memory, entry);
+    let restored = false;
+
+    for (const [cursor, stored] of items) {
+      if (stored.item.network !== change.network || shown(stored)) {
+        continue;
+      }
+
+      const ignored = stored.ignored.filter((mask) => !dropped.has(mask));
+
+      if (ignored.length === 0) {
+        restored = true;
+        items.set(cursor, {
+          ...stored,
+          ignored,
+          item: { ...stored.item, changed: change.sequence },
+        });
+      } else if (ignored.length < stored.ignored.length) {
+        items.set(cursor, { ...stored, ignored });
+      }
+    }
+
+    if (restored && entry !== undefined) {
+      entry.changed = change.sequence;
+      entry.closed = wasClosed ? change.sequence : entry.closed;
+    }
+  }
+};
+
 // Its level as `answering` gives it, from the item it answers as the Timeline holds it now.
 const add = (memory: Memory, change: Extract<Change, { readonly _tag: "Added" }>) => {
   const answered = heldAs(memory, change.timeline, answersOf(change));
 
   keep(memory, {
+    ignored: change.ignored,
     intent: change.intent,
     item: {
       answered: undefined,
@@ -426,6 +481,11 @@ const applyChange = (memory: Memory, change: Change) => {
       break;
     }
 
+    case "Unignored": {
+      unignore(memory, change);
+      break;
+    }
+
     case "Gap": {
       const gaps = memory.gaps.get(change.network) ?? new Map<string, Gap>();
 
@@ -447,9 +507,9 @@ const applyChange = (memory: Memory, change: Change) => {
 };
 
 const sortedItems = (memory: Memory, timeline: TimelineId): readonly Item[] =>
-  [...(memory.items.get(timeline) ?? new Map<string, Stored>())]
-    .toSorted(([left], [right]) => textOrder(left, right))
-    .map(([, { item }]) => resolved(memory, item));
+  shownIn(memory, timeline)
+    .map(({ item }) => resolved(memory, item))
+    .toSorted((left, right) => textOrder(cursorOf(left.position), cursorOf(right.position)));
 
 // Counted by walking every item, as no adapter that must stay bounded may.
 const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => {
@@ -484,8 +544,12 @@ const summaryOf = (memory: Memory, entry: Entry): Summary => {
 
 const allItems = (memory: Memory): readonly Item[] =>
   [...memory.items.values()].flatMap((items) =>
-    [...items.values()].map(({ item }) => resolved(memory, item))
+    [...items.values()].flatMap((stored) => (shown(stored) ? [resolved(memory, stored.item)] : []))
   );
+
+// A Direct Message Timeline opens on an item, so one with none shown holds only what is
+// hidden, and is listed nowhere until something in it is shown.
+const listed = (summary: Summary) => summary.kind !== "Direct" || summary.latest !== undefined;
 
 // The first index whose item comes at or after a position, or strictly after it.
 const indexOf = (items: readonly Item[], position: Position, after: boolean) => {
@@ -555,9 +619,9 @@ const changedAfter = (
 ): Changed => {
   const since = after ?? 0;
 
-  const timelines = [...memory.timelines.values()].flatMap((entry) =>
-    entry.changed > since ? [summaryOf(memory, entry)] : []
-  );
+  const timelines = [...memory.timelines.values()]
+    .flatMap((entry) => (entry.changed > since ? [summaryOf(memory, entry)] : []))
+    .filter(listed);
 
   const items = allItems(memory).filter(({ changed }) => changed > since);
   const merged = [...memory.merged.values()].filter(({ changed }) => changed > since);
@@ -866,6 +930,7 @@ export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effe
                 ? [summaryOf(now, entry)]
                 : []
             )
+            .filter(listed)
             .toSorted((left, right) => textOrder(left.id, right.id))
             .slice(0, page.limit)
         ),

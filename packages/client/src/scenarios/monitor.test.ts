@@ -105,6 +105,16 @@ describe("MONITOR", () => {
     ]);
   });
 
+  it("monitors no one for a Direct Message from an ignored User", () => {
+    const run = played(
+      lines("!! configure ignores=spam!*@*", "-> dial irc.test:6697 tls") +
+        registering("MONITOR=3"),
+      lines(">> MONITOR + iirc", "<< :spam!u@h PRIVMSG other :buy now")
+    );
+
+    expect(sent(run, "MONITOR")).toStrictEqual(["MONITOR + iirc"]);
+  });
+
   it("monitors a partner Self wrote to first", () => {
     const run = played(
       settled("MONITOR"),

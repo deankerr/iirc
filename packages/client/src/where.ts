@@ -9,8 +9,10 @@
  */
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Source } from "@iirc/protocol/line";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import { isHighlight } from "./highlight.ts";
+import { ignoredBy } from "./ignores.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
@@ -79,6 +81,22 @@ export const isUser = (run: Run, source: Source | undefined): boolean =>
     (source.nick !== "" &&
       !source.nick.includes(".") &&
       !sameServer(source.nick, serverName(run))));
+
+/**
+ * What a Message or an Activity from a source carries of the Owner's ignore masks: their
+ * `ignored` stamp when the source is a User who matches any, else nothing at all.
+ * @param run - The step.
+ * @param source - The Line's source, or `undefined` when it has none.
+ * @returns The stamp, to spread into the News.
+ */
+export const stamped = (
+  run: Run,
+  source: Source | undefined
+): { readonly ignored?: readonly IgnoreMask[] } => {
+  const ignored = isUser(run, source) ? ignoredBy(run, source) : undefined;
+
+  return ignored === undefined ? {} : { ignored };
+};
 
 /**
  * The Channels Self is in.
@@ -332,6 +350,7 @@ export const routeMessage = (
     highlight: isHighlight(run, message, fromUser),
     self: fromUser && isSelf(run, message.sender),
     where: messageWhere(run, message.sender, fromUser, message.target),
+    ...stamped(run, source),
   };
 };
 
@@ -391,11 +410,17 @@ export const markedBy = (run: Run, target: string | null): Marked | undefined =>
  * An Activity, with where it belongs.
  * @param run - The step, before the Activity is folded in.
  * @param activity - The Activity.
+ * @param source - The Line's source, or `undefined` when it has none, as for what Self did.
  * @returns The Activity, routed.
  */
-export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): ActivityNews => ({
+export const routeActivity = (
+  run: Run,
+  activity: Unrouted<ActivityNews>,
+  source: Source | undefined
+): ActivityNews => ({
   ...activity,
   where: activityWhere(run, activity.activity, activity.live),
+  ...stamped(run, source),
 });
 
 /**

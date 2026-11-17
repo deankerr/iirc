@@ -17,6 +17,7 @@ import type {
 } from "@iirc/client";
 import type { Casemapping, Fact } from "@iirc/client/known";
 import { casefold } from "@iirc/protocol/casemapping";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import type { Change } from "./change.ts";
 import type { Content, Level } from "./content.ts";
@@ -28,7 +29,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 15;
+export const projectionVersion = 16;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -416,6 +417,7 @@ const add = (
   draft.changes.push({
     _tag: "Added",
     content,
+    ignored: [...(routed?.ignored ?? [])],
     intent: routed?._tag === "Message" ? routed.ours?.intent : undefined,
     level,
     messageId: routed === undefined ? undefined : idOf(routed.id),
@@ -639,12 +641,39 @@ const foldAside = (draft: Draft, news: Aside) => {
 };
 
 /**
+ * What masks the Owner no longer ignores hid stays where it was placed, so the store shows
+ * it again there. No mask dropped changes nothing.
+ * @param draft - The step.
+ * @param masks - The masks dropped, in canonical form.
+ */
+const unignore = (draft: Draft, masks: readonly IgnoreMask[]) => {
+  if (masks.length > 0) {
+    draft.changes.push({
+      _tag: "Unignored",
+      masks: [...masks],
+      network: draft.network,
+      sequence: draft.sequence,
+    });
+  }
+};
+
+// News that places nothing. A Lookup's result is the Owner's answer, read from the API.
+const placesNothing = (
+  news: News
+): news is Extract<News, { readonly _tag: "Ignored" | "LookedUp" }> =>
+  news._tag === "Ignored" || news._tag === "LookedUp";
+
+/**
  * Folds one News.
  * @param draft - The step.
  * @param news - The News.
  * @param n - Its index in the step.
  */
 const foldNews = (draft: Draft, news: News, n: number) => {
+  if (placesNothing(news)) {
+    return;
+  }
+
   if (isAside(news)) {
     foldAside(draft, news);
 
@@ -740,6 +769,12 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       break;
     }
 
+    case "Unignored": {
+      unignore(draft, news.masks);
+
+      break;
+    }
+
     // The Network leaves the directory, so an id given to a Network again opens anew.
     case "NetworkRemoved": {
       draft.changes.push({
@@ -751,12 +786,6 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       });
       draft.removed = true;
 
-      break;
-    }
-
-    // A Lookup's result is the Owner's answer, read from the API, and places nothing.
-    case "Ignored":
-    case "LookedUp": {
       break;
     }
 

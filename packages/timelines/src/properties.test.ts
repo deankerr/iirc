@@ -7,6 +7,7 @@ import type { ActionWhere, Attempted, News, Where } from "@iirc/client";
 import type { Casemapping } from "@iirc/client/known";
 import { impurity } from "@iirc/client/testing";
 import { casefold } from "@iirc/protocol/casemapping";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -144,32 +145,63 @@ const fact = <T>(value: fc.Arbitrary<T>) =>
 const intent = fc.constantFrom("i1", "i2", "i3").map((each) => IntentId.make(each));
 const messageId = fc.constantFrom("m1", "m2").map((each) => MessageId.make(each));
 
+const masks = fc.subarray([IgnoreMask.make("peer!*@*"), IgnoreMask.make("*!*@bots")], {
+  minLength: 1,
+});
+
 const news: fc.Arbitrary<News> = fc.oneof(
-  fc.record({
-    _tag: fc.constant("Message"),
-    answers: fc.option(messageId, { nil: undefined }),
-    at: fact(at),
-    context: fc.option(fc.constant("#a"), { nil: undefined }),
-    highlight: fc.boolean(),
-    id: fact(messageId),
-    kind: fc.constant("Privmsg"),
-    live: fc.boolean(),
-    ours: fc.option(fc.record({ echo: fc.boolean(), intent }), { nil: undefined }),
-    self: fc.boolean(),
-    sender: fc.constant("peer"),
-    tags: fc.constant(new Map<string, string>()),
-    target: fc.constant("#a"),
-    text: fc.string(),
-    where: fc.array(where, { maxLength: 4, minLength: 1 }),
-  }),
-  fc.record({
-    _tag: fc.constant("Activity"),
-    activity: fc.constant({ _tag: "NickChanged", from: "peer", to: "Peer" } as const),
-    at: fact(at),
-    id: fact(messageId),
-    live: fc.boolean(),
-    where: fc.array(where, { maxLength: 4, minLength: 1 }),
-  }),
+  fc.record(
+    {
+      _tag: fc.constant("Message"),
+      answers: fc.option(messageId, { nil: undefined }),
+      at: fact(at),
+      context: fc.option(fc.constant("#a"), { nil: undefined }),
+      highlight: fc.boolean(),
+      id: fact(messageId),
+      ignored: masks,
+      kind: fc.constant("Privmsg"),
+      live: fc.boolean(),
+      ours: fc.option(fc.record({ echo: fc.boolean(), intent }), { nil: undefined }),
+      self: fc.boolean(),
+      sender: fc.constant("peer"),
+      tags: fc.constant(new Map<string, string>()),
+      target: fc.constant("#a"),
+      text: fc.string(),
+      where: fc.array(where, { maxLength: 4, minLength: 1 }),
+    },
+    {
+      requiredKeys: [
+        "_tag",
+        "answers",
+        "at",
+        "context",
+        "highlight",
+        "id",
+        "kind",
+        "live",
+        "ours",
+        "self",
+        "sender",
+        "tags",
+        "target",
+        "text",
+        "where",
+      ],
+    }
+  ),
+  fc.record(
+    {
+      _tag: fc.constant("Activity"),
+      activity: fc.constant({ _tag: "NickChanged", from: "peer", to: "Peer" } as const),
+      at: fact(at),
+      id: fact(messageId),
+      ignored: masks,
+      live: fc.boolean(),
+      where: fc.array(where, { maxLength: 4, minLength: 1 }),
+    },
+    { requiredKeys: ["_tag", "activity", "at", "id", "live", "where"] }
+  ),
+  fc.record({ _tag: fc.constant("Unignored"), masks }),
   fc.record({ _tag: fc.constant("Refolded"), casemapping: fc.constantFrom(...casemappings) }),
   fc.record({
     _tag: fc.constant("Confirmed"),
@@ -412,6 +444,50 @@ describe("the fold", () => {
             expect(change.level === undefined).toBe(ours);
           }
         }
+      })
+    );
+  });
+
+  it("stamps each item with the masks its News matched, and tells each Unignored to its Network", () => {
+    fc.assert(
+      fc.property(steps, (all) => {
+        const { changes } = foldAll(all);
+
+        const broken: string[] = [];
+
+        for (const [index, each] of changes.entries()) {
+          const told = all[index]?.news ?? [];
+
+          for (const change of each) {
+            const said = change._tag === "Added" ? told[change.position.n] : undefined;
+
+            const matched =
+              said?._tag === "Message" || said?._tag === "Activity" ? said.ignored : undefined;
+
+            if (
+              change._tag === "Added" &&
+              JSON.stringify(change.ignored) !== JSON.stringify(matched ?? [])
+            ) {
+              broken.push(`added ${cursorOf(change.position)} with ${change.ignored.join(",")}`);
+            }
+
+            if (change._tag === "Unignored" && change.network !== all[index]?.network) {
+              broken.push(`unignored on ${change.network}`);
+            }
+          }
+
+          const dropped = each.flatMap((change) =>
+            change._tag === "Unignored" ? [change.masks] : []
+          );
+
+          const asked = told.flatMap((said) => (said._tag === "Unignored" ? [said.masks] : []));
+
+          if (JSON.stringify(dropped) !== JSON.stringify(asked)) {
+            broken.push(`step ${index} dropped ${dropped.join(" ")}`);
+          }
+        }
+
+        expect(broken).toStrictEqual([]);
       })
     );
   });
