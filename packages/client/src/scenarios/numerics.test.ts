@@ -13,9 +13,17 @@ const base = configured();
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
+// The numerics shown, by number, in order.
+const numericsOf = (played: ReturnType<typeof play>): readonly string[] =>
+  played.steps.flatMap((step) =>
+    step.news.flatMap((news) =>
+      news._tag === "Activity" && news.activity._tag === "Numeric" ? [news.activity.numeric] : []
+    )
+  );
+
 describe("a Session's opening", () => {
   it("shows the welcome, as it came, after the Session began", () => {
-    play(client, {
+    const played = play(client, {
       configuration: base,
       transcript: registered(base)
         .replace(
@@ -31,10 +39,12 @@ describe("a Session's opening", () => {
           "$<info>?? activity Numeric 004 irc.test test-1 iow in=network :beIklmnostv\n"
         ),
     });
+
+    expect(numericsOf(played)).toStrictEqual(["001", "002", "003", "004"]);
   });
 
   it("shows the counts of Users and Channels, each parameter after Self's in order", () => {
-    play(client, {
+    const played = play(client, {
       configuration: base,
       transcript: [
         registered(base),
@@ -54,6 +64,8 @@ describe("a Session's opening", () => {
         ),
       ],
     });
+
+    expect(numericsOf(played).slice(4)).toStrictEqual(["251", "252", "254", "265", "250", "422"]);
   });
 
   it("shows a numeric it has no model for, and one before the welcome", () => {
@@ -96,14 +108,6 @@ describe("a Session's opening", () => {
     ]);
   });
 });
-
-// The numerics a step showed.
-const numericsOf = (played: ReturnType<typeof play>): readonly string[] =>
-  played.steps.flatMap((step) =>
-    step.news.flatMap((news) =>
-      news._tag === "Activity" && news.activity._tag === "Numeric" ? [news.activity.numeric] : []
-    )
-  );
 
 describe("a numeric shown once", () => {
   it("never shows ISUPPORT, NAMES, a topic, or the Client's own MODE and WHO", () => {
@@ -198,7 +202,7 @@ describe("a numeric shown once", () => {
   });
 
   it("shows an error no action awaits", () => {
-    play(client, {
+    const played = play(client, {
       configuration: base,
       transcript: [
         registered(base),
@@ -208,6 +212,8 @@ describe("a numeric shown once", () => {
         ),
       ],
     });
+
+    expect(numericsOf(played).slice(4)).toStrictEqual(["481"]);
   });
 
   it("never shows the answer to Self's OPER, which is reported as itself", () => {

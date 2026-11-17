@@ -1124,6 +1124,53 @@ const standardReply = (run: Run, arrival: Arrival): void => {
 };
 
 /**
+ * Whether a numeric is shown as it came, before it is read: one that answers neither the
+ * `OPER` nor the `CAP LS` the Client sent, and that is not read or reported otherwise.
+ * @param run - The step.
+ * @param line - The Line, live, and taken by nothing on the floor.
+ * @returns Whether it is.
+ */
+const isShown = (run: Run, line: Line): boolean =>
+  isNumeric(line.command) &&
+  !unshown.has(line.command) &&
+  !answersOper(run, line) &&
+  !refusesCap(run, line);
+
+/**
+ * A live protocol Line moves the machines on, and a numeric that nothing takes or reports
+ * is shown as it came.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ * @param raw - Its parameters as bytes, when it is the Line that arrived.
+ * @param labelled - Whether a labelled Lookup collected it.
+ */
+const liveLine = (
+  run: Run,
+  arrival: Arrival,
+  raw: readonly RawParam[] | undefined,
+  labelled: boolean
+): void => {
+  const { line } = arrival;
+
+  // A numeric no label tied goes to whichever was sent first of the Lookup and the
+  // action's Line it names.
+  const shown =
+    !labelled &&
+    arrival.answers === undefined &&
+    arrival.batch === undefined &&
+    !line.tags.has("label") &&
+    !floor(run, line) &&
+    isShown(run, line);
+
+  // History is reported, and moves no machine: it says what was, not what is.
+  protocolLine(run, line, raw);
+
+  if (shown) {
+    reportNumeric(run, arrival);
+  }
+};
+
+/**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
@@ -1165,28 +1212,6 @@ export const interpret = (
     // What `MONITOR` or `WATCH` tells answers no Lookup or action, whatever nick it names.
     monitorReply(run, arrival);
   } else if (arrival.live) {
-    const untied =
-      !labelled &&
-      arrival.answers === undefined &&
-      arrival.batch === undefined &&
-      !line.tags.has("label");
-
-    // A numeric no label tied goes to whichever was sent first of the Lookup and the
-    // action's Line it names. One that none takes, that answers neither the `OPER` nor the
-    // `CAP LS` the Client sent, and that is not read or reported otherwise, is shown as it came.
-    const shown =
-      untied &&
-      !floor(run, line) &&
-      isNumeric(command) &&
-      !unshown.has(command) &&
-      !answersOper(run, line) &&
-      !refusesCap(run, line);
-
-    // History is reported, and moves no machine: it says what was, not what is.
-    protocolLine(run, line, raw);
-
-    if (shown) {
-      reportNumeric(run, arrival);
-    }
+    liveLine(run, arrival, raw, labelled);
   }
 };

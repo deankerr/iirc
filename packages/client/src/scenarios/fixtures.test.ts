@@ -87,6 +87,35 @@ describe("the recorded fixtures", () => {
   );
 });
 
+describe("a Session's opening on the recorded Ircds", () => {
+  // Each numeric shown, by number, as `describeNews` writes it.
+  const shownNumerics = (transcript: string): readonly string[] =>
+    [...transcript.matchAll(/^\?\? activity Numeric (?<numeric>\d{3}) /gmu)].map(
+      (match) => match.groups?.numeric ?? ""
+    );
+
+  it.each([
+    [
+      "ergo/floor",
+      ["433", "001", "002", "003", "004", "251", "252", "253", "254", "255", "265", "266", "221"],
+    ],
+    ["ngircd/floor", ["433", "001", "002", "003", "004", "251", "254", "255", "265", "266", "250"]],
+  ])("%s shows what the Ircd said that nothing else reports, once", (name, numerics) => {
+    const [, transcript, configuration] = fixtures.find(([each]) => each === name) ?? [];
+
+    if (transcript === undefined || configuration === undefined) {
+      throw new TypeError(`no fixture ${name}`);
+    }
+
+    const played = replay(client, { configuration, transcript });
+
+    expect(shownNumerics(played.transcript)).toStrictEqual(numerics);
+    expect(played.transcript).toMatch(
+      /^\?\? activity Numeric 251 in=network :There are \d+ users/mu
+    );
+  });
+});
+
 describe("the first Features on the recorded Ircds", () => {
   const [[, ergoTranscript, ergoConfiguration], , [, ngircdTranscript, ngircdConfiguration]] =
     fixtures;

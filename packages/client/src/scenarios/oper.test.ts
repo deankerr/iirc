@@ -35,10 +35,20 @@ const welcomed = lines(
   ">> JOIN #iirc"
 );
 
-// Every Activity the Client reported, by kind.
+// Every Activity the Client reported, by kind, but the numerics it showed as they came.
 const activities = (played: ReturnType<typeof play>): readonly string[] =>
   played.steps.flatMap((step) =>
-    step.news.flatMap((news) => (news._tag === "Activity" ? [news.activity._tag] : []))
+    step.news.flatMap((news) =>
+      news._tag === "Activity" && news.activity._tag !== "Numeric" ? [news.activity._tag] : []
+    )
+  );
+
+// Every numeric the Client showed as it came, by number.
+const numerics = (played: ReturnType<typeof play>): readonly string[] =>
+  played.steps.flatMap((step) =>
+    step.news.flatMap((news) =>
+      news._tag === "Activity" && news.activity._tag === "Numeric" ? [news.activity.numeric] : []
+    )
   );
 
 // Every SecretLine the Client sent, by kind.
@@ -136,7 +146,7 @@ describe("an operator login", () => {
     expect(activities(played)).toStrictEqual(["OperGranted"]);
   });
 
-  it("reports nothing for a 381 with no OPER sent", () => {
+  it("reports no answer for a 381 with no OPER sent, and shows it as it came", () => {
     const none = configured({ channels: [{ name: "#iirc" }] });
 
     const played = play(client, {
@@ -153,7 +163,11 @@ describe("an operator login", () => {
       ],
     });
 
-    expect([sentSecrets(played), activities(played)]).toStrictEqual([[], []]);
+    expect([sentSecrets(played), activities(played), numerics(played)]).toStrictEqual([
+      [],
+      [],
+      ["001", "381", "491"],
+    ]);
   });
 
   it("reports nothing, and sends nothing more, when the Credential cannot be filled", () => {
