@@ -188,7 +188,9 @@ const Content = exactly<Content>()(
     },
     ConnectionFailed: { at: Instant, ircd: IrcdAddress, opened: Schema.Boolean, reason: EndReason },
     Message: {
+      answers: Schema.UndefinedOr(MessageId),
       at: Fact(Instant),
+      context: Schema.UndefinedOr(Schema.String),
       id: Fact(MessageId),
       kind: SayKind,
       live: Schema.Boolean,
@@ -311,9 +313,14 @@ export const CollapsedGapRow = Schema.toCodecJson(
   })
 );
 
-/** An item. */
+/**
+ * An item, with where the item it answers stands and what it shows, each `undefined` when
+ * it answers none its Timeline holds.
+ */
 export const ItemRow = Schema.toCodecJson(
   Schema.Struct({
+    answeredContent: Schema.UndefinedOr(ContentText),
+    answeredPosition: Schema.UndefinedOr(Cursor),
     changed: Int,
     content: ContentText,
     level: Schema.UndefinedOr(Schema.Literals(levels)),
@@ -321,6 +328,11 @@ export const ItemRow = Schema.toCodecJson(
     position: Cursor,
     timeline: TimelineId,
   })
+);
+
+/** The item a reply answers, as adding the reply reads it to give its level. */
+export const AnsweredRow = Schema.toCodecJson(
+  Schema.Struct({ content: ContentText, level: Schema.UndefinedOr(Schema.Literals(levels)) })
 );
 
 /** An item's row and its content, as folding the search again reads it. */

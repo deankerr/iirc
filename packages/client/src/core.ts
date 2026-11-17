@@ -530,7 +530,9 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   run.news.push(
     routeOurs(run, {
       _tag: "Message",
+      answers: undefined,
       at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
+      context: undefined,
       id: { _tag: "Unknown" },
       kind: input.kind,
       live: true,

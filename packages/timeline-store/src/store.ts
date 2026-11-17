@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import type { Instant } from "@iirc/client";
+import type { Instant, SayKind } from "@iirc/client";
 import type {
   Change,
   Content,
@@ -86,6 +86,38 @@ export interface Summary extends Descriptor {
   readonly changed: number;
 }
 
+/**
+ * The Message a reply answers, as a Frontend shows it beside the reply: where it stands,
+ * who said it, how, and its text, the Ircd's once it confirmed one of ours.
+ */
+export interface Answered {
+  readonly position: Position;
+  readonly sender: string;
+  readonly kind: SayKind;
+  readonly text: string;
+}
+
+/**
+ * What a reply shows of the item it answers, which every adapter gives alike.
+ * @param position - Where the answered item stands.
+ * @param content - What it shows.
+ * @returns What the reply shows of it, or `undefined` when it is not a Message.
+ */
+export const answeredOf = (position: Position, content: Content): Answered | undefined => {
+  if (content._tag !== "Message") {
+    return undefined;
+  }
+
+  const delivery = content.ours?.delivery;
+
+  return {
+    kind: content.kind,
+    position,
+    sender: content.sender,
+    text: delivery?._tag === "Confirmed" ? delivery.text : content.text,
+  };
+};
+
 /** One item, as it stands now. */
 export interface Item {
   readonly network: string;
@@ -94,6 +126,12 @@ export interface Item {
   readonly content: Content;
   /** How much it calls for the Owner, or `undefined` for a Message Self said. */
   readonly level: Level | undefined;
+  /**
+   * The Message it answers, for a Message whose `content.answers` names one: the item in
+   * the same Timeline with that message id, as it stands when read, or `undefined` when
+   * none does.
+   */
+  readonly answered: Answered | undefined;
   /** The last sequence that changed it: added, confirmed, marked unsent, or moved. */
   readonly changed: number;
 }

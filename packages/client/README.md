@@ -98,7 +98,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, or Self's, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. |
+| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, or Self's, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
 | `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
 | `Activity` | Something that changed, with its time, id, whether it is `live`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
@@ -298,7 +298,7 @@ A `Look` asks the Network something and collects the reply, which may span many 
 | --- | --- | --- | --- |
 | Cap negotiation | caps from the Ircd | Asks for each Feature's caps, whole or not at all. Only what the Ircd acknowledges is enabled. `CAP NEW` and `CAP DEL` are followed for the rest of the Connection. | `caps.test.ts` |
 | SASL | `sasl`, and a SASL login in the Configuration | Logs in with `PLAIN`, holding registration until `903`. A failed login goes on when it is optional, and gives up the Connection with `LoginFailed` when it is required. | `sasl.test.ts`, `login.test.ts` |
-| Message tags | `message-tags` | A Line's `msgid` is its Message's id. Client-only tags are reported with the Message. | `tags.test.ts` |
+| Message tags | `message-tags` | A Line's `msgid` is its Message's id. Client-only tags are reported with the Message, and `+reply` and `+channel-context` are read, ignored where their specs say. | `tags.test.ts`, `replies.test.ts` |
 | Server time | `server-time` | A Line's `time` tag is when it happened. Without it, or when malformed, the time is when the Line arrived. | `tags.test.ts` |
 | Batches | `batch` | Tracks open batches, nested or interleaved. Lines are read as they arrive, never held back. | `batch.test.ts` |
 | Echoes | `echo-message`, `labeled-response`, and `batch`, only together | Each `Say` is labelled, and its echo is `Confirmed`. An error in its answer is `Rejected`, and a `WARN` or `NOTE` in it is shown where the Message stands. | `echo.test.ts` |

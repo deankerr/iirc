@@ -996,7 +996,9 @@ const news = (source: News): WireNews => {
     case "Message": {
       const wire: Case<News, WireNews, "Message"> = {
         _tag: "Message",
+        answers: orNull(source.answers),
         at: fact(source.at, same),
+        context: orNull(source.context),
         highlight: source.highlight,
         id: fact(source.id, same),
         kind: source.kind,
@@ -1442,7 +1444,9 @@ const itemContent = (source: Content): WireItemContent => {
     case "Message": {
       const wire: Case<Content, WireItemContent, "Message"> = {
         _tag: "Message",
+        answers: orNull(source.answers),
         at: fact(source.at, same),
+        context: orNull(source.context),
         id: fact(source.id, same),
         kind: source.kind,
         live: source.live,
@@ -1481,6 +1485,15 @@ const itemContent = (source: Content): WireItemContent => {
  * @returns Its wire form.
  */
 export const timelineItem = (source: Item): Fields<Item, WireTimelineItem, "sequence"> => ({
+  answered:
+    source.answered === undefined
+      ? null
+      : {
+          kind: source.answered.kind,
+          position: source.answered.position,
+          sender: source.answered.sender,
+          text: source.answered.text,
+        },
   changed: WireSequence.make(source.changed),
   content: itemContent(source.content),
   level: orNull(source.level),

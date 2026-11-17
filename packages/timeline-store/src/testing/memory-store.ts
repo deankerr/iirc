@@ -1,5 +1,6 @@
 import type { Instant, IntentId, MessageId } from "@iirc/client";
 import {
+  answering,
   cursorOf,
   delivered,
   emptyDirectory,
@@ -9,6 +10,7 @@ import {
 } from "@iirc/timelines";
 import type {
   Change,
+  Content,
   DeliveryChange,
   Descriptor,
   Directory,
@@ -33,7 +35,7 @@ import type {
   Unread,
   Window,
 } from "../store.ts";
-import { noneUnread, unreadOf } from "../store.ts";
+import { answeredOf, noneUnread, unreadOf } from "../store.ts";
 
 /** An item and what it is found by. */
 interface Stored {
@@ -130,6 +132,31 @@ const touch = (memory: Memory, timeline: TimelineId, sequence: number) => {
   if (found !== undefined) {
     found.changed = sequence;
   }
+};
+
+/**
+ * The item a Timeline holds now under a message id.
+ * @param memory - The store.
+ * @param timeline - The Timeline.
+ * @param id - The message id, or `undefined` for none.
+ * @returns The item, or `undefined` when none has it.
+ */
+const heldAs = (memory: Memory, timeline: TimelineId, id: MessageId | undefined) =>
+  id === undefined
+    ? undefined
+    : [...(memory.items.get(timeline)?.values() ?? [])].find(({ messageId }) => messageId === id);
+
+const answersOf = ({ content }: { readonly content: Content }) =>
+  content._tag === "Message" ? content.answers : undefined;
+
+// An item as read, with the Message it answers as the store holds it now.
+const resolved = (memory: Memory, item: Item): Item => {
+  const found = heldAs(memory, item.timeline, answersOf(item));
+
+  return {
+    ...item,
+    answered: found === undefined ? undefined : answeredOf(found.item.position, found.item.content),
+  };
 };
 
 /**
@@ -321,6 +348,25 @@ const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Remove
   memory.gaps.delete(change.network);
 };
 
+// Its level as `answering` gives it, from the item it answers as the Timeline holds it now.
+const add = (memory: Memory, change: Extract<Change, { readonly _tag: "Added" }>) => {
+  const answered = heldAs(memory, change.timeline, answersOf(change));
+
+  keep(memory, {
+    intent: change.intent,
+    item: {
+      answered: undefined,
+      changed: change.sequence,
+      content: change.content,
+      level: answering(change, answered?.item),
+      network: change.network,
+      position: change.position,
+      timeline: change.timeline,
+    },
+    messageId: change.messageId,
+  });
+};
+
 const applyChange = (memory: Memory, change: Change) => {
   switch (change._tag) {
     case "Described": {
@@ -359,18 +405,7 @@ const applyChange = (memory: Memory, change: Change) => {
     }
 
     case "Added": {
-      keep(memory, {
-        intent: change.intent,
-        item: {
-          changed: change.sequence,
-          content: change.content,
-          level: change.level,
-          network: change.network,
-          position: change.position,
-          timeline: change.timeline,
-        },
-        messageId: change.messageId,
-      });
+      add(memory, change);
       break;
     }
 
@@ -414,7 +449,7 @@ const applyChange = (memory: Memory, change: Change) => {
 const sortedItems = (memory: Memory, timeline: TimelineId): readonly Item[] =>
   [...(memory.items.get(timeline) ?? new Map<string, Stored>())]
     .toSorted(([left], [right]) => textOrder(left, right))
-    .map(([, { item }]) => item);
+    .map(([, { item }]) => resolved(memory, item));
 
 // Counted by walking every item, as no adapter that must stay bounded may.
 const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => {
@@ -448,7 +483,9 @@ const summaryOf = (memory: Memory, entry: Entry): Summary => {
 };
 
 const allItems = (memory: Memory): readonly Item[] =>
-  [...memory.items.values()].flatMap((items) => [...items.values()].map(({ item }) => item));
+  [...memory.items.values()].flatMap((items) =>
+    [...items.values()].map(({ item }) => resolved(memory, item))
+  );
 
 // The first index whose item comes at or after a position, or strictly after it.
 const indexOf = (items: readonly Item[], position: Position, after: boolean) => {

@@ -15,7 +15,9 @@ const at = (ms: number) => Instant.make(t0 + ms);
 
 const message = (text: string, ours?: Extract<Content, { _tag: "Message" }>["ours"]): Content => ({
   _tag: "Message",
+  answers: undefined,
   at: { _tag: "Known", at: t0, from: "ircd", value: t0 },
+  context: undefined,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
   live: true,

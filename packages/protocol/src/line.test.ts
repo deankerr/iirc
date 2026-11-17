@@ -57,7 +57,7 @@ describe("an outbound Line", () => {
   it("decodes a recorded Line that is safe to send", () => {
     expect(safe(ok)).toBeTruthy();
     expect(safe({ ...ok, params: ["#iirc", ""] })).toBeTruthy();
-    expect(safe({ ...ok, tags: { "+draft/reply": "abc; def" } })).toBeTruthy();
+    expect(safe({ ...ok, tags: { "+reply": "abc; def" } })).toBeTruthy();
     expect(safe({ command: "001", params: [], tags: {} })).toBeTruthy();
   });
 

@@ -295,7 +295,9 @@ const unknown = { _tag: "Unknown" } as const;
 const message = (sender: string, text: string, delivery?: typeof Delivery.Encoded): ItemContent =>
   content({
     _tag: "Message",
+    answers: null,
     at: unknown,
+    context: null,
     id: unknown,
     kind: "Privmsg",
     live: true,

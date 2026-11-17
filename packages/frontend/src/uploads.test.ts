@@ -550,10 +550,13 @@ const message = (
         };
 
   return Schema.decodeSync(TimelineItem)({
+    answered: null,
     changed: 1,
     content: {
       _tag: "Message",
+      answers: null,
       at: { _tag: "Unknown" },
+      context: null,
       id: { _tag: "Unknown" },
       kind: "Privmsg",
       live: true,

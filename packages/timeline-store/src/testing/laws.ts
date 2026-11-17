@@ -34,6 +34,7 @@ import { Deferred, Effect, Equal, Fiber, Option, Scheduler, Schema } from "effec
 
 import type {
   Anchor,
+  Answered,
   Dropped,
   Gap,
   Item,
@@ -108,7 +109,9 @@ const opened = (sequence: number, on = libera): readonly Change[] => [
 
 const said = (text: string, delivery?: "Pending" | "Unconfirmed"): Content => ({
   _tag: "Message",
+  answers: undefined,
   at: known(at(0)),
+  context: undefined,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
   live: true,
@@ -121,6 +124,28 @@ const said = (text: string, delivery?: "Pending" | "Unconfirmed"): Content => ({
   target: "#a",
   text,
 });
+
+// A Message from a User other than Self that answers the Message with the id `answers`.
+const reply = (text: string, answers: string, live = true): Content => ({
+  _tag: "Message",
+  answers: MessageId.make(answers),
+  at: known(at(0)),
+  context: undefined,
+  id: { _tag: "Unknown" },
+  kind: "Privmsg",
+  live,
+  ours: undefined,
+  sender: "pal",
+  tags: [["+reply", answers]],
+  target: "#a",
+  text,
+});
+
+// What each reply among items answers, as it was read.
+const answeredOf = (items: readonly Item[]) =>
+  items.flatMap((item) =>
+    item.content._tag === "Message" && item.content.answers !== undefined ? [item.answered] : []
+  );
 
 // A Message of ours and a refused action of ours have no level, and anything else said
 // is a Message, as in a Channel.
@@ -486,6 +511,7 @@ const additions: Interruption = {
       items: [
         ...before.items,
         ...Array.from({ length: 5 }, (_, n) => ({
+          answered: undefined,
           changed: sequence,
           content: said(`${sequence}.${n}`),
           level: "Message" as const,
@@ -775,6 +801,7 @@ const marking: Interruption = {
     items: [
       ...before.items,
       {
+        answered: undefined,
         changed: sequence,
         content: said("late"),
         level: "Highlight",
@@ -1606,6 +1633,155 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("changed", summary?.changed, 4);
       }),
     name: "orders items by position, wherever and whenever they arrive",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(0, 2), said("original"), "m1"),
+          added(2, other, position(0, 2, 1), said("elsewhere"), "m2"),
+        ]);
+        yield* apply(store, 3, [
+          added(3, channel, position(10, 3), reply("first reply", "m1")),
+          added(3, channel, position(11, 3, 1), reply("across Timelines", "m2")),
+          added(3, channel, position(12, 3, 2), reply("to nothing", "m404")),
+          added(3, channel, position(13, 3, 3), reply("not yet held", "m3")),
+        ]);
+        // What it answers arrives later, from history, and the reply is not changed by it.
+        yield* apply(store, 4, [added(4, channel, position(-5, 4), said("late original"), "m3")]);
+
+        const original: Answered = {
+          kind: "Privmsg",
+          position: position(0, 2),
+          sender: "peer",
+          text: "original",
+        };
+
+        const late: Answered = { ...original, position: position(-5, 4), text: "late original" };
+        const expected = [original, undefined, undefined, late];
+
+        const window = Option.getOrUndefined(yield* store.window(channel, all, 10));
+        const changed = yield* store.changedAfter(2);
+        const found = yield* store.search({ limit: 10, text: SearchText.make("first reply") });
+
+        yield* same("by window", answeredOf(window?.items ?? []), expected);
+        yield* same("by locate", answeredOf(yield* store.locate(libera, 3)), expected);
+        yield* same("by changedAfter", answeredOf(changed.items), expected);
+        yield* same("by search", answeredOf(found), [original]);
+        yield* same(
+          "the replies unchanged since they were added",
+          changed.items.flatMap((item) =>
+            item.content._tag === "Message" && item.content.answers !== undefined
+              ? [item.changed]
+              : []
+          ),
+          [3, 3, 3, 3]
+        );
+        yield* same(
+          "a Message answering nothing has nothing",
+          (yield* store.locate(libera, 2)).map((item) => item.answered),
+          [undefined, undefined]
+        );
+      }),
+    name: "resolves what a reply answers within its Timeline, as it stands when read",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          // Self said it elsewhere, so it has no level and is not ours.
+          { ...added(2, channel, position(0, 2), said("mine"), "m1"), level: undefined },
+          added(2, channel, position(1, 2, 1), said("theirs"), "m2"),
+        ]);
+        yield* apply(store, 3, [
+          added(3, channel, position(10, 3), reply("to mine", "m1")),
+          added(3, channel, position(11, 3, 1), reply("to mine, from history", "m1", false)),
+          added(3, channel, position(12, 3, 2), reply("to theirs", "m2")),
+        ]);
+
+        const [, summary] = yield* store.timelines(libera);
+
+        yield* same(
+          "levels",
+          (yield* store.locate(libera, 3)).map((item) => [textOf(item), item.level]),
+          [
+            ["to mine", "Highlight"],
+            ["to mine, from history", "Message"],
+            ["to theirs", "Message"],
+          ]
+        );
+        yield* same("counted", summary?.unread, { ...noneUnread, highlights: 1, messages: 3 });
+      }),
+    name: "makes a live reply to a Message Self said a Highlight, and counts it as one",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(0, 2), said("hi", "Pending")),
+        ]);
+        yield* apply(store, 3, [
+          {
+            _tag: "Confirmed",
+            at: known(at(4)),
+            id: known(MessageId.make("m9")),
+            intent: IntentId.make("intent-hi"),
+            messageId: MessageId.make("m9"),
+            network: libera,
+            sequence: 3,
+            text: "hi!",
+          },
+        ]);
+        yield* apply(store, 4, [added(4, channel, position(10, 4), reply("hello", "m9"))]);
+
+        const [item] = yield* store.locate(libera, 4);
+
+        yield* same("answered", item?.answered, {
+          kind: "Privmsg",
+          position: position(0, 2),
+          sender: "peer",
+          text: "hi!",
+        });
+        yield* same("level", item?.level, "Highlight");
+      }),
+    name: "resolves a reply to our Message by the Ircd's id once confirmed, with its text",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, other, position(0, 2), said("original"), "m1"),
+          added(2, channel, position(10, 2, 1), reply("reply", "m1")),
+        ]);
+
+        const before = yield* store.locate(libera, 2);
+
+        yield* same(
+          "not across Timelines",
+          before.map((item) => item.answered),
+          [undefined, undefined]
+        );
+
+        yield* apply(store, 3, [
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 3 },
+        ]);
+
+        const window = Option.getOrUndefined(yield* store.window(channel, all, 10));
+
+        yield* same(
+          "through the merge",
+          window?.items.map((item) => item.answered),
+          [
+            undefined,
+            { kind: "Privmsg", position: position(0, 2), sender: "peer", text: "original" },
+          ]
+        );
+      }),
+    name: "resolves a reply through a merge, once what it answers stands in its Timeline",
   },
   {
     check: (store) =>

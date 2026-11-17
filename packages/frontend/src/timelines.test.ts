@@ -371,7 +371,9 @@ const wireContent = (item: ModelItem): (typeof TimelineItem.Encoded)["content"] 
     case "Message": {
       return {
         _tag: "Message",
+        answers: null,
         at: unknown,
+        context: null,
         id: unknown,
         kind: "Privmsg",
         live: true,
@@ -396,6 +398,7 @@ const wireContent = (item: ModelItem): (typeof TimelineItem.Encoded)["content"] 
 
 const wireItem = (item: ModelItem) =>
   decodeItem({
+    answered: null,
     changed: item.changed,
     content: wireContent(item),
     level: null,
@@ -1376,10 +1379,13 @@ const listOf = (through: number, ...timelines: readonly ReturnType<typeof timeli
 
 const message = (timeline: string, at: number, sequence: number, changed = sequence) =>
   decodeItem({
+    answered: null,
     changed,
     content: {
       _tag: "Message",
+      answers: null,
       at: unknown,
+      context: null,
       id: unknown,
       kind: "Privmsg",
       live: true,
@@ -3747,6 +3753,7 @@ const failure = (
   reason: "Ended" | "Refused" = "Ended"
 ) =>
   decodeItem({
+    answered: null,
     changed: sequence,
     content: {
       _tag: "ConnectionFailed",
@@ -4854,6 +4861,7 @@ describe("removing a Network", () => {
         items: [
           Schema.encodeSync(TimelineItem)(
             decodeItem({
+              answered: null,
               changed: 7,
               content: { _tag: "SessionEnded", at: 70, reason: { _tag: "Error" } },
               level: null,

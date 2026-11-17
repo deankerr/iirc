@@ -422,8 +422,16 @@ export type News =
       readonly target: string;
       readonly text: string;
       readonly kind: SayKind;
-      /** Client-only tags, such as `+draft/reply`, as data. */
+      /** Client-only tags, such as `+reply`, as data. */
       readonly tags: ReadonlyMap<string, string>;
+      /** The id of the Message it answers, from a `+reply` tag that names one. */
+      readonly answers: MessageId | undefined;
+      /**
+       * The Channel a Direct Message was said in the context of, from a `+channel-context`
+       * tag. Set only on a Message to a User whose tag names a Channel by the Network's
+       * naming, as the tag's spec says.
+       */
+      readonly context: string | undefined;
       /** Set when we said it, as the Owner's intent. A Message from Self said elsewhere has none. */
       readonly ours: Ours | undefined;
       /**

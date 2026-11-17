@@ -4,9 +4,9 @@
  *
  * @packageDocumentation
  */
-export { delivered } from "./change.ts";
+export { answering, delivered } from "./change.ts";
 
-export type { Change, DeliveryChange } from "./change.ts";
+export type { Change, DeliveryChange, Leveled } from "./change.ts";
 
 export { levels, unreadCap } from "./content.ts";
 

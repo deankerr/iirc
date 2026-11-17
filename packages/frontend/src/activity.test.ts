@@ -121,10 +121,13 @@ const said = ({
   text = `m${sequence}`,
   timeline = iirc,
 }: Said): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: changed ?? sequence,
   content: {
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind,
     live,

@@ -159,10 +159,13 @@ const placeAt10 = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
   daemon.through = 10;
   daemon.placed.set(10, [
     {
+      answered: null,
       changed: 10,
       content: {
         _tag: "Message",
+        answers: null,
         at: { _tag: "Unknown" },
+        context: null,
         id: { _tag: "Unknown" },
         kind: "Privmsg",
         live: true,
@@ -436,10 +439,13 @@ describe("saying", () => {
           gaps: [],
           items: [
             {
+              answered: null,
               changed: sequence,
               content: {
                 _tag: "Message",
+                answers: null,
                 at: { _tag: "Unknown" },
+                context: null,
                 id: { _tag: "Unknown" },
                 kind: "Privmsg",
                 live: true,
@@ -861,6 +867,7 @@ describe("acting", () => {
           gaps: [],
           items: [
             {
+              answered: null,
               changed: sequence,
               content: {
                 _tag: "Activity",

@@ -11,10 +11,11 @@ import type { Line, Source } from "@iirc/protocol/line";
 
 import type { Arrival, Meant } from "./feature.ts";
 import type { Instant } from "./ids.ts";
+import { MessageId } from "./ids.ts";
 import type { ModeRules } from "./modes.ts";
 import { readListed, readModes, rulesOf } from "./modes.ts";
 import type { Naming } from "./names.ts";
-import { namingOf, parseChannel } from "./names.ts";
+import { namingOf, parseChannel, parseNick } from "./names.ts";
 import type { Activity } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, linkOf } from "./run.ts";
@@ -77,6 +78,40 @@ const timeOf = (run: Run, arrival: Arrival): Instant =>
 
 const clientTags = (line: Line): ReadonlyMap<string, string> =>
   new Map([...line.tags].filter(([key]) => key.startsWith("+")));
+
+// `+reply` and `+channel-context`: what a Message answers, and the Channel a Direct
+// Message belongs with. Each spec says what to ignore, and an ignored tag reads as unset.
+
+/**
+ * The Message a Line answers, from its `+reply` tag.
+ * @param line - The Line.
+ * @returns The id it names, or `undefined` when the tag is missing or empty.
+ */
+const answersOf = (line: Line): MessageId | undefined => {
+  const value = line.tags.get("+reply");
+
+  return value === undefined || value === "" ? undefined : MessageId.make(value);
+};
+
+/**
+ * The Channel a Direct Message was said in the context of, from its `+channel-context`
+ * tag, which counts only on a Message to a User and only when it names a Channel.
+ * @param run - The step.
+ * @param line - The Line.
+ * @param target - The Message's Target, as said.
+ * @returns The Channel, or `undefined` when the tag is missing or does not count.
+ */
+const contextOf = (run: Run, line: Line, target: string): string | undefined => {
+  const value = line.tags.get("+channel-context");
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const naming = namingNow(run);
+
+  return parseNick(naming, target) === undefined ? undefined : parseChannel(naming, value);
+};
 
 const listOf = (names: string): readonly string[] => names.split(",").filter((name) => name !== "");
 
@@ -153,7 +188,9 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
   return [
     {
       _tag: "Message",
+      answers: answersOf(arrival.line),
       at: arrival.time,
+      context: contextOf(run, arrival.line, target),
       id: arrival.id,
       kind: kindOf(arrival.line.command, ctcp._tag === "Action"),
       live: arrival.live,

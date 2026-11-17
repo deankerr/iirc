@@ -245,7 +245,7 @@ const featured = (round: number, from: number): string =>
       "+3s",
       `<< @msgid=j${round}-${index};time=${time} :peer${index}!u@h JOIN #iirc`,
       `<< :peer${index}!u@h AWAY :away ${index}`,
-      `<< @msgid=p${round}-${index};time=${time};+draft/reply=x :peer${index}!u@h PRIVMSG #iirc :round ${round} line ${index}`,
+      `<< @msgid=p${round}-${index};time=${time};+reply=x :peer${index}!u@h PRIVMSG #iirc :round ${round} line ${index}`,
       `<< :irc.test BATCH +b${index} netsplit irc.hub other.host`,
       `<< @batch=b${index} :irc.test BATCH +n${index} example.com/inner`,
       `<< @batch=n${index};time=${time} :op!u@h MODE #iirc +v peer${index}`,

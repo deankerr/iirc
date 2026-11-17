@@ -427,7 +427,9 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
     ? finish(state, state, input.at, send(state, privmsg(input.target, input.text)), [
         {
           _tag: "Message",
+          answers: undefined,
           at: { _tag: "Known", at: input.at, from: "ours", value: input.at },
+          context: undefined,
           highlight: false,
           id: { _tag: "Unknown" },
           kind: input.kind,

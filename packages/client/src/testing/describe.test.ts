@@ -10,7 +10,9 @@ const earlier = Instant.make(epoch);
 
 const message: Extract<News, { readonly _tag: "Message" }> = {
   _tag: "Message",
+  answers: undefined,
   at: { _tag: "Known", at: now, from: "receipt", value: now },
+  context: undefined,
   highlight: false,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
@@ -54,9 +56,23 @@ describe(describeNews, () => {
         id: { _tag: "Known", at: now, from: "ircd", value: MessageId.make("m1") },
         live: false,
         ours: { echo: true, intent: IntentId.make("i1") },
-        tags: new Map([["+draft/reply", "m0"]]),
+        tags: new Map([["+reply", "m0"]]),
       },
-      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi there',
+      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history in=channel:#iirc tags=+reply="m0" ours=i1 echo :hi there',
+    ],
+    [
+      {
+        ...message,
+        answers: MessageId.make("m0@t+0s"),
+        context: "#iirc",
+        tags: new Map([
+          ["+channel-context", "#iirc"],
+          ["+reply", "m0@t+0s"],
+        ]),
+        target: "iirc",
+        where: [{ _tag: "Direct", existing: false, key: "peer", name: "peer" }],
+      },
+      'message Privmsg peer iirc in=direct:peer tags=+channel-context="#iirc";+reply="m0@t+0s" answers="m0@t+0s" context=#iirc :hi there',
     ],
     [
       {

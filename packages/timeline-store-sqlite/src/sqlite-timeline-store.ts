@@ -8,13 +8,14 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Instant } from "@iirc/client";
 import type { MessageId } from "@iirc/client";
-import { TimelineStore, TimelineStoreFailed, unreadOf } from "@iirc/timeline-store";
+import { TimelineStore, TimelineStoreFailed, answeredOf, unreadOf } from "@iirc/timeline-store";
 import type {
   Anchor,
   Applied,
   Changed,
   CollapsedGap,
   Folded,
+  Item,
   Overflowed,
   Search,
   Summary,
@@ -23,6 +24,7 @@ import type {
 } from "@iirc/timeline-store";
 import {
   TimelineId,
+  answering,
   cursorOf,
   cursorsAfter,
   cursorsFrom,
@@ -51,6 +53,7 @@ import { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 
 import {
+  AnsweredRow,
   CollapsedGapRow,
   ContentRow,
   ContentText,
@@ -70,7 +73,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 8;
+const layoutVersion = 9;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -144,6 +147,7 @@ const layout = [
     changed INTEGER NOT NULL,
     level TEXT,
     sender TEXT,
+    answers TEXT,
     UNIQUE (timeline, cursor)
   ) STRICT`,
   "CREATE UNIQUE INDEX items_by_message_id ON items (timeline, message_id) WHERE message_id IS NOT NULL",
@@ -239,6 +243,7 @@ const columns = [
   "items.changed INTEGER",
   "items.level TEXT",
   "items.sender TEXT",
+  "items.answers TEXT",
   "removals.network TEXT",
   "removals.keep INTEGER",
   "removals.changed INTEGER",
@@ -385,7 +390,24 @@ const decodeAll = <S extends Schema.Codec<unknown, unknown>>(schema: S, what: st
 
 // Each decoder is made once, since making one compiles its Schema.
 const decodeOurs = decodeAll(OursRow, "one of ours");
-const decodeItems = decodeAll(ItemRow, "an item");
+const decodeItemRows = decodeAll(ItemRow, "an item");
+
+// An item's row holds where the item it answers stands and what it shows, which the port
+// gives as what a Frontend shows of it.
+const decodeItems = (rows: readonly unknown[]) =>
+  decodeItemRows(rows).pipe(
+    Effect.map((decoded) =>
+      decoded.map(({ answeredContent, answeredPosition, ...item }): Item => ({
+        ...item,
+        answered:
+          answeredContent === undefined || answeredPosition === undefined
+            ? undefined
+            : answeredOf(answeredPosition, answeredContent),
+      }))
+    )
+  );
+
+const decodeAnswered = decodeAll(AnsweredRow, "the item a reply answers");
 const decodeSummaryRows = decodeAll(SummaryRow, "a Timeline");
 
 /** The column each level is counted in. */
@@ -761,7 +783,23 @@ export const makeSqliteTimelineStore = (
       FROM timelines ${where} ${order}
     `;
 
-    const itemColumns = sql`timeline, cursor AS position, network, content, changed, level`;
+    // The item a reply answers is found in its Timeline by `items_by_message_id`, one seek
+    // for each item read, so a read stays bounded by the items it gives.
+    const columnsOf = (from: string) => {
+      const of = (column: string) => sql(`${from}.${column}`);
+
+      const answeredBy = (column: string) => sql`
+        (SELECT ${sql(`answered.${column}`)} FROM items AS answered
+          WHERE answered.timeline = ${of("timeline")} AND answered.message_id = ${of("answers")})
+      `;
+
+      return sql`${of("timeline")} AS timeline, ${of("cursor")} AS position,
+        ${of("network")} AS network, ${of("content")} AS content, ${of("changed")} AS changed,
+        ${of("level")} AS level, ${answeredBy("cursor")} AS answeredPosition,
+        ${answeredBy("content")} AS answeredContent`;
+    };
+
+    const itemColumns = columnsOf("items");
 
     const touch = (timeline: TimelineId, sequence: number) =>
       sql`UPDATE timelines SET changed = ${sequence} WHERE id = ${timeline}`;
@@ -851,13 +889,26 @@ export const makeSqliteTimelineStore = (
       searchable: Searchable | undefined
     ) =>
       Effect.gen(function* () {
+        const answers = change.content._tag === "Message" ? change.content.answers : undefined;
+
+        // The item it answers, as the Timeline holds it now, by `items_by_message_id`.
+        const [answered] =
+          answers === undefined
+            ? []
+            : yield* sql`
+                SELECT content, level FROM items
+                WHERE timeline = ${change.timeline} AND message_id = ${answers}
+              `.pipe(Effect.flatMap(decodeAnswered));
+
+        const level = answering(change, answered);
+
         const [kept] = yield* sql`
           INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
-            level, sender)
+            level, sender, answers)
           VALUES (${change.timeline}, ${cursorOf(change.position)}, ${change.network},
             ${change.position.sequence}, ${textOrNull(change.messageId)},
             ${textOrNull(change.intent)}, ${content}, ${change.sequence},
-            ${textOrNull(change.level)}, ${textOrNull(searchable?.sender)})
+            ${textOrNull(level)}, ${textOrNull(searchable?.sender)}, ${textOrNull(answers)})
           ON CONFLICT DO NOTHING
           RETURNING id
         `.pipe(Effect.flatMap(decodeRows));
@@ -873,8 +924,8 @@ export const makeSqliteTimelineStore = (
         yield* touch(change.timeline, change.sequence);
 
         // One more of its level, when it stands after the Read Marker, up to one past the cap.
-        if (change.level !== undefined) {
-          const column = sql(unreadColumn[unreadOf[change.level]]);
+        if (level !== undefined) {
+          const column = sql(unreadColumn[unreadOf[level]]);
 
           yield* sql`
             UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
@@ -1384,7 +1435,8 @@ export const makeSqliteTimelineStore = (
         SELECT 'head' AS side, ${other} AS beyond,
           (SELECT id FROM timelines WHERE id = ${timeline}) AS timeline,
           NULL AS position, (SELECT network FROM timelines WHERE id = ${timeline}) AS network,
-          NULL AS content, NULL AS changed, NULL AS level
+          NULL AS content, NULL AS changed, NULL AS level, NULL AS answeredPosition,
+          NULL AS answeredContent
         ${sides}
       `;
     };
@@ -1467,10 +1519,10 @@ export const makeSqliteTimelineStore = (
     const search = (each: Search) => {
       const { after, since, until } = each;
 
+      // What each reply answers is found for the page alone, once it is kept.
       return sql`
-        SELECT items.timeline, items.cursor AS position, items.network, items.content,
-          items.changed, items.level
-        FROM search CROSS JOIN items ON items.id = search.rowid
+        SELECT ${columnsOf("page")} FROM (
+        SELECT items.* FROM search CROSS JOIN items ON items.id = search.rowid
         WHERE search MATCH ${phraseOf(foldForSearch(each.text))}
           ${each.network === undefined ? sql`` : sql`AND items.network = ${each.network}`}
           ${
@@ -1489,6 +1541,8 @@ export const makeSqliteTimelineStore = (
           }
         ORDER BY items.cursor DESC, items.timeline DESC
         LIMIT ${Math.max(0, Math.floor(each.limit))}
+        ) AS page
+        ORDER BY page.cursor DESC, page.timeline DESC
       `.pipe(Effect.flatMap(decodeItems));
     };
 

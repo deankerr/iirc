@@ -2,7 +2,8 @@
  * How News and outputs read in a transcript. A `??` expectation matches a News when it
  * is exactly the text `describeNews` writes, so this is the form to write them in.
  * Defaults are left out, so the common case is short: a Message's time known by receipt
- * at the input's time, an unknown id, live, with no tags, and not ours.
+ * at the input's time, an unknown id, live, with no tags, answering nothing, with no
+ * context, and not ours.
  *
  * @packageDocumentation
  */
@@ -89,6 +90,15 @@ const writeTags = (tags: ReadonlyMap<string, string>): readonly string[] =>
           .toSorted()
           .join(";")}`,
       ];
+
+// What a Message answers, and the Channel a Direct Message was said in the context of.
+const writeReply = (news: {
+  readonly answers: string | undefined;
+  readonly context: string | undefined;
+}): readonly string[] => [
+  ...(news.answers === undefined ? [] : [`answers=${atom(news.answers)}`]),
+  ...(news.context === undefined ? [] : [`context=${atom(news.context)}`]),
+];
 
 const writeOurs = (ours: Ours | undefined): readonly string[] =>
   ours === undefined ? [] : [`ours=${atom(ours.intent)}`, ...(ours.echo ? ["echo"] : [])];
@@ -546,6 +556,7 @@ export const describeNews = (news: News, now: Instant): string => {
         ...(news.self && news.ours === undefined ? ["self"] : []),
         ...writeWhere(news.where),
         ...writeTags(news.tags),
+        ...writeReply(news),
         ...writeOurs(news.ours),
         `:${news.text}`,
       ]);

@@ -89,8 +89,8 @@ describe("Messages heard", () => {
       transcript: [
         ...inChannel,
         lines(
-          "<< @+draft/reply=m0;time=2020-01-01T00:00:00.000Z;msgid=x :peer!u@h PRIVMSG #iirc :yes",
-          '?? message Privmsg peer #iirc in=channel:#iirc tags=+draft/reply="m0" :yes'
+          "<< @+reply=m0;time=2020-01-01T00:00:00.000Z;msgid=x :peer!u@h PRIVMSG #iirc :yes",
+          '?? message Privmsg peer #iirc in=channel:#iirc tags=+reply="m0" answers=m0 :yes'
         ),
       ],
     });
