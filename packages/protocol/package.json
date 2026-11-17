@@ -9,7 +9,8 @@
     "./format": "./src/format.ts",
     "./isupport": "./src/isupport.ts",
     "./line": "./src/line.ts",
-    "./links": "./src/links.ts"
+    "./links": "./src/links.ts",
+    "./mask": "./src/mask.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

@@ -32,6 +32,7 @@ import type { Arrival, Refined } from "./feature.ts";
 import { identified, noLongerIdentifying } from "./identify.ts";
 import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
+import { dropped } from "./ignores.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import { endLookups, expireLookup, look, removedLookups, unsentLookups } from "./lookups.ts";
@@ -177,8 +178,16 @@ const removed = (run: Run, keep: boolean): void => {
 const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const was = before(run);
   const { network } = run.state;
+  const previous = run.state.configuration;
 
   run.state = { ...run.state, configuration };
+
+  // A mask no longer held shows again what only it hid. The first Configuration drops none.
+  const unignored = dropped(run, previous?.ignores ?? [], configuration.ignores);
+
+  if (unignored.length > 0) {
+    run.news.push({ _tag: "Unignored", masks: unignored });
+  }
 
   // A login it now requires must happen, or the Connection is given up before anything
   // else is sent.

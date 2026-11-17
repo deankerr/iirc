@@ -27,6 +27,7 @@ import {
 import type { Input } from "@iirc/client";
 import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import { SearchText, TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Effect, Result, Schema, SchemaGetter, SchemaIssue, SchemaTransformation } from "effect";
@@ -819,6 +820,8 @@ export const News = Schema.TaggedUnion({
     activity: Activity,
     at: Fact(Instant),
     id: Fact(MessageId),
+    /** The Owner's ignore masks the User it came from matched, folded, or none. */
+    ignored: Schema.Array(IgnoreMask),
     live: Schema.Boolean,
     where: Schema.Array(Where),
   },
@@ -852,6 +855,8 @@ export const News = Schema.TaggedUnion({
      */
     highlight: Schema.Boolean,
     id: Fact(MessageId),
+    /** The Owner's ignore masks its sender matched, folded, or none. */
+    ignored: Schema.Array(IgnoreMask),
     kind: SayKind,
     live: Schema.Boolean,
     ours: Schema.NullOr(Schema.Struct({ echo: Schema.Boolean, intent: IntentId })),
@@ -891,6 +896,11 @@ export const News = Schema.TaggedUnion({
    * `where` keys it. A Timeline's `closed` says whether it still is.
    */
   TimelineClosed: { where: Closable },
+  /**
+   * The Owner stopped ignoring masks, folded: what only these hid is shown again. A mask
+   * respelt in another case is the same mask, and is no news.
+   */
+  Unignored: { masks: Schema.Array(IgnoreMask) },
 });
 
 /** The decoded form of {@link News}. */

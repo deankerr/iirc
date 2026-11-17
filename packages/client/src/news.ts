@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import type { UnparseableReason } from "@iirc/protocol/line";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import type { IrcdAddress } from "./configuration.ts";
 import type { ConnectionId, Instant, IntentId, MessageId, TimerId } from "./ids.ts";
@@ -472,6 +473,12 @@ export type News =
       readonly self: boolean;
       /** The Timelines it belongs to. Never empty. */
       readonly where: readonly Where[];
+      /**
+       * The Owner's ignore masks its sender matched when it arrived, folded by the casemapping
+       * then in force and in the Configuration's order, each once. Absent when none matched,
+       * and always for Self's own. Nothing is dropped: a projection hides what is stamped.
+       */
+      readonly ignored?: readonly IgnoreMask[];
     }
   | {
       /**
@@ -492,7 +499,19 @@ export type News =
       readonly activity: Activity;
       /** The Timelines it touches. Never empty. */
       readonly where: readonly Where[];
+      /**
+       * The Owner's ignore masks the User it came from matched, as a Message's `ignored` is:
+       * the one who joined, quit, was kicked by, or set a mode or topic. Absent when none
+       * matched, and always for Self's own.
+       */
+      readonly ignored?: readonly IgnoreMask[];
     }
+  /**
+   * The Owner stopped ignoring masks: each is a canonical mask, folded as `ignored` is, that
+   * the Configuration held and no longer does. A projection shows again what only these
+   * masks hid. A mask respelt in another case is the same mask, and is no news.
+   */
+  | { readonly _tag: "Unignored"; readonly masks: readonly IgnoreMask[] }
   /** The Owner removed the Network, and `keep` is whether its Timelines stay readable. */
   | { readonly _tag: "NetworkRemoved"; readonly keep: boolean }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
@@ -563,8 +582,8 @@ export type News =
 
 /**
  * News as the core reads it from a Line, before the step works out where it belongs,
- * whether a Message is a Highlight, and whether Self said it.
+ * whether a Message is a Highlight, whether Self said it, and which ignore masks its sender matches.
  */
 export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
-  ? Omit<T, "where" | "highlight" | "self">
+  ? Omit<T, "where" | "highlight" | "self" | "ignored">
   : T;

@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 import { encode, isRejected } from "@iirc/protocol/line";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import type { Instant } from "../ids.ts";
 import type { Fact } from "../known.ts";
@@ -101,6 +102,11 @@ const writeReply = (news: {
   ...(news.answers === undefined ? [] : [`answers=${atom(news.answers)}`]),
   ...(news.context === undefined ? [] : [`context=${atom(news.context)}`]),
 ];
+
+// The ignore masks a Message or an Activity matched, as one `ignored=` attribute, each mask
+// quoted, since a mask holds `@`.
+const writeStamp = (ignored: readonly IgnoreMask[] | undefined): readonly string[] =>
+  ignored === undefined ? [] : [`ignored=${ignored.map((mask) => JSON.stringify(mask)).join(",")}`];
 
 const writeOurs = (ours: Ours | undefined): readonly string[] =>
   ours === undefined ? [] : [`ours=${atom(ours.intent)}`, ...(ours.echo ? ["echo"] : [])];
@@ -572,6 +578,24 @@ const describeTimelineNews = (news: TimelineNews): string => {
   }
 };
 
+const writeMessage = (news: Extract<News, { readonly _tag: "Message" }>, now: Instant): string =>
+  words([
+    "message",
+    news.kind,
+    atom(news.sender),
+    atom(news.target),
+    ...attributes(news, now),
+    ...(news.highlight ? ["highlight"] : []),
+    // Ours is always Self's, so only Self said elsewhere is marked.
+    ...(news.self && news.ours === undefined ? ["self"] : []),
+    ...writeStamp(news.ignored),
+    ...writeWhere(news.where),
+    ...writeTags(news.tags),
+    ...writeReply(news),
+    ...writeOurs(news.ours),
+    `:${news.text}`,
+  ]);
+
 /**
  * Writes a News as a `??` expectation's text. Instants read against the transcript's
  * clock, as `t+13s`.
@@ -610,22 +634,12 @@ export const describeNews = (news: News, now: Instant): string => {
       return words(["connection-failed", writeEnd(news.reason), ...sessionAt(news.at, now)]);
     }
 
+    case "Unignored": {
+      return words(["unignored", ...news.masks.map((mask) => JSON.stringify(mask))]);
+    }
+
     case "Message": {
-      return words([
-        "message",
-        news.kind,
-        atom(news.sender),
-        atom(news.target),
-        ...attributes(news, now),
-        ...(news.highlight ? ["highlight"] : []),
-        // Ours is always Self's, so only Self said elsewhere is marked.
-        ...(news.self && news.ours === undefined ? ["self"] : []),
-        ...writeWhere(news.where),
-        ...writeTags(news.tags),
-        ...writeReply(news),
-        ...writeOurs(news.ours),
-        `:${news.text}`,
-      ]);
+      return writeMessage(news, now);
     }
 
     case "Confirmed": {
@@ -640,6 +654,7 @@ export const describeNews = (news: News, now: Instant): string => {
         news.activity._tag,
         ...head,
         ...attributes(news, now),
+        ...writeStamp(news.ignored),
         ...writeWhere(news.where),
         ...tail,
       ]);

@@ -540,13 +540,18 @@ const told = (run: Run, arrival: Arrival, nick: string, here: boolean): void => 
   }
 
   run.news.push(
-    routeActivity(run, {
-      _tag: "Activity",
-      activity: { _tag: here ? "CameOnline" : "WentOffline", nick },
-      at: arrival.time,
-      id: { _tag: "Unknown" },
-      live: true,
-    })
+    routeActivity(
+      run,
+      {
+        _tag: "Activity",
+        activity: { _tag: here ? "CameOnline" : "WentOffline", nick },
+        at: arrival.time,
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      // The Ircd tells it, not the partner, so no ignore mask applies.
+      undefined
+    )
   );
 };
 

@@ -145,13 +145,17 @@ const confirmedAway = (run: Run, away: { readonly message: string } | null): voi
   }
 
   run.news.push(
-    routeActivity(run, {
-      _tag: "Activity",
-      activity: { _tag: "AwayChanged", away, nick },
-      at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
-      id: { _tag: "Unknown" },
-      live: true,
-    })
+    routeActivity(
+      run,
+      {
+        _tag: "Activity",
+        activity: { _tag: "AwayChanged", away, nick },
+        at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      undefined
+    )
   );
   selfAway(run, away);
 };
@@ -390,7 +394,7 @@ const fold = (
   if (meant._tag === "Message") {
     run.news.push(routeMessage(run, meant, source));
   } else if (meant._tag === "Activity") {
-    const routed = routeActivity(run, meant);
+    const routed = routeActivity(run, meant, source);
 
     run.news.push(routed);
     followRenames(run, routed.where);

@@ -24,7 +24,7 @@ import type { Run } from "./run.ts";
 import { folder, send, updateOpen } from "./run.ts";
 import { maxActions } from "./state.ts";
 import { openOf } from "./views.ts";
-import { byPartner, isUser, named } from "./where.ts";
+import { byPartner, isUser, named, stamped } from "./where.ts";
 
 /**
  * How many answers may go at once. With {@link answerInterval}, a flood of requests sends
@@ -341,6 +341,7 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
     id: arrival.id,
     live: arrival.live,
     where,
+    ...stamped(run, source),
   });
 };
 

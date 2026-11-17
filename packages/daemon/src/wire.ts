@@ -960,6 +960,7 @@ const news = (source: News): WireNews => {
         activity: activity(source.activity),
         at: fact(source.at, same),
         id: fact(source.id, same),
+        ignored: source.ignored ?? [],
         live: source.live,
         where: source.where.map(where),
       };
@@ -1036,6 +1037,7 @@ const news = (source: News): WireNews => {
         context: orNull(source.context),
         highlight: source.highlight,
         id: fact(source.id, same),
+        ignored: source.ignored ?? [],
         kind: source.kind,
         live: source.live,
         ours:
@@ -1115,6 +1117,15 @@ const news = (source: News): WireNews => {
         _tag: "SessionBegan",
         at: source.at,
         nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    case "Unignored": {
+      const wire: Case<News, WireNews, "Unignored"> = {
+        _tag: "Unignored",
+        masks: source.masks,
       };
 
       return wire;

@@ -638,6 +638,13 @@ const foldAside = (draft: Draft, news: Aside) => {
   }
 };
 
+// News that places nothing. A Lookup's result is the Owner's answer, read from the API.
+// `Unignored` does not yet: showing again what only those masks hid is #46's next slice.
+const placesNothing = (
+  news: News
+): news is Extract<News, { readonly _tag: "Ignored" | "LookedUp" | "Unignored" }> =>
+  news._tag === "Ignored" || news._tag === "LookedUp" || news._tag === "Unignored";
+
 /**
  * Folds one News.
  * @param draft - The step.
@@ -645,6 +652,10 @@ const foldAside = (draft: Draft, news: Aside) => {
  * @param n - Its index in the step.
  */
 const foldNews = (draft: Draft, news: News, n: number) => {
+  if (placesNothing(news)) {
+    return;
+  }
+
   if (isAside(news)) {
     foldAside(draft, news);
 
@@ -751,12 +762,6 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       });
       draft.removed = true;
 
-      break;
-    }
-
-    // A Lookup's result is the Owner's answer, read from the API, and places nothing.
-    case "Ignored":
-    case "LookedUp": {
       break;
     }
 
