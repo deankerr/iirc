@@ -36,6 +36,7 @@ import type {
   State,
 } from "./state.ts";
 import { tableOf } from "./timers.ts";
+import { userIn, usersOf } from "./users.ts";
 
 /**
  * The open Connection, if there is one.
@@ -134,7 +135,7 @@ const sessionKnowledge = (network: Network): SessionKnowledge => {
 const standingOf = (phase: ChannelPhase): Standing => phase._tag;
 
 const userOf = (nick: string, open: Open, key: string): UserKnowledge => {
-  const seen = open.users.get(key);
+  const seen = userIn(open.users, key);
 
   return {
     account: seen?.account ?? unknown,
@@ -259,7 +260,7 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
   );
 
   // A monitored User a Feature keeps, who shares no Channel with Self.
-  for (const [key, seen] of open?.users ?? []) {
+  for (const [key, seen] of open === undefined ? [] : usersOf(open.users)) {
     if (!users.has(key) && open !== undefined) {
       users.set(key, userOf(seen.nick, open, key));
     }
@@ -377,6 +378,10 @@ const statesOf = (state: State): Inspection["states"] => {
 
   if (open?.modesQuery !== undefined) {
     states.set("modes", "Asking");
+  }
+
+  if (open?.whoQuery !== undefined) {
+    states.set("who", "Asking");
   }
 
   for (const channel of state.channels.values()) {

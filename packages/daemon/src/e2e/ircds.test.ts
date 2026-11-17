@@ -1280,6 +1280,83 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
     });
   }, 120_000);
 
+  // Ergo offers `WHOX`, so the Daemon's own `WHO` on joining tells the account and away
+  // status of members who were there first, which no Line about them has said since.
+  it("learns who was there before it joined, away and with an account, with no Activity for each", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const there = yield* Effect.promise(
+          async () =>
+            await connectPeer({
+              caps: ["draft/account-registration"],
+              host: ergo.host,
+              nick: "there",
+              port: ergo.plainPort,
+            })
+        );
+
+        yield* register(there);
+        there.send(`JOIN ${channel}`);
+        there.send("AWAY :out to lunch");
+        yield* Effect.promise(
+          async () => await there.waitFor((line) => line.command === "306", "306, away")
+        );
+
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
+            nicks: ["iirc"],
+            whoOnJoin: true,
+          }),
+          query: {},
+        });
+        yield* joined(api);
+
+        const listed = yield* api.timelines.list({ params: { network }, query: {} });
+        const timeline = listed.timelines.find((one) => one.name === channel)?.id;
+
+        if (timeline === undefined) {
+          return yield* Effect.die("the Channel's Timeline was not listed");
+        }
+
+        const page = yield* eventually(
+          api.timelines.members({ params: { timeline }, query: {} }),
+          (members) =>
+            members.members.some(
+              (member) =>
+                member.nick === "there" &&
+                member.account._tag === "Known" &&
+                member.away._tag === "Known"
+            )
+        );
+
+        const window = yield* api.timelines.window({ params: { timeline }, query: {} });
+
+        there.close();
+        yield* daemon.stop;
+
+        const member = page.members.find((one) => one.nick === "there");
+
+        return {
+          account: member?.account._tag === "Known" ? member.account.value : member?.account,
+          activity: window.items.flatMap((item) =>
+            item.content._tag === "Activity" ? [item.content.activity._tag] : []
+          ),
+          away: member?.away._tag === "Known" ? member.away.value !== null : member?.away,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ account: "there", activity: ["Joined"], away: true });
+  }, 120_000);
+
   it("says a Message that answers another with a +reply tag the other User hears, and shows Self's reply as one", async () => {
     const result = await run(
       Effect.gen(function* () {

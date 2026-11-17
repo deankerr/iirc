@@ -15,6 +15,7 @@ import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 import type { EndReason, MaskEntry, Notes, Profile, RefusedAction } from "./news.ts";
 import type { Seam } from "./seam.ts";
+import type { Users } from "./users.ts";
 
 /** Cap negotiation, which runs for a whole Connection. */
 export type Caps =
@@ -133,7 +134,7 @@ type LinkPhase =
       /** Whether a `903` arrived, live, on this Connection: Self logged in. */
       readonly loggedIn: boolean;
       /** What Lines have shown of other Users, by folded nick, while they share a Channel with Self. */
-      readonly users: ReadonlyMap<string, Seen>;
+      readonly users: Users;
       /**
        * The intents the Ircd has confirmed on this Connection, the latest last, at most
        * {@link maxConfirmed}. An `Unsent` for one of them refuses nothing.
@@ -154,6 +155,17 @@ type LinkPhase =
        * joining it, whose answer has not come, or `undefined` for none.
        */
       readonly modesQuery: ModesQuery | undefined;
+      /**
+       * The one `WHO` query the Client sent of its own, to learn who is in a Channel on
+       * joining it, whose answer has not ended, or `undefined` for none.
+       */
+      readonly whoQuery: WhoQuery | undefined;
+      /**
+       * The Channels a `WHO` query was sent for in this Session, by folded name, each as
+       * it was sent, oldest first, at most {@link maxWhoAsked}. None is asked twice in a
+       * Session, so a Channel parted and joined again is not asked again.
+       */
+      readonly whoAsked: ReadonlyMap<string, string>;
       /**
        * The `NICK`s the Client sent of its own to take a nick back, whose answers have not
        * come, oldest first, at most {@link maxReclaims}. The Ircd answers every `NICK`, so one
@@ -303,6 +315,25 @@ export interface ModesQuery {
   /** When it stops waiting, and the next Channel is asked. */
   readonly deadline: Instant;
 }
+
+/**
+ * A `WHO` query the Client sent of its own, awaiting the end of its answer: a `315`, or an
+ * error that names its Channel or its command. It takes an `order` as the Owner's Lines do,
+ * so whichever was sent first takes a reply that could answer either.
+ */
+export interface WhoQuery {
+  /** The Channel, as it was sent. */
+  readonly channel: string;
+  /** When it was sent among the Lines awaiting an answer on the Connection, as an action's `order` is. */
+  readonly order: number;
+  /** When it stops waiting, and the next Channel is asked. */
+  readonly deadline: Instant;
+  /** Whether a reply has described anyone yet, so its end reports the Channel learned. */
+  readonly replied: boolean;
+}
+
+/** How many Channels a Session remembers asking `WHO` of. */
+export const maxWhoAsked = 512;
 
 /**
  * A Lookup whose reply is being collected: what it asked, how its reply is tied to it,

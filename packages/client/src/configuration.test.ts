@@ -131,6 +131,34 @@ describe("answering CTCP", () => {
   });
 });
 
+describe("asking who is in each Channel on joining it", () => {
+  const old = {
+    channels: [],
+    declined: [],
+    enabled: true,
+    fallbackEncoding: "windows-1252",
+    ircds: [{ host: "irc.test", port: 6697, tls: true }],
+    login: { _tag: "None" },
+    nicks: ["iirc"],
+    realname: "iirc",
+    username: "iirc",
+  };
+
+  it("decodes as off from a Configuration written before it existed, which asked nothing", () => {
+    const decode = Schema.decodeUnknownSync(NetworkConfiguration);
+
+    expect([
+      decode(old).whoOnJoin,
+      decode({ ...old, whoOnJoin: true }).whoOnJoin,
+      decode({ ...old, whoOnJoin: false }).whoOnJoin,
+    ]).toStrictEqual([false, true, false]);
+  });
+
+  it("starts on for a new Network", () => {
+    expect(NetworkConfiguration.fields.whoOnJoin.ast.annotations).toMatchObject({ default: true });
+  });
+});
+
 describe("the Credentials a Configuration names", () => {
   it("include an operator login's", () => {
     const configuration = Schema.decodeSync(NetworkConfiguration)({

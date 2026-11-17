@@ -55,6 +55,7 @@ const plain: Configuration = decode({
   nicks: ["dean", "dean_"],
   realname: "Dean",
   username: "dean",
+  whoOnJoin: true,
 });
 
 const full: Configuration = decode({
@@ -136,6 +137,7 @@ describe("the options, derived from the Schema", () => {
         password: "Credential",
         realname: "Text",
         username: "Text",
+        whoOnJoin: "Toggle",
       },
     });
   });
@@ -172,6 +174,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.password",
         "network.libera.realname",
         "network.libera.username",
+        "network.libera.whoOnJoin",
       ],
       resolved: true,
     });
@@ -221,6 +224,7 @@ describe("the options, derived from the Schema", () => {
       },
       realname: { starts: "the first nick", value: { _tag: "Shown", text: "Dean" } },
       username: { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
+      whoOnJoin: { starts: "on", value: { _tag: "Shown", text: "on" } },
     });
   });
 
@@ -1040,6 +1044,7 @@ describe("the commands", () => {
               nicks: ["bot"],
               realname: "bot",
               username: "bot",
+              whoOnJoin: true,
             }),
             network: Schema.decodeSync(NetworkId)("test"),
           },
@@ -1089,6 +1094,7 @@ describe("the commands", () => {
           nicks: ["x"],
           realname: "x",
           username: "x",
+          whoOnJoin: true,
         }),
       },
     });

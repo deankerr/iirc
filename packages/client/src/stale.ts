@@ -13,6 +13,8 @@ import { changeListing } from "./members.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
 import type { Joined, Member, Seen } from "./state.ts";
+import { mapUsers } from "./users.ts";
+import type { Users } from "./users.ts";
 
 /**
  * A fact as stale since an instant: what was known, or known in part, is what it was.
@@ -62,10 +64,7 @@ const joinedStaled = (joined: Joined, since: Instant): Joined => ({
   members: membersStaled(joined.members, since),
 });
 
-const usersStaled = (
-  users: ReadonlyMap<string, Seen>,
-  change: (seen: Seen) => Seen
-): ReadonlyMap<string, Seen> => new Map([...users].map(([key, seen]) => [key, change(seen)]));
+const usersStaled = (users: Users, change: (seen: Seen) => Seen): Users => mapUsers(users, change);
 
 /**
  * Rewrites the facts no Feature keeps any longer as stale, from now.

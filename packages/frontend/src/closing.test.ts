@@ -54,6 +54,7 @@ const configurationOf = (...channels: readonly string[]) =>
     nicks: ["dean"],
     realname: "Dean",
     username: "dean",
+    whoOnJoin: true,
   });
 
 const rfc: Naming = { casemapping: "rfc1459", chantypes: "#" };

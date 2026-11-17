@@ -20,6 +20,7 @@ import type { TimerTable } from "../output.ts";
 import { maxLookups } from "../state.ts";
 import type { State } from "../state.ts";
 import { configured, epoch, impurity, snapshot } from "../testing/index.ts";
+import { usersOf } from "../users.ts";
 import { openOf } from "../views.ts";
 
 const configurations = [
@@ -614,7 +615,8 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
     )
   );
 
-  const users = [...(openOf(step.state)?.users.keys() ?? [])];
+  const open = openOf(step.state);
+  const users = open === undefined ? [] : usersOf(open.users).map(([nick]) => nick);
 
   expect(users.filter((nick) => !members.has(nick))).toStrictEqual([]);
 

@@ -58,7 +58,8 @@ curl -X PUT "$API/networks/libera" -H "$AUTH" -H 'content-type: application/json
   "nicks": ["my-nick"], "username": "iirc", "realname": "iirc",
   "login": { "_tag": "None" },
   "channels": [{ "name": "#my-channel" }],
-  "declined": [], "fallbackEncoding": "windows-1252", "answerCtcp": true
+  "declined": [], "fallbackEncoding": "windows-1252", "answerCtcp": true,
+  "whoOnJoin": true
 }'
 
 curl -N "$API/news" -H "$AUTH"                         # News as Server-Sent Events
