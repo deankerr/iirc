@@ -376,6 +376,26 @@ describe("reading a line", () => {
     ]);
   });
 
+  it("refuses to say anything while whether the Network has a Session is not known, without calling it not connected", () => {
+    const unknown: CommandContext = { ...offline, session: undefined };
+
+    const drafting: CommandContext = {
+      ...nowhere,
+      draft: { network, nick: "bob" },
+      session: undefined,
+    };
+
+    expect([
+      message("hello", unknown),
+      message("/msg peer hi", unknown),
+      message("hello", drafting),
+    ]).toStrictEqual([
+      "Whether libera is connected is not known yet, so nothing can be said there now.",
+      "Whether libera is connected is not known yet, so nothing can be said there now.",
+      "Whether libera is connected is not known yet, so nothing can be said there now.",
+    ]);
+  });
+
   it("moves to the next and previous Timeline, opens the palette, and focuses the composer, from anywhere", () => {
     const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
     const listed: CommandContext = { ...nowhere, open: timeline, timelines: [timeline, other] };

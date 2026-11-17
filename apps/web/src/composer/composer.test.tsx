@@ -68,10 +68,16 @@ const settled = async (holds: () => boolean) => {
  * A browser signed in to a Daemon with `#iirc` open, its members `op` and `peer`, the page
  * drawn, and this device's `ui` options overridden as given.
  * @param overrides - This device's overrides of the options under `ui`.
+ * @param prepare - What else the fake Daemon is to be before the browser signs in.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async (overrides: DeviceUi = {}) => {
+const signedIn = async (
+  overrides: DeviceUi = {},
+  prepare: (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => void = () => {}
+) => {
   const fake = fakeDaemon();
+
+  prepare(fake.daemon);
 
   fake.daemon.signedIn = true;
   fake.daemon.timelines.set("libera", [
@@ -535,6 +541,47 @@ const listIn = (container: HTMLElement) => {
     texts: options.map((one) => one.textContent),
   };
 };
+
+/**
+ * The note above the composer that its Network is not connected, if drawn.
+ * @param container - The page.
+ * @returns The note's text, or `undefined` while none is drawn.
+ */
+const offlineNoteIn = (container: HTMLElement) =>
+  [...container.querySelectorAll("p")]
+    .map((note) => note.textContent)
+    .find((text) => text.includes("is not connected")) ?? undefined;
+
+describe("the Composer's note on its Network's connection", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("says nothing while the connection is not known yet, though the window is read", async () => {
+    const { container, daemon } = await signedIn({}, (held) => {
+      held.holdKnown = true;
+    });
+
+    expect({
+      note: offlineNoteIn(container),
+      waiting: daemon.held.known.length > 0,
+    }).toStrictEqual({ note: undefined, waiting: true });
+  });
+
+  it("says the Network is not connected once it is read to be so", async () => {
+    const { container } = await signedIn({}, (held) => {
+      held.sessions.set("libera", { _tag: "Offline", since: null });
+    });
+
+    await settled(() => offlineNoteIn(container) !== undefined);
+
+    expect(offlineNoteIn(container)).toBe(
+      "libera is not connected: nothing can be said there until it is."
+    );
+  });
+});
 
 describe("the Composer's list", () => {
   afterEach(() => {

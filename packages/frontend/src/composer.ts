@@ -28,7 +28,7 @@ import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { attemptedText, contained, requested } from "./render.ts";
 import { isRemoved, mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
-import type { Timelines } from "./timelines.ts";
+import type { NetworkView, Timelines } from "./timelines.ts";
 
 /**
  * Where a composer is: under a Timeline, under a Direct Message not yet begun, by
@@ -306,6 +306,24 @@ const unseenIn = (timelines: readonly Timeline[]): readonly Unseen[] =>
   });
 
 /**
+ * Whether a Network has a Session: not while the Daemon stops it, and not known while it is
+ * not read or its connection is not known yet.
+ * @param network - The Network, as held.
+ * @returns Whether it has one, or `undefined` while that is not known.
+ */
+const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
+  if (network?.running?._tag === "Stopped") {
+    return false;
+  }
+
+  if (network === undefined || network.connection._tag === "Unknown") {
+    return undefined;
+  }
+
+  return network.connection._tag === "Connected";
+};
+
+/**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
  * it, whether that Network has a Session, every Timeline in the sidebar's order, those open
  * in any Pane, those with something unread, and the head of the Channel in focus, as read.
@@ -354,7 +372,7 @@ export const contextOf = (
       draft: { network: main.network, nick: main.nick },
       focus: undefined,
       head: undefined,
-      session: network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
+      session: sessionOf(network),
     };
   }
 
@@ -385,8 +403,7 @@ export const contextOf = (
     focus,
     head:
       description.kind === "Channel" && header?.timeline === description.id ? header : undefined,
-    session:
-      !removed && network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
+    session: removed ? false : sessionOf(network),
   };
 };
 
