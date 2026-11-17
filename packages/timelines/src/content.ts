@@ -112,8 +112,8 @@ export type Content =
  * - `Activity`: an Activity, a Session's start or end, a failed Connection, or a Message
  *   in the Network's own Timeline.
  *
- * Our own Messages, every Message Self said, and our refused actions have no level, and
- * never count.
+ * Our own Messages, every Message Self said, our refused actions, and a numeric the Ircd
+ * sent have no level, and never count.
  */
 export type Level = "Highlight" | "Direct" | "Message" | "Activity";
 

@@ -221,22 +221,26 @@ export type Line =
       /**
        * What stands in the senders' column, where a Message's nick does, so the words line
        * up with a Message's text: `-->` for one who arrived, `<--` for one who left, `--`
-       * for any other Activity, as WeeChat marks them, and none for a Session or a refusal.
+       * for any other Activity, as WeeChat marks them, an Ircd's numeric by its number, and
+       * none for a Session or a refusal.
        */
       readonly marker: Marker | undefined;
       readonly parts: readonly Part[];
     };
 
-/** What marks an Activity in the senders' column: arriving, leaving, or anything else. */
-export type Marker = "-->" | "<--" | "--";
+/**
+ * What marks an Activity in the senders' column: `-->` for arriving, `<--` for leaving, `--`
+ * for anything else, or a numeric's own number, such as `251`.
+ */
+export type Marker = string;
 
 /**
- * What marks an Activity: `-->` for a join or a partner coming online, `<--` for a part, a
- * quit, a kick, or a partner going offline, and `--` for anything else.
+ * What marks an Activity that is not a numeric: `-->` for a join or a partner coming online,
+ * `<--` for a part, a quit, a kick, or a partner going offline, and `--` for anything else.
  * @param activity - The Activity.
  * @returns Its marker.
  */
-const markerOf = (activity: Activity): Marker => {
+const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" }>): Marker => {
   switch (activity._tag) {
     case "Joined":
     case "CameOnline": {
@@ -271,6 +275,14 @@ const markerOf = (activity: Activity): Marker => {
     }
   }
 };
+
+/**
+ * What marks an Activity: a numeric's number for a numeric, or an arrow or `--`.
+ * @param activity - The Activity.
+ * @returns Its marker.
+ */
+const markerOf = (activity: Activity): Marker =>
+  activity._tag === "Numeric" ? activity.numeric : arrowOf(activity);
 
 const words = (text: string): Part => ({ _tag: "Words", text });
 
@@ -498,6 +510,11 @@ const describeOtherActivity = (
         ...activity.context.flatMap((each) => [words(" "), name(each)]),
         ...(activity.description === "" ? [] : [words(": "), said(activity.description)]),
       ];
+    }
+
+    // The Ircd's own words, as one run of text, its number in the marker beside them.
+    case "Numeric": {
+      return [said(activity.params.join(" "))];
     }
 
     // Who asked for what, and the answer sent beside it, or why none was.

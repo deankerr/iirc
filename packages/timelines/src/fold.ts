@@ -370,10 +370,15 @@ const kindOf = (where: Where): Kind => {
  * How much a Message or an Activity calls for the Owner in one Timeline.
  * @param news - The News.
  * @param kind - The Timeline's kind.
- * @returns Its level, or `undefined` for a Message Self said.
+ * @returns Its level, or `undefined` for a Message Self said or a numeric.
  */
 const levelOf = (news: Routed, kind: Kind): Level | undefined => {
   if (news._tag === "Activity") {
+    // What an Ircd says as it goes about its business calls for no one: it never counts.
+    if (news.activity._tag === "Numeric") {
+      return undefined;
+    }
+
     // An invitation is addressed to Self, as a Message naming Self is, and calls for the
     // Owner only while it is happening now.
     return news.live && news.activity._tag === "Invited" ? "Highlight" : "Activity";
