@@ -59,7 +59,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
 - **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its login's, and each Channel's key.
-- **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` starts on and decodes as off, since no answer was sent then.
+- **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` and `whoOnJoin` start on and decode as off, since nothing was answered or asked then.
 
 ### When the Client dials
 
@@ -91,6 +91,7 @@ The State holds no timer table. Each machine's state names the instants it waits
 | `rejoin <channel>` | a Channel is refused or kicked | joins it again |
 | `lookup <intent>` | a Lookup awaits its reply, 30 s | reports what it has |
 | `modes` | the Client's own `MODE` query awaits its answer, 30 s | asks the next Channel |
+| `who` | the Client's own `WHO` query holds the slot, 30 s | asks the next Channel, still reading the last answer |
 
 ## News
 
@@ -108,7 +109,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it: whether a Timeline is still closed is the projection's to derive. |
 | `Unignored` | The Owner took masks out of the Configuration's `ignores`, each given as every casemapping folds it. |
-| `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
+| `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, the end of a `NAMES` listing, or the end of a `WHO` answer that described its members. It says which Channel, keyed as `where` keys it. |
 | `PartnerLearned` | Whether a Direct Message partner is on the Network, as `Knowledge.partners` says, changed with no Activity saying so: the first status `MONITOR` or `WATCH` gave, their joining or leaving a Channel Self shares, or the Session ending. It says which partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
@@ -160,7 +161,7 @@ A `Refused` for an `Act` names no Message, so it carries `action`: what was trie
 - **`partners` are the open Direct Message partners,** keyed as `where` keys their Timelines, and whether each is `here`: known true while they share a Channel with Self or `MONITOR` or `WATCH` says they are online, known false while it says they are offline, and unknown otherwise, as with no Session.
 - **Self's away status is as the Ircd confirmed it,** never as the Owner asked.
 - **A Channel's `wanted` says whether the Owner wants Self in it.**
-- **A User's account is `null` when known to be logged out, and `Unknown` when not known.** Another User's is learned only from the caps below, or a `WHOIS`.
+- **A User's account is `null` when known to be logged out, and `Unknown` when not known.** Another User's is learned only from the caps below, a `WHOIS`, or the `WHO` asked on joining.
 
 Every fact is a `Fact<T>`:
 
@@ -186,6 +187,7 @@ A fact's source is `ircd`, `replied`, `receipt`, or `ours`. Nothing in Knowledge
 | `presence` | `Registering`, `Session` |
 | `keepalive` | `Listening`, `Pinged` |
 | `modes` | `Asking` |
+| `who` | `Asking` |
 | `channel <name>` | `Wanted`, `Joining`, `Joined.Syncing`, `Joined.Synced`, `Refused`, `Kicked` |
 
 A machine that is not running is left out.
@@ -256,6 +258,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **An operator login** (`oper.test.ts`). With an `oper` login, each Session begins by sending `OPER <name> <credential>`, and awaits the answer, read from its numeric alone: `381` is an `OperGranted`, and `464`, `491`, or a `461` naming `OPER` an `OperRefused` with that numeric, each once, in the Network's own Timeline. A numeric when nothing awaits it reports nothing. `echo-message` never echoes `OPER`, so no cap is declined for it.
 - **Keepalive** (`keepalive.test.ts`). Answers `PING` at once, byte for byte. After 60 s of silence it sends a `PING`, and after 90 s it hangs up.
 - **A Channel's modes** (`modes.test.ts`). Each time Self's join is confirmed, the Client asks the Channel's modes once with `MODE <channel>`, and folds the `324` that answers. One query waits at a time on a Connection, so a hundred Channels are asked one after another, each when the last is answered or after 30 s, and the Owner's Lines never queue behind them all. A Channel whose modes are already known by its turn is not asked. An error in answer leaves the modes unknown. A `MODE` while they are known keeps them true, by `CHANMODES`, with `PREFIX`'s modes as membership; one while they are unknown leaves them unknown, never a partial set. A key is kept only as set.
+- **Who is in a Channel** (`who.test.ts`). With the Configuration's `whoOnJoin`, once the `NAMES` listing that follows Self's join ends, the Client asks `WHO <channel>` once a Session, never again in it though Self joins again, one Channel at a time as for `MODE`, independently of it. With `WHOX` it asks `%tcuhnfar` with a token of its own, and reads only a `354` that carries it, an account of `0` meaning logged out. Without it, a `352` gives the mask, realname, and away status, and no account. Either is read while it names a Channel asked whose answer has not ended, and refreshes only a member the Client keeps, never Self, as the latest word on them. `G` is away, `H` here, and since WHO gives no away message, an away member keeps the message already known, or none. The Runtime may send the `WHO` after Lines the Owner asked for later, so it waits among none of them: it takes no error numeric naming its Channel, only a `421` or `461` naming `WHO`, or a `FAIL` of `WHO`, which end its answer, as do its `315` and an `Unsent` of it. After 30 s the next Channel is asked, and the late answer is still read until its `315`. No Activity is reported, only a `ChannelLearned` when an answer that described anyone ends.
 - **Channels** (`channels.test.ts`). Each Channel the Owner wants is a machine. Wanted Channels share `JOIN` Lines as `TARGMAX` allows, and one with a key goes alone. A refused Channel, a kick, or a `PART` the Owner did not ask for is joined again on the backoff. A Channel Self was put in without asking is followed with `wanted` false and never joined again. Without `multi-prefix`, a member's prefixes are partial.
 - **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. A `DCC` is dropped, and other CTCP is Activity, below. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and so is a standard reply that refused nothing. An `INVITE` that names Self is an `Invited`, by who invited and to which Channel, in the Network's own Timeline (`invite.test.ts`). One that names another User is not reported. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
 - **CTCP** (`ctcp.test.ts`). A CTCP in a `PRIVMSG` from another User is a `CtcpRequest`, with what became of it, and one in a `NOTICE` a `CtcpReply`. Self answers a live `VERSION` (`iirc`, and nothing of what it runs), `PING` (its arguments, back), `TIME` (when the request arrived, in UTC), and `CLIENTINFO` with a `NOTICE` to the sender's nick, never to a Channel or a mask, and answers nothing when the Configuration's `answerCtcp` is off. Answers take a budget of three at once and then one every ten seconds, which reconnecting does not refill. A request that is not answered says why, and none is dropped. A request or a reply belongs to each Channel it was sent to, and otherwise to the Network, and to the sender's Direct Messages if those exist. A live reply to Self, never to a Channel, with the token of a `PING` the Owner sent, from the User it went to, carries `roundTrip`: the milliseconds between the instants the Runtime journaled the request and the reply, and every other reply carries `null`. The User a `PING` went to is followed through a change of nick, and the `PING` is forgotten when that User quits or another User takes the nick. An answer that never left is a `CtcpUnsent`, in the Timelines its request is in as they stand then: its Channels as named when it arrived, or its partner's Direct Messages as they followed a live rename. Once another User took that nick, or 64 later answers have pushed it out of memory, it goes to the Network's own Timeline alone, never another User's. Its budget stays spent.

@@ -37,6 +37,7 @@ import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Link, Looking, Refreshed } from "./state.ts";
 import { maxLookupLines, maxLookups } from "./state.ts";
 import { lookupTime } from "./timers.ts";
+import { userIn } from "./users.ts";
 import { openOf } from "./views.ts";
 
 /** A Lookup of a User: a `WHOIS` or a `WHOWAS`. */
@@ -509,7 +510,7 @@ const factOf = (run: Run, nick: string, field: Refreshed): Fact<unknown> => {
     return presence[field];
   }
 
-  const seen = open?.users.get(folder(run.state)(nick));
+  const seen = open === undefined ? undefined : userIn(open.users, folder(run.state)(nick));
 
   return seen === undefined ? unknown : seen[field];
 };

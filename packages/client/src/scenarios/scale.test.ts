@@ -229,3 +229,107 @@ describe("a Network of 30,000 members", () => {
     scaleTimeout
   );
 });
+
+// One User a WHOX reply describes, with a token.
+const reply = (token: string, nick: string) =>
+  `:irc.test 354 iirc ${token} #big ~${nick} ${nick}.test ${nick} G acct :${nick}`;
+
+// The middle of 501 timings.
+const median = (each: readonly number[]) => each.toSorted((left, right) => left - right)[250] ?? 0;
+
+describe("a WHO answer of a Channel of 10,000 members", () => {
+  it(
+    "costs each reply what it describes, and leaves a Message costing what it did",
+    () => {
+      const configuration = configured({ channels: [{ name: "#big" }], whoOnJoin: true });
+
+      const played = replay(client, {
+        configuration,
+        transcript: registered(configuration, {
+          isupport: [...floorIsupport, "WHOX"],
+          offered: ["message-tags", "account-tag"],
+        }),
+      });
+
+      let { state }: { state: State } = played;
+      let at = 60_000;
+
+      const input = (line: string) => {
+        at += 1;
+
+        return {
+          _tag: "Received",
+          at: Instant.make(at),
+          bytes: utf8.encode(line),
+          connection: ConnectionId.make(1),
+        } as const;
+      };
+
+      const receive = (line: string): void => {
+        ({ state } = client.step(state, input(line)));
+      };
+
+      const nicks = Array.from({ length: 10_000 }, (_unused, index) => `u${index}`);
+
+      receive(":iirc!u@h JOIN #big");
+
+      for (let start = 0; start < nicks.length; start += 20) {
+        const names = nicks.slice(start, start + 20).join(" ");
+
+        receive(`:irc.test 353 iirc = #big :${start === 0 ? "iirc " : ""}${names}`);
+      }
+
+      receive(":irc.test 366 iirc #big :End of /NAMES list.");
+
+      // What a step costs with nothing to learn: a reply with another's token.
+      const idle = now();
+
+      for (const nick of nicks) {
+        receive(reply("999", nick));
+      }
+
+      const baseline = now() - idle;
+      const asked = state;
+      const began = now();
+      let slowest = 0;
+
+      for (const nick of nicks) {
+        const started = now();
+        receive(reply("152", nick));
+        slowest = Math.max(slowest, now() - started);
+      }
+
+      receive(":irc.test 315 iirc #big :End of WHO list");
+
+      const answer = now() - began;
+      const answered = state;
+
+      // An account-tagged Message refreshes its sender, before the answer and after it,
+      // timed in turn so a loaded machine slows both alike.
+      const before: number[] = [];
+      const after: number[] = [];
+
+      for (let index = 0; index < 501; index += 1) {
+        const line = input(`@account=acct${index} :u${index}!u@h PRIVMSG #big :hi`);
+
+        for (const [from, into] of [
+          [asked, before],
+          [answered, after],
+        ] as const) {
+          const started = now();
+          client.step(from, line);
+          into.push(now() - started);
+        }
+      }
+
+      expect(client.known(state).users.get("u9999")?.away).toMatchObject({ _tag: "Known" });
+      // Reading the answer costs about what reading 10,000 Lines that change nothing does,
+      // where copying every User on each reply took three times that.
+      expect(answer).toBeLessThan(Math.max(baseline * 2, 200));
+      expect(slowest).toBeLessThan(50);
+      // A Message costs the same once 10,000 Users are known, where it took twice as long.
+      expect(median(after)).toBeLessThan(median(before) * 1.25);
+    },
+    scaleTimeout
+  );
+});

@@ -28,6 +28,7 @@ import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
 import type { Channel, Joined, Member, Seen, State } from "./state.ts";
+import { userIn, usersFrom, usersOf, withUser, withoutUsers } from "./users.ts";
 import { openOf, sessionOf } from "./views.ts";
 import { keptWatched } from "./watched.ts";
 
@@ -76,19 +77,16 @@ export const pruneUsers = (run: Run, left?: readonly string[]): void => {
     return;
   }
 
-  const gone = new Set(
-    (left ?? [...users.keys()]).filter(
-      (folded) => users.has(folded) && !shares(run.state, folded) && !keptWatched(run, folded)
-    )
+  const gone = (left ?? usersOf(users).map(([folded]) => folded)).filter(
+    (folded) =>
+      userIn(users, folded) !== undefined && !shares(run.state, folded) && !keptWatched(run, folded)
   );
 
-  if (gone.size === 0) {
+  if (gone.length === 0) {
     return;
   }
 
-  const kept = [...users].filter(([nick]) => !gone.has(nick));
-
-  updateOpen(run, (open) => ({ ...open, users: new Map(kept) }));
+  updateOpen(run, (open) => ({ ...open, users: withoutUsers(open.users, gone) }));
 };
 
 /**
@@ -318,7 +316,7 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
   }
 
   updateOpen(run, (open) => {
-    const was: Seen = open.users.get(folded) ?? {
+    const was: Seen = userIn(open.users, folded) ?? {
       account: { _tag: "Unknown" },
       away: { _tag: "Unknown" },
       mask: { _tag: "Unknown" },
@@ -326,7 +324,7 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
       realname: { _tag: "Unknown" },
     };
 
-    return { ...open, users: new Map(open.users).set(folded, change(was)) };
+    return { ...open, users: withUser(open.users, folded, change(was)) };
   });
 };
 
@@ -569,16 +567,16 @@ export const foldActivity = (
       }
 
       updateOpen(run, (open) => {
-        const seen = open.users.get(from);
+        const seen = userIn(open.users, from);
 
         if (seen === undefined) {
           return open;
         }
 
-        const users = new Map(open.users);
-        users.delete(from);
-
-        return { ...open, users: users.set(to, { ...seen, nick: activity.to }) };
+        return {
+          ...open,
+          users: withUser(withoutUsers(open.users, [from]), to, { ...seen, nick: activity.to }),
+        };
       });
 
       return;
@@ -714,8 +712,9 @@ const once = <V>(entries: readonly (readonly [string, V])[]): ReadonlyMap<string
 };
 
 /**
- * Folds every key again after the casemapping changed: Channels, their members, and
- * the Users seen. Where two keys now fold together, the first is kept.
+ * Folds every key again after the casemapping changed: Channels, their members, the
+ * Users seen, and the Channels asked who is in them. Where two keys now fold together,
+ * the first is kept.
  * @param run - The step.
  */
 const refold = (run: Run): void => {
@@ -752,7 +751,8 @@ const refold = (run: Run): void => {
 
   updateOpen(run, (open) => ({
     ...open,
-    users: once([...open.users.values()].map((seen) => [fold(seen.nick), seen] as const)),
+    users: usersFrom(once(usersOf(open.users).map(([, seen]) => [fold(seen.nick), seen] as const))),
+    whoAsked: once([...open.whoAsked.values()].map((asked) => [fold(asked.name), asked] as const)),
   }));
 };
 

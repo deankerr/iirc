@@ -378,6 +378,7 @@ export const liberaConfiguration: ConfigurationOnWire = {
   oper: { _tag: "None" },
   realname: "iirc",
   username: "iirc",
+  whoOnJoin: true,
 };
 
 const LookBody = Schema.fromJsonString(

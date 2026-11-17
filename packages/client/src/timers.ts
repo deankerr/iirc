@@ -29,6 +29,9 @@ export const lookupTime = 30_000;
 /** How long a `MODE` query of the Client's own waits for its answer, from when it was sent. */
 export const modesQueryTime = 30_000;
 
+/** How long a `WHO` query of the Client's own waits for the end of its answer, from when it was sent. */
+export const whoQueryTime = 30_000;
+
 /** What a timer is for, which decides what its `Fired` does. */
 export type Purpose =
   | { readonly _tag: "Redial" }
@@ -38,7 +41,8 @@ export type Purpose =
   | { readonly _tag: "Keepalive" }
   | { readonly _tag: "Rejoin"; readonly channel: string }
   | { readonly _tag: "Lookup"; readonly intent: IntentId }
-  | { readonly _tag: "ModesQuery" };
+  | { readonly _tag: "ModesQuery" }
+  | { readonly _tag: "WhoQuery" };
 
 /** A timer that is set: when it is due, and what it is for. */
 export interface Timer {
@@ -100,6 +104,13 @@ export const timersOf = (state: State): ReadonlyMap<TimerId, Timer> => {
         table.set(TimerId.make("modes"), {
           due: phase.modesQuery.deadline,
           purpose: { _tag: "ModesQuery" },
+        });
+      }
+
+      if (phase.whoQuery !== undefined) {
+        table.set(TimerId.make("who"), {
+          due: phase.whoQuery.deadline,
+          purpose: { _tag: "WhoQuery" },
         });
       }
 

@@ -13,9 +13,10 @@ takeAll(outbox): { items: readonly A[], outbox }           // in the order they 
 nextAt(outbox, now): number | undefined                    // when the next Line may leave, for inspection
 depth(outbox): number
 goesFirst(command): boolean                                // PING and PONG
+goesLast(command): boolean                                 // WHO
 Pacing = { burst: number, interval: number }               // a Schema; interval in milliseconds
 defaultPacing = { burst: 5, interval: 2000 }
-defaultCapacity = 1000                                     // ordinary Lines
+defaultCapacity = 1000                                     // ordinary Lines and WHO
 defaultFirstCapacity = 64                                  // PING and PONG
 alwaysAdmitted(command): boolean                           // QUIT
 ```
@@ -24,12 +25,12 @@ The Outbox is generic over what it queues, so the Runtime queues its `Send` and 
 
 ## Guarantees
 
-- **FIFO, with `PING` and `PONG` first.** Every Line leaves in the order it was offered, so a `PRIVMSG` never overtakes the `JOIN` it depends on, nor falls behind a later `PART`. Only `PING` and `PONG` go ahead of the Lines waiting, in their own order among themselves, so a keepalive never waits behind a burst. They still take a token. Which Lines go first is decided from the command alone, which is structure, never from text.
+- **FIFO, with `PING` and `PONG` first and `WHO` last.** Every Line leaves in the order it was offered, so a `PRIVMSG` never overtakes the `JOIN` it depends on, nor falls behind a later `PART`. Only `PING` and `PONG` go ahead of the Lines waiting, in their own order among themselves, so a keepalive never waits behind a burst. A `WHO` goes behind them all: it leaves only when no other Line waits, so a Line offered after it still leaves first, and `WHO`s keep their own order among themselves. All of them still take a token. Where a Line goes is decided from the command alone, which is structure, never from text.
 - **A token bucket.** Up to `burst` Lines may leave at once, then one every `interval`. In any window of time, at most `burst` plus one for each whole `interval` in it leave. The bucket refills while nothing is sent, up to `burst` and no more.
 - **One safe default.** `defaultPacing` is a burst of 5, then one Line every 2 s, as RFC 1459 §8.10 describes an Ircd's own limit, and as irssi and WeeChat pace. It is tuned for no Ircd, and a caller may pass another `Pacing`.
 - **No fractions.** The bucket is held as `fullAt`, the time it is next full, so there is no part of a token to round.
 - **A clock set back stalls nothing for long.** With a clock that moves only forward, `fullAt` is never more than a whole bucket ahead of now. Seen further ahead, the clock was set back, and the bucket is taken as empty as of now, so the next Line waits at most one `interval`, however far the clock moved. `take` stores what it saw in the Outbox it returns, so a `take` at the time a `Wait` names, with the Outbox that `Wait` gave, takes a Line, unless the clock was set back again in between.
-- **Bounded, with room kept for what must leave.** At most `capacity` ordinary Lines wait, 1,000 by default. `PING` and `PONG` have a bound of their own, `firstCapacity`, 64 by default, so a full queue of ordinary Lines never refuses a keepalive, and a hostile flood of `PING`s cannot grow memory: past that bound a keepalive is refused rather than evicting an ordinary Line. A `QUIT` is always admitted, past `capacity`, since it is the last Line and leaving is what was asked. A refused offer is `Full`, nothing is queued, and nothing waits for room, so a caller never blocks on it.
+- **Bounded, with room kept for what must leave.** At most `capacity` ordinary Lines and `WHO`s wait together, 1,000 by default, and a `WHO` never evicts a Line. `PING` and `PONG` have a bound of their own, `firstCapacity`, 64 by default, so a full queue of ordinary Lines never refuses a keepalive, and a hostile flood of `PING`s cannot grow memory: past that bound a keepalive is refused rather than evicting an ordinary Line. A `QUIT` is always admitted, past `capacity`, since it is the last Line and leaving is what was asked. A refused offer is `Full`, nothing is queued, and nothing waits for room, so a caller never blocks on it.
 - **One token for each wire Line.** An item taken may become several Lines on the wire, such as a SASL response filled to several `AUTHENTICATE` Lines. The caller spends a token for each Line after the first with `spend`, which waits as `take` does, so those Lines are paced like any others.
 - **Plain data.** An `Outbox` holds numbers, arrays, and plain objects, and every function returns a new one, leaving the one it was given as it was. What is queued is the caller's.
 

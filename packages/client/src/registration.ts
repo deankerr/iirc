@@ -34,6 +34,7 @@ import type { Asking, Caps, Negotiated, Open } from "./state.ts";
 import { unmonitored } from "./state.ts";
 import { readSts } from "./sts.ts";
 import { holdTime, registrationTime } from "./timers.ts";
+import { noUsers } from "./users.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
 
 /** The most caps kept from what an Ircd offers. */
@@ -172,7 +173,9 @@ export const begin = (run: Run): void => {
     },
     reclaims: [],
     seam: freshSeam,
-    users: new Map(),
+    users: noUsers,
+    whoAsked: new Map(),
+    whoQuery: undefined,
   };
 
   run.state = { ...run.state, network: { _tag: "Connection", link: { ...link, phase: open } } };

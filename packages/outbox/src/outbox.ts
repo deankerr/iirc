@@ -26,7 +26,7 @@ export type Pacing = typeof Pacing.Type;
  */
 export const defaultPacing: Pacing = { burst: 5, interval: 2000 };
 
-/** How many ordinary Lines may wait in one Outbox. */
+/** How many ordinary Lines may wait in one Outbox, counting those that go last. */
 export const defaultCapacity = 1000;
 
 /** How many `PING` and `PONG` Lines may wait in one Outbox, apart from the ordinary ones. */
@@ -39,8 +39,9 @@ export interface Waiting<A> {
 
 /**
  * One Connection's queue. Lines that go first, `PING` and `PONG`, wait in `ahead`, at
- * most `firstCapacity` of them, and every other Line in `behind`, at most `capacity` of
- * them but for a `QUIT`, each in the order it was offered. The token bucket is held as
+ * most `firstCapacity` of them. Lines that go last, `WHO`, wait in `last`. Every other Line
+ * waits in `behind`. Between `behind` and `last` there are at most `capacity` Lines but
+ * for a `QUIT`, each lane in the order its Lines were offered. The token bucket is held as
  * `fullAt`, the time it is next full, so there is no fraction of a token to round.
  */
 export interface Outbox<A> {
@@ -49,6 +50,7 @@ export interface Outbox<A> {
   readonly firstCapacity: number;
   readonly ahead: readonly Waiting<A>[];
   readonly behind: readonly Waiting<A>[];
+  readonly last: readonly Waiting<A>[];
   readonly fullAt: number;
 }
 
@@ -70,7 +72,7 @@ export type Take<A> =
 /**
  * An empty Outbox, with a full bucket.
  * @param options - The pacing, by default {@link defaultPacing}, how many ordinary Lines
- * may wait, by default {@link defaultCapacity}, and how many `PING` and `PONG`, by default
+ * and Lines that go last may wait, by default {@link defaultCapacity}, and how many `PING` and `PONG`, by default
  * {@link defaultFirstCapacity}.
  * @returns The Outbox.
  */
@@ -86,6 +88,7 @@ export const makeOutbox = <A>(
   capacity: Math.max(0, Math.floor(options.capacity ?? defaultCapacity)),
   firstCapacity: Math.max(0, Math.floor(options.firstCapacity ?? defaultFirstCapacity)),
   fullAt: Number.NEGATIVE_INFINITY,
+  last: [],
   pacing: options.pacing ?? defaultPacing,
 });
 
@@ -102,6 +105,15 @@ export const goesFirst = (command: string): boolean => {
 };
 
 /**
+ * Whether a Line with this command goes behind every other Line waiting. Only `WHO` does:
+ * what the Client asks for on its own account leaves only when nothing the Owner asked
+ * for is waiting.
+ * @param command - The Line's command.
+ * @returns Whether it goes last.
+ */
+export const goesLast = (command: string): boolean => command.toUpperCase() === "WHO";
+
+/**
  * Whether a Line with this command is admitted past a full queue. Only `QUIT` is: it is
  * the last Line, and leaving is what was asked.
  * @param command - The Line's command.
@@ -114,14 +126,17 @@ export const alwaysAdmitted = (command: string): boolean => command.toUpperCase(
  * @param outbox - The Outbox.
  * @returns Their count.
  */
-export const depth = <A>(outbox: Outbox<A>): number => outbox.ahead.length + outbox.behind.length;
+export const depth = <A>(outbox: Outbox<A>): number =>
+  outbox.ahead.length + outbox.behind.length + outbox.last.length;
 
 /**
  * Queues a Line behind every other Line, or, for `PING` and `PONG`, behind only each
- * other. `PING` and `PONG` have their own bound, so a full queue of ordinary Lines never
- * refuses a keepalive, and a flood of them never grows the queue past it. A `QUIT` is
- * always admitted. Any other Line is refused once `capacity` ordinary Lines wait. A
- * refused Line is not queued, and nothing waits for room.
+ * other, or, for `WHO`, behind every other Line, including any later offered, and behind
+ * only other `WHO`s among themselves. `PING` and `PONG` have their own bound, so a full
+ * queue of ordinary Lines never refuses a keepalive, and a flood of them never grows the
+ * queue past it. A `QUIT` is always admitted. Any other Line is refused once `capacity`
+ * ordinary Lines and Lines that go last wait, so a `WHO` never evicts a Line. A refused
+ * Line is not queued, and nothing waits for room.
  * @param outbox - The Outbox.
  * @param item - What to queue.
  * @param command - The Line's command, which decides where it waits.
@@ -134,8 +149,12 @@ export const offer = <A>(outbox: Outbox<A>, item: A, command: string): Offered<A
       : { _tag: "Queued", outbox: { ...outbox, ahead: [...outbox.ahead, { item }] } };
   }
 
-  return outbox.behind.length >= outbox.capacity && !alwaysAdmitted(command)
-    ? { _tag: "Full" }
+  if (outbox.behind.length + outbox.last.length >= outbox.capacity && !alwaysAdmitted(command)) {
+    return { _tag: "Full" };
+  }
+
+  return goesLast(command)
+    ? { _tag: "Queued", outbox: { ...outbox, last: [...outbox.last, { item }] } }
     : { _tag: "Queued", outbox: { ...outbox, behind: [...outbox.behind, { item }] } };
 };
 
@@ -178,12 +197,18 @@ export const take = <A>(outbox: Outbox<A>, now: number): Take<A> => {
   const fullAt = Math.max(current.fullAt, now) + current.pacing.interval;
   const [first, ...ahead] = current.ahead;
   const [next, ...behind] = current.behind;
+  const [final, ...last] = current.last;
 
-  // `PING` and `PONG` first, then the rest.
-  const head =
-    first === undefined
-      ? next && { item: next.item, rest: { behind } }
-      : { item: first.item, rest: { ahead } };
+  // `PING` and `PONG` first, then the rest, then `WHO`.
+  let head: { readonly item: A; readonly rest: Partial<Outbox<A>> } | undefined = undefined;
+
+  if (first !== undefined) {
+    head = { item: first.item, rest: { ahead } };
+  } else if (next !== undefined) {
+    head = { item: next.item, rest: { behind } };
+  } else if (final !== undefined) {
+    head = { item: final.item, rest: { last } };
+  }
 
   if (head === undefined) {
     return { _tag: "Empty", outbox: current };
@@ -233,6 +258,6 @@ export const spend = <A>(outbox: Outbox<A>, now: number): Spend<A> => {
  * @returns The Lines, and the Outbox emptied.
  */
 export const takeAll = <A>(outbox: Outbox<A>): Emptied<A> => ({
-  items: [...outbox.ahead, ...outbox.behind].map(({ item }) => item),
-  outbox: { ...outbox, ahead: [], behind: [] },
+  items: [...outbox.ahead, ...outbox.behind, ...outbox.last].map(({ item }) => item),
+  outbox: { ...outbox, ahead: [], behind: [], last: [] },
 });

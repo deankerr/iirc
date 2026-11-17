@@ -212,6 +212,7 @@ describe("the options", () => {
         oper: { _tag: "None" },
         realname: "bot",
         username: "bot",
+        whoOnJoin: true,
       },
       notice: "libera is already configured. Change it with /set network.libera.*",
       puts: [

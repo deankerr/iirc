@@ -247,6 +247,23 @@ export const NetworkConfiguration = Schema.Struct({
     description: "The username, the part of Self's mask before the @.",
     ...startsAsFirstNick,
   }),
+  /**
+   * Whether Self asks who is in each Channel on joining it. A new Network starts with it
+   * on. A `Configured` written before the field existed decodes as off, since the Client
+   * then asked nothing, so replaying an old Journal sends no `WHO` it did not.
+   */
+  whoOnJoin: Schema.optionalKey(Schema.Boolean)
+    .pipe(
+      Schema.decodeTo(Schema.Boolean, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => false)),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: true,
+      description:
+        "Whether to ask who is in each Channel on joining it, to learn who is away and who is logged in. Turn it off for a Network whose Channels are so large that asking is rude.",
+    }),
 });
 
 /** The decoded form of {@link NetworkConfiguration}. */

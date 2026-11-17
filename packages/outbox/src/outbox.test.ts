@@ -1,7 +1,18 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { defaultPacing, depth, makeOutbox, nextAt, offer, spend, take, takeAll } from "./outbox.ts";
+import {
+  defaultPacing,
+  depth,
+  goesFirst,
+  goesLast,
+  makeOutbox,
+  nextAt,
+  offer,
+  spend,
+  take,
+  takeAll,
+} from "./outbox.ts";
 import type { Outbox, Pacing } from "./outbox.ts";
 
 /** A Line as the tests queue it: its command, and its place in the order offered. */
@@ -10,7 +21,18 @@ interface Queued {
   readonly index: number;
 }
 
-const command = fc.constantFrom("PRIVMSG", "JOIN", "PART", "PING", "PONG", "ping", "QUIT", "NICK");
+const command = fc.constantFrom(
+  "PRIVMSG",
+  "JOIN",
+  "PART",
+  "PING",
+  "PONG",
+  "ping",
+  "QUIT",
+  "NICK",
+  "WHO",
+  "who"
+);
 
 const pacing: fc.Arbitrary<Pacing> = fc.record({
   burst: fc.integer({ max: 10, min: 1 }),
@@ -55,10 +77,14 @@ const drain = (outbox: Outbox<Queued>, start: number) => {
   return left;
 };
 
-const first = (name: string) => ["PING", "PONG"].includes(name.toUpperCase());
+const first = (name: string) => goesFirst(name);
+const last = (name: string) => goesLast(name);
+
+const names = (items: readonly { readonly item: Queued }[]) =>
+  items.map(({ item }) => item.command);
 
 describe("order", () => {
-  it("keeps every Line in the order offered, except PING and PONG, which go first in their own order", () => {
+  it("keeps every Line in the order offered, except PING and PONG first and WHO last, each in their own order", () => {
     fc.assert(
       fc.property(fc.array(command, { maxLength: 60 }), pacing, (commands, chosen) => {
         const outbox = queued(makeOutbox({ pacing: chosen }), commands);
@@ -67,7 +93,8 @@ describe("order", () => {
 
         expect(order).toStrictEqual([
           ...indexed.filter(({ name }) => first(name)).map(({ index }) => index),
-          ...indexed.filter(({ name }) => !first(name)).map(({ index }) => index),
+          ...indexed.filter(({ name }) => !first(name) && !last(name)).map(({ index }) => index),
+          ...indexed.filter(({ name }) => last(name)).map(({ index }) => index),
         ]);
       })
     );
@@ -81,6 +108,44 @@ describe("order", () => {
     const index = taken._tag === "Taken" ? taken.item.index : undefined;
 
     expect([index, ...drain(after, 0).map(({ item }) => item.index)]).toStrictEqual([0, 3, 1, 2]);
+  });
+
+  it("lets an ordinary Line offered after a WHO leave before it", () => {
+    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "JOIN"]);
+
+    expect(names(drain(outbox, 0))).toStrictEqual(["PRIVMSG", "JOIN", "WHO"]);
+  });
+
+  it("lets a Line offered after a WHO overtake it even once the WHO is at the head", () => {
+    const start = queued(makeOutbox({ pacing: { burst: 1, interval: 1000 } }), ["PRIVMSG", "WHO"]);
+    const taken = take(start, 0);
+    const offered = offer(taken.outbox, { command: "PART", index: 2 }, "PART");
+    const after = offered._tag === "Queued" ? offered.outbox : start;
+
+    expect(names(drain(after, 0))).toStrictEqual(["PART", "WHO"]);
+  });
+
+  it("keeps WHOs in the order offered among themselves", () => {
+    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "who", "WHO"]);
+
+    expect(drain(outbox, 0).map(({ item }) => item.index)).toStrictEqual([1, 0, 2, 3]);
+  });
+
+  it("recognises WHO whatever its case, and nothing else", () => {
+    expect(["WHO", "who", "Who"].map(goesLast)).toStrictEqual([true, true, true]);
+    expect(["WHOIS", "WHOWAS", "PRIVMSG", "PING", ""].map(goesLast)).toStrictEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("lets PING and PONG go before a waiting WHO, and before ordinary Lines", () => {
+    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "PING", "PONG"]);
+
+    expect(names(drain(outbox, 0))).toStrictEqual(["PING", "PONG", "PRIVMSG", "WHO"]);
   });
 
   it("takes everything in the order it would have left, and spends no token", () => {
@@ -216,6 +281,21 @@ describe("pacing", () => {
       0, 0, 0, 0, 0, 2000, 4000,
     ]);
   });
+
+  it("spends a token for a WHO as for any Line, so pacing is unchanged", () => {
+    const left = drain(
+      queued(makeOutbox({ pacing: { burst: 2, interval: 1000 } }), [
+        "WHO",
+        "PRIVMSG",
+        "WHO",
+        "NICK",
+      ]),
+      0
+    );
+
+    expect(names(left)).toStrictEqual(["PRIVMSG", "NICK", "WHO", "WHO"]);
+    expect(left.map(({ at }) => at)).toStrictEqual([0, 0, 1000, 2000]);
+  });
 });
 
 describe("spending a token for a Line not queued", () => {
@@ -278,6 +358,25 @@ describe("a clock set back", () => {
 });
 
 describe("the bound", () => {
+  it("counts a waiting WHO toward the capacity, and refuses one to a full Outbox", () => {
+    const full = queued(makeOutbox({ capacity: 2 }), ["PRIVMSG", "WHO"]);
+
+    expect(depth(full)).toBe(2);
+    expect(offer(full, { command: "WHO", index: 2 }, "WHO")).toStrictEqual({ _tag: "Full" });
+    expect(offer(full, { command: "PRIVMSG", index: 2 }, "PRIVMSG")).toStrictEqual({
+      _tag: "Full",
+    });
+    expect(
+      names(drain(queued(makeOutbox({ capacity: 2 }), ["WHO", "WHO", "WHO"]), 0))
+    ).toStrictEqual(["WHO", "WHO"]);
+  });
+
+  it("never evicts a Line to admit a WHO, and a QUIT is still admitted past a queue of WHOs", () => {
+    const full = queued(makeOutbox({ capacity: 2 }), ["PRIVMSG", "PRIVMSG", "WHO", "QUIT"]);
+
+    expect(names(drain(full, 0))).toStrictEqual(["PRIVMSG", "PRIVMSG", "QUIT"]);
+  });
+
   it("refuses an ordinary Line to a full Outbox, and keeps what it holds", () => {
     fc.assert(
       fc.property(

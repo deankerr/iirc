@@ -81,6 +81,7 @@ import {
   sessionOf,
 } from "./views.ts";
 import { routeOurs } from "./where.ts";
+import { whoQueryExpired, whoUnsent } from "./who-query.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
 const lagToken = "iirc";
@@ -661,6 +662,11 @@ const fire = (run: Run, purpose: Purpose): void => {
       break;
     }
 
+    case "WhoQuery": {
+      whoQueryExpired(run);
+      break;
+    }
+
     default: {
       purpose satisfies never;
     }
@@ -713,6 +719,16 @@ const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
   const link = linkOf(run);
   const open = link?.id === input.connection ? openOf(run.state) : undefined;
   const confirmed = new Set(open?.confirmed);
+
+  // The Client's own `WHO` query awaits nothing more once its Line never left.
+  if (open !== undefined) {
+    whoUnsent(
+      run,
+      input.outputs.flatMap((output) =>
+        output._tag === "Send" && output.intent === undefined ? [output.line] : []
+      )
+    );
+  }
 
   // A Lookup whose Line never left reports `Unsent` as its result, and no refusal.
   const refused = new Set<IntentId>(

@@ -78,6 +78,15 @@ import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
 import { followSays, named, routeActivity, routeMessage, saidWhere } from "./where.ts";
+import {
+  askWho,
+  whoEnded,
+  whoNamed,
+  whoQueryOver,
+  whoRefused,
+  whoReply,
+  whoxReply,
+} from "./who-query.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
 const refusals: ReadonlySet<string> = new Set([
@@ -785,9 +794,14 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
       second(run, line, (name) => {
         learned(run, name);
         endOfNames(run, name);
+        // Its members are listed now, so who they are can be asked.
+        askWho(run);
       });
     },
   ],
+  ["315", whoEnded],
+  ["352", whoReply],
+  ["354", whoxReply],
 ]);
 
 // A protocol Line moves the machines on.
@@ -828,7 +842,8 @@ const rejection = (line: Line): string | undefined => {
  * Gives a numeric tied to nothing by label to the oldest of what waits for it on the
  * floor: a Lookup whose reply it can be part of, an action's Line whose error it names,
  * the Client's own `MODE` query it answers, or the Client's own ask for a nick it refuses,
- * by the order they were sent. The ask settles no intent.
+ * by the order they were sent. The ask settles no intent. A `421` or `461` naming `WHO`
+ * that none of them takes refuses the Client's own `WHO` query, which waits among none.
  * @param run - The step.
  * @param line - The Line, live, outside any batch, and with no label.
  */
@@ -847,6 +862,8 @@ const floor = (run: Run, line: Line): void => {
     collectFloor(run, looking, line);
   } else if (tied !== undefined) {
     tieRejection(run, line, tied);
+  } else if (whoRefused(run, line)) {
+    whoQueryOver(run);
   }
 };
 
@@ -903,9 +920,10 @@ const latestSayWhere = (run: Run, command: string): readonly Where[] | undefined
 
 /**
  * Gives a standard reply on the floor to the Client's own `MODE` query, when it names
- * `MODE` and the query was sent before any Lookup or action it could answer: a `FAIL` ends
- * the query, and the next Channel is asked. The query is News of nothing, so the reply is
- * shown in the Network's own Timeline.
+ * `MODE` and the query was sent before any Lookup or action it could answer, or to its
+ * own `WHO` query, when it names `WHO` and no Lookup or action could take it: a `FAIL`
+ * ends the query, and the next Channel is asked. The query is News of nothing, so the
+ * reply is shown in the Network's own Timeline.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
  * @param reply - The standard reply.
@@ -916,13 +934,18 @@ const toQuery = (run: Run, arrival: Arrival, reply: StandardReply): boolean => {
   const looking = lookupByCommand(run, reply);
   const acting = actionByCommand(run, reply.command);
   const first = Math.min(looking?.order ?? Infinity, acting?.order ?? Infinity);
+  const who = first === Infinity && whoNamed(run, reply.command);
 
-  if (query === undefined || query.order > first) {
+  if (!who && (query === undefined || query.order > first)) {
     return false;
   }
 
   if (reply.kind === "FAIL") {
-    modesQueryOver(run);
+    if (who) {
+      whoQueryOver(run);
+    } else {
+      modesQueryOver(run);
+    }
   }
 
   reportReply(run, arrival, reply, [{ _tag: "Network" }]);
