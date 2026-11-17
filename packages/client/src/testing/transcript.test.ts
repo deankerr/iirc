@@ -6,6 +6,7 @@ import ergoFeatures from "../../../../fixtures/transcripts/ergo/first-features.i
 import ergoFloor from "../../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
+import { SendableMessageId } from "../ids.ts";
 import { epoch, parse, print, writeInstant } from "./transcript.ts";
 import type { Item } from "./transcript.ts";
 
@@ -173,8 +174,29 @@ describe("the format", () => {
           ],
         },
       },
-      { _tag: "Owner", owner: { _tag: "Say", kind: "Notice", target: "peer", text: "a :b" } },
+      {
+        _tag: "Owner",
+        owner: { _tag: "Say", answers: undefined, kind: "Notice", target: "peer", text: "a :b" },
+      },
     ]);
+  });
+
+  it("reads a Say that answers a Message, and writes it back", () => {
+    const text = "!! say #iirc answers=m0 :a :b\n";
+
+    expect(items(text)).toStrictEqual([
+      {
+        _tag: "Owner",
+        owner: {
+          _tag: "Say",
+          answers: SendableMessageId.make("m0"),
+          kind: "Privmsg",
+          target: "#iirc",
+          text: "a :b",
+        },
+      },
+    ]);
+    expect(print(items(text))).toBe(text);
   });
 
   it("writes instants against the transcript's clock", () => {

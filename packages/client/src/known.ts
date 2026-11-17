@@ -67,7 +67,13 @@ export type SessionKnowledge =
   | { readonly _tag: "Offline"; readonly since: Instant | undefined }
   | { readonly _tag: "Connecting"; readonly since: Instant }
   | { readonly _tag: "Registering"; readonly since: Instant }
-  | { readonly _tag: "Registered"; readonly since: Instant; readonly ircd: string };
+  | {
+      readonly _tag: "Registered";
+      readonly since: Instant;
+      readonly ircd: string;
+      /** Whether the Session carries tags, by `message-tags`, so a Message can answer another. */
+      readonly tags: boolean;
+    };
 
 /** A User as we know them. Self is one too. */
 export interface UserKnowledge {

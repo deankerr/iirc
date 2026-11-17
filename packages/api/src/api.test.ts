@@ -23,6 +23,7 @@ import {
   Resume,
   ReadRequest,
   SayRequest,
+  SessionKnowledge,
   SignInRequest,
   TimelineChangesEvent,
   TimelineItem,
@@ -197,6 +198,52 @@ describe("the contract", () => {
       say({ kind: "Privmsg", target: "#iirc", text: "two\r\nlines" }),
       say({ kind: "Privmsg", target: "", text: "no target" }),
     ]).toStrictEqual([true, false, false]);
+  });
+
+  it("takes the id of the Message a Say answers, and refuses one no tag could carry", () => {
+    const say = Schema.decodeUnknownResult(SayRequest);
+    const request = { kind: "Privmsg", target: "#iirc", text: "yes" };
+
+    expect(
+      [
+        "m0",
+        "a;b\\c",
+        "x".repeat(256),
+        "",
+        "a b",
+        "a\r\nPRIVMSG #other :x",
+        "a\u0000b",
+        "x".repeat(257),
+      ].map((answers) => say({ ...request, answers })._tag)
+    ).toStrictEqual([
+      "Success",
+      "Success",
+      "Success",
+      "Failure",
+      "Failure",
+      "Failure",
+      "Failure",
+      "Failure",
+    ]);
+    expect(say(request)._tag).toBe("Success");
+  });
+
+  it("round-trips whether a Session carries tags", () => {
+    const wire = Schema.encodeSync(SessionKnowledge);
+    const read = Schema.decodeUnknownSync(SessionKnowledge);
+    const since = Instant.make(5);
+
+    const registered = [true, false].map((tags) =>
+      read(wire({ _tag: "Registered", ircd: "irc.test", since, tags }))
+    );
+
+    expect(registered).toStrictEqual([
+      { _tag: "Registered", ircd: "irc.test", since, tags: true },
+      { _tag: "Registered", ircd: "irc.test", since, tags: false },
+    ]);
+    expect(
+      Schema.is(SessionKnowledge)({ _tag: "Registered", ircd: "irc.test", since })
+    ).toBeFalsy();
   });
 
   it("takes an action whole, and refuses one no Line could carry, or with a field nothing reads", () => {

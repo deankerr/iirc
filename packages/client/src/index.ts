@@ -26,6 +26,7 @@ export {
   Instant,
   IntentId,
   MessageId,
+  SendableMessageId,
   TimerId,
 } from "./ids.ts";
 

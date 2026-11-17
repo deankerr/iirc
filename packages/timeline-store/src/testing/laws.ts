@@ -1719,6 +1719,43 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: (store) =>
       Effect.gen(function* () {
+        // Self's own reply, which the Ircd never echoes: it is ours, and answers a Message by id.
+        const ours: Content = {
+          _tag: "Message",
+          answers: MessageId.make("m2"),
+          at: known(at(0)),
+          context: undefined,
+          id: { _tag: "Unknown" },
+          kind: "Privmsg",
+          live: true,
+          ours: { delivery: { _tag: "Unconfirmed" }, intent: IntentId.make("intent-reply") },
+          sender: "peer",
+          tags: [["+reply", "m2"]],
+          target: "#a",
+          text: "my reply",
+        };
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(0, 2), said("theirs"), "m2"),
+          added(2, channel, position(1, 2, 1), ours),
+        ]);
+
+        const [, item] = yield* store.locate(libera, 2);
+
+        yield* same("answered", item?.answered, {
+          kind: "Privmsg",
+          position: position(0, 2),
+          sender: "peer",
+          text: "theirs",
+        });
+        yield* same("level", item?.level, undefined);
+      }),
+    name: "resolves a reply of ours to its Message, and it is no Highlight",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
         yield* apply(store, 2, [
           ...opened(2),
           added(2, channel, position(0, 2), said("hi", "Pending")),

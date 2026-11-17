@@ -421,7 +421,7 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
     case "Say": {
       at.intents += 1;
 
-      return {
+      const say: Input = {
         _tag: "Say",
         at: at.now,
         intent: IntentId.make(`i${at.intents}`),
@@ -429,6 +429,8 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
         target: owner.target,
         text: owner.text,
       };
+
+      return owner.answers === undefined ? say : { ...say, answers: owner.answers };
     }
 
     case "Act": {

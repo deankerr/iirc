@@ -433,6 +433,7 @@ const networks = HttpApiBuilder.group(
 
           return yield* runtime
             .say(NetworkId.make(params.network), {
+              answers: payload.answers,
               intent,
               kind: payload.kind,
               target: payload.target,
