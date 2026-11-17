@@ -10,7 +10,7 @@
  * How well a query matches, best first: the text starts with it, it starts a word of the
  * text, it starts a word of the description, or its characters appear in the text in order.
  */
-const tiers = { Described: 1, Fuzzy: 0, Prefix: 3, WordStart: 2 } as const;
+export const tiers = { Described: 1, Fuzzy: 0, Prefix: 3, WordStart: 2 } as const;
 
 /** How well an item matches: its tier, then the lower `cost` the better. */
 export interface Score {
@@ -56,7 +56,7 @@ const wordCharacter = /[\p{L}\p{N}]/u;
  * @param query - The query, folded.
  * @returns Where, or -1.
  */
-const wordStart = (text: string, query: string) => {
+export const wordStart = (text: string, query: string) => {
   for (let at = text.indexOf(query); at !== -1; at = text.indexOf(query, at + 1)) {
     if (at === 0 || !wordCharacter.test(text[at - 1] ?? "")) {
       return at;

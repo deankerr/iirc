@@ -16,7 +16,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/app.tsx";
 import { channelSync } from "./channel/atoms.ts";
 import { draftsCarried } from "./composer/atoms.ts";
-import { chantypesSync, completer } from "./composer/completion.ts";
+import { chantypesSync, completer, emojiLoader } from "./composer/completion.ts";
 import { uploadsSignedOut } from "./composer/uploading.ts";
 import { lookupSync } from "./lookup/atoms.ts";
 import { nickMenuSync } from "./nick/atoms.ts";
@@ -56,6 +56,9 @@ registry.mount(marking);
 registry.mount(channelSync);
 
 registry.mount(completer);
+
+// The emoji names, loaded the first time completion is on a `:name`.
+registry.mount(emojiLoader);
 
 registry.mount(chantypesSync);
 

@@ -19,6 +19,7 @@ import {
   announced,
   chantypesWanted,
   completes,
+  emojiWanted,
   initialCompletion,
   listOf,
   nicksWanted,
@@ -29,7 +30,7 @@ import {
   sourcesOf,
   spotAt,
 } from "./completion.ts";
-import type { Completion, CompletionEvent, Held, Shown, Sources } from "./completion.ts";
+import type { Completion, CompletionEvent, Emoji, Held, Shown, Sources } from "./completion.ts";
 import { chordsFor, defaultKeymap } from "./keymap.ts";
 import { choose, networkEntry, sections } from "./palette.ts";
 import type { Listing } from "./palette.ts";
@@ -56,6 +57,7 @@ const sources: Sources = {
   chantypes: undefined,
   chosen: { dark: uiDefaults.dark, light: uiDefaults.light, theme: uiDefaults.theme },
   commands: listing("me", "members", "msg", "set"),
+  emoji: undefined,
   font: uiDefaults.font,
   keymap: [],
   network,
@@ -766,6 +768,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
 const held: Held = {
   chantypes: new Map(),
   chosen: sources.chosen,
+  emoji: undefined,
   font: sources.font,
   keymap: [],
   options: [],
@@ -1441,5 +1444,185 @@ describe("everything the palette lists", () => {
         [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
       ],
     });
+  });
+});
+
+describe("an emoji completed from :name", () => {
+  const names: readonly Emoji[] = [
+    { emoji: "\u{1F604}", names: ["smile"] },
+    { emoji: "\u{1F603}", names: ["smiley"] },
+    { emoji: "\u{1F63A}", names: ["smiley_cat"] },
+    { emoji: "\u{1F642}", names: ["slightly_smiling_face"] },
+    { emoji: "\u{1F44B}", names: ["wave"] },
+    { emoji: "\u{1F44D}", names: ["+1", "thumbsup"] },
+  ];
+
+  const loaded: Sources = { ...sources, emoji: names };
+
+  /**
+   * Folds events into completion from the names, unless told other sources.
+   * @param events - The events.
+   * @param given - The sources.
+   * @returns Where the composer stands.
+   */
+  const run = (events: Parameters<typeof play>[1], given: Sources = loaded) =>
+    play("", events, given);
+
+  /** A Direct Message's sources, so a nick is not asked of the members route. */
+  const direct: Sources = { ...peers, emoji: names };
+
+  it("lists the emoji whose names match, those that start with it before those with a word that does", () => {
+    expect({
+      first: listed(run([type(":smi")]), loaded),
+      fourth: listed(run([type(":+1")]), loaded)?.names,
+      second: listed(run([type(":sm")]), loaded)?.names,
+      third: listed(run([type(":thu")]), loaded)?.names,
+      uppercase: listed(run([type(":SMILEY")]), loaded)?.names,
+    }).toStrictEqual({
+      first: {
+        highlighted: undefined,
+        names: [":smile:", ":smiley:", ":smiley_cat:", ":slightly_smiling_face:"],
+      },
+      fourth: [":+1:"],
+      second: [":smile:", ":smiley:", ":smiley_cat:", ":slightly_smiling_face:"],
+      third: [":thumbsup:"],
+      uppercase: [":smiley:", ":smiley_cat:"],
+    });
+  });
+
+  it("lists a name's word after an underscore, and no name by its letters in order alone", () => {
+    expect({
+      cat: listed(run([type(":cat")]), loaded)?.names,
+      face: listed(run([type(":face")]), loaded)?.names,
+      scattered: listed(run([type(":sml")]), loaded),
+    }).toStrictEqual({
+      cat: [":smiley_cat:"],
+      face: [":slightly_smiling_face:"],
+      scattered: undefined,
+    });
+  });
+
+  it("lists nothing for a colon and one character, or for a colon inside a word, a time, or an address", () => {
+    const drafts = [
+      ":s",
+      ":",
+      "foo:smi",
+      "12:30",
+      "https://example.org:8080",
+      "alice@host:smi",
+      "::1",
+      ":smile:",
+      ":smi:le",
+    ];
+
+    expect(drafts.map((draft) => listed(run([type(draft)]), loaded) === undefined)).toStrictEqual(
+      drafts.map(() => true)
+    );
+  });
+
+  it("writes the emoji and a space on Tab, and gives back what was typed on Escape", () => {
+    const opened = run([type("hi :smi")], direct);
+    const tabbed = run([type("hi :smi"), tab], direct);
+    const second = run([type("hi :smi"), tab, tab], direct);
+
+    expect({
+      escaped: shown(run([type("hi :smi"), tab, { _tag: "Escaped", place: iirc }], direct)),
+      opened: shown(opened),
+      second: shown(second),
+      tabbed: shown(tabbed),
+      wrapped: shown(run([type(":smi"), back], direct)),
+    }).toStrictEqual({
+      escaped: ["hi :smi", 7],
+      opened: ["hi :smi", 7],
+      second: ["hi \u{1F603} ", 6],
+      tabbed: ["hi \u{1F604} ", 6],
+      wrapped: ["\u{1F642} ", 3],
+    });
+  });
+
+  it("writes the emoji when one is picked, and opens as it is typed with none highlighted", () => {
+    expect({
+      following: listed(run([type(":smi")]), loaded)?.highlighted,
+      picked: shown(run([type(":smi"), { _tag: "Pick", index: 1 }], loaded)),
+    }).toStrictEqual({ following: undefined, picked: ["\u{1F603} ", 3] });
+  });
+
+  it("puts none of the space in where whitespace already follows the caret", () => {
+    const typedUp = run([type("a :smi b")], loaded);
+    const moved = run([type("a :smi b"), { _tag: "Move", start: 6 }, tab], loaded);
+
+    expect([shown(typedUp), shown(moved)]).toStrictEqual([
+      ["a :smi b", 8],
+      ["a \u{1F604} b", 4],
+    ]);
+  });
+
+  it("works on any line of the draft, and inside a command's line", () => {
+    const second = run([type("hello\n:smi"), tab], loaded);
+    const inside = run([type("/me waves :wav")], loaded);
+
+    expect({
+      inside: listed(inside, loaded)?.names,
+      second: shown(second),
+    }).toStrictEqual({ inside: [":wave:"], second: ["hello\n\u{1F604} ", 9] });
+  });
+
+  it("gives way to a command context that completes the word already", () => {
+    const smoke: Sources = {
+      ...loaded,
+      timelines: [{ kind: "Direct", name: ":smoke", network, timeline: iirc }],
+    };
+
+    const go = run([type("/go :sm")], smoke);
+
+    expect({
+      go: listed(go, smoke)?.names,
+      join: listed(run([type("/join :sm")], loaded), loaded),
+      wanted: emojiWanted(go.state, smoke),
+    }).toStrictEqual({ go: [":smoke"], join: undefined, wanted: false });
+  });
+
+  it("is wanted while an emoji word is typed and the names are not loaded, and lists once they are", () => {
+    const waiting: Sources = { ...direct, emoji: undefined };
+    const typedIn = run([type("hi :smi")], waiting);
+    const tabbed = run([type("hi :smi"), tab], waiting);
+
+    expect({
+      announced: announced(tabbed.state, iirc, tabbed.text, waiting),
+      idle: emojiWanted(initialCompletion, waiting),
+      listedAfter: listed(tabbed, direct)?.names.slice(0, 2),
+      listedBefore: listed(typedIn, waiting),
+      loaded: emojiWanted(typedIn.state, direct),
+      owns: owns(tabbed.state, iirc, tabbed.text, waiting),
+      plain: emojiWanted(run([type("hi 12:30")], waiting).state, waiting),
+      tabbed: shown(tabbed),
+      wanted: [emojiWanted(typedIn.state, waiting), emojiWanted(tabbed.state, waiting)],
+    }).toStrictEqual({
+      announced: "",
+      idle: false,
+      listedAfter: [":smile:", ":smiley:"],
+      listedBefore: undefined,
+      loaded: false,
+      owns: false,
+      plain: false,
+      tabbed: ["hi :smi", 7],
+      wanted: [true, true],
+    });
+  });
+
+  it("shows no preview of an emoji", () => {
+    const tabbedTo = run([type(":smi"), tab], loaded);
+
+    expect(previewOf(tabbedTo.state, iirc, tabbedTo.text)).toBeUndefined();
+  });
+
+  it("passes the names held through to the sources", () => {
+    const place = iirc;
+    const sourcesNow = sourcesOf(initialTimelines, place, { ...held, emoji: names });
+
+    expect([sourcesNow.emoji, sourcesOf(initialTimelines, place, held).emoji]).toStrictEqual([
+      names,
+      undefined,
+    ]);
   });
 });

@@ -10,6 +10,7 @@ import type { NetworkId } from "@iirc/api";
 import {
   announced,
   chantypesWanted,
+  emojiWanted,
   listOf,
   nicksLimit,
   nicksWanted,
@@ -17,7 +18,7 @@ import {
   reduceCompletion,
   sourcesOf,
 } from "@iirc/frontend/completion";
-import type { Completed, CompletionEvent, List, Sources } from "@iirc/frontend/completion";
+import type { Completed, CompletionEvent, Emoji, List, Sources } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { listed } from "@iirc/frontend/options";
@@ -42,11 +43,15 @@ import { composerState } from "./composer-state.ts";
 /** What was run or chosen recently, apart from the palette's query, so typing there recomputes no composer's sources. */
 const ranRecently = Atom.make((get) => get(paletteState).recent);
 
+/** Every emoji by its names, once loaded, and none until completion first wants them. */
+export const emojiState = Atom.make<readonly Emoji[] | undefined>(undefined).pipe(Atom.keepAlive);
+
 /** What a word typed at a place can be completed from, as things are now. */
 const sourcesAt = Atom.family((place: Place) =>
   Atom.make((get): Sources =>
     sourcesOf(get(timelinesState), place, {
       chantypes: get(chantypesState),
+      emoji: get(emojiState),
       keymap: get(keymapState),
       options: listed(get(optionsState), ""),
       ran: get(ranRecently),
@@ -298,6 +303,56 @@ export const completer = runtime
               yield* FiberMap.run(fibers, "Nicks", askNicks(registry, wanted));
             }
           })
+        )
+      );
+    })
+  )
+  .pipe(Atom.keepAlive);
+
+/**
+ * The list completion follows while it waits on the emoji names, a new object for each
+ * draft typed, so a load that failed is asked for again as the next key is typed.
+ */
+const emojiAsked = Atom.make((get) => {
+  const { phase } = get(completionState);
+
+  return phase._tag === "Following" &&
+    emojiWanted(get(completionState), get(sourcesAt(phase.place)))
+    ? phase
+    : undefined;
+});
+
+/**
+ * Loads the emoji names the first time completion is on an emoji word, as a chunk of their
+ * own, so the page's first load is no larger, and keeps them. A load that fails keeps
+ * nothing, and is made again the next time they are wanted. Mounted once for the page.
+ */
+export const emojiLoader = runtime
+  .atom((get) =>
+    Effect.gen(function* () {
+      const { registry } = get;
+      const fibers = yield* FiberMap.make<"Emoji">();
+
+      yield* get.stream(emojiAsked).pipe(
+        Stream.runForEach((wanted) =>
+          wanted === undefined || registry.get(emojiState) !== undefined
+            ? Effect.void
+            : FiberMap.run(
+                fibers,
+                "Emoji",
+                Effect.tryPromise(async () => await import("gemoji")).pipe(
+                  Effect.flatMap(({ gemoji }) =>
+                    Effect.sync(() => {
+                      registry.set(
+                        emojiState,
+                        gemoji.map((one) => ({ emoji: one.emoji, names: one.names }))
+                      );
+                    })
+                  ),
+                  Effect.ignore
+                ),
+                { onlyIfMissing: true }
+              )
         )
       );
     })
