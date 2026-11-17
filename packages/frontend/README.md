@@ -307,6 +307,7 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 - **Operating is offered by one rule, `mayOperate`:** Self holds operator, or a rank above it in `PREFIX`, in the Channel's head, as removing a mask from a Lookup card is.
 - **It acts only on its own Pane's Timeline.** With the focus on another, it offers nothing.
 - **What needs the User there needs them found there.** `presenceWanted` asks the members route for the nicks that start with theirs, and only one that folds as theirs does, by the casemapping the Network's Connection folds names by, says they are there. None, with no more to read, says they are gone, and a failure, or more to read, says nothing. Op, voice, deop, devoice, and kick wait for them to be found, and ban does not.
+- **What is still being read is said, not left out.** `coming` counts the operator's entries not offered yet, in a Channel while its head is not read, or while Self may operate and whether the Network has a Session, or whether the User is there, is still being read, so a view can hold their room. It is none once the Network is known to have no Session, which no answer would change.
 - **Nothing is offered that the Network would refuse for want of status.** Deop, devoice, and kick are left out of a member who outranks Self, by `outranks`: the highest prefix they hold stands strictly above Self's in `PREFIX`, or which they hold is not known. Equal rank is allowed, since Ircds differ.
 
 ## Completion

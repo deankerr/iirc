@@ -5,16 +5,18 @@
  * as a right-click, the menu key, or Shift+F10 opens it, and by a long press on a touch
  * screen, which shows no callout of the browser's. The menu offers what the core's
  * `nickEntries` gives, each the command the Composer would run, and choosing one closes it
- * and puts away members that lie over something.
+ * and puts away members that lie over something. While more may come, a wait is drawn
+ * where it will go, as an entry that cannot be chosen, as tall as what may come, so a menu
+ * placed above its nick, which grows upward, moves nothing when it arrives either.
  *
  * @packageDocumentation
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId } from "@iirc/api";
 import { nickEntries } from "@iirc/frontend/nick-menu";
-import type { Presence } from "@iirc/frontend/nick-menu";
+import type { NickEntry, Presence } from "@iirc/frontend/nick-menu";
 import { useContext, useEffect, useRef, useState } from "react";
-import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import { Menu, MenuItem, Popover, Pressable } from "react-aria-components";
 
 import { membersDismissed } from "../channel/state.ts";
@@ -28,6 +30,32 @@ const longPressMs = 500;
 
 /** How far a held touch may move, in CSS pixels, before it is a scroll and opens nothing. */
 const longPressSlop = 10;
+
+/** The id of the wait drawn where more entries will go. */
+const waitId = "reading";
+
+/**
+ * The wait drawn where more entries will go, which cannot be chosen.
+ * @param nick - The nick.
+ * @returns It, as an entry with nothing to do.
+ */
+const waitFor = (nick: string): NickEntry => ({
+  id: waitId,
+  intents: [],
+  label: `Reading what else can be done with ${nick}`,
+  text: "reading…",
+});
+
+/**
+ * The style that makes the wait as tall as the entries that may come.
+ * @param coming - How many may.
+ * @returns The style.
+ */
+const waitStyle = (coming: number): CSSProperties => {
+  const style: Record<`--${string}`, string> = { "--coming": String(coming) };
+
+  return style;
+};
 
 /**
  * What can be done with a User, as a menu anchored to where their nick was pressed, with
@@ -54,7 +82,8 @@ export const NickMenu = ({
   const context = useAtomValue(commandContext);
   const carryOut = useAtomSet(perform);
   const dismiss = useAtomSet(membersDismissed);
-  const entries = nickEntries(nick, timeline, presence, context);
+  const { coming, entries } = nickEntries(nick, timeline, presence, context);
+  const rows = coming > 0 ? [...entries, waitFor(nick)] : entries;
 
   return (
     <Popover
@@ -74,7 +103,8 @@ export const NickMenu = ({
         aria-label={`What to do with ${nick}`}
         autoFocus="first"
         className={styles.menu}
-        items={entries}
+        disabledKeys={[waitId]}
+        items={rows}
         onAction={(key) => {
           const chosen = entries.find((entry) => entry.id === String(key));
 
@@ -91,9 +121,14 @@ export const NickMenu = ({
             aria-label={entry.label}
             className={styles.entry}
             id={entry.id}
+            {...(entry.id === waitId ? { style: waitStyle(coming) } : {})}
             textValue={entry.text}
           >
-            {entry.text}
+            {entry.id === waitId ? (
+              <span className={styles.waiting}>{entry.text}</span>
+            ) : (
+              entry.text
+            )}
           </MenuItem>
         )}
       </Menu>
