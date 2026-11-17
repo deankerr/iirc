@@ -292,9 +292,22 @@ const nickIn = (text: string, pane = "p0") =>
 
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]');
 
-const entries = () =>
+/**
+ * Every row of the menu, a wait as much as an entry.
+ * @returns Their accessible names.
+ */
+const rows = () =>
   [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((one) =>
     one.getAttribute("aria-label")
+  );
+
+/**
+ * The entries of the menu, which leaves out a wait.
+ * @returns Their accessible names.
+ */
+const entries = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')].map(
+    (one) => one.getAttribute("aria-label")
   );
 
 /**
@@ -432,6 +445,41 @@ describe("the menu on a nick", () => {
       closed: null,
       label: "What to do with peer",
       offered: operator("peer"),
+    });
+  });
+
+  it("draws a wait where an operator's entries go while the members and known are read, and moves nothing when they arrive", async () => {
+    const { daemon } = await signedIn(["o"]);
+
+    daemon.holdMembers = true;
+    daemon.holdKnown = true;
+
+    await settled(() => nickIn("line 2") !== undefined);
+    await press(nickIn("line 2"));
+    await settled(() => daemon.held.members.length === 1);
+    await pause(50);
+
+    const waiting = rows();
+
+    for (const release of daemon.held.members.splice(0)) {
+      release();
+    }
+
+    await settled(() => daemon.held.known.length === 1);
+    await pause(50);
+
+    const stillWaiting = rows();
+
+    for (const release of daemon.held.known.splice(0)) {
+      release();
+    }
+
+    await settled(() => rows().length === 10);
+
+    expect({ arrived: rows(), stillWaiting, waiting }).toStrictEqual({
+      arrived: operator("peer"),
+      stillWaiting: waiting,
+      waiting: [...everyone("peer"), "Ban peer", "Reading what else can be done with peer"],
     });
   });
 

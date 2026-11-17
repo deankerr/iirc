@@ -15,12 +15,13 @@ import type { CommandContext, Intent } from "./commands.ts";
 
 /**
  * Whether a User is in the Channel: `Here`, with the prefixes they hold there, or none
- * while which they hold is not known, `Gone`, or `Unknown`, as before the members route
- * answers, when it fails, or when it could not say.
+ * while which they hold is not known, `Gone`, `Reading`, while the members route is asked,
+ * or `Unknown`, when it fails, could not say, or is not asked, outside a Channel.
  */
 export type Presence =
   | { readonly _tag: "Here"; readonly prefixes: readonly string[] | undefined }
   | { readonly _tag: "Gone" }
+  | { readonly _tag: "Reading" }
   | { readonly _tag: "Unknown" };
 
 /** One entry of the menu: what it is, the word shown, its accessible name, and its intents. */
@@ -29,6 +30,17 @@ export interface NickEntry {
   readonly text: string;
   readonly label: string;
   readonly intents: readonly Intent[];
+}
+
+/**
+ * What the menu offers now, and whether more is coming: an operator's entries that wait on
+ * the Channel's head, whether its Network has a Session, or whether the User is there, any
+ * of which is still being read. Leaving them out meanwhile would read as Self may not use
+ * them, so a view draws the wait where they will go.
+ */
+export interface NickEntries {
+  readonly entries: readonly NickEntry[];
+  readonly coming: boolean;
 }
 
 /** What can be done with anyone, by the command that does it. */
@@ -83,34 +95,38 @@ const commandEntry = (
  * Op and voice are offered only while the User is `Here`, and deop, devoice, and kick only
  * while they are too and do not outrank Self, or their rank is not known, which the
  * Network would refuse for want of status. Ban is placed before them, so what a read of
- * the members adds never moves it. Nothing
- * is offered unless the context is the menu's own Pane's, its open Timeline the one the
- * menu was opened in, so no entry acts on another Pane's Channel.
+ * the members adds never moves it. More is coming in a Channel while its head is not read,
+ * or Self may operate and whether the Network has a Session, or whether the User is there,
+ * is still being read, unless the Network is known to have no Session. Nothing is offered
+ * unless the context is the menu's own Pane's, its open Timeline the one the menu was
+ * opened in, so no entry acts on another Pane's Channel.
  * @param nick - The nick.
  * @param timeline - The Timeline the menu was opened in.
  * @param presence - Whether the User is in its Channel.
  * @param context - The focused Pane's context.
- * @returns The entries.
+ * @returns The entries, and whether more are coming.
  */
 export const nickEntries = (
   nick: string,
   timeline: TimelineId,
   presence: Presence,
   context: CommandContext
-): readonly NickEntry[] => {
+): NickEntries => {
   if (context.open !== timeline || context.focus?.timeline !== timeline) {
-    return [];
+    return { coming: false, entries: [] };
   }
 
-  const { focus, head } = context;
+  const { focus, session } = context;
+  const channel = focus.kind === "Channel";
+  const head = context.head?.timeline === timeline ? context.head : undefined;
+  const operator = channel && head !== undefined && mayOperate(head);
 
-  const operator =
-    focus.kind === "Channel" &&
-    head !== undefined &&
-    head.timeline === timeline &&
-    mayOperate(head);
+  const coming =
+    channel &&
+    session !== false &&
+    (head === undefined || (operator && (session === undefined || presence._tag === "Reading")));
 
-  return [
+  const entries: readonly NickEntry[] = [
     ...anyone.flatMap((name) => commandEntry(name, nick, context)),
     {
       id: "mention",
@@ -134,18 +150,19 @@ export const nickEntries = (
           .flatMap((one) => commandEntry(one.name, nick, context))
       : []),
   ];
+
+  return { coming, entries };
 };
 
 /**
  * The menu open on a nick, if any, under the request that opened it: the nick, the Timeline
- * it was opened in, whether the User is there, and whether that is still being read.
+ * it was opened in, and whether the User is there.
  */
 export interface NickMenu {
   readonly request: number;
   readonly nick: string;
   readonly timeline: TimelineId;
   readonly presence: Presence;
-  readonly reading: boolean;
 }
 
 /** The menu open on a nick, if any, and the request the next one opens under. */
@@ -199,8 +216,7 @@ export const reduceNickMenus = (state: NickMenus, event: NickMenusEvent): NickMe
         next: state.next + 1,
         open: {
           nick: event.nick,
-          presence: { _tag: "Unknown" },
-          reading: event.channel,
+          presence: event.channel ? { _tag: "Reading" } : { _tag: "Unknown" },
           request: state.next,
           timeline: event.timeline,
         },
@@ -214,7 +230,7 @@ export const reduceNickMenus = (state: NickMenus, event: NickMenusEvent): NickMe
     case "MembersRead": {
       const { open } = state;
 
-      if (open?.request !== event.request || !open.reading) {
+      if (open?.request !== event.request || open.presence._tag !== "Reading") {
         return state;
       }
 
@@ -231,14 +247,14 @@ export const reduceNickMenus = (state: NickMenus, event: NickMenusEvent): NickMe
         presence = { _tag: "Gone" };
       }
 
-      return { ...state, open: { ...open, presence, reading: false } };
+      return { ...state, open: { ...open, presence } };
     }
 
     case "MembersFailed": {
       const { open } = state;
 
-      return open?.request === event.request && open.reading
-        ? { ...state, open: { ...open, presence: { _tag: "Unknown" }, reading: false } }
+      return open?.request === event.request && open.presence._tag === "Reading"
+        ? { ...state, open: { ...open, presence: { _tag: "Unknown" } } }
         : state;
     }
 
@@ -259,6 +275,6 @@ export const presenceWanted = (
 ):
   | { readonly request: number; readonly timeline: TimelineId; readonly prefix: string }
   | undefined =>
-  state.open?.reading === true
+  state.open?.presence._tag === "Reading"
     ? { prefix: state.open.nick, request: state.open.request, timeline: state.open.timeline }
     : undefined;

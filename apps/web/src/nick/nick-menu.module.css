@@ -51,6 +51,11 @@
   white-space: nowrap;
 }
 
+/* The wait where more entries will go, dim, and never marked. */
+.entry[data-disabled] {
+  color: var(--color-muted);
+}
+
 .entry[data-hovered],
 .entry[data-focused] {
   background: var(--color-surface);
