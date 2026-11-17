@@ -894,7 +894,8 @@ const floor = (run: Run, line: Line): boolean => {
  * - `353`, `366`: a Channel's members, read into the Channel.
  * - `372`, `375`, `376`: the message of the day.
  *
- * What `MONITOR` and `WATCH` tell is taken before this, while the Client keeps its list.
+ * What `MONITOR` tells is taken before this always, and what `WATCH` tells while the Client
+ * keeps its list.
  */
 const unshown: ReadonlySet<string> = new Set([
   "005",
