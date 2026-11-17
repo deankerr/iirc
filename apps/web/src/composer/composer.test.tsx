@@ -20,6 +20,8 @@ import { placeOf } from "./atoms.ts";
 import { completer, emojiLoader, emojiState } from "./completion.ts";
 import { composerState } from "./composer-state.ts";
 
+import inlineStyles from "../timelines/inlines.module.css";
+
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -1134,6 +1136,221 @@ describe("the Composer's emoji", () => {
       loaded: undefined,
       one: undefined,
       time: undefined,
+    });
+  });
+});
+
+/**
+ * Types text into the composer as the browser does, the caret where it is left after it.
+ * @param container - The page.
+ * @param text - The composer's text after.
+ * @param caret - Where the caret is after.
+ */
+const editTo = async (container: HTMLElement, text: string, caret: number) => {
+  const composer = composerOf(container);
+
+  await act(async () => {
+    Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      composer,
+      text
+    );
+    composer.setSelectionRange(caret, caret);
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * Selects some of the composer's text, as a drag or Shift and the arrows do.
+ * @param container - The page.
+ * @param start - Where the selection begins.
+ * @param end - Where it ends.
+ */
+const select = async (container: HTMLElement, start: number, end: number) => {
+  await act(async () => {
+    composerOf(container).focus();
+    composerOf(container).setSelectionRange(start, end);
+    document.dispatchEvent(new Event("selectionchange"));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * Presses a chord with Ctrl in the composer, as the browser dispatches it.
+ * @param container - The page.
+ * @param letter - The letter's key.
+ * @param shift - Whether Shift is held.
+ * @returns Whether the key was left to the browser.
+ */
+const chordIn = async (container: HTMLElement, letter: string, shift = false) => {
+  let left = true;
+
+  await act(async () => {
+    left = composerOf(container).dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: `Key${letter.toUpperCase()}`,
+        ctrlKey: true,
+        key: shift ? letter.toUpperCase() : letter,
+        shiftKey: shift,
+      })
+    );
+    await Promise.resolve();
+  });
+
+  return left;
+};
+
+/**
+ * The backdrop behind the composer, if one is drawn.
+ * @param container - The page.
+ * @returns It, or none.
+ */
+const backdropOf = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>("[data-composer-backdrop]") ?? undefined;
+
+/**
+ * The runs the backdrop draws, each its text and whether it is bold.
+ * @param container - The page.
+ * @returns The runs.
+ */
+const drawnRuns = (container: HTMLElement) =>
+  [...(backdropOf(container)?.querySelectorAll("span") ?? [])].map((span) => ({
+    bold: span.classList.contains(inlineStyles.bold),
+    coloured: span.style.color !== "",
+    text: span.textContent,
+  }));
+
+describe("the Composer's formatting", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("bolds the selection on Mod+B, draws it bold behind the text, and sends the codes", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+
+    const before = backdropOf(container);
+
+    await select(container, 2, 3);
+
+    const left = await chordIn(container, "b");
+    const drawn = drawnRuns(container);
+    const shown = composerOf(container).value;
+    const selection = [composerOf(container).selectionStart, composerOf(container).selectionEnd];
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      before,
+      drawn,
+      left,
+      said: daemon.says.map((one) => one.text),
+      selection,
+      shown,
+    }).toStrictEqual({
+      before: undefined,
+      drawn: [
+        { bold: false, coloured: false, text: "a " },
+        { bold: true, coloured: false, text: "b" },
+        { bold: false, coloured: false, text: " c" },
+      ],
+      left: false,
+      said: ["a \u0002b\u0002 c"],
+      selection: [2, 3],
+      shown: "a b c",
+    });
+  });
+
+  it("with nothing selected, says the style pending and types it next", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "hello ");
+    await chordIn(container, "b");
+
+    const pending = container.querySelector("[data-composer-pending]")?.textContent;
+
+    await editTo(container, "hello you", 9);
+
+    const after = container.querySelector("[data-composer-pending]");
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({ after, pending, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      after: null,
+      pending: "bold",
+      said: ["hello \u0002you"],
+    });
+  });
+
+  it("offers the colours on Mod+Shift+K, and colours the selection with the one chosen", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+
+    const colours = container.querySelector('[role="listbox"][aria-label="Colours"]');
+
+    const offered = [...(colours?.querySelectorAll('[role="option"]') ?? [])].map((one) =>
+      one.getAttribute("aria-label")
+    );
+
+    // From the default, past white, black, blue, and green, to red, and back from brown.
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowDown");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowLeft");
+    await pressIn(container, "Enter");
+
+    const drawn = drawnRuns(container);
+    const gone = container.querySelector('[aria-label="Colours"]');
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      drawn,
+      gone,
+      offered: [offered.length, offered[0], offered[5]],
+      said: daemon.says.map((one) => one.text),
+    }).toStrictEqual({
+      drawn: [
+        { bold: false, coloured: false, text: "a " },
+        { bold: false, coloured: true, text: "b" },
+        { bold: false, coloured: false, text: " c" },
+      ],
+      gone: null,
+      offered: [17, "default colour", "red"],
+      said: ["a \u000304b\u000399 c"],
+    });
+  });
+
+  it("leaves nothing stray once Backspace deletes a formatted run", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "b");
+    await editTo(container, "a  c", 2);
+
+    const backdrop = backdropOf(container);
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({ backdrop, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      backdrop: undefined,
+      said: ["a  c"],
     });
   });
 });

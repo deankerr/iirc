@@ -12,6 +12,7 @@
 import type { Upload } from "@iirc/api";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf } from "@iirc/frontend/composer";
+import { plainOf } from "@iirc/frontend/formatting";
 import {
   anchorAfter,
   caretAfter,
@@ -335,7 +336,11 @@ export const addFiles = runtime
           _tag: "Added",
           // The files are added before anything else happens, so the text is as the caret
           // was read in, and this moves nothing unless the composer changed it meanwhile.
-          anchor: anchorAfter(anchor, text, draftOf(registry.get(composerState), place).text),
+          anchor: anchorAfter(
+            anchor,
+            text,
+            plainOf(draftOf(registry.get(composerState), place).text)
+          ),
           files: named.map((one) => one.added),
           place,
         });

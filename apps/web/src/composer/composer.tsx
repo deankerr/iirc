@@ -24,6 +24,15 @@ import { completes } from "@iirc/frontend/completion";
 import type { Candidate, List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
+import {
+  colourChoices,
+  colouredStyle,
+  colourName,
+  hasFormatting,
+  linesIn,
+  pendingWords,
+  plainOf,
+} from "@iirc/frontend/formatting";
 import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import {
   allScope,
@@ -31,9 +40,10 @@ import {
   networkDescription,
   themeDescription,
 } from "@iirc/frontend/palette";
-import { quotedOf } from "@iirc/frontend/render";
-import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { formatted, quotedOf } from "@iirc/frontend/render";
+import { runColours } from "@iirc/frontend/theme";
+import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, closeUploads, mainView } from "../options/atoms.ts";
@@ -42,10 +52,16 @@ import { keyOf } from "../palette/press.ts";
 import { openPalette, platform } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
+import { drawnTheme } from "../theme/atoms.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
+import { Inlines } from "../timelines/inlines.tsx";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import {
+  colourChoiceAt,
+  colourChosen,
+  colourDismissed,
+  colourMoved,
   commandContext,
   composerFocus,
   confirmSend,
@@ -427,17 +443,171 @@ const Completions = ({
 
 /**
  * What the textarea says of the list it controls, while one is open: its id, and the
- * candidate highlighted, which a screen reader names as it moves.
- * @param list - The list, if open.
- * @param id - Its id.
+ * option highlighted, which a screen reader names as it moves.
+ * @param shown - The list's id and the option highlighted, while one is open.
  * @returns The attributes.
  */
-const controlling = (list: List | undefined, id: string) => ({
+const controlling = (
+  shown: { readonly id: string; readonly highlighted: number | undefined } | undefined
+) => ({
   "aria-activedescendant":
-    list?.highlighted === undefined ? undefined : optionId(id, list.highlighted),
+    shown?.highlighted === undefined ? undefined : optionId(shown.id, shown.highlighted),
   "aria-autocomplete": "list" as const,
-  "aria-controls": list === undefined ? undefined : id,
+  "aria-controls": shown?.id,
 });
+
+/** How the arrows move through the colours offered. */
+const colourMoves: ReadonlyMap<string, number> = new Map([
+  ["ArrowDown", 1],
+  ["ArrowLeft", -1],
+  ["ArrowRight", 1],
+  ["ArrowUp", -1],
+]);
+
+/**
+ * Which list the textarea controls while one is open: the colours offered, or else what it
+ * can complete.
+ * @param choosing - The colours offered, if they are.
+ * @param coloursId - Their list's id.
+ * @param list - What it can complete, if listed.
+ * @param listId - That list's id.
+ * @returns The list's id and the option highlighted, or none.
+ */
+const controlled = (
+  choosing: { readonly highlighted: number } | undefined,
+  coloursId: string,
+  list: List | undefined,
+  listId: string
+) => {
+  if (choosing !== undefined) {
+    return { highlighted: choosing.highlighted, id: coloursId };
+  }
+
+  return list === undefined ? undefined : { highlighted: list.highlighted, id: listId };
+};
+
+/**
+ * The textarea's classes: over a backdrop, while the draft holds formatting, it draws only
+ * its caret and selection.
+ * @param text - The draft's text.
+ * @returns The classes.
+ */
+const inputClass = (text: string) =>
+  hasFormatting(text) ? `${styles.input} ${styles.inked}` : styles.input;
+
+/**
+ * A style chosen at the caret with nothing selected, said quietly beside the prompt, so a
+ * key pressed is seen to have done something before anything is typed.
+ * @param props - What it changes, in words, and its id, which describes the textarea.
+ * @returns The words, or nothing while nothing is pending.
+ */
+const PendingMark = ({ id, words }: { readonly id: string; readonly words: readonly string[] }) =>
+  words.length === 0 ? null : (
+    <span className={styles.pending} data-composer-pending="" id={id}>
+      {words.join(" ")}
+    </span>
+  );
+
+/**
+ * The draft as a Timeline draws it, line by line, as each line is sent, behind the
+ * textarea, whose own text is not drawn, so the two lie over each other. A space of no
+ * width ends it, so a last line with nothing on it is a line here too, as in the textarea.
+ * @param props - The draft's text.
+ * @returns Its lines.
+ */
+const DraftDrawn = ({ text }: { readonly text: string }) => (
+  <>
+    {linesIn(text).map((line, index) => (
+      // A line's place is what tells two apart.
+      // oxlint-disable-next-line react/no-array-index-key
+      <Fragment key={index}>
+        {index === 0 ? null : "\n"}
+        <Inlines inlines={formatted(line)} links={false} />
+      </Fragment>
+    ))}
+    {"\u200B"}
+  </>
+);
+
+/**
+ * The draft drawn behind the textarea while it holds formatting, and nothing otherwise.
+ * @param props - The draft's text, and the element's ref, which scrolls with the textarea.
+ * @returns The backdrop.
+ */
+const Backdrop = ({
+  backdrop,
+  text,
+}: {
+  readonly backdrop: RefObject<HTMLDivElement | null>;
+  readonly text: string;
+}) =>
+  hasFormatting(text) ? (
+    <div aria-hidden="true" className={styles.backdrop} data-composer-backdrop="" ref={backdrop}>
+      <DraftDrawn text={text} />
+    </div>
+  ) : null;
+
+/**
+ * The colours offered for the composer's selection, or for what is typed next: the
+ * default and the sixteen, each a swatch drawn as a Timeline draws the colour. The
+ * textarea keeps the focus, and the arrows, Enter, and Escape, as the completion list's.
+ * @param props - The list's id, which is highlighted, and what picking one does.
+ * @returns The listbox.
+ */
+const Colours = ({
+  choosing,
+  id,
+  onPick,
+}: {
+  readonly choosing: { readonly highlighted: number } | undefined;
+  readonly id: string;
+  readonly onPick: (index: number) => void;
+}) => {
+  const theme = useAtomValue(drawnTheme);
+
+  if (choosing === undefined) {
+    return null;
+  }
+
+  const { highlighted } = choosing;
+
+  return (
+    <div
+      aria-label="Colours"
+      aria-orientation="horizontal"
+      className={styles.colours}
+      id={id}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a listbox the textarea controls and keeps the focus from, as the completion list is.
+      role="listbox"
+    >
+      {colourChoices.map((colour, index) => (
+        // The textarea takes the keys, and keeps the focus through a press.
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
+        <div
+          aria-label={colourName(colour)}
+          aria-selected={index === highlighted}
+          className={styles.swatch}
+          id={optionId(id, index)}
+          // oxlint-disable-next-line react/no-array-index-key
+          key={index}
+          onClick={() => {
+            onPick(index);
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
+          role="option"
+          style={{ backgroundColor: runColours(colouredStyle(colour), theme).color }}
+          tabIndex={-1}
+          title={colourName(colour)}
+        >
+          {colour === undefined ? "A" : null}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 /**
  * What describes the textarea: the ids of what is shown above it.
@@ -507,7 +677,24 @@ const Composer = ({
   const hintId = `${id}-hint`;
   const answeringId = `${id}-answering`;
   const listId = `${id}-list`;
+  const coloursId = `${id}-colours`;
+  const pendingId = `${id}-pending`;
   const { answering, confirming, notice } = draft;
+  // What the Owner sees and edits: the draft without its codes, which the backdrop draws.
+  const shown = plainOf(draft.text);
+  const pending = pendingWords(draft.text, draft.typing);
+  const choosing = useAtomValue(colourChoiceAt(timeline));
+  const moveColour = useAtomSet(colourMoved);
+  const chooseColour = useAtomSet(colourChosen);
+  const dismissColours = useAtomSet(colourDismissed);
+  const backdrop = useRef<HTMLDivElement>(null);
+
+  // The backdrop scrolls with the textarea, once its text is drawn.
+  useLayoutEffect(() => {
+    if (backdrop.current !== null && input.current !== null) {
+      backdrop.current.scrollTop = input.current.scrollTop;
+    }
+  });
   // Whether a list is shown and whether completion owns the keys are one: what the core says.
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
@@ -596,10 +783,10 @@ const Composer = ({
   const add = (files: readonly File[]) => {
     if (files.length > 0) {
       addNow({
-        anchor: input.current?.selectionStart ?? draft.text.length,
+        anchor: input.current?.selectionStart ?? shown.length,
         files,
         place: timeline,
-        text: draft.text,
+        text: shown,
       });
     }
   };
@@ -747,6 +934,34 @@ const Composer = ({
     }
   };
 
+  /**
+   * While the colours are offered, the arrows move through them, Enter puts the one
+   * highlighted over the selection, and Escape puts them away.
+   * @param event - The key.
+   * @returns Whether the colours took it.
+   */
+  const colourKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const by = colourMoves.get(event.key);
+
+    if (choosing === undefined || event.altKey || event.ctrlKey || event.metaKey) {
+      return false;
+    }
+
+    if (by !== undefined) {
+      moveColour(by);
+    } else if (event.key === "Enter") {
+      chooseColour(choosing.highlighted);
+    } else if (event.key === "Escape") {
+      dismissColours(undefined);
+    } else {
+      return false;
+    }
+
+    event.preventDefault();
+
+    return true;
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const element = event.currentTarget;
     const { selectionEnd, selectionStart, value } = element;
@@ -759,7 +974,7 @@ const Composer = ({
       return;
     }
 
-    if (completionKey(event)) {
+    if (colourKey(event) || completionKey(event)) {
       return;
     }
 
@@ -792,6 +1007,7 @@ const Composer = ({
   };
 
   const describedBy = describedByOf([
+    [pending.length > 0, pendingId],
     [answering !== undefined, answeringId],
     [notice !== undefined || confirming !== undefined, noticeId],
     [offline !== undefined, hintId],
@@ -864,10 +1080,17 @@ const Composer = ({
           id={listId}
           list={list}
           onPick={(index) => {
-            pickNow({ index, place: timeline, text: draft.text });
+            pickNow({ index, place: timeline, text: shown });
           }}
         />
       )}
+      <Colours
+        choosing={choosing}
+        id={coloursId}
+        onPick={(index) => {
+          chooseColour(index);
+        }}
+      />
       {answering === undefined ? null : (
         <AnsweringLine
           answering={answering}
@@ -890,41 +1113,56 @@ const Composer = ({
           <AwayMark network={network} />
           <span aria-hidden="true">&gt;</span>
         </label>
-        <textarea
-          {...controlling(list, listId)}
-          // Among several Panes, the number shown is said with what it is.
-          aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
-          aria-describedby={describedBy}
-          aria-invalid={notice === undefined ? undefined : true}
-          autoComplete="off"
-          className={styles.input}
-          data-composer=""
-          id={id}
-          onChange={(event) => {
-            const { selectionStart, value } = event.currentTarget;
-            const from = selectedFrom.current;
+        <PendingMark id={pendingId} words={pending} />
+        <div className={styles.field}>
+          <Backdrop backdrop={backdrop} text={draft.text} />
+          <textarea
+            {...controlling(controlled(choosing, coloursId, list, listId))}
+            // Among several Panes, the number shown is said with what it is.
+            aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
+            aria-describedby={describedBy}
+            aria-invalid={notice === undefined ? undefined : true}
+            autoComplete="off"
+            className={inputClass(draft.text)}
+            data-composer=""
+            id={id}
+            onChange={(event) => {
+              const { selectionStart, value } = event.currentTarget;
+              const from = selectedFrom.current;
 
-            // A selection read for one edit says nothing of the next.
-            selectedFrom.current = undefined;
-            setText(
-              from === undefined
-                ? { caret: selectionStart, text: value, timeline }
-                : {
-                    caret: selectionStart,
-                    text: value,
-                    timeline,
-                    typing: { caret: selectionStart, from },
-                  }
-            );
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={placeholder}
-          ref={input}
-          rows={1}
-          spellCheck={spellcheck}
-          value={draft.text}
-        />
+              // A selection read for one edit says nothing of the next, and the colours were
+              // offered for the text before it.
+              selectedFrom.current = undefined;
+
+              if (choosing !== undefined) {
+                dismissColours(undefined);
+              }
+
+              setText(
+                from === undefined
+                  ? { caret: selectionStart, text: value, timeline }
+                  : {
+                      caret: selectionStart,
+                      text: value,
+                      timeline,
+                      typing: { caret: selectionStart, from },
+                    }
+              );
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onScroll={(event) => {
+              if (backdrop.current !== null) {
+                backdrop.current.scrollTop = event.currentTarget.scrollTop;
+              }
+            }}
+            placeholder={placeholder}
+            ref={input}
+            rows={1}
+            spellCheck={spellcheck}
+            value={shown}
+          />
+        </div>
         {enter === "newline" ? (
           <IconButton
             icon="send"

@@ -107,6 +107,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
+| Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
 
@@ -128,25 +129,28 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 Keybindings as data over the registry. A binding names a chord, a command, its arguments, and a `when`. `resolve` gives a pressed key's intents, or nothing, so a key no binding takes is never swallowed.
 
-| Keys                              | Does                                |
-| --------------------------------- | ----------------------------------- |
-| `mod+k`, `mod+shift+p`            | Open the palette                    |
-| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline          |
-| `alt+a`                           | The Timeline that calls most        |
-| `alt+m`                           | Show or hide the members            |
-| `alt+n`                           | Show or hide the sidebar            |
-| `mod+,`                           | Show the options                    |
-| `mod+shift+f`                     | Show the search                     |
-| `alt+shift+arrows`                | Move between Panes                  |
-| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down         |
-| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink |
+| Keys                              | Does                                          |
+| --------------------------------- | --------------------------------------------- |
+| `mod+k`, `mod+shift+p`            | Open the palette                              |
+| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline                    |
+| `alt+a`                           | The Timeline that calls most                  |
+| `alt+m`                           | Show or hide the members                      |
+| `alt+n`                           | Show or hide the sidebar                      |
+| `mod+,`                           | Show the options                              |
+| `mod+shift+f`                     | Show the search                               |
+| `alt+shift+arrows`                | Move between Panes                            |
+| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down                   |
+| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink           |
+| `mod+b`, `i`, `u`, `e`, `r`       | Bold, italic, underline, fixed pitch, reverse |
+| `mod+shift+x`                     | Strikethrough                                 |
+| `mod+shift+k`                     | Choose a colour                               |
 
 - **A chord is parsed.** `formatChord` writes one so that it parses back the same. A binding that does not parse, or names no command, is dropped, so a keymap holds only bindings that can fire.
 - **`mod` is Cmd on a Mac and Ctrl elsewhere.** `showChord` writes a chord as the platform does.
 - **A key event is the layout's character,** so an AZERTY `é` binds as `é`. The physical key names it only where the character says less, as with a dead key or Option on a Mac.
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
-- **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses.
+- **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses, but the formatting keys, as a web editor's do, and those fire only in a field, so Mod+R reloads anywhere else. No two defaults share a chord where both can fire.
 - **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, the palette, an overlay holding the focus, or no composer to write to, leaves the key alone.
 - **Enter in the Composer is not a binding, but `ui.enter`.** `enterPressed` says whether a press sends or begins a new line: under `send`, Enter sends and Shift+Enter begins a line, and under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
 - **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
@@ -165,6 +169,7 @@ What the command palette lists for a query (`sections`), and what choosing an en
 What the Owner is writing in each Timeline, what they sent from it, and why something was not said. `submit` reads the draft through the registry and gives intents. A composer is at a `Place`: a Timeline, a Direct Message not yet begun, or `Nowhere`, where commands that need no Timeline are typed.
 
 - **Each Timeline has its own draft and its own history,** at most 100 lines, which Up and Down go through.
+- **A draft's text is what is sent,** IRC's formatting codes and all, and is what history keeps and recalls. The Owner sees and edits its plain text: `Edited` carries the plain text, which is merged into the formatting, and `Formatted` puts a format over a range, or with nothing selected, keeps it pending at the caret for what is typed there next, until the text changes.
 - **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
 - **What was sent says which commands it ran,** as `ran`, the palette's keys, so the palette remembers them. Plain text runs none.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
@@ -172,6 +177,15 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 - **A refusal is said in words under the composer it came from,** and nothing after it is sent.
 - **A notice lasts as long as it is true.** One about the text as typed, such as no such command, goes when the text is edited and when the composer turns to another Timeline. One with an offer stays with its Timeline until taken or dismissed. One of an outcome that arrived later stays until dismissed or the next submit, since an edit must not hide what the Owner may not have read.
 - **What failed says what is safe to do next, and nothing is sent twice.** A Say or an Act that was not journaled may be sent again under the same intent. One that was journaled is never sent again. One with no answer can only be checked again.
+
+## Formatting
+
+A draft's formatting, between its text, with codes, and the plain text the Owner edits. `merged` takes an edit of the plain text back into the codes, `formattedIn` puts a format over a range, `pendingAfter` keeps one at a caret, and `linesIn` gives the lines to draw.
+
+- **Formatting is per line,** as each line is sent as a Message of its own and IRC carries nothing from one to the next. A style over a line break is written again at the start of the next line.
+- **What is written is as the protocol's writer writes it,** so no code stands where nothing follows it, however the text is edited.
+- **Typed text takes the style around it:** the style pending there, else the style of what it was typed over, else of the character before it, or after it at the start of a line. A paste's codes are read as formatting from there. Where the text alone could place an edit in several ways, as a letter typed beside the same letter, the caret places it.
+- **A flag goes off where the whole range has it,** and on otherwise, as a word processor does. A colour is one of the sixteen, `colourNames`, or the default.
 
 ## Options
 
