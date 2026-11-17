@@ -252,6 +252,7 @@ const markerOf = (activity: Activity): Marker => {
     case "TopicChanged":
     case "ModeChanged":
     case "AwayChanged":
+    case "AccountChanged":
     case "Invited":
     case "OperGranted":
     case "OperRefused":
@@ -372,6 +373,29 @@ const describeInvitation = (
 ];
 
 /**
+ * A User's away or account changing, in words.
+ * @param activity - The Activity.
+ * @returns Its parts.
+ */
+const describePresence = (
+  activity: Extract<Activity, { readonly _tag: "AccountChanged" | "AwayChanged" }>
+): readonly Part[] => {
+  if (activity._tag === "AccountChanged") {
+    return activity.account === null
+      ? [nickPart(activity.nick), words(" logged out")]
+      : [nickPart(activity.nick), words(" logged in as "), name(activity.account)];
+  }
+
+  return activity.away === null
+    ? [nickPart(activity.nick), words(" is back")]
+    : [
+        nickPart(activity.nick),
+        words(" is away"),
+        ...(activity.away.message === "" ? [] : [words(": "), said(activity.away.message)]),
+      ];
+};
+
+/**
  * Any other Activity in words.
  * @param activity - The Activity.
  * @returns Its parts.
@@ -440,14 +464,9 @@ const describeOtherActivity = (
       ];
     }
 
-    case "AwayChanged": {
-      return activity.away === null
-        ? [nickPart(activity.nick), words(" is back")]
-        : [
-            nickPart(activity.nick),
-            words(" is away"),
-            ...(activity.away.message === "" ? [] : [words(": "), said(activity.away.message)]),
-          ];
+    case "AwayChanged":
+    case "AccountChanged": {
+      return describePresence(activity);
     }
 
     // As the Network gave it: its kind, the command it is about, its code, its context, and

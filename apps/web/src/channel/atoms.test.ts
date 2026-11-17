@@ -121,6 +121,7 @@ const member = (
   prefixes: readonly string[] = [],
   away = false
 ): typeof Member.Encoded => ({
+  account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: away ? { message: "out" } : null },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },

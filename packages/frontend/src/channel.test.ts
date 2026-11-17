@@ -256,15 +256,21 @@ const header = (
     topic: topic ?? { _tag: "Unknown" },
   });
 
+const unknownAccount = { _tag: "Unknown" } as const;
+
 const member = (
   nick: string,
   prefixes: readonly string[],
-  away = false
+  away = false,
+  account: (typeof MemberPage.Encoded)["members"][number]["account"] = unknownAccount
 ): (typeof MemberPage.Encoded)["members"][number] => ({
+  account,
   away: { _tag: "Known", at: 1, from: "ircd", value: away ? { message: "lunch" } : null },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });
+
+const known = (value: string | null) => ({ _tag: "Known", at: 1, from: "ircd", value }) as const;
 
 const page = (
   members: readonly (typeof MemberPage.Encoded)["members"][number][],
@@ -805,6 +811,30 @@ describe("the members", () => {
       ["@", false, "op, operator"],
       ["+", true, "voiced, voice, away"],
       [undefined, false, "plain"],
+    ]);
+  });
+
+  it("shows each one's account as their User is known, and says it in words", () => {
+    const { ranks } = header("Joined");
+
+    const decoded = page([
+      member("op", ["o"], false, known("opper")),
+      member("out", [], false, known(null)),
+      member("was", [], true, { _tag: "Stale", since: 2, was: "wasser" }),
+      member("plain", []),
+    ]).members;
+
+    expect(
+      decoded.map((one) => {
+        const row = memberRow(one, ranks);
+
+        return [row.account, row.label];
+      })
+    ).toStrictEqual([
+      [{ _tag: "LoggedIn", name: "opper" }, "op, operator, account opper"],
+      [{ _tag: "LoggedOut" }, "out, logged out"],
+      [{ _tag: "LoggedIn", name: "wasser" }, "was, away, account wasser"],
+      [{ _tag: "Unknown" }, "plain"],
     ]);
   });
 

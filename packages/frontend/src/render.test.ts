@@ -523,9 +523,10 @@ describe("lines", () => {
       markerOf(activity({ _tag: "NickChanged", from: "peer", to: "peer2" })),
       markerOf(activity({ _tag: "TopicChanged", by: "op", channel: "#iirc", topic: null })),
       markerOf(activity({ _tag: "AwayChanged", away: null, nick: "peer" })),
+      markerOf(activity({ _tag: "AccountChanged", account: "peerly", nick: "peer" })),
       markerOf(content({ _tag: "SessionBegan", at: 0, nick: "iirc" })),
       markerOf(message("peer", "hi")),
-    ]).toStrictEqual(["-->", "<--", "<--", "<--", "--", "--", "--", undefined, "a Message"]);
+    ]).toStrictEqual(["-->", "<--", "<--", "<--", "--", "--", "--", "--", undefined, "a Message"]);
   });
 
   it("describes each Activity in a few words", () => {
@@ -553,6 +554,8 @@ describe("lines", () => {
       }),
       activity({ _tag: "AwayChanged", away: { message: "lunch" }, nick: "peer" }),
       activity({ _tag: "AwayChanged", away: null, nick: "peer" }),
+      activity({ _tag: "AccountChanged", account: "peerly", nick: "peer" }),
+      activity({ _tag: "AccountChanged", account: null, nick: "peer" }),
     ].map((content) => read(lineOf(content)));
 
     expect(described).toStrictEqual([
@@ -566,6 +569,8 @@ describe("lines", () => {
       "<op> set +o peer -m on #iirc",
       "<peer> is away: lunch",
       "<peer> is back",
+      "<peer> logged in as peerly",
+      "<peer> logged out",
     ]);
   });
 

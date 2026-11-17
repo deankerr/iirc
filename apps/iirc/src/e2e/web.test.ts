@@ -5533,4 +5533,105 @@ describe("the web frontend on iirc daemon --web", () => {
       }
     }
   );
+
+  it(
+    "shows a member's account in their menu, or that they are logged out",
+    { timeout: 90_000 },
+    async () => {
+      // Ergo offers `account-notify` and `extended-join`, and an account to register.
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "account"),
+        "#iirc-account",
+        { start: startErgo }
+      );
+
+      try {
+        // Registering an account logs the Connection in to it, named as its nick is.
+        const member = await connectPeer({
+          caps: ["draft/account-registration"],
+          host: ngircd.host,
+          nick: "bobby",
+          port: ngircd.plainPort,
+        });
+
+        member.send("REGISTER * * a-password-nobody-reads");
+        await member.waitFor((line) => line.command === "REGISTER", "REGISTER's reply");
+        member.send(`JOIN ${channel}`);
+
+        // Joined with no account, which `extended-join` says. `peer` was there before the
+        // Daemon, whom nothing has told yet.
+        const guest = await connectPeer({
+          host: ngircd.host,
+          nick: "guest",
+          port: ngircd.plainPort,
+        });
+
+        guest.send(`JOIN ${channel}`);
+        await peer.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("guest!") === true,
+          "guest to join"
+        );
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { exact: true, name: channel }).click();
+        await page.getByRole("log", { name: channel }).waitFor();
+        await page.getByRole("textbox", { name: channel }).click();
+        await page.keyboard.press("Alt+m");
+
+        const members = page.getByRole("region", { name: "members" });
+
+        const menuOf = async (name: string) => {
+          await members.getByRole("row", { name }).focus();
+          await page.keyboard.press("Enter");
+
+          const menu = page.getByRole("menu");
+
+          await menu.waitFor();
+
+          return menu;
+        };
+
+        const logged = await menuOf("bobby, account bobby");
+        const account = await logged.locator("xpath=..").textContent();
+
+        await screenshot(page, "68-after-account.png");
+        await page.keyboard.press("Escape");
+        await logged.waitFor({ state: "detached" });
+
+        const out = await menuOf("guest, logged out");
+        const loggedOut = await out.locator("xpath=..").textContent();
+
+        await page.keyboard.press("Escape");
+        await out.waitFor({ state: "detached" });
+
+        const unknown = await menuOf("peer");
+        const unsaid = await unknown.locator("xpath=..").textContent();
+
+        member.close();
+        guest.close();
+
+        expect({
+          account,
+          loggedOut,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          unsaid,
+        }).toStrictEqual({
+          account: "account bobbyquerywhoismention",
+          loggedOut: "logged outquerywhoismention",
+          problems: [],
+          unsaid: "querywhoismention",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
 });

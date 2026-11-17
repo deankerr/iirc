@@ -56,6 +56,7 @@ const listed = (
 });
 
 const member = (nick: string, prefixes: readonly string[] = []): typeof Member.Encoded => ({
+  account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
@@ -70,6 +71,7 @@ const hostilePeer: LookScript = {
     notes: [],
     profiles: [
       profileOf({
+        account: "peerly",
         channels: [{ name: "#iirc", prefixes: ["o"] }],
         host: "example.test",
         idle: 180,
@@ -291,6 +293,7 @@ describe("the Lookup card", () => {
     );
 
     const drawn = {
+      account: shown?.textContent.includes("account peerly"),
       channel: shown?.querySelector("li")?.textContent,
       heading: shown?.querySelector("h3")?.textContent,
       images: shown?.querySelectorAll("img").length,
@@ -304,6 +307,7 @@ describe("the Lookup card", () => {
     await inComposer(container, undefined, "Escape");
 
     expect({ ...drawn, after: card() ?? null }).toStrictEqual({
+      account: true,
       after: null,
       channel: "@#iirc",
       heading: "whois peer",

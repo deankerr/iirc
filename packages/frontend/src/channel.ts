@@ -933,11 +933,39 @@ export interface MemberRow {
   /** The symbol of the highest prefix they hold, such as `@`, or none. */
   readonly symbol: string | undefined;
   readonly away: boolean;
+  /** Their User's account, as it was if that is all that is known. */
+  readonly account: MemberAccount;
   /** Their nick's colour slot. */
   readonly colour: number;
-  /** Their nick, rank, and whether they are away, in words, for a screen reader. */
+  /** Their nick, rank, whether they are away, and their account, in words, for a screen reader. */
   readonly label: string;
 }
+
+/** A member's account: the one they are logged in to, none, or not known. */
+export type MemberAccount =
+  | { readonly _tag: "LoggedIn"; readonly name: string }
+  | { readonly _tag: "LoggedOut" }
+  | { readonly _tag: "Unknown" };
+
+const accountOf = (fact: Member["account"]): MemberAccount => {
+  switch (fact._tag) {
+    case "Known": {
+      return fact.value === null ? { _tag: "LoggedOut" } : { _tag: "LoggedIn", name: fact.value };
+    }
+
+    case "Stale": {
+      return fact.was === null ? { _tag: "LoggedOut" } : { _tag: "LoggedIn", name: fact.was };
+    }
+
+    case "Unknown": {
+      return fact;
+    }
+
+    default: {
+      return fact satisfies never;
+    }
+  }
+};
 
 /**
  * The prefixes a member holds, as much as is known: all of them, at least these, or as
@@ -990,13 +1018,18 @@ export const memberRow = (member: Member, ranks: readonly Rank[]): MemberRow => 
     (member.away._tag === "Known" && member.away.value !== null) ||
     (member.away._tag === "Stale" && member.away.was !== null);
 
+  const account = accountOf(member.account);
+
   const words = [
     member.nick,
     ...(highest === undefined ? [] : [rankNames.get(highest.mode) ?? `mode ${highest.mode}`]),
     ...(away ? ["away"] : []),
+    ...(account._tag === "LoggedIn" ? [`account ${account.name}`] : []),
+    ...(account._tag === "LoggedOut" ? ["logged out"] : []),
   ];
 
   return {
+    account,
     away,
     colour: nickColour(member.nick),
     label: words.join(", "),

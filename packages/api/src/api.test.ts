@@ -1032,6 +1032,18 @@ describe("the contract", () => {
     ]).toStrictEqual([invited, false, false]);
   });
 
+  it("carries a login or logout as the nick and the account, or null, both Untrusted", () => {
+    const loggedIn = { _tag: "AccountChanged", account: "bobby", nick: "bob" } as const;
+    const loggedOut = { _tag: "AccountChanged", account: null, nick: "bob" } as const;
+
+    expect([
+      roundTrip(loggedIn),
+      roundTrip(loggedOut),
+      Schema.is(Activity)({ _tag: "AccountChanged", nick: "bob" }),
+      Schema.is(Activity)({ _tag: "AccountChanged", account: "bobby" }),
+    ]).toStrictEqual([loggedIn, loggedOut, false, false]);
+  });
+
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {
     const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
     const head = JSON.stringify(document.paths["/api/timelines/{timeline}/channel"]);
@@ -1040,6 +1052,7 @@ describe("the contract", () => {
     const page = Schema.encodeSync(MemberPage)({
       members: [
         {
+          account: { _tag: "Known", at: Instant.make(0), from: "ircd", value: "bobby" },
           away: { _tag: "Unknown" },
           nick: "__proto__",
           prefixes: { _tag: "Partial", at: Instant.make(0), atLeast: ["o"], from: "ircd" },
@@ -1057,8 +1070,17 @@ describe("the contract", () => {
       ),
       head.includes(`"name":${untrusted}`),
       members.includes(`"nick":${untrusted}`),
+      members.includes(`"account":`) &&
+        members.includes(`"value":{"anyOf":[${untrusted},{"type":"null"}]}`),
       members.includes(`"atLeast":{"type":"array","items":${untrusted}}`),
       page.members.map((one) => [Object.keys(one).toSorted(), one.nick]),
-    ]).toStrictEqual([true, true, true, true, [[["away", "nick", "prefixes"], "__proto__"]]]);
+    ]).toStrictEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      [[["account", "away", "nick", "prefixes"], "__proto__"]],
+    ]);
   });
 });

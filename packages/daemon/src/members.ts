@@ -14,9 +14,10 @@ export interface MemberPlace {
   readonly key: string;
 }
 
-/** A member, where they stand in the order, and whether their User is away. */
+/** A member, where they stand in the order, and their User's account and whether they are away. */
 export interface Placed extends MemberPlace {
   readonly member: MemberKnowledge;
+  readonly account: UserKnowledge["account"];
   readonly away: UserKnowledge["away"];
 }
 
@@ -148,7 +149,14 @@ export const membersPage = (view: ChannelView, query: MembersQuery): MembersPage
     const place = { key, rank: rankOf(member.prefixes, order) };
 
     if (after === undefined || comparePlaces(place, after) > 0) {
-      placed.push({ ...place, away: view.users.get(key)?.away ?? unknown, member });
+      const user = view.users.get(key);
+
+      placed.push({
+        ...place,
+        account: user?.account ?? unknown,
+        away: user?.away ?? unknown,
+        member,
+      });
     }
   }
 

@@ -15,7 +15,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId } from "@iirc/api";
-import type { MemberRow } from "@iirc/frontend/channel";
+import type { MemberAccount, MemberRow } from "@iirc/frontend/channel";
 import { commandNamed, runIn } from "@iirc/frontend/commands";
 import type { Intent } from "@iirc/frontend/commands";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -70,18 +70,51 @@ const Reference = () => (
 );
 
 /**
+ * A member's account, in a dim line, or nothing while it is not known.
+ * @param props - The account.
+ * @returns The line, or nothing.
+ */
+const Account = ({ account }: { readonly account: MemberAccount }) => {
+  switch (account._tag) {
+    case "LoggedIn": {
+      return (
+        <p className={styles.account}>
+          account <bdi>{account.name}</bdi>
+        </p>
+      );
+    }
+
+    case "LoggedOut": {
+      return <p className={styles.account}>logged out</p>;
+    }
+
+    case "Unknown": {
+      return null;
+    }
+
+    default: {
+      return account satisfies never;
+    }
+  }
+};
+
+/**
  * What can be done with a member, as a menu anchored to their row: open their Direct
  * Message, as `/query` does, look them up, as `/whois` does, or mention them, starting the
- * composer with their nick. Choosing one puts away members that lie over something.
- * @param props - The member, their row, and what closes the menu.
+ * composer with their nick. Above them, dimly, the account they are logged in to, or that
+ * they are not logged in, when that is known. Choosing one puts away members that lie over
+ * something.
+ * @param props - The member, their account, their row, and what closes the menu.
  * @returns The menu.
  */
 const Actions = ({
+  account,
   anchor,
   nick,
   onClose,
 }: {
   readonly nick: string;
+  readonly account: MemberAccount;
   readonly anchor: RefObject<HTMLElement | null>;
   readonly onClose: () => void;
 }) => {
@@ -122,6 +155,7 @@ const Actions = ({
       placement="bottom start"
       triggerRef={anchor}
     >
+      <Account account={account} />
       <Menu
         aria-label={`What to do with ${nick}`}
         autoFocus="first"
@@ -188,6 +222,7 @@ const Members = ({
 
   // A key is read back as the member it names, never cast.
   const nickOf = (key: Key) => rows.find((row) => row.nick === String(key))?.nick;
+  const opened = rows.find((row) => row.nick === menu);
 
   return (
     <>
@@ -240,10 +275,11 @@ const Members = ({
           ) : null}
         </GridList>
       </Virtualizer>
-      {menu === undefined ? null : (
+      {opened === undefined ? null : (
         <Actions
+          account={opened.account}
           anchor={anchor}
-          nick={menu}
+          nick={opened.nick}
           onClose={() => {
             setMenu(undefined);
           }}

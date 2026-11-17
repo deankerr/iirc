@@ -64,6 +64,19 @@ const prefixesOf = (n: number) => {
   return n % 7 === 0 ? known("v") : known();
 };
 
+// A User known by their account alone, keyed by their nick.
+const user = (nick: string, account: Fact<string | null>) =>
+  [
+    nick,
+    {
+      account,
+      away: { _tag: "Unknown" },
+      mask: { _tag: "Unknown" },
+      nick,
+      realname: { _tag: "Unknown" },
+    },
+  ] as const;
+
 const nicks = (view: ChannelView, query: Parameters<typeof membersPage>[1]) =>
   membersPage(view, query).members.map(({ member }) => member.nick);
 
@@ -111,6 +124,28 @@ describe("members", () => {
       nicks(view, { after: first.next, limit: 5, prefix: "[A" }),
       membersPage(view, { after: first.next, limit: 1, prefix: "[A" }).next,
     ]).toStrictEqual([["{A}b"], { key: "{a}b", rank: 2 }, ["[a]"], undefined]);
+  });
+
+  it("places each member's account from their User, and Unknown where none is known", () => {
+    const loggedIn: Fact<string | null> = { _tag: "Known", at, from: "ircd", value: "bobby" };
+    const loggedOut: Fact<string | null> = { _tag: "Known", at, from: "ircd", value: null };
+
+    const view = channelOf([
+      ["bob", known()],
+      ["carol", known()],
+      ["dave", known()],
+    ]);
+
+    const placed = membersPage(
+      { ...view, users: new Map([user("bob", loggedIn), user("carol", loggedOut)]) },
+      { limit: 10 }
+    ).members.map(({ account, member }) => [member.nick, account]);
+
+    expect(placed).toStrictEqual([
+      ["bob", loggedIn],
+      ["carol", loggedOut],
+      ["dave", { _tag: "Unknown" }],
+    ]);
   });
 
   it("pages 10,000 members quickly", () => {
