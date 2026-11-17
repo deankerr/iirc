@@ -414,6 +414,34 @@ describe("taking a mask out of the Configuration", () => {
     expect.assertions(0);
   });
 
+  it("restores what a mask stamped on an ascii Network, though it is dropped while redialling", () => {
+    const base = ignoring("[Bot]!*@*");
+
+    const isupport = floorIsupport.map((token) =>
+      token.startsWith("CASEMAPPING=") ? "CASEMAPPING=ascii" : token
+    );
+
+    play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport }),
+        joined(base, "#iirc"),
+        lines(
+          "<< :[bot]!u@h PRIVMSG #iirc :hi",
+          '?? message Privmsg [bot] #iirc ignored="[bot]!*@*" in=channel:#iirc :hi',
+          "# The next Connection folds by rfc1459 until its own ISUPPORT says otherwise.",
+          "== closed Reset",
+          "+2s",
+          "-> dial irc.test:6697 tls",
+          "!! configure ignores=",
+          '?? unignored "[bot]!*@*" "{bot}!*@*"'
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("reports none when the first Configuration is given", () => {
     const base = ignoring("spam!*@*");
     const played = play(client, { configuration: base, transcript: [registered(base)] });

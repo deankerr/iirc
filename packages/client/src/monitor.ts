@@ -132,8 +132,9 @@ const partnersAfter = (
   partners: ReadonlyMap<string, string>,
   news: News
 ): Map<string, string> | undefined => {
+  // An ignored User's Message is hidden, so it opens no partner to monitor.
   if (news._tag === "Message") {
-    return afterMessage(partners, news.where);
+    return news.ignored === undefined ? afterMessage(partners, news.where) : undefined;
   }
 
   if (news._tag === "Activity") {
