@@ -2393,7 +2393,7 @@ describe("the handlers", () => {
 
         const network = yield* api.timelines.window({
           params: { timeline: yield* timelineNamed(api, "libera") },
-          query: { limit: 1 },
+          query: { limit: 100 },
         });
 
         const shown = (window: typeof quiet) => ({
@@ -2405,7 +2405,7 @@ describe("the handlers", () => {
           before: shown(before),
           both: shown(both),
           latest: shown(latest),
-          network: network.gaps.length,
+          network: network.gaps.map(({ count }) => count),
           quiet: shown(quiet),
         };
       })
@@ -2416,9 +2416,8 @@ describe("the handlers", () => {
       both: { gaps: [[4, true]], items: ["hello", "back"] },
       latest: { gaps: [], items: ["back"] },
       // The Network's own Timeline has an item at each Session's start and end, so Gaps
-      // never run together there: its last item is the last Session's start, where the one
-      // Gap that touches it ended.
-      network: 1,
+      // never run together there: each of the four stands alone between them.
+      network: [1, 1, 1, 1],
       quiet: { gaps: [[4, true]], items: ["hello"] },
     });
   });
