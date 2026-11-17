@@ -10,7 +10,7 @@
  */
 import type { PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
 import type { Json } from "@iirc/frontend/options";
-import { reduceOptions } from "@iirc/frontend/options";
+import { reduceOptions, uiShown } from "@iirc/frontend/options";
 import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
 import { Effect, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
@@ -21,12 +21,17 @@ import { runtime } from "../app/runtime.ts";
 import { writeChoice } from "../page/device.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, Waits } from "../timelines/atoms.ts";
-import { editing, optionsState, signedOut, told } from "./atoms.ts";
+import { editing, onItsWay, optionsState, signedOut, told } from "./atoms.ts";
 import type { Outcome } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
 
-/** The options under `ui` in effect on this device: its override, else the shared one, else the default. */
-export const uiInEffect = Atom.make((get) => effectiveUi(get(optionsState).ui, get(deviceUi)));
+/**
+ * The options under `ui` in effect on this device: its override, else the shared one as it
+ * shows with the changes on its way, else the default.
+ */
+export const uiInEffect = Atom.make((get) =>
+  effectiveUi(uiShown(get(optionsState)), get(deviceUi))
+);
 
 /** How a line's time shows on this device, alone, so a line draws again only when it changes. */
 export const timeShown = Atom.make((get) => get(uiInEffect).time);
@@ -74,7 +79,7 @@ export const mediaHeightShown = Atom.make(
  * When a Timeline is marked read on this device, as `timeShown` is, but none until it is
  * known: this device's override, or the shared options once read.
  */
-export const readRule = Atom.make((get) => readRuleOf(get(optionsState).ui, get(deviceUi)));
+export const readRule = Atom.make((get) => readRuleOf(uiShown(get(optionsState)), get(deviceUi)));
 
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
@@ -260,7 +265,7 @@ const tryShared = (registry: AtomRegistry.AtomRegistry, change: UiChange, fresh:
 /**
  * Changes an option under `ui`: on this device alone, kept as best it can and never sent,
  * or for every device, through the Daemon, made from the options read and made once more
- * after a conflict.
+ * after a conflict, and shown at once until the Daemon has answered.
  * @param registry - The registry.
  * @param change - The change.
  * @returns What it came to.
@@ -278,15 +283,21 @@ export const changeUi = (registry: AtomRegistry.AtomRegistry, change: UiChange) 
       return done;
     }
 
-    const first = yield* tryShared(registry, change, false);
+    return yield* onItsWay(
+      registry,
+      { _tag: "Ui", option: change.option, value: change.value },
+      Effect.gen(function* () {
+        const first = yield* tryShared(registry, change, false);
 
-    if (first._tag !== "Conflict") {
-      return first;
-    }
+        if (first._tag !== "Conflict") {
+          return first;
+        }
 
-    const second = yield* tryShared(registry, change, true);
+        const second = yield* tryShared(registry, change, true);
 
-    return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
+        return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
+      })
+    );
   });
 
 /** Makes a change of an option under `ui` from the options view, and says there what it came to. */

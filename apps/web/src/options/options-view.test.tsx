@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { deviceUiKey } from "@iirc/frontend/ui";
+import { Effect } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -13,6 +14,7 @@ import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake
 import { editing, optionsState, optionsSync } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
 import { ownerSync } from "./owner.ts";
+import { uiSync } from "./ui.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -73,10 +75,14 @@ const press = async (element: Element, key: string) => {
 /**
  * A page signed in to the fake, showing the options, following them, and rendered.
  * @param fake - The fake Daemon.
+ * @param fetch - How the page reaches it, the fake's own unless a test stands between.
  * @returns The registry, the page, and a way to type a line into its composer.
  */
-const page = async (fake: ReturnType<typeof fakeDaemon>) => {
-  const registry = registryFor(fake.fetch);
+const page = async (
+  fake: ReturnType<typeof fakeDaemon>,
+  fetch: typeof globalThis.fetch = fake.fetch
+) => {
+  const registry = registryFor(fetch);
 
   await run(registry, check, undefined);
   registry.mount(optionsSync);
@@ -500,5 +506,158 @@ describe("the options view, under store, uploads, and previews", () => {
       device: registry.get(deviceUi),
       row: rowOf(container, "uploads.maxSize")?.[1],
     }).toStrictEqual({ changes: [], device: {}, row: "104857600" });
+  });
+});
+
+/**
+ * The fake Daemon with each write of an option held until the test lets it go, and either
+ * taken as the fake takes it, or refused as the Daemon refuses a Change it cannot journal.
+ * @param fake - The fake Daemon.
+ * @returns The fetch to hand the page, and the writes held.
+ */
+const holdingWrites = (fake: ReturnType<typeof fakeDaemon>) => {
+  const writes: (() => void)[] = [];
+  const state = { holding: false, refusing: false };
+
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    const writing = (init?.method ?? "GET") !== "GET";
+    const option = /^\/api\/(?:ui|options)\/|^\/api\/networks\/libera$/u.test(url.pathname);
+
+    if (!state.holding || !writing || !option) {
+      return await fake.fetch(input, init);
+    }
+
+    const { promise, resolve } = Promise.withResolvers<undefined>();
+
+    writes.push(() => {
+      resolve(undefined);
+    });
+    await promise;
+
+    return state.refusing
+      ? Response.json({ _tag: "JournalFailed", reason: "disk" }, { status: 500 })
+      : await fake.fetch(input, init);
+  };
+
+  return { fetch, state, writes };
+};
+
+/**
+ * A page showing the options, signed in to a fake Daemon whose writes can be held, once it
+ * has read the options under `ui`, `store`, `uploads`, and `previews`, and a Network's.
+ * @returns The page, the fake, and the writes held.
+ */
+const held = async () => {
+  const fake = signedIn();
+  const { fetch, state, writes } = holdingWrites(fake);
+  const shown = await page(fake, fetch);
+
+  shown.registry.mount(uiSync);
+  await shown.type("/set");
+  await settled(
+    () =>
+      shown.registry.get(optionsState).ui !== undefined &&
+      shown.registry.get(optionsState).owner !== undefined &&
+      rowOf(shown.container, "ui.time")?.[1] === "HH:mm"
+  );
+  state.holding = true;
+
+  return { ...shown, fake, state, writes };
+};
+
+/** Lets several frames pass, so a write still held is seen to be. */
+const later = async () => {
+  await act(async () => {
+    await Effect.runPromise(Effect.sleep("100 millis"));
+  });
+};
+
+describe("an option's change, while it is on its way", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("shows ui.time as asked, while the write is held and once it is answered", async () => {
+    const { container, type, writes } = await held();
+
+    await type("/set ui.time HH:mm:ss");
+    await settled(() => writes.length === 1);
+    await later();
+    const whileHeld = rowOf(container, "ui.time")?.[1];
+
+    for (const release of writes.splice(0)) {
+      release();
+    }
+
+    await later();
+
+    expect([whileHeld, rowOf(container, "ui.time")?.[1]]).toStrictEqual(["HH:mm:ss", "HH:mm:ss"]);
+  });
+
+  it("shows a Network's option as asked, while the write is held", async () => {
+    const { container, type, writes } = await held();
+
+    await type("/set network.libera.realname Dean");
+    await settled(() => writes.length === 1);
+    await later();
+    const whileHeld = rowOf(container, "network.libera.realname")?.[1];
+
+    for (const release of writes.splice(0)) {
+      release();
+    }
+
+    await later();
+
+    expect([whileHeld, rowOf(container, "network.libera.realname")?.[1]]).toStrictEqual([
+      "Dean",
+      "Dean",
+    ]);
+  });
+
+  it("shows an option under store as asked, while the write is held", async () => {
+    const { container, type, writes } = await held();
+
+    await type("/set store.s3.bucket my-bucket");
+    await settled(() => writes.length === 1);
+    await later();
+    const whileHeld = rowOf(container, "store.s3.bucket")?.[1];
+
+    for (const release of writes.splice(0)) {
+      release();
+    }
+
+    await later();
+
+    expect([whileHeld, rowOf(container, "store.s3.bucket")?.[1]]).toStrictEqual([
+      "my-bucket",
+      "my-bucket",
+    ]);
+  });
+
+  it("goes back to what is in force when the Daemon refuses, and says why", async () => {
+    const { container, state, type, writes } = await held();
+
+    state.refusing = true;
+    await type("/set ui.time HH:mm:ss");
+    await settled(() => writes.length === 1);
+    await later();
+    const whileHeld = rowOf(container, "ui.time")?.[1];
+
+    for (const release of writes.splice(0)) {
+      release();
+    }
+
+    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm");
+
+    expect({
+      notice: container.querySelector('[role="alert"]')?.firstChild?.textContent,
+      whileHeld,
+    }).toStrictEqual({
+      notice: "The Daemon could not record this, so nothing was changed.",
+      whileHeld: "HH:mm:ss",
+    });
   });
 });

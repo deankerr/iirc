@@ -13,6 +13,7 @@
  * @packageDocumentation
  */
 import type { Upload, UploadId, UploadsQuery } from "@iirc/api";
+import { ownerShown } from "@iirc/frontend/options";
 import { initialUploadEdits, linkOf, reduceUploadEdits } from "@iirc/frontend/uploads";
 import type { EditFailure, UploadEditsEvent } from "@iirc/frontend/uploads";
 import { Effect, Schedule, Stream } from "effect";
@@ -44,9 +45,9 @@ export const uploadMissing = Atom.family((id: UploadId) =>
 /** What the Owner asked of the Uploads listed, as the core folds it. */
 export const uploadEditsState = Atom.make(initialUploadEdits).pipe(Atom.keepAlive);
 
-/** The public URL in force, which every Upload's link is made from, or none while unset. */
+/** The public URL as it shows, which every Upload's link is made from, or none while unset. */
 export const publicUrl = Atom.make(
-  (get): string | undefined => get(optionsState).owner?.options["uploads.publicUrl"]
+  (get): string | undefined => ownerShown(get(optionsState))?.options["uploads.publicUrl"]
 );
 
 /** The link last copied, which the list says was, while it is still that Upload's link. */

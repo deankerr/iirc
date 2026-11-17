@@ -23,9 +23,15 @@
  * @packageDocumentation
  */
 import type { NetworkId } from "@iirc/api";
-import { OwnerOptionName, OwnerOptions, ownerDefaults, ownerOptionNames } from "@iirc/api/options";
+import {
+  OwnerOptionName,
+  OwnerOptions,
+  ownerDefaults,
+  ownerOptionNames,
+  ownerValueKept,
+} from "@iirc/api/options";
 import type { OwnerInForce } from "@iirc/api/options";
-import { UiOptionName, UiOptions, uiDefaults } from "@iirc/api/ui";
+import { UiOptionName, UiOptions, uiDefaults, uiValueKept } from "@iirc/api/ui";
 import type { FontFamily, UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
@@ -2494,6 +2500,14 @@ export interface Options {
   readonly held: ReadonlySet<string> | undefined;
   /** What the last edit from the view came to, when it did not go as asked, in words. */
   readonly notice: string | undefined;
+  /** How many changes were asked for, which numbers each as it is asked. */
+  readonly asked: number;
+  /**
+   * The changes asked for that the Daemon has not yet answered, oldest first. They are what
+   * was asked and never a copy of the options, which `uiShown`, `ownerShown`, and
+   * `configurationShown` derive from what is in force and these.
+   */
+  readonly onItsWay: readonly OnItsWay[];
   /** The option being edited in place, by name. */
   readonly editing: string | undefined;
   /** The option the Owner is asked to confirm unsetting, by name. */
@@ -2501,6 +2515,18 @@ export interface Options {
   /** The Credential option whose value a password prompt asks for, wherever it was asked. */
   readonly prompting: Prompt | undefined;
 }
+
+/**
+ * A change the Owner asked for: one option under `ui`, or under `store`, `uploads`, or
+ * `previews`, set to a value as JSON, or none to unset it, or an edit of a Network's Configuration.
+ */
+export type Wanted =
+  | { readonly _tag: "Ui"; readonly option: UiOptionName; readonly value: Json | undefined }
+  | { readonly _tag: "Owner"; readonly option: OwnerOptionName; readonly value: Json | undefined }
+  | { readonly _tag: "Network"; readonly network: NetworkId; readonly edit: Edit };
+
+/** A change asked for and not yet answered, with the number it was asked under. */
+export type OnItsWay = Wanted & { readonly id: number };
 
 /**
  * A Credential option whose value is asked for: a Network's, by its Network and path, or
@@ -2523,8 +2549,11 @@ export type Prompt = Asked & {
  * - `Read`, `ReadFailed`: a Network's Configuration was read, or could not be.
  * - `UiRead`: the options under `ui` were read, or followed.
  * - `UiForgotten`: the page signed out, so the shared `ui` options it held may no longer
- *   be the ones in force, and are read again once it signs in.
+ *   be the ones in force, and are read again once it signs in. Changes of them on their way are let go.
  * - `OwnerRead`, `OwnerForgotten`: the same, for the options under `store`, `uploads`, and `previews`.
+ * - `Asked`: the Owner asked for a change, which is on its way, and shows at once.
+ * - `Answered`: the Daemon answered a change asked for, however it came out, so it is no longer
+ *   on its way and what is in force shows.
  * - `Held`: the names of the Credentials the Vault holds.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
@@ -2544,6 +2573,8 @@ export type OptionsEvent =
   | { readonly _tag: "UiForgotten" }
   | { readonly _tag: "OwnerRead"; readonly owner: OwnerInForce }
   | { readonly _tag: "OwnerForgotten" }
+  | { readonly _tag: "Asked"; readonly change: Wanted }
+  | { readonly _tag: "Answered"; readonly id: number }
   | { readonly _tag: "Held"; readonly names: readonly string[] }
   | { readonly _tag: "Noticed"; readonly message: string | undefined }
   | { readonly _tag: "Editing"; readonly name: string | undefined }
@@ -2552,11 +2583,13 @@ export type OptionsEvent =
 
 /** The options view before anything was read. */
 export const initialOptions: Options = {
+  asked: 0,
   confirming: undefined,
   editing: undefined,
   held: undefined,
   networks: new Map(),
   notice: undefined,
+  onItsWay: [],
   owner: undefined,
   prompting: undefined,
   ui: undefined,
@@ -2630,7 +2663,11 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
     }
 
     case "UiForgotten": {
-      return { ...state, ui: undefined };
+      return {
+        ...state,
+        onItsWay: state.onItsWay.filter((way) => way._tag !== "Ui"),
+        ui: undefined,
+      };
     }
 
     case "OwnerRead": {
@@ -2638,7 +2675,23 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
     }
 
     case "OwnerForgotten": {
-      return { ...state, owner: undefined };
+      return {
+        ...state,
+        onItsWay: state.onItsWay.filter((way) => way._tag !== "Owner"),
+        owner: undefined,
+      };
+    }
+
+    case "Asked": {
+      return {
+        ...state,
+        asked: state.asked + 1,
+        onItsWay: [...state.onItsWay, { ...event.change, id: state.asked }],
+      };
+    }
+
+    case "Answered": {
+      return { ...state, onItsWay: state.onItsWay.filter((way) => way.id !== event.id) };
     }
 
     case "Held": {
@@ -2676,9 +2729,97 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
 };
 
 /**
+ * The shared options under `ui` as they show: those in force, each change of one on its way
+ * applied over them in the order asked, where unsetting one is its default. Nothing is
+ * applied while those in force are not known, since a default drawn then would read as the answer.
+ * @param state - The view.
+ * @returns The options as shown, with the sequence of those in force, or none while not known.
+ */
+export const uiShown = (state: Options): UiInForce | undefined => {
+  const { ui } = state;
+
+  if (ui === undefined) {
+    return undefined;
+  }
+
+  let options: UiOptions = ui.options;
+
+  for (const way of state.onItsWay) {
+    if (way._tag === "Ui") {
+      const value =
+        way.value === undefined ? uiDefaults[way.option] : uiValueKept(way.option, way.value);
+
+      options = value === undefined ? options : { ...options, [way.option]: value };
+    }
+  }
+
+  return { options, sequence: ui.sequence };
+};
+
+/**
+ * The options under `store`, `uploads`, and `previews` as they show, as `uiShown` shows
+ * those under `ui`, where unsetting one is its default, or none when it has none.
+ * @param state - The view.
+ * @returns The options as shown, with the sequence of those in force, or none while not known.
+ */
+export const ownerShown = (state: Options): OwnerInForce | undefined => {
+  const { owner } = state;
+
+  if (owner === undefined) {
+    return undefined;
+  }
+
+  const options: OwnerOptions = { ...owner.options };
+
+  for (const way of state.onItsWay) {
+    if (way._tag === "Owner") {
+      Object.assign(options, {
+        [way.option]:
+          way.value === undefined
+            ? ownerDefaults[way.option]
+            : ownerValueKept(way.option, way.value),
+      });
+    }
+  }
+
+  return { options, sequence: owner.sequence };
+};
+
+/**
+ * A Network's Configuration as it shows: the one read, each edit of it on its way applied
+ * over it in the order asked, an edit that cannot be made left out. Nothing is applied until
+ * it is read.
+ * @param state - The view.
+ * @param network - The Network.
+ * @returns The Configuration as shown, or none while it is not read.
+ */
+export const configurationShown = (
+  state: Options,
+  network: NetworkId
+): Configuration | undefined => {
+  const reading = state.networks.get(network);
+
+  if (reading?._tag !== "Read") {
+    return undefined;
+  }
+
+  let shown = reading.configuration;
+
+  for (const way of state.onItsWay) {
+    if (way._tag === "Network" && way.network === network) {
+      const after = apply(network, shown, way.edit);
+
+      shown = after._tag === "Invalid" ? shown : after.value;
+    }
+  }
+
+  return shown;
+};
+
+/**
  * The options the view lists, that the filter matches: every option under `store` and
  * `uploads`, the Daemon's own, then every option of every Network read, then every option
- * under `ui`, as it takes effect on this device.
+ * under `ui`, as it takes effect on this device, each as it shows with the changes on its way.
  * @param state - The view.
  * @param filter - What the Owner typed to filter them.
  * @param device - This device's overrides of the options under `ui`.
@@ -2693,9 +2834,11 @@ export const listed = (
   missing: ReadonlySet<FontFamily> = noneMissing
 ): readonly Option[] =>
   [
-    ...ownerOptionsOf(state.owner, state.held),
-    ...[...state.networks].flatMap(([network, reading]) =>
-      reading._tag === "Read" ? optionsOf(network, reading.configuration, state.held) : []
-    ),
-    ...uiOptionsOf(state.ui, device, missing),
+    ...ownerOptionsOf(ownerShown(state), state.held),
+    ...[...state.networks.keys()].flatMap((network) => {
+      const configuration = configurationShown(state, network);
+
+      return configuration === undefined ? [] : optionsOf(network, configuration, state.held);
+    }),
+    ...uiOptionsOf(uiShown(state), device, missing),
   ].filter((option) => matches(filter, option.name));

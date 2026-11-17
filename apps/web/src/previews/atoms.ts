@@ -10,6 +10,7 @@
 import { PreviewsByTimeline } from "@iirc/api";
 import type { TimelineId, TimelineItem } from "@iirc/api";
 import type { Intent } from "@iirc/frontend/commands";
+import { uiShown } from "@iirc/frontend/options";
 import {
   asksAnywhere,
   asksWanted,
@@ -44,8 +45,8 @@ export const previewsOpened = Atom.make<ReadonlySet<string>>(new Set<string>()).
   Atom.keepAlive
 );
 
-/** `ui.previews` and each Timeline's own choice over it, as the Daemon acts on them, once read. */
-export const previewsModes = Atom.make((get) => previewsModesOf(get(optionsState).ui));
+/** `ui.previews` and each Timeline's own choice over it, as they show with the changes on their way, once read. */
+export const previewsModes = Atom.make((get) => previewsModesOf(uiShown(get(optionsState))));
 
 /** Whether Previews are followed now: while any Timeline's mode asks. */
 const previewsAsked = Atom.make((get) => asksAnywhere(get(previewsModes)));
