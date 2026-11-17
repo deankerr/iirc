@@ -360,6 +360,11 @@ export interface Timelines {
   readonly follow: Follow;
   /** `GET /api/networks`, with the stream's place when it was read. */
   readonly entries: StatusLoad;
+  /**
+   * Whether the Network list was ever read, apart from `entries`, which is not `fresh` again
+   * each time the list is to be read once more, while what it held is still known.
+   */
+  readonly listed: boolean;
   readonly networks: ReadonlyMap<NetworkId, NetworkView>;
   /** Windows by the id of the Timeline they show. */
   readonly windows: ReadonlyMap<TimelineId, Window>;
@@ -665,6 +670,7 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   follow: { _tag: "Waiting", version: undefined },
   kept,
   layout: single(emptyView),
+  listed: false,
   located: undefined,
   merged: new Map(),
   navigation: 0,
@@ -2027,7 +2033,11 @@ const networksRead = (state: Timelines, entries: readonly NetworkEntry[]): Timel
     }
   }
 
-  return { ...read, entries: { ...state.entries, attempt: 0, fresh: true, reading: false } };
+  return {
+    ...read,
+    entries: { ...state.entries, attempt: 0, fresh: true, reading: false },
+    listed: true,
+  };
 };
 
 /**
@@ -4079,8 +4089,11 @@ export interface SidebarNetwork {
    * the sidebar leaves out and the palette still lists.
    */
   readonly closed: readonly Timeline[];
-  /** Its Timelines are not all read yet. */
-  readonly reading: boolean;
+  /**
+   * Whether its Timelines are known: read, or held from an earlier read while they are read
+   * again. Until then, having none says nothing.
+   */
+  readonly listed: boolean;
   /** It was removed with its Timelines kept, so they are only read. */
   readonly removed: boolean;
 }
@@ -4105,8 +4118,8 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] => {
         away: network.away,
         closed: all.filter(hidden),
         connection: network.connection,
+        listed: network.list.fresh || network.timelines.size > 0,
         network: network.network,
-        reading: !network.list.fresh,
         removed: isRemoved(network),
         running: network.running,
         timelines: all.filter((timeline) => !hidden(timeline)),
@@ -4117,6 +4130,13 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] => {
         Number(left.removed) - Number(right.removed) || byCodeUnits(left.network, right.network)
     );
 };
+
+/**
+ * Whether the Network list was ever read, so having no Network says none is configured.
+ * @param state - The state.
+ * @returns Whether it was.
+ */
+export const networksListed = (state: Timelines): boolean => state.listed;
 
 /**
  * How a Network stands, for removing it: `Live`, configured; `Kept`, removed with its

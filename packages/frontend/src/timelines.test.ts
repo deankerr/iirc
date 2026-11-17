@@ -32,6 +32,7 @@ import {
   initialTimelines,
   keptLayout,
   KeptLayoutSchema,
+  networksListed,
   layoutKept,
   layoutKeptText,
   longestKept,
@@ -2065,6 +2066,33 @@ describe("the Timelines' state", () => {
       reads: ["Networks", "List", "Status", "Latest"],
       shown: "Reading",
       timelines: [],
+    });
+  });
+
+  it("says the Network list was read once, through its reads again, and a Network's Timelines not known until read", () => {
+    const unread = initialTimelines;
+
+    let state = reduceTimelines(unread, {
+      _tag: "ReadStarted",
+      read: { _tag: "Networks", attempt: 0 },
+    });
+
+    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("libera") });
+    const read = state;
+
+    state = reduceTimelines(state, {
+      _tag: "Reset",
+      reset: { through: sequenceOf(9), version: 1 },
+    });
+
+    expect({
+      read: [networksListed(read), sidebar(read).map((network) => network.listed)],
+      reset: [networksListed(state), wanted(state).some((one) => one._tag === "Networks")],
+      unread: networksListed(unread),
+    }).toStrictEqual({
+      read: [true, [false]],
+      reset: [true, true],
+      unread: false,
     });
   });
 

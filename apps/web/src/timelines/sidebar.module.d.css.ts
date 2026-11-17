@@ -30,6 +30,7 @@ declare const styles: {
   readonly network: string;
   readonly offline: string;
   readonly pane: string;
+  readonly reading: string;
   readonly popover: string;
   readonly scroll: string;
   readonly section: string;
