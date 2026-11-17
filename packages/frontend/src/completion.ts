@@ -13,6 +13,7 @@
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
 import type { FontShown } from "@iirc/api/ui";
+import { themeCommandWords } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
 import { commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
@@ -478,7 +479,9 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
       );
 
       // `import` and `remove` are verbs, not a theme to draw: neither is listed nor previewed.
-      return flags === undefined || /^(?:import|remove)(?:\s|$)/iu.test(after.slice(given.length))
+      const verb = /^\S*/u.exec(after.slice(given.length))?.[0].toLowerCase() ?? "";
+
+      return flags === undefined || themeCommandWords.some((word) => word === verb)
         ? undefined
         : { start: head[0].length + given.length, whole: { _tag: "Themes", option: flags.option } };
     }
@@ -631,7 +634,8 @@ const wholeCandidates = (whole: Whole, typed: string, sources: Sources): readonl
     }
   };
 
-  const go = goTexts(sources);
+  // Only Timelines are written by name, so only their list folds every name.
+  const go = whole._tag === "Timelines" ? goTexts(sources) : undefined;
 
   return rankedEntries(query, entries()).flatMap((entry) => candidateOfEntry(entry, go) ?? []);
 };
