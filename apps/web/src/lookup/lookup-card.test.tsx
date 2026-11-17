@@ -652,7 +652,7 @@ describe("the Lookup card", () => {
       looks: daemon.looks.map((one) => one.lookup),
     }).toStrictEqual({
       closed: true,
-      items: ["Query peer", "Whois peer", "Mention peer"],
+      items: ["Query peer", "Whois peer", "Mention peer", "Ignore peer"],
       label: "What to do with peer",
       looks: [{ _tag: "Whois", nick: "peer" }],
     });

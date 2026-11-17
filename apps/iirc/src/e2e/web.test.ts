@@ -1698,7 +1698,7 @@ describe("the web frontend on iirc daemon --web", () => {
           violations,
         }).toStrictEqual({
           completed: "peer: ",
-          menu: { focused: true, height: true, items: 3 },
+          menu: { focused: true, height: true, items: 4 },
           problems: [],
           stale: [[], [], []],
           symbol: "@peer",
@@ -5542,7 +5542,9 @@ describe("the web frontend on iirc daemon --web", () => {
         const quotation = await goes.textContent();
 
         const shown = {
-          plain: await plainRow.getByRole("button").count(),
+          plain: await plainRow
+            .getByRole("button", { name: "Go to the message this answers" })
+            .count(),
           plainText: plainWords?.replace(/^\S+ /u, ""),
           quoted: quotation?.replaceAll(/[\u2066-\u2069]/gu, ""),
         };
@@ -5677,10 +5679,10 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           unsaid,
         }).toStrictEqual({
-          account: "account bobbyquerywhoismention",
-          loggedOut: "logged outquerywhoismention",
+          account: "account bobbyquerywhoismentionignore",
+          loggedOut: "logged outquerywhoismentionignore",
           problems: [],
-          unsaid: "querywhoismention",
+          unsaid: "querywhoismentionignore",
         });
       } finally {
         peer.close();
@@ -5848,6 +5850,119 @@ describe("the web frontend on iirc daemon --web", () => {
         expect(msgid).toBeDefined();
       } finally {
         asker.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "opens a menu on a nick in a Timeline's line, by a press and by a tap on a phone, offering an operator's entries",
+    { timeout: 120_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "nick-menu"),
+        "#iirc-nick-menu"
+      );
+
+      const said = "who has the keys";
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { exact: true, name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+
+        // The peer, who made the Channel, makes Self an operator, then says something.
+        peer.send(`MODE ${channel} +o iirc`);
+        peer.send(`PRIVMSG ${channel} :${said}`);
+
+        const saidRow = log.locator("[data-index]", { hasText: said });
+
+        await saidRow.waitFor();
+
+        // Self's operator rank, as the Client knows it, shows in the line that gave it.
+        await log.getByText("set +o iirc", { exact: false }).waitFor();
+        await screenshot(page, "57-before-line-desktop.png");
+
+        // A press on the sender's nick opens the menu on it, with an operator's entries once
+        // the peer is read to be in the Channel.
+        const nick = saidRow.getByRole("button", { exact: true, name: "peer" });
+
+        await nick.click();
+        await page.getByRole("menuitem", { name: "Kick peer" }).waitFor();
+        await placed(page);
+
+        const offered = await page
+          .getByRole("menuitem")
+          .evaluateAll((items) => items.map((item) => item.getAttribute("aria-label")));
+
+        await screenshot(page, "57-after-menu-desktop.png");
+        await page.getByRole("menuitem", { exact: true, name: "Voice peer" }).click();
+        await log.getByText("set +v peer", { exact: false }).waitFor();
+
+        const touch = await browser.newContext({
+          hasTouch: true,
+          isMobile: true,
+          viewport: { height: 844, width: 390 },
+        });
+
+        const phone = await touch.newPage();
+
+        await phone.goto(base);
+        await phone.getByLabel("Key").fill(key);
+        await phone.getByRole("button", { name: "Sign in" }).click();
+        await phone
+          .getByRole("button", { name: /^Networks/u })
+          .first()
+          .tap();
+        await phone.getByRole("row", { exact: true, name: channel }).tap();
+
+        const onPhone = phone.getByRole("log", { name: channel });
+
+        const onPhoneRow = onPhone.locator("[data-index]", { hasText: said });
+
+        await onPhoneRow.waitFor();
+        await screenshot(phone, "57-before-line-phone.png");
+
+        // A tap on the nick opens the same menu, each entry a finger's size.
+        await onPhoneRow.getByRole("button", { exact: true, name: "peer" }).tap();
+        await phone.getByRole("menuitem", { name: "Kick peer" }).waitFor();
+        await placed(phone);
+
+        const tapped = await phone.getByRole("menuitem").count();
+
+        await screenshot(phone, "57-after-menu-phone.png");
+
+        expect({
+          offered,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          tapped,
+        }).toStrictEqual({
+          offered: [
+            "Query peer",
+            "Whois peer",
+            "Mention peer",
+            "Ignore peer",
+            "Ban peer",
+            "Op peer",
+            "Deop peer",
+            "Voice peer",
+            "Devoice peer",
+            "Kick peer",
+          ],
+          problems: [],
+          tapped: 10,
+        });
+      } finally {
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

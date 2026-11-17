@@ -14,6 +14,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { nickVectors } from "../../../fixtures/nicks/vectors.ts";
+import { mayOperate } from "./channel.ts";
 import { commandNamed, interpret, unmet } from "./commands.ts";
 import type { CommandContext } from "./commands.ts";
 import { contextOf } from "./composer.ts";
@@ -26,7 +27,6 @@ import {
   listedChannels,
   listLookOf,
   lookOf,
-  mayChangeLists,
   nickRulesOf,
   parseLookupNick,
   reduceLookups,
@@ -946,11 +946,11 @@ describe("a card of a Channel's list", () => {
       owner: [true, true],
     });
     expect([
-      mayChangeLists(held(["o", "v"])),
-      mayChangeLists({ ...held(["h"]), ranks: [...head.ranks, { mode: "h", symbol: "%" }] }),
-      mayChangeLists(withHeld({ _tag: "Partial", at: 1, atLeast: ["o"], from: "ircd" })),
-      mayChangeLists(withHeld({ _tag: "Stale", since: 1, was: ["o"] })),
-      mayChangeLists(head),
+      mayOperate(held(["o", "v"])),
+      mayOperate({ ...held(["h"]), ranks: [...head.ranks, { mode: "h", symbol: "%" }] }),
+      mayOperate(withHeld({ _tag: "Partial", at: 1, atLeast: ["o"], from: "ircd" })),
+      mayOperate(withHeld({ _tag: "Stale", since: 1, was: ["o"] })),
+      mayOperate(head),
     ]).toStrictEqual([true, false, true, false, false]);
   });
 

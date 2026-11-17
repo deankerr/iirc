@@ -1952,9 +1952,10 @@ describe("replying to a Message", () => {
     await aliceSaid(true);
 
     await act(async () => {
-      // Right-clicked on its text, as the context menu reaches the row from within it.
-      rowSaying("said 1")
-        .querySelector("bdi")
+      // Right-clicked on its text, as the context menu reaches the row from within it. The
+      // nick before it opens the menu on the nick instead.
+      [...rowSaying("said 1").querySelectorAll("bdi")]
+        .find((one) => one.textContent.includes("said 1"))
         ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });

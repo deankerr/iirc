@@ -19,6 +19,7 @@ import { draftsCarried } from "./composer/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
 import { uploadsSignedOut } from "./composer/uploading.ts";
 import { lookupSync } from "./lookup/atoms.ts";
+import { nickMenuSync } from "./nick/atoms.ts";
 import { optionsSync } from "./options/atoms.ts";
 import { ownerSync } from "./options/owner.ts";
 import { uiSync } from "./options/ui.ts";
@@ -63,6 +64,9 @@ registry.mount(previewsSync);
 
 // What was typed under a draft goes to its Timeline once the draft shows it.
 registry.mount(draftsCarried);
+
+// Whether the User of the menu open on a nick is in its Channel.
+registry.mount(nickMenuSync);
 
 // Each Pane's Lookup card, let go of with its Pane, and every one on signing out.
 registry.mount(lookupSync);

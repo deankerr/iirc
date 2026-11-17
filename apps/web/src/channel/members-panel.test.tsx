@@ -77,11 +77,13 @@ const settled = async (holds: () => boolean) => {
  * its members `op` and `peer`, the page drawn.
  * @param setAt - When the topic was set, if known.
  * @param people - Its members, `op` and `peer` unless given.
+ * @param held - The prefix modes Self holds there, or none while they are not read.
  * @returns The fake, the registry, and the page.
  */
 const signedIn = async (
   setAt: number | null = null,
-  people: readonly (typeof Member.Encoded)[] = [member("op", ["o"]), member("peer")]
+  people: readonly (typeof Member.Encoded)[] = [member("op", ["o"]), member("peer")],
+  held: readonly string[] | null = null
 ) => {
   const fake = fakeDaemon();
 
@@ -94,13 +96,14 @@ const signedIn = async (
     header: {
       chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
       chantypes: "#&",
-      held: null,
+      held: held === null ? null : { _tag: "Known", at: 1, from: "ircd", value: [...held] },
       lists: { bans: "b", exceptions: "e", invitations: "I" },
       members: 2,
       modes: { _tag: "Known", at: 1, from: "ircd", value: [{ mode: "n", param: null }] },
       name: "#iirc",
       network: "libera",
       ranks: [
+        { mode: "q", symbol: "~" },
         { mode: "o", symbol: "@" },
         { mode: "v", symbol: "+" },
       ],
@@ -454,9 +457,82 @@ describe("a Pane's members", () => {
       peer: await menuOf("peer"),
       quiet: await menuOf("quiet"),
     }).toStrictEqual({
-      op: "account opperquerywhoismention",
-      peer: "logged outquerywhoismention",
-      quiet: "querywhoismention",
+      op: "account opperquerywhoismentionignore",
+      peer: "logged outquerywhoismentionignore",
+      quiet: "querywhoismentionignore",
+    });
+  });
+
+  it("offers no kick, deop, or devoice of a member who outranks Self, and does of one who does not", async () => {
+    const { registry } = await signedIn(
+      null,
+      [member("founder", ["q"]), member("op", ["o"]), member("peer")],
+      ["o"]
+    );
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 400);
+    await press(toggle());
+    await settled(() => members()?.querySelector('[data-key="peer"]') !== null);
+
+    const offered = async (nick: string) => {
+      const row = members()?.querySelector<HTMLElement>(`[data-key="${nick}"]`);
+
+      await act(async () => {
+        row?.focus();
+        await Promise.resolve();
+      });
+      await key(row, "Enter");
+      await settled(() => document.querySelector('[role="menu"]') !== null);
+
+      const labels = [...document.querySelectorAll('[role="menuitem"]')].map((item) =>
+        item.getAttribute("aria-label")
+      );
+
+      await key(document.querySelector('[role="menu"]'), "Escape");
+      await settled(() => document.querySelector('[role="menu"]') === null);
+
+      return labels;
+    };
+
+    expect({
+      founder: await offered("founder"),
+      op: await offered("op"),
+      peer: await offered("peer"),
+    }).toStrictEqual({
+      founder: [
+        "Query founder",
+        "Whois founder",
+        "Mention founder",
+        "Ignore founder",
+        "Ban founder",
+        "Op founder",
+        "Voice founder",
+      ],
+      op: [
+        "Query op",
+        "Whois op",
+        "Mention op",
+        "Ignore op",
+        "Ban op",
+        "Op op",
+        "Deop op",
+        "Voice op",
+        "Devoice op",
+        "Kick op",
+      ],
+      peer: [
+        "Query peer",
+        "Whois peer",
+        "Mention peer",
+        "Ignore peer",
+        "Ban peer",
+        "Op peer",
+        "Deop peer",
+        "Voice peer",
+        "Devoice peer",
+        "Kick peer",
+      ],
     });
   });
 });

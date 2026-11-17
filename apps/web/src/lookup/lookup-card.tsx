@@ -1,7 +1,7 @@
 /**
  * A Pane's Lookup card: a transient panel under its header, over its Timeline, showing what
  * `/whois`, `/whowas`, or a Channel's list found, compact as the header is. Each User's
- * nick in their colour, `user@host`, realname, server, idle and signed on, account, away,
+ * nick in their colour, which opens the menu on it, `user@host`, realname, server, idle and signed on, account, away,
  * the Channels with their prefixes, each opening its Timeline or starting `/join`, and the
  * numerics read for nothing, dimly. Each mask of a list with who set it and when, and,
  * while Self may, a button that removes it. Every text a Network sent is a text node in its
@@ -11,11 +11,14 @@
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import type { TimelineId } from "@iirc/api";
 import type { ChannelShown, MaskShown, ProfileShown, SubjectShown } from "@iirc/frontend/lookup";
 import type { KeyboardEvent } from "react";
 import { useId } from "react";
 
 import { perform } from "../composer/atoms.ts";
+import { NickButton } from "../nick/nick-menu.tsx";
+import { paneTimeline } from "../timelines/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import { dismissCard, paneCard, removeMask } from "./atoms.ts";
@@ -76,11 +79,17 @@ const Field = ({ label, value }: { readonly label: string; readonly value: strin
   );
 
 /**
- * One User, as the reply described them.
- * @param props - The User.
+ * One User, as the reply described them, their nick opening the menu on it.
+ * @param props - The User, and the Timeline the card shows over, if known.
  * @returns The profile.
  */
-const Profile = ({ profile }: { readonly profile: ProfileShown }) => {
+const Profile = ({
+  profile,
+  timeline,
+}: {
+  readonly profile: ProfileShown;
+  readonly timeline: TimelineId | undefined;
+}) => {
   const flags = [
     profile.operator ? "operator" : undefined,
     profile.secure ? "secure connection" : undefined,
@@ -91,7 +100,13 @@ const Profile = ({ profile }: { readonly profile: ProfileShown }) => {
   return (
     <div className={styles.profile}>
       <p className={styles.line}>
-        <Nick colour={profile.colour} nick={profile.nick} />
+        {timeline === undefined ? (
+          <Nick colour={profile.colour} nick={profile.nick} />
+        ) : (
+          <NickButton nick={profile.nick} timeline={timeline}>
+            <Nick colour={profile.colour} nick={profile.nick} />
+          </NickButton>
+        )}
         {profile.mask === undefined ? null : <bdi className={styles.dim}>{profile.mask}</bdi>}
         {profile.realname === undefined ? null : <bdi>{profile.realname}</bdi>}
       </p>
@@ -197,6 +212,8 @@ const kindWords = {
  */
 export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(paneCard(pane));
+  const opened = useAtomValue(paneTimeline(pane));
+  const timeline = opened._tag === "Closed" ? undefined : opened.timeline;
   const dismiss = useAtomSet(dismissCard);
   const run = useAtomSet(perform);
   const headingId = useId();
@@ -246,7 +263,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
             {body.profiles.map((profile, index) => (
               // A User's place in the reply tells two apart, and it never moves.
               // oxlint-disable-next-line react/no-array-index-key
-              <Profile key={index} profile={profile} />
+              <Profile key={index} profile={profile} timeline={timeline} />
             ))}
           </>
         ) : null}
