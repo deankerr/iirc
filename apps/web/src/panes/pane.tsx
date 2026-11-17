@@ -17,7 +17,7 @@ import { useRef } from "react";
 import { MembersPanel } from "../channel/members-panel.tsx";
 import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { OptionsView } from "../options/options-view.tsx";
-import { UploadsView } from "../options/uploads-list.tsx";
+import { UploadsView } from "../options/uploads-view.tsx";
 import { SearchView } from "../search/search-view.tsx";
 import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";

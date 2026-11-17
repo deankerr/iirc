@@ -1,5 +1,5 @@
 /**
- * The Uploads the options list, as the core folds them, apart from what reads and follows
+ * The Uploads their view lists, as the core folds them, apart from what reads and follows
  * them, so the one changes stream of the Timelines can learn where one was said without
  * depending on either. Saying a Message makes no Upload Change, so an Upload held whose
  * link a Message of ours in a change holds is read again, and the Daemon's answer folded in.

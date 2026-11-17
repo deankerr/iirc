@@ -60,7 +60,7 @@ import {
   uploadMissing,
 } from "./uploads.ts";
 
-import styles from "./uploads-list.module.css";
+import styles from "./uploads-view.module.css";
 
 /**
  * Where an Upload's bytes are read on the API's own origin, under the page's sign-in.

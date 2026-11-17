@@ -1,4 +1,4 @@
-// The class names in uploads-list.module.css, which CSS Modules exports.
+// The class names in uploads-view.module.css, which CSS Modules exports.
 declare const styles: {
   readonly about: string;
   readonly actions: string;
