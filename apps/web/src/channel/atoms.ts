@@ -1,8 +1,9 @@
 /**
  * Who is here, as atoms: each Pane's header and its Channel's members, derived from what
  * the core holds, and the reads it calls for. While the browser is signed in,
- * `channelSync` makes each read the core asks for: the head of each Channel a Pane shows,
- * or whose list a Lookup card is, and while the members show, their pages. A change that may have changed the
+ * `channelSync` makes each read the core asks for: the head of each Channel the Sidebar
+ * lists, a Pane shows, or whose list a Lookup card is, so a Channel opens with its head
+ * already read, and while the members show, their pages. A change that may have changed the
  * Channel, which the one changes stream folds in, has it read again, after a moment, each
  * later change superseding the read before.
  *
@@ -13,6 +14,7 @@ import {
   channelIn,
   channelsReads,
   headerOf,
+  heldChannels,
   initialChannels,
   openChannel,
   openChannels,
@@ -81,19 +83,20 @@ const membersRead = Atom.make((get) => {
 });
 
 /**
- * Every Channel whose head is followed: those the Panes show, and those whose lists the
- * Lookup cards are, which say whether Self may remove a mask, each once.
+ * Every Channel whose head is followed: those the Panes show, those the Sidebar lists, and
+ * those whose lists the Lookup cards are, which say whether Self may remove a mask, each
+ * once.
  * @param read - Reads an atom, from the registry or as a derived atom does.
  * @returns The Channels.
  */
 const followed = (read: <A>(atom: Atom.Atom<A>) => A): readonly OpenChannel[] => {
   const timelines = read(timelinesState);
-  const shown = openChannels(timelines);
+  const held = heldChannels(timelines);
 
   return [
-    ...shown,
+    ...held,
     ...listedChannels(read(lookupsState), timelines).filter(
-      (one) => !shown.some((open) => open.timeline === one.timeline)
+      (one) => !held.some((open) => open.timeline === one.timeline)
     ),
   ];
 };
@@ -110,12 +113,23 @@ const readsNow = (read: <A>(atom: Atom.Atom<A>) => A) =>
 /** The reads the core calls for now. */
 const wanted = Atom.make((get) => readsNow(get));
 
-/** The Channels followed, to keep, as their Timelines' ids. */
-const shownChannels = Atom.make((get) =>
-  followed(get)
-    .map((one) => one.timeline)
-    .join(" ")
-);
+/**
+ * The Channels followed, whose heads are kept, and those the Panes show, whose members are
+ * kept too, as their Timelines' ids.
+ * @param read - Reads an atom, from the registry or as a derived atom does.
+ * @returns Them.
+ */
+const keptNow = (read: <A>(atom: Atom.Atom<A>) => A) => ({
+  shown: openChannels(read(timelinesState)).map((one) => one.timeline),
+  timelines: followed(read).map((one) => one.timeline),
+});
+
+/** What is kept, as a string, so the stream of it changes only when what is kept does. */
+const kept = Atom.make((get) => {
+  const { shown, timelines } = keptNow(get);
+
+  return `${timelines.join(" ")}|${shown.join(" ")}`;
+});
 
 /** The errors a read gives up on: no sign-in, or nothing to read. */
 const final: ReadonlySet<string> = new Set([
@@ -258,16 +272,20 @@ export const channelSync = runtime
       // One fiber for each kind of read of each Channel.
       const fibers = yield* FiberMap.make<string>();
 
-      // A Channel no Pane shows any more is let go of, and a read of it in flight with it.
-      const keep = get.stream(shownChannels).pipe(
-        Stream.runForEach((shown) =>
+      // A Channel no longer followed is let go of, and its members once no Pane shows it,
+      // each with a read of it in flight.
+      const keep = get.stream(kept).pipe(
+        Stream.runForEach(() =>
           Effect.gen(function* () {
-            const timelines = followed((atom) => registry.get(atom)).map((one) => one.timeline);
+            const now = keptNow((atom) => registry.get(atom));
 
-            channelHappened(registry, { _tag: "Kept", timelines });
+            channelHappened(registry, { _tag: "Kept", ...now });
 
             for (const key of [...fibers].map(([one]) => one)) {
-              if (!shown.includes(key.slice(key.indexOf(" ") + 1))) {
+              const [kind = "", timeline = ""] = key.split(" ");
+              const still = kind === "Head" ? now.timelines : now.shown;
+
+              if (!still.some((one) => one === timeline)) {
                 yield* FiberMap.remove(fibers, key);
               }
             }

@@ -189,12 +189,13 @@ const inChannel = async (
 
   const registry = registryFor(fake.fetch, more.waits);
 
+  // Held from the first, since the head is read as soon as the Sidebar lists it.
+  fake.daemon.holdChannels = more.holdHead ?? false;
   await run(registry, check, undefined);
   registry.mount(sync);
   registry.mount(channelSync);
   registry.mount(completer);
   await eventually(() => fake.daemon.followers.length === 1);
-  fake.daemon.holdChannels = more.holdHead ?? false;
   registry.set(open, timelineId(iirc));
   await until(registry, openTimeline, (shown) => shown._tag === "Shown");
 

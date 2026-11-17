@@ -20,6 +20,7 @@ import {
   channelReads,
   channelsReads,
   headerOf,
+  heldChannels,
   initialChannel,
   initialChannels,
   memberRow,
@@ -32,7 +33,14 @@ import {
   rosterOf,
   touches,
 } from "./channel.ts";
-import type { Channel, ChannelEvent, ChannelRead, ChannelsEvent, OpenChannel } from "./channel.ts";
+import type {
+  Channel,
+  ChannelEvent,
+  ChannelRead,
+  Channels,
+  ChannelsEvent,
+  OpenChannel,
+} from "./channel.ts";
 import { formatted } from "./render.ts";
 import { initialTimelines, reduceTimelines, wanted } from "./timelines.ts";
 import type { Timelines, TimelinesEvent } from "./timelines.ts";
@@ -1135,7 +1143,7 @@ describe("the Channels the Panes show", () => {
     ]);
   });
 
-  it("reads each Channel's head, keeps each apart, and lets go of one no Pane shows", () => {
+  it("reads each Channel's head, keeps each apart, and lets go of one no longer held", () => {
     const reads = channelsReads(initialChannels, [inIirc, inOther], new Set());
     const started = reads.map((read): ChannelsEvent => ({ _tag: "ReadStarted", at: 0, read }));
     const [forIirc, forOther] = reads;
@@ -1148,7 +1156,11 @@ describe("the Channels the Panes show", () => {
       changed({ items: [joined(11, other)] }),
     ]);
 
-    const kept = reduceChannels(answered, { _tag: "Kept", timelines: [timelineId(iirc)] });
+    const kept = reduceChannels(answered, {
+      _tag: "Kept",
+      shown: [timelineId(iirc)],
+      timelines: [timelineId(iirc)],
+    });
 
     expect({
       again: channelsReads(answered, [inIirc, inOther], new Set()).map((read) => [
@@ -1164,5 +1176,36 @@ describe("the Channels the Panes show", () => {
       kept: [iirc],
       read: "#iirc",
     });
+  });
+
+  it("holds the head of each Channel the Sidebar lists, those the Panes show first", () => {
+    expect({
+      none: heldChannels(world(undefined)).map((one) => one.timeline),
+      shown: heldChannels(world(other)).map((one) => one.timeline),
+    }).toStrictEqual({ none: [iirc, other], shown: [other, iirc] });
+  });
+
+  it("keeps the head of a Channel no Pane shows, and lets go of its members", () => {
+    const { state } = settled();
+    const held: Channels = new Map([[timelineId(iirc), state]]);
+
+    const event = (shown: readonly string[]): ChannelsEvent => ({
+      _tag: "Kept",
+      shown: shown.map((one) => timelineId(one)),
+      timelines: [timelineId(iirc)],
+    });
+
+    const hidden = reduceChannels(held, event([]));
+
+    expect({
+      head: channelIn(hidden, timelineId(iirc)).head.header?.name,
+      members: channelIn(hidden, timelineId(iirc)).roster.members.length,
+      // Shown again, its members are read afresh, and its head only if a change came.
+      reads: channelsReads(hidden, [inIirc], new Set([timelineId(iirc)])).map((read) => [
+        read._tag,
+        read.wait,
+      ]),
+      same: reduceChannels(held, event([iirc])) === held,
+    }).toStrictEqual({ head: "#iirc", members: 0, reads: [["Members", false]], same: true });
   });
 });
