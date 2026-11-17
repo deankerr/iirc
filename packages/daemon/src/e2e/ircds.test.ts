@@ -5,6 +5,7 @@
  */
 import { CallerIntent, CredentialPathName, NetworkId } from "@iirc/api";
 import type { ActionRequest, Happened, LookupRequest, Member, TimelineItem } from "@iirc/api";
+import { SendableMessageId } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
@@ -38,6 +39,35 @@ const sequences = (happened: readonly Happened[]) => happened.map((one) => one.s
 
 const sent = (item: TimelineItem, sender: string, text: string) =>
   item.content._tag === "Message" && item.content.sender === sender && item.content.text === text;
+
+// A Timeline's Messages, as the Owner reads them: what each says, what it answers by id,
+// and what that is, resolved in the same Timeline.
+const reading = (api: Api, name: string) =>
+  Effect.gen(function* () {
+    const listed = yield* api.timelines.list({ params: { network }, query: {} });
+    const timeline = listed.timelines.find((one) => one.name === name);
+
+    if (timeline === undefined) {
+      return yield* Effect.die(`${name} was not listed`);
+    }
+
+    const window = yield* api.timelines.window({ params: { timeline: timeline.id }, query: {} });
+
+    return window.items.flatMap((item) =>
+      item.content._tag === "Message"
+        ? [
+            {
+              answered: item.answered === null ? null : item.answered.text,
+              answers: item.content.answers,
+              id: item.content.id._tag === "Known" ? item.content.id.value : undefined,
+              level: item.level,
+              sender: item.content.sender,
+              text: item.content.text,
+            },
+          ]
+        : []
+    );
+  });
 
 // Registering an account logs a Peer's Connection in to it, named as its nick is.
 const register = (peer: Peer) =>
@@ -416,6 +446,62 @@ describe("ngircd, on the floor", () => {
         version: true,
       },
       wasSaid: true,
+    });
+  }, 60_000);
+
+  it("says a Message that answers another without a tag, where the Ircd offers no tags", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        const peer = yield* Effect.promise(
+          async () => await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort })
+        );
+
+        peer.send(`JOIN ${channel}`);
+        yield* api.networks.configure({ params: { network }, payload: floor(), query: {} });
+        const known = yield* joined(api);
+
+        const saying = yield* api.networks.say({
+          params: { network },
+          payload: {
+            answers: SendableMessageId.make("not-a-msgid-here"),
+            kind: "Privmsg",
+            target: channel,
+            text: "an answer",
+          },
+        });
+
+        const heard = yield* Effect.promise(
+          async () =>
+            await peer.waitFor(
+              (line) => line.command === "PRIVMSG" && line.params[1] === "an answer",
+              "the Daemon's Message"
+            )
+        );
+
+        const messages = yield* reading(api, channel);
+
+        peer.close();
+        yield* daemon.stop;
+
+        return {
+          heardTags: [...heard.tags],
+          messages: messages.map(({ answers, text }) => [text, answers]),
+          said: saying._tag,
+          tags: known.session._tag === "Registered" ? known.session.tags : undefined,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      heardTags: [],
+      messages: [["an answer", null]],
+      said: "Said",
+      tags: false,
     });
   }, 60_000);
 
@@ -1191,6 +1277,101 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       afterLogin: { anon: null, iirc: "Unknown", late: "late", member: "member" },
       onJoining: { anon: null, iirc: "Unknown", late: null, member: "member" },
       whois: [["member", "member"]],
+    });
+  }, 120_000);
+
+  it("says a Message that answers another with a +reply tag the other User hears, and shows Self's reply as one", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
+            nicks: ["iirc"],
+          }),
+          query: {},
+        });
+        yield* joined(api);
+
+        const peer = yield* Effect.promise(
+          async () =>
+            await connectPeer({
+              caps: ["message-tags"],
+              host: ergo.host,
+              nick: "peer",
+              port: ergo.plainPort,
+            })
+        );
+
+        peer.send(`JOIN ${channel}`);
+        peer.send(`PRIVMSG ${channel} :a question`);
+
+        const asked = yield* eventually(reading(api, channel), (all) =>
+          all.some(({ id, text }) => text === "a question" && id !== undefined)
+        );
+
+        const question = asked.find(({ text }) => text === "a question")?.id;
+
+        if (question === undefined) {
+          return yield* Effect.die("the question has no id");
+        }
+
+        const saying = yield* api.networks.say({
+          params: { network },
+          payload: {
+            answers: SendableMessageId.make(question),
+            kind: "Privmsg",
+            target: channel,
+            text: "an answer",
+          },
+        });
+
+        const heard = yield* Effect.promise(
+          async () =>
+            await peer.waitFor(
+              (line) => line.command === "PRIVMSG" && line.params[1] === "an answer",
+              "the Daemon's reply"
+            )
+        );
+
+        const messages = yield* eventually(reading(api, channel), (all) =>
+          all.some(({ answers, sender }) => sender === "iirc" && answers !== null)
+        );
+
+        const known = yield* api.networks.known({ params: { network } });
+
+        peer.close();
+        yield* daemon.stop;
+
+        return {
+          heard: heard.tags.get("+reply") === question,
+          messages: messages.map(({ answered, answers, level, sender, text }) => [
+            sender,
+            text,
+            answers === question ? "the question" : answers,
+            answered,
+            level,
+          ]),
+          said: saying._tag,
+          tags: known.session._tag === "Registered" ? known.session.tags : undefined,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      heard: true,
+      messages: [
+        ["peer", "a question", null, null, "Message"],
+        ["iirc", "an answer", "the question", "a question", null],
+      ],
+      said: "Said",
+      tags: true,
     });
   }, 120_000);
 

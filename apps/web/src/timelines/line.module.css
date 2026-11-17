@@ -151,6 +151,81 @@
   white-space: nowrap;
 }
 
+/*
+ * A Message that can be answered: its menu's button stands at the row's end, over the top
+ * line, shown while the row is hovered or focused, or its menu is open, and always where the
+ * pointer is coarse, where the row keeps room for it.
+ */
+.menued {
+  position: relative;
+}
+
+.more {
+  display: inline-flex;
+  position: absolute;
+  top: 0;
+  right: var(--space-1);
+  align-items: center;
+  justify-content: center;
+  width: 3ch;
+  height: calc(var(--line-height) * 1em);
+  padding: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-muted);
+  font: inherit;
+  visibility: hidden;
+  user-select: none;
+}
+
+.menued:hover .more,
+.menued:focus-within .more,
+.menued[data-menu] .more {
+  visibility: visible;
+}
+
+.more[data-hovered],
+.more[data-focus-visible] {
+  color: var(--color-accent);
+}
+
+.more[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+/* A Message's menu, under its row, as dense as the Timeline. */
+.popover {
+  min-width: 12ch;
+  max-width: calc(100vw - 2 * var(--space-4));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-4) var(--color-shadow);
+  outline: none;
+}
+
+.menu {
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.action[data-hovered],
+.action[data-focused] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  color: var(--color-accent);
+}
+
 /* The Channel a Direct Message is about, dim, after its text. */
 .context {
   color: var(--color-muted);
@@ -333,6 +408,22 @@
     content: "";
     flex: 1;
     border-top: var(--border-width) solid var(--color-border);
+  }
+}
+
+@media (pointer: coarse) {
+  .more {
+    border-color: transparent;
+    width: var(--target-size);
+    visibility: visible;
+  }
+
+  .menued.menued {
+    padding-inline-end: calc(var(--target-size) + var(--space-1));
+  }
+
+  .action {
+    min-height: var(--target-size);
   }
 }
 

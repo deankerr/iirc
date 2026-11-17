@@ -53,7 +53,7 @@ const sidebar: readonly SidebarNetwork[] = [
   {
     away: { _tag: "Unknown" },
     closed: [],
-    connection: { _tag: "Connected", nick: "dean", since: 1 },
+    connection: { _tag: "Connected", nick: "dean", since: 1, tags: false },
     network: libera,
     reading: false,
     removed: false,
@@ -676,6 +676,7 @@ describe("a choice and the draft", () => {
       blank: "/me ",
       empty: "/me ",
       kept: {
+        answering: undefined,
         confirming: undefined,
         history: [],
         kept: "",

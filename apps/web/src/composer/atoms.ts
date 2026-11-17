@@ -25,6 +25,7 @@ import {
   takeOffer,
 } from "@iirc/frontend/composer";
 import type {
+  Answering,
   ComposerEvent,
   Composers,
   IntentId,
@@ -245,10 +246,12 @@ const ask = (intent: Say | Act, id: IntentId) =>
         );
     }
 
+    const said = { intent: id, kind: intent.kind, target: intent.target, text: intent.text };
+
     return yield* client.networks
       .say({
         params: { network: intent.network },
-        payload: { intent: id, kind: intent.kind, target: intent.target, text: intent.text },
+        payload: intent.answers === undefined ? said : { ...said, answers: intent.answers },
       })
       .pipe(
         Effect.map((answer): Outcome =>
@@ -821,6 +824,22 @@ export const recall = Atom.fnSync(
     happened(get.registry, { _tag: "Recalled", direction, timeline });
   }
 ).pipe(Atom.keepAlive);
+
+/**
+ * Answers a Message from its Timeline's draft, and focuses the composer, which shows what
+ * it answers.
+ */
+export const chooseReply = Atom.fnSync(
+  ({ answering, timeline }: { readonly timeline: Place; readonly answering: Answering }, get) => {
+    happened(get.registry, { _tag: "ReplyChosen", answering, timeline });
+    get.registry.set(composerFocus, get.registry.get(composerFocus) + 1);
+  }
+).pipe(Atom.keepAlive);
+
+/** Lets go of what a Timeline's draft answers, keeping its text. */
+export const dropReply = Atom.fnSync((timeline: Place, get) => {
+  happened(get.registry, { _tag: "ReplyDropped", timeline });
+}).pipe(Atom.keepAlive);
 
 /** Lets go of a Timeline's notice and confirmation. */
 export const dismiss = Atom.fnSync((timeline: Place, get) => {

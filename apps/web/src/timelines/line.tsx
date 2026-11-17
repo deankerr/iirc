@@ -5,19 +5,27 @@
  * one's words starting where a Message's text does. In a Timeline too narrow for those
  * columns, a row is one run of text that wraps under itself. Failed Connections in a row
  * say how many and when. A reply has what it answers above it, as a line that goes there
- * when pressed, and a Direct Message says which Channel it is about. A Message's Previews,
- * if it has any, are under its text. Every name and every text a Network sent sits in its
+ * when pressed, and a Direct Message says which Channel it is about. A Message that can be
+ * answered has a menu, opened by a button shown while its row is hovered or focused, and
+ * always where the pointer is coarse, or by the context menu, as a right-click, the menu
+ * key, or Shift+F10 opens it, which offers to reply. A Message's Previews, if it has any,
+ * are under its text. Every name and every text a Network sent sits in its
  * own isolate, as a text node.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
+import { replyOf } from "@iirc/frontend/composer";
+import type { Answering } from "@iirc/frontend/composer";
 import { lineOf, quotedOf } from "@iirc/frontend/render";
-import type { Delivery, Part } from "@iirc/frontend/render";
+import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
+import { useRef, useState } from "react";
+import type { MouseEvent, RefObject } from "react";
+import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
 
-import { perform } from "../composer/atoms.ts";
+import { chooseReply, perform } from "../composer/atoms.ts";
 import { dayShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
@@ -25,6 +33,8 @@ import { Button } from "../ui/button.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { dayIso, dayWritten } from "../ui/day.ts";
+import { Icon } from "../ui/icon.tsx";
+import { tagsOn } from "./atoms.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
@@ -287,6 +297,154 @@ const toneClass = {
 } as const;
 
 /**
+ * What can be done with a Message from its row: reply to it.
+ * @param props - The Message's sender, what answering it answers, its row, and what closes the menu.
+ * @returns The menu, placed under its row.
+ */
+const MessageMenu = ({
+  anchor,
+  answering,
+  nick,
+  onClose,
+  timeline,
+}: {
+  readonly anchor: RefObject<HTMLElement | null>;
+  readonly answering: Answering;
+  readonly nick: string;
+  readonly onClose: () => void;
+  readonly timeline: TimelineItem["timeline"];
+}) => {
+  const reply = useAtomSet(chooseReply);
+
+  return (
+    <Popover
+      className={styles.popover}
+      isOpen
+      offset={0}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
+        }
+      }}
+      placement="bottom end"
+      triggerRef={anchor}
+    >
+      <Menu
+        aria-label={`What to do with the message from ${nick}`}
+        autoFocus="first"
+        className={styles.menu}
+      >
+        <MenuItem
+          className={styles.action}
+          id="reply"
+          onAction={() => {
+            onClose();
+            reply({ answering, timeline });
+          }}
+          textValue="Reply"
+        >
+          Reply
+        </MenuItem>
+      </Menu>
+    </Popover>
+  );
+};
+
+/**
+ * A Message's line: what it answers, the time, the sender as said, its text, how it fares
+ * if it is ours, and its Previews, with its menu where it can be answered.
+ * @param props - Its item, and its line.
+ * @returns The line.
+ */
+const MessageLine = ({
+  item,
+  line,
+}: {
+  readonly item: TimelineItem;
+  readonly line: Extract<LineOfRow, { readonly _tag: "Message" }>;
+}) => {
+  const answering = replyOf(item, useAtomValue(tagsOn(item.network)));
+  const [menu, setMenu] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const delivery = line.delivered;
+  const nick = <Nick colour={line.colour} nick={line.nick} />;
+  let tone = item.level === "Highlight" ? styles.highlight : styles.message;
+
+  if (line.delivery !== undefined && failed.has(line.delivery)) {
+    tone = styles.unsent;
+  }
+
+  // The context menu, from a pointer or the keyboard, opens the Message's menu in place of
+  // the browser's, while there is something to offer.
+  const onContextMenu = (event: MouseEvent<HTMLElement>) => {
+    if (answering !== undefined) {
+      event.preventDefault();
+      setMenu(true);
+    }
+  };
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the menu's button is the row's control, and this only listens for the context menu.
+    <div
+      className={answering === undefined ? tone : `${tone} ${styles.menued}`}
+      data-menu={menu || undefined}
+      onContextMenu={onContextMenu}
+      ref={anchor}
+    >
+      <Answered item={item} />
+      <Time at={item.position.at} />{" "}
+      <span className={styles.sender}>
+        <span className={styles.said}>
+          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
+          {line.kind === "Notice" ? <>-{nick}-</> : null}
+          {line.kind === "Action" ? <>* {nick}</> : null}
+        </span>
+      </span>{" "}
+      <bdi className={styles.text}>
+        <Inlines inlines={line.text} />
+        {line.context === undefined ? null : (
+          <>
+            {" "}
+            <span className={styles.context}>
+              in <bdi>{line.context}</bdi>
+            </span>
+          </>
+        )}
+      </bdi>
+      {delivery === undefined ? null : (
+        <>
+          {" "}
+          <span className={styles.delivery}>{delivery}</span>
+        </>
+      )}
+      {answering === undefined ? null : (
+        <AriaButton
+          aria-label={`More for the message from ${line.nick}`}
+          className={styles.more}
+          onPress={() => {
+            setMenu(true);
+          }}
+        >
+          <Icon name="more" />
+        </AriaButton>
+      )}
+      <MessagePreviews item={item} />
+      {menu && answering !== undefined ? (
+        <MessageMenu
+          anchor={anchor}
+          answering={answering}
+          nick={line.nick}
+          onClose={() => {
+            setMenu(false);
+          }}
+          timeline={item.timeline}
+        />
+      ) : null}
+    </div>
+  );
+};
+
+/**
  * One row's line, in the columns every row shares: the time, the sender or a marker, and
  * the text, so an Activity's or a Session's words start where a Message's text does.
  * @param props - The row.
@@ -338,45 +496,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
     );
   }
 
-  const delivery = line.delivered;
-  const nick = <Nick colour={line.colour} nick={line.nick} />;
-  let tone = row.item.level === "Highlight" ? styles.highlight : styles.message;
-
-  if (line.delivery !== undefined && failed.has(line.delivery)) {
-    tone = styles.unsent;
-  }
-
-  return (
-    <div className={tone}>
-      <Answered item={row.item} />
-      {time}{" "}
-      <span className={styles.sender}>
-        <span className={styles.said}>
-          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
-          {line.kind === "Notice" ? <>-{nick}-</> : null}
-          {line.kind === "Action" ? <>* {nick}</> : null}
-        </span>
-      </span>{" "}
-      <bdi className={styles.text}>
-        <Inlines inlines={line.text} />
-        {line.context === undefined ? null : (
-          <>
-            {" "}
-            <span className={styles.context}>
-              in <bdi>{line.context}</bdi>
-            </span>
-          </>
-        )}
-      </bdi>
-      {delivery === undefined ? null : (
-        <>
-          {" "}
-          <span className={styles.delivery}>{delivery}</span>
-        </>
-      )}
-      <MessagePreviews item={row.item} />
-    </div>
-  );
+  return <MessageLine item={row.item} line={line} />;
 };
 
 /**

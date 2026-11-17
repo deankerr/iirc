@@ -10,7 +10,7 @@ import { CredentialName, SecretLine } from "@iirc/protocol/line";
 import { Result, Schema } from "effect";
 
 import { Login, Oper } from "../configuration.ts";
-import { FeatureName } from "../ids.ts";
+import { FeatureName, SendableMessageId } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
 import type { Action, Lookup, ModeRequest, SayKind } from "../input.ts";
 import type { News } from "../news.ts";
@@ -51,8 +51,17 @@ export type Change =
 export type Owner =
   /** `!! configure` with its changes, if any. Sends the Configuration whole. */
   | { readonly _tag: "Configure"; readonly changes: readonly Change[] }
-  /** `!! say #iirc :hello`, `!! notice …`, or `!! action …`. Intent ids are given in order. */
-  | { readonly _tag: "Say"; readonly kind: SayKind; readonly target: string; readonly text: string }
+  /**
+   * `!! say #iirc :hello`, `!! notice …`, or `!! action …`, with `answers=<id>` after the
+   * target to answer a Message. Intent ids are given in order.
+   */
+  | {
+      readonly _tag: "Say";
+      readonly answers: SendableMessageId | undefined;
+      readonly kind: SayKind;
+      readonly target: string;
+      readonly text: string;
+    }
   /**
    * An action: `!! topic #iirc :text`, `!! kick #iirc a,b :reason`, `!! mode #iirc +o=peer -l`,
    * `!! invite peer #iirc`, `!! nick new`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
@@ -407,6 +416,9 @@ const sayVerbs: Readonly<Record<SayKind, string>> = {
 const secondsPattern = /^\d{1,2}$/u;
 
 const decodeLogin = Schema.decodeUnknownResult(Login);
+
+const decodeAnswers = (id: string): Result.Result<SendableMessageId, string> =>
+  Result.mapError(Schema.decodeResult(SendableMessageId)(id), () => "not a sendable id");
 
 // What the Login schema accepts, so a value the Client would refuse never reaches a
 // `Configured`.
@@ -809,6 +821,42 @@ const readSimple = (text: string): Owner | undefined => {
       };
 };
 
+// `say|notice|action <target> [answers=<id>] :<text>`
+const readSay = (text: string): Result.Result<Owner, string> => {
+  const verb = text.slice(0, text.indexOf(" "));
+  const kind = sayKinds.get(verb);
+  const rest = text.slice(verb.length + 1);
+  const colon = rest.indexOf(" :");
+  const [target, answering, ...extra] = rest.slice(0, colon).split(" ");
+  const id = answering?.startsWith("answers=") === true ? answering.slice(8) : undefined;
+
+  if (
+    kind === undefined ||
+    colon <= 0 ||
+    target === undefined ||
+    extra.length > 0 ||
+    (answering !== undefined && id === undefined)
+  ) {
+    return Result.fail(
+      "not `configure …`, `say|notice|action <target> [answers=<id>] :<text>`, `read [<target>] <instant>`, or `retry`"
+    );
+  }
+
+  const answers = id === undefined ? Result.succeed(undefined) : decodeAnswers(id);
+
+  if (Result.isFailure(answers)) {
+    return Result.fail(answers.failure);
+  }
+
+  return Result.succeed({
+    _tag: "Say",
+    answers: answers.success,
+    kind,
+    target,
+    text: rest.slice(colon + 2),
+  });
+};
+
 const readOwner = (text: string): Result.Result<Owner, string> => {
   const space = text.indexOf(" ");
   const actionVerb = space === -1 ? text : text.slice(0, space);
@@ -852,23 +900,7 @@ const readOwner = (text: string): Result.Result<Owner, string> => {
       : Result.map(readChanges(tokens), (changes) => ({ _tag: "Configure", changes }));
   }
 
-  const verb = text.slice(0, text.indexOf(" "));
-  const kind = sayKinds.get(verb);
-  const rest = text.slice(verb.length + 1);
-  const colon = rest.indexOf(" :");
-
-  if (kind === undefined || colon <= 0 || rest.slice(0, colon).includes(" ")) {
-    return Result.fail(
-      "not `configure …`, `say|notice|action <target> :<text>`, `read [<target>] <instant>`, or `retry`"
-    );
-  }
-
-  return Result.succeed({
-    _tag: "Say",
-    kind,
-    target: rest.slice(0, colon),
-    text: rest.slice(colon + 2),
-  });
+  return readSay(text);
 };
 
 const writeOwner = (owner: Owner): string => {
@@ -878,7 +910,9 @@ const writeOwner = (owner: Owner): string => {
     }
 
     case "Say": {
-      return `${sayVerbs[owner.kind]} ${owner.target} :${owner.text}`;
+      const answering = owner.answers === undefined ? "" : ` answers=${owner.answers}`;
+
+      return `${sayVerbs[owner.kind]} ${owner.target}${answering} :${owner.text}`;
     }
 
     case "Retry": {

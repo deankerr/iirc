@@ -2,7 +2,7 @@ import { OutboundLine, SecretLine } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { NetworkConfiguration } from "./configuration.ts";
-import { ConnectionId, Instant, IntentId, TimerId } from "./ids.ts";
+import { ConnectionId, Instant, IntentId, SendableMessageId, TimerId } from "./ids.ts";
 import { Answers } from "./output.ts";
 
 /**
@@ -177,8 +177,18 @@ export const Input = Schema.TaggedUnion({
   Removed: { at: Instant, keep: Schema.Boolean },
   /** The Owner wants to try connecting now, cutting a wait short. */
   Retry: { at: Instant },
-  /** The Owner wants to say something to a Target. */
-  Say: { at: Instant, intent: IntentId, kind: SayKind, target: Schema.String, text: Schema.String },
+  /**
+   * The Owner wants to say something to a Target, answering the Message `answers` names
+   * when the Session carries tags.
+   */
+  Say: {
+    answers: Schema.optionalKey(SendableMessageId),
+    at: Instant,
+    intent: IntentId,
+    kind: SayKind,
+    target: Schema.String,
+    text: Schema.String,
+  },
   /** The Runtime has started. A Connection the Client believed open is over. */
   Started: { at: Instant },
   /**

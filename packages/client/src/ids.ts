@@ -41,3 +41,17 @@ export const MessageId = Schema.String.pipe(Schema.brand("MessageId"));
 
 /** The decoded form of {@link MessageId}. */
 export type MessageId = typeof MessageId.Type;
+
+/**
+ * The id of a Message to answer, as a Line we send carries it in a `+reply` tag: 1 to 256
+ * characters, none of them a space or a control character. The tag is escaped as it is
+ * written, so `;` and `\` in it are only text.
+ */
+export const SendableMessageId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[^\p{Cc} ]+$/u, { message: "must not hold a space or a control character" })
+).pipe(Schema.brand("MessageId"));
+
+/** The decoded form of {@link SendableMessageId}. */
+export type SendableMessageId = typeof SendableMessageId.Type;

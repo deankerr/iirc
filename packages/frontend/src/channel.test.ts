@@ -183,6 +183,7 @@ const world = (
         _tag: "Registered",
         ircd: "ircd.test",
         since: 1,
+        tags: false,
       }),
     },
   ];

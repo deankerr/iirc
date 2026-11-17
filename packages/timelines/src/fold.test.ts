@@ -273,6 +273,26 @@ describe("a reply", () => {
     ]);
   });
 
+  it("carries what Self's own reply answers, with no level, whether or not the Ircd echoes it", () => {
+    const { changes } = fold([
+      happened(1, [
+        message([channel("#iirc")], { answers: "m0", ours: { echo: false, intent: "i1" } }),
+        message([channel("#iirc")], { answers: "m0", ours: { echo: true, intent: "i2" } }),
+      ]),
+    ]);
+
+    expect(
+      ofTag(changes, "Added").map(({ content, level }) =>
+        content._tag === "Message"
+          ? [content.answers, content.ours?.delivery._tag, level]
+          : undefined
+      )
+    ).toStrictEqual([
+      ["m0", "Unconfirmed", undefined],
+      ["m0", "Pending", undefined],
+    ]);
+  });
+
   it("is a Highlight as every store adds it, when it is live and answers a Message Self said", () => {
     const [peers, ours, history, refused] = fold([
       happened(1, [

@@ -10,18 +10,35 @@ export interface Parsed {
   readonly source: string | undefined;
   readonly command: string;
   readonly params: readonly string[];
+  /** Its tags, as they were written: a tag with no value has an empty one. */
+  readonly tags: ReadonlyMap<string, string>;
   /** When the Peer read it, in milliseconds by the monotonic clock. */
   readonly at: number;
 }
 
 /**
- * Splits a Line's text into its parts. Tags are dropped.
+ * Splits a Line's text into its parts.
  * @param text - The Line, without its line ending.
  * @param at - When it arrived.
  * @returns Its parts.
  */
 const parseLine = (text: string, at: number): Parsed => {
-  let rest = text.startsWith("@") ? text.slice(text.indexOf(" ") + 1) : text;
+  const tagged = text.startsWith("@");
+  let rest = tagged ? text.slice(text.indexOf(" ") + 1) : text;
+
+  const tags = new Map(
+    tagged
+      ? text
+          .slice(1, text.indexOf(" "))
+          .split(";")
+          .map((tag): [string, string] => {
+            const equals = tag.indexOf("=");
+
+            return equals === -1 ? [tag, ""] : [tag.slice(0, equals), tag.slice(equals + 1)];
+          })
+      : []
+  );
+
   let source: string | undefined;
 
   if (rest.startsWith(":")) {
@@ -40,6 +57,7 @@ const parseLine = (text: string, at: number): Parsed => {
     command: command.toUpperCase(),
     params: trailing === -1 ? params : [...params, rest.slice(trailing + 2)],
     source,
+    tags,
   };
 };
 

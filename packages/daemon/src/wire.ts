@@ -1171,6 +1171,7 @@ const sessionKnowledge = (source: Knowledge["session"]): WireSessionKnowledge =>
         _tag: "Registered",
         ircd: source.ircd,
         since: source.since,
+        tags: source.tags,
       };
 
       return wire;

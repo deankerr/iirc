@@ -9,8 +9,7 @@ import { chantypesOf } from "@iirc/protocol/isupport";
 import type { Inspection } from "./client.ts";
 import { declinedOf } from "./configuration.ts";
 import type { KnownBefore } from "./feature.ts";
-import type { CapName } from "./ids.ts";
-import { ConnectionId } from "./ids.ts";
+import { CapName, ConnectionId } from "./ids.ts";
 import type {
   ChannelKnowledge,
   ChannelView,
@@ -86,6 +85,16 @@ const membersOf = (
 ): ReadonlyMap<string, MemberKnowledge> =>
   new Map([...(members ?? [])].map(([key, { nick, prefixes }]) => [key, { nick, prefixes }]));
 
+const messageTags = CapName.make("message-tags");
+
+/**
+ * Whether the Session carries tags, which is when `message-tags` is enabled now.
+ * @param state - The Client's state.
+ * @returns Whether a Line we send may carry a tag.
+ */
+export const carriesTags = (state: State): boolean =>
+  negotiated(openOf(state)?.caps).enabled.has(messageTags);
+
 const sessionKnowledge = (network: Network): SessionKnowledge => {
   switch (network._tag) {
     case "Unconfigured": {
@@ -106,7 +115,12 @@ const sessionKnowledge = (network: Network): SessionKnowledge => {
 
       return phase.presence._tag === "Registering"
         ? { _tag: "Registering", since: phase.opened }
-        : { _tag: "Registered", ircd: phase.presence.server, since: phase.presence.began };
+        : {
+            _tag: "Registered",
+            ircd: phase.presence.server,
+            since: phase.presence.began,
+            tags: negotiated(phase.caps).enabled.has(messageTags),
+          };
     }
 
     default: {

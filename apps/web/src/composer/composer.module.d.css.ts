@@ -2,6 +2,7 @@
 declare const styles: {
   readonly about: string;
   readonly actions: string;
+  readonly answering: string;
   readonly away: string;
   readonly camera: string;
   readonly candidate: string;
@@ -24,6 +25,7 @@ declare const styles: {
   readonly pane: string;
   readonly progress: string;
   readonly prompt: string;
+  readonly quote: string;
   readonly status: string;
   readonly thumbnail: string;
   readonly upload: string;

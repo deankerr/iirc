@@ -5,8 +5,9 @@
  * modifier; where Enter begins a new line a button sends too, as a phone's keyboard has no
  * modifier. Up and Down recall what was sent from the first and last lines, and Tab
  * completes, a nick at the start of a line followed by `ui.suffix`. Spelling is checked as
- * `ui.spellcheck` says. Escape lets go of an error or a confirmation, or, with
- * neither, closes what stands in front of the focused Pane's Timeline, the options, the
+ * `ui.spellcheck` says. What a draft answers is shown dim above its line, cut to the line,
+ * with a button that drops it. Escape lets go of an error or a confirmation, or, with
+ * neither, of what the draft answers, or, with none, closes what stands in front of the focused Pane's Timeline, the options, the
  * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
  * away. Files pasted, dropped on it, picked, or photographed are uploaded, each link going
  * where the caret was. What it says goes through the command registry in the core, and the
@@ -19,9 +20,10 @@ import { typesCredential } from "@iirc/frontend/commands";
 import type { CommandContext } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
-import type { Offer, Place } from "@iirc/frontend/composer";
+import type { Answering, Offer, Place } from "@iirc/frontend/composer";
 import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { allScope } from "@iirc/frontend/palette";
+import { quotedOf } from "@iirc/frontend/render";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
@@ -33,6 +35,7 @@ import { openPalette, platform } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
+import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import {
   commandContext,
@@ -40,6 +43,7 @@ import {
   confirmSend,
   dismiss,
   draft as draftAtom,
+  dropReply,
   recall,
   send,
   takeUp,
@@ -108,6 +112,42 @@ const PaletteButton = () => {
       }}
       size="small"
     />
+  );
+};
+
+/**
+ * What a draft answers, dim, above its line: who said it, as a reply shows it, and its
+ * text, cut to the line, with a button that drops it.
+ * @param props - What it answers, its id for the textarea to be described by, and what drops it.
+ * @returns The line.
+ */
+const AnsweringLine = ({
+  answering,
+  id,
+  onDrop,
+}: {
+  readonly answering: Answering;
+  readonly id: string;
+  readonly onDrop: () => void;
+}) => {
+  const quoted = quotedOf(answering.message);
+  const nick = <Nick colour={quoted.colour} nick={quoted.nick} />;
+
+  return (
+    <div
+      aria-label={`Replying to ${quoted.nick}`}
+      className={styles.answering}
+      id={id}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a quotation and the button that drops it, named together, which no element of HTML is.
+      role="group"
+    >
+      <span className={styles.quote}>
+        <span aria-hidden>{"\u21B3"}</span> {quoted.kind === "Action" ? <>* {nick}</> : null}
+        {quoted.kind === "Notice" ? <>-{nick}-</> : null}
+        {quoted.kind === "Privmsg" ? <>{nick}:</> : null} <bdi>{quoted.text}</bdi>
+      </span>
+      <IconButton icon="close" keys="Esc" label="Stop replying" onPress={onDrop} size="small" />
+    </div>
   );
 };
 
@@ -230,6 +270,17 @@ const sayable = (context: CommandContext): Sayable => {
 };
 
 /**
+ * What describes the textarea: the ids of what is shown above it.
+ * @param shown - Each part, whether it is shown, and its id.
+ * @returns The ids, or nothing.
+ */
+const describedByOf = (shown: readonly (readonly [boolean, string])[]) => {
+  const ids = shown.flatMap(([present, id]) => (present ? [id] : []));
+
+  return ids.length === 0 ? undefined : ids.join(" ");
+};
+
+/**
  * The composer of one Timeline, or the one under no Timeline.
  * @param props - Where it is, the name its prompt shows, and what stands before the prompt.
  * @returns The composer.
@@ -253,6 +304,7 @@ const Composer = ({
   const restore = useAtomSet(escapeCompletion);
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
+  const dropNow = useAtomSet(dropReply);
   const sendNow = useAtomSet(send);
   const confirmNow = useAtomSet(confirmSend);
   const again = useAtomSet(takeUp);
@@ -279,7 +331,8 @@ const Composer = ({
   const id = useId();
   const noticeId = `${id}-notice`;
   const hintId = `${id}-hint`;
-  const { confirming, notice } = draft;
+  const answeringId = `${id}-answering`;
+  const { answering, confirming, notice } = draft;
   const candidates = cycled(completion, timeline, draft.text);
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
@@ -415,12 +468,18 @@ const Composer = ({
     return false;
   };
 
-  // Escape lets go of a notice or a confirmation first. With neither, it closes what stands
-  // in front of the focused Pane's Timeline, the options, the search, or a draft, and with
-  // nothing in front, puts its Lookup card away.
+  // Escape lets go of a notice or a confirmation first, then of what the draft answers. With
+  // none, it closes what stands in front of the focused Pane's Timeline, the options, the
+  // search, or a draft, and with nothing in front, puts its Lookup card away.
   const escaped = () => {
     if (notice !== undefined || confirming !== undefined) {
       dismissNow(timeline);
+
+      return;
+    }
+
+    if (answering !== undefined) {
+      dropNow(timeline);
 
       return;
     }
@@ -514,12 +573,11 @@ const Composer = ({
     }
   };
 
-  const describedBy = [
-    notice === undefined && confirming === undefined ? undefined : noticeId,
-    offline === undefined ? undefined : hintId,
-  ]
-    .filter((one) => one !== undefined)
-    .join(" ");
+  const describedBy = describedByOf([
+    [answering !== undefined, answeringId],
+    [notice !== undefined || confirming !== undefined, noticeId],
+    [offline !== undefined, hintId],
+  ]);
 
   return (
     <div
@@ -597,6 +655,16 @@ const Composer = ({
           ))}
         </p>
       )}
+      {answering === undefined ? null : (
+        <AnsweringLine
+          answering={answering}
+          id={answeringId}
+          onDrop={() => {
+            dropNow(timeline);
+            input.current?.focus();
+          }}
+        />
+      )}
       {/* A status, polite, present while the composer is, so each candidate is announced. */}
       <output aria-live="polite" className={styles.status}>
         {announced(completion, timeline, draft.text)}
@@ -612,7 +680,7 @@ const Composer = ({
         <textarea
           // Among several Panes, the number shown is said with what it is.
           aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
-          aria-describedby={describedBy === "" ? undefined : describedBy}
+          aria-describedby={describedBy}
           aria-invalid={notice === undefined ? undefined : true}
           autoComplete="off"
           className={styles.input}

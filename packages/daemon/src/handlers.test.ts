@@ -23,7 +23,7 @@ import type {
   TimelineItem,
   UiEvent,
 } from "@iirc/api";
-import { Instant } from "@iirc/client";
+import { Instant, SendableMessageId as ClientMessageId } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { Entry } from "@iirc/runtime/journal";
 import type { JournalRecord } from "@iirc/runtime/journal";
@@ -300,6 +300,20 @@ const uiChangedIn = <E>(events: Stream.Stream<UiEvent, E>, count: number) =>
       )
     )
   );
+
+// The next `PRIVMSG` the Ircd hears, past the registration and joining Lines before it,
+// each of which waits its turn in the pacing.
+const saidLine = (call: Parameters<typeof heard>[0]) =>
+  Effect.gen(function* () {
+    let line = "";
+
+    while (!line.includes("PRIVMSG")) {
+      yield* TestClock.adjust(2000);
+      line = yield* heard(call);
+    }
+
+    return line;
+  });
 
 describe("the handlers", () => {
   it("reads the Configuration in force, and refuses a PUT made from another, with 409", async () => {
@@ -1758,6 +1772,102 @@ describe("the handlers", () => {
       ],
       direct: ["#iirc"],
     });
+  });
+
+  it("says what a Message answers as a +reply tag where the Session carries tags, and shows Self's reply as one", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        yield* heard(call);
+        yield* heard(call);
+        yield* heard(call);
+        yield* say(call, ":irc.test CAP * LS :message-tags");
+        yield* heard(call);
+        yield* say(call, ":irc.test CAP * ACK :message-tags");
+        yield* heard(call);
+        yield* say(call, ":irc.test 001 iirc :Welcome");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, "@msgid=m1 :peer!u@h PRIVMSG #iirc :question");
+        yield* settle;
+
+        yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            answers: ClientMessageId.make("m1"),
+            kind: "Privmsg",
+            target: "#iirc",
+            text: "answer",
+          },
+        });
+        // Registration and the join spent the burst, so it waits its turn.
+        const line = yield* saidLine(call);
+
+        const timeline = yield* timelineNamed(api, "#iirc");
+        const window = yield* api.timelines.window({ params: { timeline }, query: { limit: 10 } });
+        const known = yield* api.networks.known({ params: { network: libera } });
+
+        return {
+          items: window.items
+            .filter((item) => item.content._tag === "Message")
+            .map((item) => [
+              textOf(item),
+              item.content._tag === "Message" ? item.content.answers : undefined,
+              item.answered === null ? null : `${item.answered.sender} :${item.answered.text}`,
+              item.level,
+            ]),
+          line,
+          tags: known.session._tag === "Registered" ? known.session.tags : undefined,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      items: [
+        ["question", null, null, "Message"],
+        ["answer", "m1", "peer :question", null],
+      ],
+      line: "@+reply=m1 PRIVMSG #iirc answer",
+      tags: true,
+    });
+  });
+
+  it("says a Message that answers without the tag where the Session carries no tags", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+
+        const call = yield* registerOnFloor(world.memory);
+
+        yield* heard(call);
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* settle;
+
+        const said = yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            answers: ClientMessageId.make("m1"),
+            kind: "Privmsg",
+            target: "#iirc",
+            text: "hello",
+          },
+        });
+
+        const line = yield* saidLine(call);
+        const known = yield* api.networks.known({ params: { network: libera } });
+
+        return [
+          said._tag,
+          line,
+          known.session._tag === "Registered" ? known.session.tags : undefined,
+        ];
+      })
+    );
+
+    expect(result).toStrictEqual(["Said", "PRIVMSG #iirc hello", false]);
   });
 
   it("reads a merged Timeline's id as the one it went to, and refuses an id never given", async () => {

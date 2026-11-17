@@ -227,15 +227,19 @@ const pause = async (millis: number) => {
  * @param items - What `#iirc` holds, two Messages unless given.
  * @param more - How `#iirc` is listed, beyond two unread Messages.
  * @param network - What the Network's own Timeline holds, nothing unless given.
+ * @param tags - Whether the Network's Session carries tags.
  * @returns The fake, the registry, and the page.
  */
 const signedIn = async (
   gaps: readonly (typeof WindowGap.Encoded)[] = [],
   items: readonly (typeof TimelineItem.Encoded)[] = [message(1), message(2)],
   more: Partial<typeof Timeline.Encoded> = {},
-  network: readonly (typeof TimelineItem.Encoded)[] = []
+  network: readonly (typeof TimelineItem.Encoded)[] = [],
+  tags = false
 ) => {
   const fake = fakeDaemon();
+
+  fake.daemon.sessions.set("libera", { _tag: "Registered", ircd: "ircd.test", since: 1, tags });
   const last = Math.max(items.at(-1)?.sequence ?? 2, network.at(-1)?.sequence ?? 0);
 
   fake.daemon.signedIn = true;
@@ -1772,5 +1776,274 @@ describe("where the view stands as its rows wrap again", () => {
       top: logOf().scrollTop,
     }).toStrictEqual(reading);
     expect({ following: reading.following }).toStrictEqual({ following: false });
+  });
+});
+
+/**
+ * A Message from alice, with an id when given one.
+ * @param sequence - Its sequence.
+ * @param id - Its id, if it has one.
+ * @returns The item.
+ */
+const fromAlice = (sequence: number, id?: string): typeof TimelineItem.Encoded => ({
+  ...message(sequence),
+  content: {
+    _tag: "Message",
+    answers: null,
+    at: { _tag: "Unknown" },
+    context: null,
+    id: id === undefined ? { _tag: "Unknown" } : { _tag: "Known", at: 1, from: "ircd", value: id },
+    kind: "Privmsg",
+    live: true,
+    ours: null,
+    sender: "alice",
+    tags: [],
+    target: "#iirc",
+    text: `said ${sequence}`,
+  },
+});
+
+/**
+ * The log's row that says something.
+ * @param text - What it says.
+ * @returns The row.
+ */
+const rowSaying = (text: string) => {
+  const found = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+    one.textContent?.includes(text)
+  );
+
+  if (found === undefined) {
+    throw new Error(`no row: ${text}`);
+  }
+
+  return found;
+};
+
+/**
+ * The button that opens the menu of alice's Message in a row.
+ * @param row - The row.
+ * @returns It, or none.
+ */
+const menuButtonIn = (row: HTMLElement) =>
+  row.querySelector<HTMLButtonElement>('button[aria-label="More for the message from alice"]');
+
+/**
+ * The items of the menu open.
+ * @returns Their words.
+ */
+const menuItems = () =>
+  [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((one) => one.textContent);
+
+/**
+ * Chooses an item of the menu open, by its text, with Enter, as a browser's keys do.
+ * @param text - Its text.
+ */
+const chooseFromMenu = async (text: string) => {
+  await settled(() => document.querySelector('[role="menu"]') !== null);
+
+  const item = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(
+    (one) => one.textContent === text
+  );
+
+  await act(async () => {
+    item?.focus();
+    await Promise.resolve();
+  });
+
+  await act(async () => {
+    for (const type of ["keydown", "keyup"]) {
+      item?.dispatchEvent(
+        new KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter" })
+      );
+    }
+
+    await Promise.resolve();
+  });
+
+  await settled(() => document.querySelector('[role="menu"]') === null);
+};
+
+/**
+ * The composer's textarea.
+ * @returns It.
+ */
+const composer = () => {
+  const found = document.querySelector("textarea");
+
+  if (found === null) {
+    throw new Error("no composer");
+  }
+
+  return found;
+};
+
+/**
+ * What the composer says it answers, without its button.
+ * @returns Its words, or nothing.
+ */
+const answeringShown = () => {
+  const group = document.querySelector('[aria-label^="Replying to"]');
+
+  return plain(
+    group?.textContent?.replace(group.querySelector("button")?.textContent ?? "", "").trim()
+  );
+};
+
+/**
+ * The Frontend signed in, with `#iirc` open, holding a Message from alice with an id and one
+ * without.
+ * @param tags - Whether the Network's Session carries tags.
+ * @returns The fake, the registry, and the page.
+ */
+const aliceSaid = async (tags: boolean) => {
+  const signed = await signedIn([], [fromAlice(1, "msg-1"), fromAlice(2)], {}, [], tags);
+
+  await openFromPalette();
+  await settled(() => signed.registry.get(openTimeline)._tag === "Shown");
+  await settled(() => logOf().textContent?.includes("said 2") ?? false);
+
+  return signed;
+};
+
+describe("replying to a Message", () => {
+  beforeEach(() => {
+    layout.content = 0;
+    layout.row = 20;
+    layout.top = 0;
+    layout.view = 500;
+    layout.width = 800;
+    layOut();
+  });
+
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("offers reply from a Message's menu only where the Session carries tags and the Message has an id", async () => {
+    await aliceSaid(false);
+
+    const untagged = [menuButtonIn(rowSaying("said 1")), menuButtonIn(rowSaying("said 2"))];
+
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    await aliceSaid(true);
+
+    const tagged = [menuButtonIn(rowSaying("said 1")) !== null, menuButtonIn(rowSaying("said 2"))];
+
+    await act(async () => {
+      menuButtonIn(rowSaying("said 1"))?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    expect({ items: menuItems(), tagged, untagged }).toStrictEqual({
+      items: ["Reply"],
+      tagged: [true, null],
+      untagged: [null, null],
+    });
+  });
+
+  it("opens a Message's menu from the context menu, and choosing reply shows what the composer answers, focused", async () => {
+    await aliceSaid(true);
+
+    await act(async () => {
+      // Right-clicked on its text, as the context menu reaches the row from within it.
+      rowSaying("said 1")
+        .querySelector("bdi")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    await chooseFromMenu("Reply");
+    await settled(() => answeringShown() !== undefined);
+
+    expect({
+      focused: document.activeElement === composer(),
+      shown: answeringShown(),
+    }).toStrictEqual({ focused: true, shown: "\u21B3 alice: said 1" });
+  });
+
+  it("drops what the composer answers by its button, and by Escape where Escape does nothing else", async () => {
+    await aliceSaid(true);
+
+    const choose = async () => {
+      await act(async () => {
+        menuButtonIn(rowSaying("said 1"))?.click();
+        await Promise.resolve();
+      });
+      await chooseFromMenu("Reply");
+      await settled(() => answeringShown() !== undefined);
+    };
+
+    await choose();
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="Stop replying"]')?.click();
+      await Promise.resolve();
+    });
+    const byButton = answeringShown();
+
+    await choose();
+    await act(async () => {
+      composer().dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
+      );
+      await Promise.resolve();
+    });
+
+    expect({ byButton, byEscape: answeringShown() }).toStrictEqual({
+      byButton: undefined,
+      byEscape: undefined,
+    });
+  });
+
+  it("sends a draft of two lines answering the Message on its first only, and lets go of it", async () => {
+    const { daemon } = await aliceSaid(true);
+
+    await act(async () => {
+      menuButtonIn(rowSaying("said 1"))?.click();
+      await Promise.resolve();
+    });
+    await chooseFromMenu("Reply");
+    await settled(() => answeringShown() !== undefined);
+
+    await act(async () => {
+      const text = "yes\nit is";
+      const field = composer();
+
+      Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+        field,
+        text
+      );
+      field.setSelectionRange(text.length, text.length);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      composer().dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          code: "Enter",
+          key: "Enter",
+        })
+      );
+      await Promise.resolve();
+    });
+    await settled(() => daemon.says.length === 2);
+
+    expect({
+      said: daemon.says.map((one) => [one.text, one.answers]),
+      shown: answeringShown(),
+    }).toStrictEqual({
+      said: [
+        ["yes", "msg-1"],
+        ["it is", undefined],
+      ],
+      shown: undefined,
+    });
   });
 });

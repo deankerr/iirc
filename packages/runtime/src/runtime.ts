@@ -9,6 +9,7 @@ import type {
   Action,
   Client,
   IgnoredReason,
+  Input,
   Inspection,
   Instant,
   Lookup,
@@ -17,6 +18,7 @@ import type {
   News,
   RefusedReason,
   SayKind,
+  SendableMessageId,
   TimerTable,
 } from "@iirc/client";
 import type { ChannelView, Knowledge } from "@iirc/client/known";
@@ -113,6 +115,8 @@ export class DecodersMissing extends Schema.TaggedError<
 
 /** What the Owner can say to a Target. */
 export interface Saying {
+  /** The id of the Message it answers, which the Client sends where the Session carries tags. */
+  readonly answers?: SendableMessageId | undefined;
   readonly kind: SayKind;
   readonly target: string;
   readonly text: string;
@@ -1050,16 +1054,13 @@ export const makeRuntime = <S>(
         Effect.gen(function* () {
           const network = yield* find(id);
           const intent = saying.intent ?? (yield* intentId);
-          const { kind, target, text } = saying;
+          const { answers, kind, target, text } = saying;
 
-          const { news, sequence } = yield* tell(network, (at) => ({
-            _tag: "Say",
-            at,
-            intent,
-            kind,
-            target,
-            text,
-          }));
+          const { news, sequence } = yield* tell(network, (at): Input => {
+            const say: Input = { _tag: "Say", at, intent, kind, target, text };
+
+            return answers === undefined ? say : { ...say, answers };
+          });
 
           const reason = refusalIn(news, intent);
 

@@ -21,6 +21,7 @@ import {
   MessageId as ClientMessageId,
   NetworkConfiguration,
   SayKind,
+  SendableMessageId,
   TimerId,
 } from "@iirc/client";
 import type { Input } from "@iirc/client";
@@ -143,6 +144,8 @@ const SayText = Schema.String.check(
 
 /** What the Owner says to a Target. */
 export const SayRequest = Schema.Struct({
+  /** The id of the Message it answers, sent as a `+reply` tag where the Session carries tags. */
+  answers: Schema.optionalKey(SendableMessageId),
   /** The intent to say it under. Left out, the Daemon names one, and gives it back. */
   intent: Schema.optionalKey(CallerIntent),
   kind: SayKind,
@@ -1544,7 +1547,8 @@ const Standing = Schema.Literals(["Wanted", "Joining", "Joined", "Refused", "Kic
 export const SessionKnowledge = Schema.TaggedUnion({
   Connecting: { since: Instant },
   Offline: { since: Schema.NullOr(Instant) },
-  Registered: { ircd: Untrusted, since: Instant },
+  /** `tags`: whether the Session carries tags, by `message-tags`, so a Message can answer another. */
+  Registered: { ircd: Untrusted, since: Instant, tags: Schema.Boolean },
   Registering: { since: Instant },
 });
 

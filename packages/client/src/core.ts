@@ -17,6 +17,7 @@ import {
   privmsg,
   quit,
   rawParams,
+  withTags,
 } from "@iirc/protocol/line";
 import type { Encoding, Line, RawParam, SecretLine } from "@iirc/protocol/line";
 
@@ -68,7 +69,15 @@ import { initialState, maxActions } from "./state.ts";
 import { addressFor, pruned, rescheduled } from "./sts.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
 import type { Purpose } from "./timers.ts";
-import { channelViewOf, inspectionOf, knowledgeOf, onNow, openOf, sessionOf } from "./views.ts";
+import {
+  carriesTags,
+  channelViewOf,
+  inspectionOf,
+  knowledgeOf,
+  onNow,
+  openOf,
+  sessionOf,
+} from "./views.ts";
 import { routeOurs } from "./where.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
@@ -495,13 +504,25 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
 
   const builder = input.kind === "Notice" ? notice : privmsg;
 
-  const line =
+  const plain =
     input.kind === "Action" ? action(input.target, input.text) : builder(input.target, input.text);
 
-  const bytes = isRejected(line) ? line : encode(line);
+  const bytes = isRejected(plain) ? plain : encode(plain);
 
-  // A Line that would be cut short when the Ircd relays it is not sent.
-  if (isRejected(line) || isRejected(bytes) || bytes.length + relayed(run) > 512) {
+  // A Line that would be cut short when the Ircd relays it is not sent. Its tags have a
+  // budget of their own, so they are not counted.
+  if (isRejected(plain) || isRejected(bytes) || bytes.length + relayed(run) > 512) {
+    refuseIntent(run, input.intent, { _tag: "Unsendable" });
+
+    return;
+  }
+
+  // Where the Session has no tags, what it answers is not said, and nothing is refused.
+  const answers = carriesTags(run.state) ? input.answers : undefined;
+
+  const line = answers === undefined ? plain : withTags(plain, { "+reply": answers });
+
+  if (isRejected(line)) {
     refuseIntent(run, input.intent, { _tag: "Unsendable" });
 
     return;
@@ -530,7 +551,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   run.news.push(
     routeOurs(run, {
       _tag: "Message",
-      answers: undefined,
+      answers,
       at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
       context: undefined,
       id: { _tag: "Unknown" },
@@ -538,7 +559,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
       live: true,
       ours: { echo: sent.echo, intent: input.intent },
       sender: session.nick,
-      tags: new Map(),
+      tags: answers === undefined ? new Map() : new Map([["+reply", answers]]),
       target: input.target,
       text: input.text,
     })

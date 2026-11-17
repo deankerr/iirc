@@ -6,7 +6,14 @@
  *
  * @packageDocumentation
  */
-import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
+import type {
+  ActionRequest,
+  ChannelHeader,
+  Level,
+  NetworkId,
+  SayRequest,
+  TimelineId,
+} from "@iirc/api";
 import type { OwnerOptionName } from "@iirc/api/options";
 import type { PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
 import type { Casemapping } from "@iirc/protocol/casemapping";
@@ -155,6 +162,8 @@ export interface Say {
   readonly kind: SayKind;
   readonly text: string;
   readonly opens: boolean;
+  /** The id of the Message it answers, sent as a `+reply` tag where the Session carries tags. */
+  readonly answers?: NonNullable<SayRequest["answers"]>;
 }
 
 /**
