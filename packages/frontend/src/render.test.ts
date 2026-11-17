@@ -361,6 +361,10 @@ const read = (line: Line): string =>
               return `\`${part.text}\``;
             }
 
+            case "Join": {
+              return `[join ${part.channel} on ${part.network}]`;
+            }
+
             default: {
               return part satisfies never;
             }
@@ -609,6 +613,31 @@ describe("lines", () => {
       ["Activity", "--", "<iirc> is now an IRC operator"],
       ["Refused", "--", "<iirc> was refused as an IRC operator (491)"],
     ]);
+  });
+
+  it("shows an invitation by who invited and where, with an offer to join that Channel", () => {
+    const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#elsewhere" }));
+
+    expect([
+      line._tag === "Description" && line.tone,
+      line._tag === "Description" && line.marker,
+      read(line),
+    ]).toStrictEqual([
+      "Activity",
+      "--",
+      "<peer> invited you to #elsewhere [join #elsewhere on libera]",
+    ]);
+  });
+
+  it("offers to join the Channel as the Network said it, and shows its name contained", () => {
+    const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#a\u202Eb" }));
+
+    expect(line._tag === "Description" ? line.parts : []).toContainEqual({
+      _tag: "Join",
+      channel: "#a\u202Eb",
+      network: libera,
+    });
+    expect(read(line)).toContain("#a\u202Eb\u202C ");
   });
 
   it("describes a Session's start and end, and a failed Connection, never in an Ircd's words", () => {

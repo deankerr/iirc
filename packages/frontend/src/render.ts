@@ -186,7 +186,12 @@ export type Part =
   | { readonly _tag: "Name"; readonly text: string }
   | { readonly _tag: "Said"; readonly inlines: readonly Inline[] }
   /** A command the Owner can type, as a view shows code. */
-  | { readonly _tag: "Command"; readonly text: string };
+  | { readonly _tag: "Command"; readonly text: string }
+  /**
+   * An offer to join a Channel on a Network, which a view draws as a button. `channel` is
+   * the name as the Network said it, which is what joining names.
+   */
+  | { readonly _tag: "Join"; readonly channel: string; readonly network: NetworkId };
 
 /** Where one of our Messages stands with the Ircd, as shown. */
 export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rejected";
@@ -244,6 +249,7 @@ const markerOf = (activity: Activity): Marker => {
     case "TopicChanged":
     case "ModeChanged":
     case "AwayChanged":
+    case "Invited":
     case "OperGranted":
     case "OperRefused":
     case "StandardReply":
@@ -346,11 +352,30 @@ const describeOperAnswer = (activity: OperAnswer): readonly Part[] =>
       ];
 
 /**
+ * An invitation in words, with the offer to join the Channel it is to.
+ * @param activity - The invitation.
+ * @param network - The Network it came from, whose Configuration joining changes.
+ * @returns Its parts.
+ */
+const describeInvitation = (
+  activity: Extract<Activity, { readonly _tag: "Invited" }>,
+  network: NetworkId
+): readonly Part[] => [
+  nickPart(activity.by),
+  words(" invited you to "),
+  name(activity.channel),
+  words(" "),
+  { _tag: "Join", channel: activity.channel, network },
+];
+
+/**
  * Any other Activity in words.
  * @param activity - The Activity.
  * @returns Its parts.
  */
-const describeOtherActivity = (activity: Exclude<Activity, OperAnswer>): readonly Part[] => {
+const describeOtherActivity = (
+  activity: Exclude<Activity, OperAnswer | { readonly _tag: "Invited" }>
+): readonly Part[] => {
   switch (activity._tag) {
     case "Joined": {
       return [nickPart(activity.nick), words(" joined "), name(activity.channel)];
@@ -489,10 +514,18 @@ const describeOtherActivity = (activity: Exclude<Activity, OperAnswer>): readonl
 /**
  * An Activity in words.
  * @param activity - The Activity.
+ * @param network - The Network it belongs to.
  * @returns Its parts.
  */
-const describeActivity = (activity: Activity): readonly Part[] =>
-  isOperAnswer(activity) ? describeOperAnswer(activity) : describeOtherActivity(activity);
+const describeActivity = (activity: Activity, network: NetworkId): readonly Part[] => {
+  if (isOperAnswer(activity)) {
+    return describeOperAnswer(activity);
+  }
+
+  return activity._tag === "Invited"
+    ? describeInvitation(activity, network)
+    : describeOtherActivity(activity);
+};
 
 /**
  * What an action asked for comes to, in short, as the Client says what an action tried:
@@ -651,6 +684,10 @@ export const attemptedText = (attempted: Attempted): string =>
         case "Name":
         case "Command": {
           return part.text;
+        }
+
+        case "Join": {
+          return `join ${part.channel}`;
         }
 
         case "Nick": {
@@ -858,7 +895,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
       return {
         _tag: "Description",
         marker: markerOf(activity),
-        parts: describeActivity(activity),
+        parts: describeActivity(activity, network),
         tone:
           (activity._tag === "StandardReply" && activity.kind === "FAIL") ||
           activity._tag === "CtcpUnsent" ||

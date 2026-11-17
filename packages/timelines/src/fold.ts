@@ -28,7 +28,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 12;
+export const projectionVersion = 13;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -371,7 +371,9 @@ const kindOf = (where: Where): Kind => {
  */
 const levelOf = (news: Routed, kind: Kind): Level | undefined => {
   if (news._tag === "Activity") {
-    return "Activity";
+    // An invitation is addressed to Self, as a Message naming Self is, and calls for the
+    // Owner only while it is happening now.
+    return news.live && news.activity._tag === "Invited" ? "Highlight" : "Activity";
   }
 
   if (news.self || news.ours !== undefined) {

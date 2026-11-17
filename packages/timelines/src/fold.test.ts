@@ -314,6 +314,29 @@ describe("levels", () => {
   });
 });
 
+const invited = (live: boolean): News => ({
+  _tag: "Activity",
+  activity: { _tag: "Invited", by: "peer", channel: "#elsewhere" },
+  at: known(t0),
+  id: unknown,
+  live,
+  where: [network],
+});
+
+describe("an invitation", () => {
+  it("is a Highlight when it is happening now, as it is addressed to Self", () => {
+    const { changes } = fold([happened(1, [invited(true)])]);
+
+    expect(ofTag(changes, "Added").map(({ level }) => level)).toStrictEqual(["Highlight"]);
+  });
+
+  it("is only Activity when it is read from history", () => {
+    const { changes } = fold([happened(1, [invited(false)])]);
+
+    expect(ofTag(changes, "Added").map(({ level }) => level)).toStrictEqual(["Activity"]);
+  });
+});
+
 const readMarker = (where: Marked, read: Instant): News => ({
   _tag: "ReadMarker",
   read,

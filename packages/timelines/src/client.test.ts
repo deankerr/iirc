@@ -256,4 +256,25 @@ describe("a played Session", () => {
       ["CtcpUnsent", libera?.timeline],
     ]);
   });
+
+  it("places an invitation in the Network's own Timeline, a Highlight there", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      lines("<< :peer!u@h INVITE iirc #elsewhere"),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag === "Invited"
+        ? [[change.content.activity, change.timeline, change.level]]
+        : []
+    );
+
+    expect(placed).toStrictEqual([
+      [{ _tag: "Invited", by: "peer", channel: "#elsewhere" }, libera?.timeline, "Highlight"],
+    ]);
+  });
 });

@@ -174,20 +174,22 @@ const pause = async (millis: number) => {
  * @param gaps - The Gaps `#iirc` holds.
  * @param items - What `#iirc` holds, two Messages unless given.
  * @param more - How `#iirc` is listed, beyond two unread Messages.
+ * @param network - What the Network's own Timeline holds, nothing unless given.
  * @returns The fake, the registry, and the page.
  */
 const signedIn = async (
   gaps: readonly (typeof WindowGap.Encoded)[] = [],
   items: readonly (typeof TimelineItem.Encoded)[] = [message(1), message(2)],
-  more: Partial<typeof Timeline.Encoded> = {}
+  more: Partial<typeof Timeline.Encoded> = {},
+  network: readonly (typeof TimelineItem.Encoded)[] = []
 ) => {
   const fake = fakeDaemon();
-  const last = items.at(-1)?.sequence ?? 2;
+  const last = Math.max(items.at(-1)?.sequence ?? 2, network.at(-1)?.sequence ?? 0);
 
   fake.daemon.signedIn = true;
   fake.daemon.through = last;
   fake.daemon.timelines.set("libera", [
-    { gaps: [], items: [], timeline: listed(own, "libera", "Network") },
+    { gaps: [], items: [...network], timeline: listed(own, "libera", "Network") },
     {
       gaps: [...gaps],
       items: [...items],
@@ -336,9 +338,10 @@ const scrollTo = async (top: number, content: number) => {
 };
 
 /**
- * Opens `#iirc` through the palette, as the Owner would: Mod+K, its name, and Enter.
+ * Opens a Timeline through the palette, as the Owner would: Mod+K, its name, and Enter.
+ * @param name - Its name, `#iirc` unless given.
  */
-const openFromPalette = async () => {
+const openFromPalette = async (name = "#iirc") => {
   await act(async () => {
     document.body.dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ctrlKey: true, key: "k" })
@@ -356,14 +359,11 @@ const openFromPalette = async () => {
   await act(async () => {
     search.focus();
     search.dispatchEvent(
-      new InputEvent("beforeinput", { bubbles: true, data: "#iirc", inputType: "insertText" })
+      new InputEvent("beforeinput", { bubbles: true, data: name, inputType: "insertText" })
     );
-    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
-      search,
-      "#iirc"
-    );
+    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, name);
     search.dispatchEvent(
-      new InputEvent("input", { bubbles: true, data: "#iirc", inputType: "insertText" })
+      new InputEvent("input", { bubbles: true, data: name, inputType: "insertText" })
     );
     await Promise.resolve();
   });
@@ -1038,6 +1038,58 @@ describe("what the view says it shows", () => {
       "-- peer asked for TIME, not answered: too many requests",
       "-- peer asked for FINGER, not answered: not understood",
     ]);
+  });
+
+  it("shows an invitation in the Network's own Timeline, and joins the Channel only when its button is pressed", async () => {
+    const invitation: typeof TimelineItem.Encoded = {
+      ...joined(1),
+      content: {
+        _tag: "Activity",
+        activity: { _tag: "Invited", by: "peer", channel: "#elsewhere" },
+        at: { _tag: "Unknown" },
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      level: "Highlight",
+      timeline: own,
+    };
+
+    const { daemon, registry } = await signedIn([], [], {}, [invitation]);
+
+    await openFromPalette("libera");
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("invited you to"));
+
+    const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+      one.textContent?.includes("invited you to")
+    );
+
+    const before = {
+      channels: daemon.configurations.get("libera")?.configuration.channels,
+      puts: daemon.puts.length,
+      row: row?.textContent?.replace(/^\S+ /u, ""),
+    };
+
+    const button = row?.querySelector<HTMLButtonElement>('button[aria-label="Join #elsewhere"]');
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await settled(() => daemon.puts.length === 1);
+
+    expect({
+      after: daemon.configurations.get("libera")?.configuration.channels,
+      before,
+    }).toStrictEqual({
+      after: [{ name: "#iirc" }, { name: "#elsewhere" }],
+      before: {
+        channels: [{ name: "#iirc" }],
+        puts: 0,
+        row: "-- peer invited you to #elsewhere join",
+      },
+    });
   });
 
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {
