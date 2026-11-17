@@ -308,6 +308,16 @@ const activity = (source: Activity): WireActivity => {
       return wire;
     }
 
+    case "Invited": {
+      const wire: Case<Activity, WireActivity, "Invited"> = {
+        _tag: "Invited",
+        by: source.by,
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
     case "OperGranted": {
       const wire: Case<Activity, WireActivity, "OperGranted"> = {
         _tag: "OperGranted",

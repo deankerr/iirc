@@ -138,7 +138,8 @@ const replied = (sequence: number): Change => ({
 });
 
 // A CTCP request, with the answer Self sent, a reply, an answer that never left, and the
-// Owner's own PING and its reply with the round trip, in the Network's own Timeline.
+// Owner's own PING and its reply with the round trip, and an invitation, in the Network's
+// own Timeline.
 const asked = (sequence: number): readonly Change[] =>
   (
     [
@@ -168,6 +169,7 @@ const asked = (sequence: number): readonly Change[] =>
         roundTrip: 250,
         target: "iirc",
       },
+      { _tag: "Invited", by: "peer", channel: "#elsewhere" },
     ] as const
   ).map((activity, index) => ({
     _tag: "Added",
@@ -312,7 +314,14 @@ describe("reopening the file", () => {
         expect(Option.isSome(before.merged)).toBeTruthy();
         expect(before.changed.items.length).toBeGreaterThan(0);
         expect({
-          kept: ["StandardReply", "CtcpRequest", "CtcpReply", "CtcpUnsent", "CtcpSent"].map((tag) =>
+          kept: [
+            "StandardReply",
+            "CtcpRequest",
+            "CtcpReply",
+            "CtcpUnsent",
+            "CtcpSent",
+            "Invited",
+          ].map((tag) =>
             before.changed.items.some(
               (item) => item.content._tag === "Activity" && item.content.activity._tag === tag
             )
@@ -322,7 +331,10 @@ describe("reopening the file", () => {
               ? [item.content.activity.roundTrip]
               : []
           ),
-        }).toStrictEqual({ kept: [true, true, true, true, true], roundTrips: [null, 250] });
+        }).toStrictEqual({
+          kept: [true, true, true, true, true, true],
+          roundTrips: [null, 250],
+        });
         expect(after).toStrictEqual(before);
       })
     );

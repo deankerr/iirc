@@ -316,7 +316,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
-- **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was, and an answer that never left takes the `Refused` tone. One the Owner sent shows whom they asked for what, and a reply to their `PING` shows how long it took, in seconds to the millisecond, as the Daemon journaled the two, never by a clock the page reads. An answer to Self's `OPER` says whether Self is an IRC operator now, a refusal by its numeric in the `Refused` tone.
+- **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was, and an answer that never left takes the `Refused` tone. One the Owner sent shows whom they asked for what, and a reply to their `PING` shows how long it took, in seconds to the millisecond, as the Daemon journaled the two, never by a clock the page reads. An answer to Self's `OPER` says whether Self is an IRC operator now, a refusal by its numeric in the `Refused` tone. An invitation says who invited Self to which Channel, then a `Join` part, an offer to join that Channel on its Network, which a view draws as a button that does what `/join` does when pressed.
 
 ## Previews
 
@@ -361,7 +361,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 `notificationsOf` says which items a change added call for a notification, and what it says.
 
-- **Only what calls for the Owner, and only once:** a Highlight or a Direct Message said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once.
+- **Only what calls for the Owner, and only once:** a Highlight, a Direct Message, or an invitation said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once.
 - **Its words are plain text,** by `plainText`: the Timeline and Network, then the sender and text. A newer one for a Timeline replaces the last.
 
 ## Not yet

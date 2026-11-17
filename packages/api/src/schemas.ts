@@ -494,7 +494,9 @@ const CtcpAnswer = Schema.TaggedUnion({
  * by who asked, where, and its command, that never left after all, shown where the request
  * was. `OperGranted` and `OperRefused` answer the `OPER` Self sent as its Session began, in
  * the Network's own Timeline: Self, by its nick, is an IRC operator now, or the Ircd refused
- * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`.
+ * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`. An
+ * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
+ * `channel`, which it may join.
  */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
@@ -505,6 +507,7 @@ export const Activity = Schema.TaggedUnion({
   CtcpRequest: { ...ctcp, answer: CtcpAnswer },
   CtcpSent: { args: Untrusted, command: Untrusted, nick: Untrusted },
   CtcpUnsent: { command: Untrusted, nick: Untrusted, target: Untrusted },
+  Invited: { by: Untrusted, channel: Untrusted },
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },

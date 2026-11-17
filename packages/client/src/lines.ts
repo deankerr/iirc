@@ -39,7 +39,7 @@ import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { askModes, modesQueryOver, queryAnswered, queryByCommand } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
-import { isOperAnswer } from "./news.ts";
+import { isNetworkOnly } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { oper, operAnswered } from "./oper.ts";
 import { reclaim, reclaimAsked, reclaimOver, reclaimRefused, reclaimTaken } from "./reclaim.ts";
@@ -208,7 +208,7 @@ const isSameNick = (run: Run, first: string, second: string): boolean => {
 // `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to them, and
 // a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
 const settled = (run: Run, activity: Activity): void => {
-  if (isOperAnswer(activity)) {
+  if (isNetworkOnly(activity)) {
     return;
   }
 

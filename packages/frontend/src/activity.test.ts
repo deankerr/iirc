@@ -875,6 +875,34 @@ describe("notifications", () => {
     });
   });
 
+  it("notifies of an invitation as of a Highlight, in plain isolated text", () => {
+    const invitation = (more: Partial<Said> = {}): typeof TimelineItem.Encoded => ({
+      ...said({ at: 50, level: "Highlight", sequence: 11, timeline: other, ...more }),
+      content: {
+        _tag: "Activity",
+        activity: { _tag: "Invited", by: "‮evil", channel: "#elsewhere" },
+        at: { _tag: "Unknown" },
+        id: { _tag: "Unknown" },
+        live: more.live ?? true,
+      },
+    });
+
+    const event = changed(11, { items: [invitation()] });
+    const [first] = notificationsOf(state, reduceTimelines(state, event), event.change, seeing);
+
+    expect({
+      body: first?.body,
+      history: notified(invitation({ level: "Activity", live: false })),
+      looking: notified(invitation({ timeline: iirc })),
+      tag: first?.tag,
+    }).toStrictEqual({
+      body: "⁨evil⁩ invited you to ⁨#elsewhere⁩",
+      history: [],
+      looking: [],
+      tag: `iirc:${other}`,
+    });
+  });
+
   it("never notifies twice of a step a reset replays", () => {
     const event = changed(11, { items: [highlight(other)] });
     const first = reduceTimelines(state, event);

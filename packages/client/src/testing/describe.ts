@@ -401,6 +401,10 @@ const writeActivity = (activity: Activity): ActivityParts => {
       };
     }
 
+    case "Invited": {
+      return { head: [atom(activity.channel), `by=${atom(activity.by)}`], tail: [] };
+    }
+
     case "OperGranted": {
       return { head: [atom(activity.nick)], tail: [] };
     }

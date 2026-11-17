@@ -81,6 +81,29 @@ const nordAlacritty = readFileSync(
 );
 
 /** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
+/** What the end-to-end run reads of the Network's own Timeline: what is unread in it. */
+const decodeNetworkUnread = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      timelines: Schema.Array(
+        Schema.Struct({
+          kind: Schema.String,
+          unread: Schema.Struct({ highlights: Schema.Finite }),
+        })
+      ),
+    })
+  )
+);
+
+/** What the end-to-end run reads of `known`: which Channels the Client is in. */
+const decodeStanding = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      channels: Schema.Array(Schema.Struct({ name: Schema.String, standing: Schema.String })),
+    })
+  )
+);
+
 /** What the end-to-end run reads of an Upload. */
 const UploadRead = Schema.Struct({
   deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
@@ -5179,6 +5202,111 @@ describe("the web frontend on iirc daemon --web", () => {
         }
       } finally {
         await minio.stop();
+      }
+    }
+  );
+
+  it(
+    "shows an invitation in the Network's Timeline as a Highlight, and joins the Channel only when its button is pressed",
+    { timeout: 90_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "invitation"),
+        "#iirc-invite"
+      );
+
+      const invited = "#iirc-invited";
+
+      const standingOf = async () => {
+        const answer = await api("GET", "/networks/private/known");
+
+        return decodeStanding(await answer.text()).channels.find((one) => one.name === invited)
+          ?.standing;
+      };
+
+      const unreadOf = async () => {
+        const answer = await api("GET", "/networks/private/timelines");
+
+        return decodeNetworkUnread(await answer.text()).timelines.find(
+          (one) => one.kind === "Network"
+        )?.unread;
+      };
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        // Looking at the Channel, so the Network's own Timeline is somewhere the Owner is not.
+        await page.getByRole("row", { exact: true, name: channel }).click();
+        await page.getByRole("log", { name: channel }).waitFor();
+
+        // Another User makes a Channel of their own, and invites Self to it.
+        peer.send(`JOIN ${invited}`);
+        await peer.waitFor((line) => line.command === "JOIN", "the peer's own JOIN");
+        peer.send(`INVITE iirc ${invited}`);
+
+        await expect
+          .poll(
+            async () => {
+              const unread = await unreadOf();
+
+              return unread?.highlights;
+            },
+            { interval: 100, timeout: 10_000 }
+          )
+          .toBe(1);
+
+        const counted = await unreadOf();
+        const badge = page.getByRole("row", { name: /1 highlight/u });
+
+        await badge.first().waitFor();
+
+        // Nothing joined by itself.
+        const standingBefore = await standingOf();
+
+        await page.keyboard.press("Alt+ArrowUp");
+
+        const log = page.getByRole("log", { name: "private" });
+        const row = log.locator("[data-index]", { hasText: "invited you to" });
+
+        await row.waitFor();
+
+        const text = await row.textContent();
+        const shown = text?.replace(/^\S+ /u, "");
+        const join = row.getByRole("button", { name: `Join ${invited}` });
+
+        await join.waitFor();
+        await screenshot(page, "after-invitation.png");
+        await join.click();
+
+        await expect.poll(standingOf, { interval: 100, timeout: 10_000 }).toBe("Joined");
+        await peer.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("iirc!") === true,
+          "Self joining"
+        );
+        await page.getByRole("row", { exact: true, name: invited }).waitFor();
+        await screenshot(page, "after-joined.png");
+
+        expect({
+          counted,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          shown,
+          standingBefore,
+        }).toStrictEqual({
+          counted: { highlights: 1 },
+          problems: [],
+          shown: `-- peer invited you to ${invited} join`,
+          standingBefore: undefined,
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
       }
     }
   );
