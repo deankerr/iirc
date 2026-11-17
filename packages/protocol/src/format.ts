@@ -251,3 +251,99 @@ export const stripFormatting = (text: string): string =>
   tokenize(text)
     .map((token) => (token._tag === "Text" ? token.text : ""))
     .join("");
+
+const toggleCodes: readonly (readonly [Toggle, string])[] = [
+  ["bold", "\u0002"],
+  ["italic", "\u001D"],
+  ["underline", "\u001F"],
+  ["strikethrough", "\u001E"],
+  ["monospace", "\u0011"],
+  ["reverse", "\u0016"],
+];
+
+// A colour that cannot be written, such as palette `120`, becomes the default colour.
+const writable = (colour: Colour | undefined): Colour | undefined => {
+  if (colour?._tag === "Palette") {
+    return Number.isInteger(colour.index) && colour.index >= 0 && colour.index <= 98
+      ? colour
+      : undefined;
+  }
+
+  return colour !== undefined && /^[\da-f]{6}$/iu.test(colour.hex)
+    ? { _tag: "Hex", hex: colour.hex.toLowerCase() }
+    : undefined;
+};
+
+const paletteDigits = (colour: Colour | undefined) =>
+  colour?._tag === "Palette" ? String(colour.index).padStart(2, "0") : "99";
+
+// Only a code that sets the foreground can follow with a background, so a changed
+// background is written with a foreground: the wanted one when it is the same kind of
+// colour, and a stand-in otherwise, which the code after it then replaces.
+const colourCodes = (
+  foreground: Colour | undefined,
+  background: Colour | undefined,
+  backgroundChanged: boolean
+) => {
+  const foregroundCode = foreground?._tag === "Hex" ? `\u0004${foreground.hex}` : "";
+  const alone = foreground?._tag === "Hex" ? foregroundCode : `\u0003${paletteDigits(foreground)}`;
+
+  if (!backgroundChanged) {
+    return alone;
+  }
+
+  if (background?._tag === "Hex") {
+    const both = `\u0004${foreground?._tag === "Hex" ? foreground.hex : "000000"},${background.hex}`;
+
+    return foreground?._tag === "Hex" ? both : both + alone;
+  }
+
+  const both = `\u0003${foreground?._tag === "Hex" ? "99" : paletteDigits(foreground)},${paletteDigits(background)}`;
+
+  return foreground?._tag === "Hex" ? both + foregroundCode : both;
+};
+
+/**
+ * Writes spans as text with mIRC formatting codes, which {@link parseFormatting} reads
+ * back as the same spans: empty spans are gone, and neighbours of the same style are one.
+ * Text starts in {@link plainStyle}, and only what changes between spans is written, with
+ * no reset at the end. A code in a span's text is stripped first, so it cannot change
+ * the formatting after it. Never throws.
+ * @param spans - The runs of text to send, each with the style over it.
+ * @returns Text for a Message, which {@link stripFormatting} turns back to the spans' text.
+ */
+export const formatSpans = (spans: readonly Span[]): string => {
+  let out = "";
+  let current = plainStyle;
+
+  for (const span of spans) {
+    const text = stripFormatting(span.text);
+
+    const style = {
+      ...span.style,
+      background: writable(span.style.background),
+      foreground: writable(span.style.foreground),
+    };
+
+    if (text !== "") {
+      for (const [toggle, code] of toggleCodes) {
+        out += current[toggle] === style[toggle] ? "" : code;
+      }
+
+      const backgroundChanged = !sameColour(current.background, style.background);
+      const colourChanged = backgroundChanged || !sameColour(current.foreground, style.foreground);
+
+      if (colourChanged) {
+        out += colourCodes(style.foreground, style.background, backgroundChanged);
+      }
+
+      // A comma and a digit after a colour would read as its background, so two
+      // toggles that cancel come between.
+      out += colourChanged && text.startsWith(",") ? "\u0002\u0002" : "";
+      out += text;
+      current = style;
+    }
+  }
+
+  return out;
+};

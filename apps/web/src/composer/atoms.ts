@@ -31,6 +31,8 @@ import type {
   Place,
   SayFailure,
 } from "@iirc/frontend/composer";
+import type { Format } from "@iirc/frontend/formatting";
+import { colourChoices, plainOf } from "@iirc/frontend/formatting";
 import { allScope } from "@iirc/frontend/palette";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
@@ -69,6 +71,7 @@ import { latest, open, paned, showDraft, timelinesState, Waits } from "../timeli
 import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
 import { composerState } from "./composer-state.ts";
+import { composerInput } from "./input.ts";
 import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
 /** The context commands are judged in, derived from the Timelines. */
@@ -314,6 +317,102 @@ const sayOne = (intent: Say | Act, id: IntentId) =>
     })
   );
 
+/** Where the composer's selection is in its plain text, from `start` to `end`. */
+interface Range {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Where the selection is in a composer's plain text: the textarea's, which keeps it while
+ * the focus is elsewhere, as in the palette, or the end of the draft with none drawn.
+ * @param registry - The registry.
+ * @param place - The composer's place.
+ * @returns The selection.
+ */
+const selectionIn = (registry: AtomRegistry.AtomRegistry, place: Place): Range => {
+  const input = composerInput(document);
+
+  if (input === undefined) {
+    const end = plainOf(draftOf(registry.get(composerState), place).text).length;
+
+    return { end, start: end };
+  }
+
+  return { end: input.selectionEnd, start: input.selectionStart };
+};
+
+/**
+ * Puts a format over a range of a composer's draft, or with nothing selected, has it
+ * pending at the caret, and gives the composer the focus back, its selection where it was,
+ * since the plain text it is a place in did not change.
+ * @param registry - The registry.
+ * @param place - The composer's place.
+ * @param format - What is put over it.
+ * @param range - The range, or the selection now.
+ */
+const formatHere = (
+  registry: AtomRegistry.AtomRegistry,
+  place: Place,
+  format: Format,
+  range: Range = selectionIn(registry, place)
+) => {
+  happened(registry, { _tag: "Formatted", ...range, format, timeline: place });
+  composerInput(document)?.focus();
+};
+
+/**
+ * The colours offered for a composer, while they are: its place, the range they go over,
+ * its selection as it was when they were asked for, and which of `colourChoices` is
+ * highlighted.
+ */
+const colourChoice = Atom.make<
+  (Range & { readonly place: Place; readonly highlighted: number }) | undefined
+>(undefined).pipe(Atom.keepAlive);
+
+/** The colours offered for one composer, while they are. */
+export const colourChoiceAt = Atom.family((place: Place) =>
+  Atom.make((get) => {
+    const choice = get(colourChoice);
+
+    return choice?.place === place ? choice : undefined;
+  })
+);
+
+/** Moves through the colours offered, on past either end to the other. */
+export const colourMoved = Atom.fnSync((by: number, get) => {
+  const choice = get.registry.get(colourChoice);
+  const { length } = colourChoices;
+
+  if (choice !== undefined) {
+    get.registry.set(colourChoice, {
+      ...choice,
+      highlighted: (((choice.highlighted + by) % length) + length) % length,
+    });
+  }
+}).pipe(Atom.keepAlive);
+
+/**
+ * Puts one of `colourChoices` over the range the colours were offered for, and puts them
+ * away.
+ */
+export const colourChosen = Atom.fnSync((index: number, get) => {
+  const { registry } = get;
+  const choice = registry.get(colourChoice);
+
+  registry.set(colourChoice, undefined);
+
+  if (choice !== undefined && index >= 0 && index < colourChoices.length) {
+    formatHere(registry, choice.place, { _tag: "Colour", colour: colourChoices[index] }, choice);
+  }
+}).pipe(Atom.keepAlive);
+
+/** Puts the colours away, choosing none. */
+export const colourDismissed = Atom.fnSync((_: undefined, get) => {
+  get.registry.set(colourChoice, undefined);
+  composerInput(document)?.focus();
+}).pipe(Atom.keepAlive);
+
 /** An intent carried out in the page at once, which waits on nothing the Daemon says. */
 type Local = Extract<
   Intent,
@@ -334,14 +433,18 @@ type Local = Extract<
       | "AskRemoval"
       | "Search"
       | "Look"
-      | "Draft";
+      | "Draft"
+      | "Format"
+      | "ChooseColour";
   }
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "AskRemoval",
+  "ChooseColour",
   "Draft",
   "FocusComposer",
+  "Format",
   "ImportTheme",
   "Latest",
   "ListThemes",
@@ -453,6 +556,17 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
     // A Lookup is asked beside the composer's turn, so a Say never waits behind it.
     case "Look": {
       look(registry, intent);
+      break;
+    }
+
+    case "Format": {
+      formatHere(registry, place, { _tag: "Toggle", flag: intent.format });
+      break;
+    }
+
+    case "ChooseColour": {
+      registry.set(colourChoice, { ...selectionIn(registry, place), highlighted: 0, place });
+      composerInput(document)?.focus();
       break;
     }
 
@@ -806,10 +920,14 @@ export const draftsCarried = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** An edit of a Timeline's draft, and where the Owner's selection was if they typed it. */
+/**
+ * An edit of a Timeline's draft: its plain text after, where the caret is after it if
+ * known, and where the Owner's selection was if they typed it.
+ */
 interface Edit {
   readonly timeline: Place;
   readonly text: string;
+  readonly caret?: number;
   readonly typing?: Typing;
 }
 
@@ -819,8 +937,17 @@ interface Edit {
  * @param registry - The registry.
  * @param change - The edit.
  */
-export const edited = (registry: AtomRegistry.AtomRegistry, { text, timeline, typing }: Edit) => {
-  happened(registry, { _tag: "Edited", text, timeline }, typing);
+export const edited = (
+  registry: AtomRegistry.AtomRegistry,
+  { caret, text, timeline, typing }: Edit
+) => {
+  happened(
+    registry,
+    caret === undefined
+      ? { _tag: "Edited", text, timeline }
+      : { _tag: "Edited", caret, text, timeline },
+    typing
+  );
 };
 
 /** Edits a Timeline's draft, where the Owner's selection was if they typed it. */

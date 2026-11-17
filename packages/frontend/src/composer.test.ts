@@ -946,3 +946,106 @@ describe("a reply", () => {
     }).toStrictEqual({ chosen: undefined, dropped: undefined });
   });
 });
+
+const typed = (text: string, caret: number): ComposerEvent => ({
+  _tag: "Edited",
+  caret,
+  text,
+  timeline: channel,
+});
+
+describe("formatting a draft", () => {
+  const bold = { _tag: "Toggle", flag: "bold" } as const;
+
+  const formatted = (start: number, end: number): ComposerEvent => ({
+    _tag: "Formatted",
+    end,
+    format: bold,
+    start,
+    timeline: channel,
+  });
+
+  it("wraps a selection, and sends exactly the codes the draft shows", () => {
+    const state = fold([edited("a b c"), formatted(2, 3)]);
+
+    expect([draftOf(state, channel).text, submit(state, channel, context).intents]).toStrictEqual([
+      "a \u0002b\u0002 c",
+      [say("a \u0002b\u0002 c")],
+    ]);
+  });
+
+  it("toggles what is typed next at a caret, there only", () => {
+    const there = fold([edited("hello"), formatted(5, 5), typed("hello!", 6)]);
+    const elsewhere = fold([edited("hello"), formatted(5, 5), typed("h!ello", 2)]);
+
+    expect([draftOf(there, channel).text, draftOf(elsewhere, channel).text]).toStrictEqual([
+      "hello\u0002!",
+      "h!ello",
+    ]);
+  });
+
+  it("keeps the style pending until the text changes, and lets it go then", () => {
+    const pending = fold([edited("hello"), formatted(5, 5)]);
+    const kept = fold([edited("hello")], pending);
+    const typedOnce = fold([typed("hello!", 6), typed("hello!?", 7)], pending);
+
+    expect([
+      draftOf(pending, channel).typing?.at,
+      draftOf(kept, channel).typing?.at,
+      draftOf(typedOnce, channel).typing,
+      draftOf(typedOnce, channel).text,
+    ]).toStrictEqual([5, 5, undefined, "hello\u0002!?"]);
+  });
+
+  it("lets go of a style pending once the draft is recalled or sent", () => {
+    const sent = submit(fold([edited("hello"), formatted(5, 5)]), channel, context).state;
+    const recalled = fold([edited("hello"), formatted(5, 5), up()], sent);
+
+    expect([draftOf(sent, channel).typing, draftOf(recalled, channel).typing]).toStrictEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("puts a style pending past the end of the draft at its end, as after `/bold` is sent", () => {
+    const state = fold([formatted(5, 5), typed("x", 1)]);
+
+    expect([
+      draftOf(fold([formatted(5, 5)]), channel).typing?.at,
+      draftOf(state, channel).text,
+    ]).toStrictEqual([0, "\u0002x"]);
+  });
+
+  it("sends no line that only formatted whitespace makes, as the draft shows it blank", () => {
+    const state = fold([edited("a\n \nb"), formatted(0, 5)]);
+
+    expect(submit(state, channel, context).intents).toStrictEqual([say("\u0002a"), say("\u0002b")]);
+  });
+
+  it("leaves no code with nothing after it once a run is deleted", () => {
+    const state = fold([edited("a b c"), formatted(2, 3), typed("a  c", 2)]);
+
+    expect(draftOf(state, channel).text).toBe("a  c");
+  });
+
+  it("writes a style across a line break on both lines, so each Message carries it", () => {
+    const state = fold([edited("ab\ncd"), formatted(1, 4)]);
+
+    expect(submit(state, channel, context).intents).toStrictEqual([
+      say("a\u0002b"),
+      say("\u0002c\u0002d"),
+    ]);
+  });
+
+  it("is kept through an edit elsewhere, which changes the plain text alone", () => {
+    const state = fold([edited("a b c"), formatted(2, 3), typed("a b c!", 6)]);
+
+    expect(draftOf(state, channel).text).toBe("a \u0002b\u0002 c!");
+  });
+
+  it("is recalled as it was sent", () => {
+    const sent = submit(fold([edited("a b c"), formatted(2, 3)]), channel, context).state;
+
+    expect(draftOf(fold([up()], sent), channel).text).toBe("a \u0002b\u0002 c");
+  });
+});

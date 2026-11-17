@@ -23,6 +23,7 @@ import { Schema } from "effect";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
+import type { Flag } from "./formatting.ts";
 import type { Axis, Direction } from "./layout.ts";
 import {
   isLookupNick,
@@ -267,6 +268,10 @@ export interface Act {
  *   reads against the Timelines and the Owner's time zone, or showing what it last found.
  * - `Look`: look a nick up on a Network, `WHOIS` or `WHOWAS`, or a Channel's list, under an
  *   intent the runtime names, and show what came back in a card over the Pane that asked.
+ * - `Format`: turn a flag over in the composer's selection, or, with none, for what is
+ *   typed next at its caret.
+ * - `ChooseColour`: offer the colours for the composer's selection, or for what is typed
+ *   next at its caret.
  */
 export type Intent =
   | Say
@@ -325,7 +330,9 @@ export type Intent =
     }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
   | { readonly _tag: "Search"; readonly query: string | undefined }
-  | Look;
+  | Look
+  | { readonly _tag: "Format"; readonly format: Flag }
+  | { readonly _tag: "ChooseColour" };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -1154,6 +1161,25 @@ const nothingAfter =
   (name: string) =>
   (args: string): Parsed<undefined> =>
     args.trim() === "" ? parsed(undefined) : invalid(`/${name} takes nothing after it.`);
+
+/**
+ * The command that turns a flag over in the composer, named for it.
+ * @param flag - The flag.
+ * @param what - What it is called, in words.
+ * @returns The command.
+ */
+const formatCommand = (flag: Flag, what: string): Command =>
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description: `Turn ${what} on or off over the composer's selection, or for what is typed next.`,
+    id: `format.${flag}`,
+    intents: () => [{ _tag: "Format", format: flag }],
+    name: flag,
+    parse: nothingAfter(flag),
+    usage: `/${flag}`,
+    when: [],
+  });
 
 /**
  * The marks of Timelines with something unread, skipping any that would change nothing.
@@ -2704,6 +2730,24 @@ export const commands: readonly Command[] = [
     name: "sidebar",
     parse: shownArguments("sidebar", "it"),
     usage: "/sidebar [on|off]",
+    when: [],
+  }),
+  formatCommand("bold", "bold"),
+  formatCommand("italic", "italic"),
+  formatCommand("underline", "underline"),
+  formatCommand("monospace", "fixed pitch"),
+  formatCommand("reverse", "reversed colours"),
+  formatCommand("strikethrough", "strikethrough"),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description:
+      "Choose a colour for the text selected in the composer, or for what is typed next.",
+    id: "format.colour",
+    intents: () => [{ _tag: "ChooseColour" }],
+    name: "colour",
+    parse: nothingAfter("colour"),
+    usage: "/colour",
     when: [],
   }),
   unfocused({

@@ -21,6 +21,7 @@ import {
 import type { Completed, CompletionEvent, Emoji, List, Sources } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
+import { plainOf } from "@iirc/frontend/formatting";
 import { listed } from "@iirc/frontend/options";
 import type { Typing } from "@iirc/frontend/uploading";
 import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
@@ -83,7 +84,8 @@ export const completionShown = Atom.family((place: Place) =>
       return nothingShown;
     }
 
-    const { text } = get(draft(place));
+    // Completion reads what the Owner sees, the draft's plain text.
+    const text = plainOf(get(draft(place)).text);
     const sources = get(sourcesAt(place));
 
     return {
@@ -112,6 +114,7 @@ const completing = (registry: AtomRegistry.AtomRegistry, place: Place, event: Co
       registry,
       reduceComposers(registry.get(composerState), {
         _tag: "Edited",
+        caret: step.edit.caret,
         text: step.edit.text,
         timeline: step.edit.place,
       })
@@ -207,10 +210,15 @@ export const typed = Atom.fnSync(
     },
     get
   ) => {
-    edited(get.registry, typing === undefined ? { text, timeline } : { text, timeline, typing });
+    const at = caret ?? text.length;
+
+    edited(
+      get.registry,
+      typing === undefined ? { caret: at, text, timeline } : { caret: at, text, timeline, typing }
+    );
     completing(get.registry, timeline, {
       _tag: "Typed",
-      caret: caret ?? text.length,
+      caret: at,
       place: timeline,
       text,
     });
@@ -255,7 +263,7 @@ const askNicks = (
             nicks: page.members.map((member) => member.nick),
             place: now,
             request: wanted.request,
-            text: draftOf(registry.get(composerState), now).text,
+            text: plainOf(draftOf(registry.get(composerState), now).text),
           };
         }),
         Effect.catch((error) =>

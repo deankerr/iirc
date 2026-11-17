@@ -56,7 +56,7 @@ export interface KeyEvent {
 }
 
 /** What a binding's `when` may test besides its command's own conditions. */
-export type ContextKey = "editing" | "palette";
+export type ContextKey = "editing" | "inComposer" | "palette";
 
 /** One test of a `when`: a context key, or its negation. */
 export interface Clause {
@@ -93,6 +93,7 @@ export interface BindingText {
  *
  * - `command`: the context the bound command is judged in.
  * - `editing`: focus is in a field that takes text, such as the composer.
+ * - `inComposer`: focus is in the composer itself.
  * - `palette`: the command palette is open.
  * - `covered`: a modal dialog, a popover, or a menu is open or holds the focus, and keeps
  *   its keys.
@@ -104,6 +105,7 @@ export interface KeyContext {
   readonly palette: boolean;
   readonly covered: boolean;
   readonly composer: boolean;
+  readonly inComposer: boolean;
   readonly platform: Platform;
 }
 
@@ -411,7 +413,7 @@ const sameKeys = (bound: Chord, pressed: Chord, platform: Platform) => {
   );
 };
 
-const contextKeys: ReadonlySet<string> = new Set<ContextKey>(["editing", "palette"]);
+const contextKeys: ReadonlySet<string> = new Set<ContextKey>(["editing", "inComposer", "palette"]);
 
 const isContextKey = (text: string): text is ContextKey => contextKeys.has(text);
 
@@ -489,12 +491,16 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * The bindings the Frontend starts with. Opening the palette and moving between Timelines
  * work while typing in the composer, as an IRC client's do, and Alt+A jumps to what calls
  * for the Owner most, as WeeChat's does. Alt+M shows or hides the members and Alt+N the
- * sidebar of Networks beside them: Mod+Shift+M is the browser's own in Chrome and Firefox,
- * and Ctrl+B is bold to an IRC user. No letter is bound to focusing the composer, since a
- * character typed outside a field goes to it. The Panes are Alt+Shift: with the
- * arrows to move between them, as Alt and the arrows move between Timelines, and with a
- * letter to split, close, zoom, equalize, grow, or shrink, a letter because Option on a
- * Mac types another character, which only a letter's or a digit's physical key names back.
+ * sidebar of Networks beside them: Mod+Shift+M is the browser's own in Chrome and Firefox.
+ * Formatting is Mod and a letter, as an IRC client's and a word processor's are: B, I,
+ * and U, E for fixed pitch, as some editors mark code, R for reverse, and Mod+Shift+X to
+ * strike through. mIRC's Ctrl+K for colour is the palette's here, so the colours are
+ * Mod+Shift+K. They act only while typing in the composer, so anywhere else Mod+R
+ * still reloads the page. No letter is bound to focusing the composer, since a character typed
+ * outside a field goes to it. The Panes are Alt+Shift: with the arrows to move between
+ * them, as Alt and the arrows move between Timelines, and with a letter to split, close,
+ * zoom, equalize, grow, or shrink, a letter because Option on a Mac types another
+ * character, which only a letter's or a digit's physical key names back.
  */
 export const defaultBindings: readonly BindingText[] = [
   { command: "palette.open", keys: "mod+k", when: "!palette" },
@@ -506,6 +512,13 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "sidebar.toggle", keys: "alt+n", when: "!palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
   { command: "search.open", keys: "mod+shift+f", when: "!palette" },
+  { command: "format.bold", keys: "mod+b", when: "inComposer && !palette" },
+  { command: "format.italic", keys: "mod+i", when: "inComposer && !palette" },
+  { command: "format.underline", keys: "mod+u", when: "inComposer && !palette" },
+  { command: "format.monospace", keys: "mod+e", when: "inComposer && !palette" },
+  { command: "format.reverse", keys: "mod+r", when: "inComposer && !palette" },
+  { command: "format.strikethrough", keys: "mod+shift+x", when: "inComposer && !palette" },
+  { command: "format.colour", keys: "mod+shift+k", when: "inComposer && !palette" },
   { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft", when: "!palette" },
   { args: "right", command: "pane.focus", keys: "alt+shift+arrowright", when: "!palette" },
   { args: "up", command: "pane.focus", keys: "alt+shift+arrowup", when: "!palette" },

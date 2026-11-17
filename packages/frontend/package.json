@@ -10,6 +10,7 @@
     "./commands": "./src/commands.ts",
     "./completion": "./src/completion.ts",
     "./composer": "./src/composer.ts",
+    "./formatting": "./src/formatting.ts",
     "./keymap": "./src/keymap.ts",
     "./layout": "./src/layout.ts",
     "./lookup": "./src/lookup.ts",

@@ -10,7 +10,7 @@ Each subpath is its own module, and there is no root export.
 | `@iirc/protocol/isupport` | `RPL_ISUPPORT` tokens, and readers for the token values the protocol fixes |
 | `@iirc/protocol/casemapping` | How a Network compares nicks and Channel names |
 | `@iirc/protocol/ctcp` | CTCP read out of a Message's text, and CTCP text and Lines to send |
-| `@iirc/protocol/format` | mIRC formatting codes as spans of text and style, or stripped |
+| `@iirc/protocol/format` | mIRC formatting codes as spans of text and style, written from spans, or stripped |
 | `@iirc/protocol/links` | The links a Message holds, in order, and the first three that may be previewed |
 | `@iirc/protocol/mask` | A `nick!user@host` mask with wildcards, and whether it matches a User |
 
@@ -24,7 +24,7 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 4. **Sending.** `outbound` builds an `OutboundLine` or says why it cannot, and `encode` gives its bytes with CRLF, writing the last parameter as trailing only when it must be. A parameter is text, sent as UTF-8, or a `RawParam`, sent as its bytes, which `pong` uses to echo a token exactly. The builders cover the Lines a Client sends: `nick`, `user`, `join`, `part`, `privmsg`, `notice`, `quit`, `ping`, `pong`, `names`, `mode`, `who`, `whois`, `whowas`, `away`, `topic`, `kick`, and `invite` on the floor, and `cap`, `authenticate`, `tagmsg`, `monitor`, `watch`, and `withTags` above it. `quote` builds a Line from text, as `/quote` takes it.
 5. **Credentials.** `fillSecret` fills `PASS`, a `JOIN` with a key, and a service's `IDENTIFY`, and `OPER` on the floor, and the SASL `PLAIN` response above it.
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, `ctcpRequest`, and `ctcpReply` build CTCP that is safe to send, and a request or a reply only ever to a User.
-7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, and `stripFormatting` removes exactly the codes it reads. Spans are data for a Frontend to draw, never markup.
+7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, `formatSpans` writes spans back as codes, and `stripFormatting` removes exactly the codes `parseFormatting` reads. Spans are data for a Frontend to draw, never markup.
 8. **Links.** `linksOf` finds the links in a Message's text, and `previewableLinksOf` the first three distinct `http` or `https` ones, so the Daemon and every Frontend agree on which they are.
 9. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
 10. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
@@ -136,11 +136,14 @@ ctcpReply(target: ReplyTarget, text: CtcpText): OutboundLine | Rejected
 
 ```ts
 parseFormatting(text: string): readonly Span[]   // { text, style }
+formatSpans(spans: readonly Span[]): string
 stripFormatting(text: string): string
 plainStyle: Style
 ```
 
 A colour of `99` is the default colour, so it is `undefined` in a `Style`. A colour code with no colour after it resets both colours and takes nothing else, so `\x03,` shows the comma. A `\x04` needs exactly six hex digits. Reverse is a flag, and does not swap the colours.
+
+`formatSpans` is the inverse: `parseFormatting` reads its output back as the same spans, less empty ones and with neighbours of one style joined. It writes only what changes, never a reset at the end, and strips any code from a span's text first, so no span can change the formatting after it.
 
 ## `@iirc/protocol/links`
 

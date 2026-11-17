@@ -22,7 +22,15 @@ import {
   showChord,
   typesInComposer,
 } from "./keymap.ts";
-import type { Chord, KeyContext, KeyEvent, KeyName, Platform } from "./keymap.ts";
+import type {
+  Binding,
+  BindingText,
+  Chord,
+  KeyContext,
+  KeyEvent,
+  KeyName,
+  Platform,
+} from "./keymap.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timelineId = Schema.decodeSync(TimelineId);
@@ -61,6 +69,7 @@ const at = (
   composer: true,
   covered: false,
   editing: false,
+  inComposer: false,
   palette: false,
   platform: "Other",
   ...more,
@@ -440,6 +449,122 @@ describe("the keymap", () => {
     ]);
     expect(chordsFor(defaultKeymap, "say.privmsg")).toStrictEqual([]);
     expect(key("Up")).toBe("arrowup");
+  });
+});
+
+const platforms: readonly Platform[] = ["Mac", "Other"];
+
+/**
+ * A chord as it is pressed on a platform, written, so two bound alike write the same.
+ * @param keys - The chord.
+ * @param platform - The platform.
+ * @returns It, written.
+ */
+const pressedOn = (keys: Chord, platform: Platform) => {
+  const mac = platform === "Mac";
+
+  return formatChord({
+    ...keys,
+    ctrl: mac ? keys.ctrl : false,
+    meta: mac ? false : keys.meta,
+    mod: keys.mod || (mac ? keys.meta : keys.ctrl),
+  });
+};
+
+/**
+ * Whether two bindings' whens can both hold: neither tests a context key the other tests
+ * the other way.
+ * @param left - One binding.
+ * @param right - The other.
+ * @returns Whether they can.
+ */
+const together = (left: Binding, right: Binding) =>
+  !left.when.some((clause) =>
+    right.when.some((other) => other.key === clause.key && other.is !== clause.is)
+  );
+
+/**
+ * The pairs of bindings that share a chord on a platform where both their whens can hold.
+ * @param texts - The bindings, as text.
+ * @returns Each pair, as their commands.
+ */
+const clashes = (texts: readonly BindingText[]) => {
+  const bindings = keymapOf(texts);
+
+  return bindings.flatMap((left, index) =>
+    bindings
+      .slice(index + 1)
+      .filter(
+        (right) =>
+          together(left, right) &&
+          platforms.some(
+            (platform) => pressedOn(left.keys, platform) === pressedOn(right.keys, platform)
+          )
+      )
+      .map((right) => [left.command, right.command])
+  );
+};
+
+describe("the formatting keys", () => {
+  it("resolve to formatting the composer while typing in it, but not in another field, outside one, or while the palette is open", () => {
+    const chord = (key: string, shift = false) =>
+      resolve(
+        defaultKeymap,
+        at({ editing: true, inComposer: true }),
+        press(shift ? key.toUpperCase() : key, `Key${key.toUpperCase()}`, { ctrl: true, shift })
+      );
+
+    expect({
+      bold: chord("b"),
+      colour: chord("k", true),
+      italic: chord("i"),
+      mac: resolve(
+        defaultKeymap,
+        at({ editing: true, inComposer: true, platform: "Mac" }),
+        press("b", "KeyB", { meta: true })
+      ),
+      monospace: chord("e"),
+      open: resolve(
+        defaultKeymap,
+        at({ editing: true, inComposer: true, palette: true }),
+        press("b", "KeyB", { ctrl: true })
+      ),
+      otherField: resolve(defaultKeymap, at({ editing: true }), press("r", "KeyR", { ctrl: true })),
+      outside: resolve(defaultKeymap, at({}), press("r", "KeyR", { ctrl: true })),
+      reverse: chord("r"),
+      strikethrough: chord("x", true),
+      underline: chord("u"),
+    }).toStrictEqual({
+      bold: [{ _tag: "Format", format: "bold" }],
+      colour: [{ _tag: "ChooseColour" }],
+      italic: [{ _tag: "Format", format: "italic" }],
+      mac: [{ _tag: "Format", format: "bold" }],
+      monospace: [{ _tag: "Format", format: "monospace" }],
+      open: undefined,
+      otherField: undefined,
+      outside: undefined,
+      reverse: [{ _tag: "Format", format: "reverse" }],
+      strikethrough: [{ _tag: "Format", format: "strikethrough" }],
+      underline: [{ _tag: "Format", format: "underline" }],
+    });
+  });
+
+  it("are shown beside their commands", () => {
+    expect(chordsFor(defaultKeymap, "format.colour").map(formatChord)).toStrictEqual([
+      "mod+shift+k",
+    ]);
+  });
+});
+
+describe("the default bindings", () => {
+  it("give no chord to two commands where both can fire", () => {
+    expect(clashes(defaultBindings)).toStrictEqual([]);
+  });
+
+  it("would be caught giving the colours Mod+K, the palette's", () => {
+    expect(
+      clashes([...defaultBindings, { command: "format.colour", keys: "mod+k", when: "!palette" }])
+    ).toStrictEqual([["palette.open", "format.colour"]]);
   });
 });
 

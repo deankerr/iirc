@@ -17,6 +17,7 @@ import type { OwnerOptionName, Upload, UploadsStatus } from "@iirc/api";
 import { typesCredential } from "./commands.ts";
 import { draftOf, linesOf, reduceComposers } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
+import { plainOf } from "./formatting.ts";
 import { sizeText } from "./uploads.ts";
 import type { EditFailure } from "./uploads.ts";
 
@@ -559,8 +560,9 @@ export const followed = (
     notes: state.notes,
     pending: state.pending.map((one) => {
       const place = carriedTo(one.place);
-      const was = draftOf(before, one.place).text;
-      const now = draftOf(after, place).text;
+      // An anchor is a place in the plain text, as a caret is.
+      const was = plainOf(draftOf(before, one.place).text);
+      const now = plainOf(draftOf(after, place).text);
       const typed = place === one.place && typing?.place === place ? typing : undefined;
 
       return was === now && place === one.place
@@ -651,7 +653,7 @@ export const uploaded = (
   }
 
   const { place } = file;
-  const insertion = insertLink(draftOf(composers, place).text, file.anchor, link);
+  const insertion = insertLink(plainOf(draftOf(composers, place).text), file.anchor, link);
 
   const pending = state.pending.map((one, at): Pending => {
     if (one.key === key) {
@@ -766,7 +768,7 @@ export const renamed = (
   const { place, stage } = file;
   const was = stage.link;
   const now = upload.link ?? was;
-  const { text } = draftOf(composers, place);
+  const text = plainOf(draftOf(composers, place).text);
   const starts = now === was ? [] : placesOf(text, was);
 
   const held = changed(state, key, (one) => ({

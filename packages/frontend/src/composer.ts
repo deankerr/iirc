@@ -25,6 +25,8 @@ import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
 import { commandNamed, credentialRefusal, interpret, namedIn } from "./commands.ts";
 import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
+import { merged, formattedIn, pendingAfter, plainOf } from "./formatting.ts";
+import type { Format, Hint, Pending } from "./formatting.ts";
 import { panesOf } from "./layout.ts";
 import { commandKey } from "./palette.ts";
 import { attemptedText, contained, requested } from "./render.ts";
@@ -147,7 +149,13 @@ export interface Answering {
 
 /** One Timeline's composer. */
 export interface Draft {
+  /**
+   * What is sent, kept, and recalled, with IRC's formatting codes in it. What the Owner sees
+   * and edits is its plain text, `plainOf` it.
+   */
   readonly text: string;
+  /** A style chosen at a caret with nothing selected, for what is typed there next. */
+  readonly typing: Pending | undefined;
   /** The Message its first Say answers, until it is sent or dropped. */
   readonly answering: Answering | undefined;
   /** What was sent from this Timeline, newest first. */
@@ -204,8 +212,13 @@ export type SayFailure =
 /**
  * What happened to a composer.
  *
- * - `Edited`: the Owner changed the text, which lets go of lines waiting to be confirmed,
- *   and of a notice about the text. Text left as it was changes nothing.
+ * - `Edited`: the Owner changed the plain text to `text`, which is merged into the draft's
+ *   formatting, and lets go of lines waiting to be confirmed, and of a notice about the
+ *   text. `caret`, where the caret is after it, places an edit the text alone could place
+ *   in several ways. Text left as it was changes nothing. Once the text changes, a style
+ *   pending is let go of, after it was typed if the edit put text in where it was.
+ * - `Formatted`: the Owner put a format over the plain text from `start` to `end`. With
+ *   nothing selected, it is pending at the caret instead, for what is typed there next.
  * - `Recalled`: Up or Down through the history, which changes the text as an edit does.
  * - `Left`: the composer turned to another Timeline, which lets go of a notice about the
  *   text it holds, since the text stays and the complaint about it does not come back.
@@ -223,7 +236,19 @@ export type SayFailure =
  *   notice about the text stays behind.
  */
 export type ComposerEvent =
-  | { readonly _tag: "Edited"; readonly timeline: Place; readonly text: string }
+  | {
+      readonly _tag: "Edited";
+      readonly timeline: Place;
+      readonly text: string;
+      readonly caret?: number;
+    }
+  | {
+      readonly _tag: "Formatted";
+      readonly timeline: Place;
+      readonly start: number;
+      readonly end: number;
+      readonly format: Format;
+    }
   | {
       readonly _tag: "Recalled";
       readonly timeline: Place;
@@ -265,6 +290,7 @@ export const emptyDraft: Draft = {
   notice: undefined,
   recalled: undefined,
   text: "",
+  typing: undefined,
 };
 
 /**
@@ -420,7 +446,7 @@ export const contextOf = (
  * @returns Its lines.
  */
 export const linesOf = (text: string): readonly string[] =>
-  text.split(/\r\n|\r|\n/u).filter((line) => line.trim() !== "");
+  text.split(/\r\n|\r|\n/u).filter((line) => plainOf(line).trim() !== "");
 
 /**
  * The keys of the commands lines run, in order, as the palette remembers them: a line that
@@ -784,6 +810,7 @@ const recalledIn = (draft: Draft, direction: "Older" | "Newer"): Draft => {
           kept: recalled === undefined ? draft.text : draft.kept,
           recalled: next,
           text,
+          typing: undefined,
         };
   }
 
@@ -794,8 +821,8 @@ const recalledIn = (draft: Draft, direction: "Older" | "Newer"): Draft => {
   const text = recalled === 0 ? undefined : history[recalled - 1];
 
   return text === undefined
-    ? { ...draft, kept: "", recalled: undefined, text: draft.kept }
-    : { ...draft, recalled: recalled - 1, text };
+    ? { ...draft, kept: "", recalled: undefined, text: draft.kept, typing: undefined }
+    : { ...draft, recalled: recalled - 1, text, typing: undefined };
 };
 
 /**
@@ -823,7 +850,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
       const from = draftOf(state, event.from);
       const to = draftOf(state, event.to);
       const kept = from.notice?._tag === "AboutText" ? undefined : from.notice;
-      const moving = from.text.trim() !== "" && to.text.trim() === "";
+      const moving = plainOf(from.text).trim() !== "" && plainOf(to.text).trim() === "";
       const drafts = new Map(state.drafts);
 
       drafts.delete(event.from);
@@ -839,6 +866,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
                 notice: to.notice ?? kept,
                 recalled: undefined,
                 text: from.text,
+                typing: undefined,
               }
             : { ...to, notice: to.notice ?? kept }
         ),
@@ -848,13 +876,38 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
     case "Edited": {
       // Lines waiting to be confirmed were read from the text before it changed, and a
       // complaint about the text is about the text as it was.
-      return withDraft(state, event.timeline, (draft) => ({
-        ...draft,
-        confirming: undefined,
-        notice: unlessAboutText(draft.notice, draft.text !== event.text),
-        recalled: undefined,
-        text: event.text,
-      }));
+      return withDraft(state, event.timeline, (draft) => {
+        const hint: Hint =
+          event.caret === undefined
+            ? { pending: draft.typing }
+            : { caret: event.caret, pending: draft.typing };
+
+        const text = merged(draft.text, event.text, hint);
+
+        return {
+          ...draft,
+          confirming: undefined,
+          notice: unlessAboutText(draft.notice, plainOf(draft.text) !== event.text),
+          recalled: undefined,
+          text,
+          typing: text === draft.text ? draft.typing : undefined,
+        };
+      });
+    }
+
+    // Nothing selected, the format waits at the caret for what is typed there; anything
+    // selected takes it at once.
+    case "Formatted": {
+      return withDraft(state, event.timeline, (draft) =>
+        event.start === event.end
+          ? { ...draft, typing: pendingAfter(draft.text, draft.typing, event.start, event.format) }
+          : {
+              ...draft,
+              confirming: undefined,
+              text: formattedIn(draft.text, event.start, event.end, event.format),
+              typing: undefined,
+            }
+      );
     }
 
     case "Left": {
@@ -930,7 +983,7 @@ export const started = (state: Composers, timeline: Place, text: string | undefi
 
   const draft = draftOf(state, timeline);
 
-  if (draft.text.trim() === "") {
+  if (plainOf(draft.text).trim() === "") {
     return reduceComposers(state, { _tag: "Edited", text, timeline });
   }
 
