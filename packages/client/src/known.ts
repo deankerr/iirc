@@ -173,8 +173,8 @@ export interface ChannelView {
 export interface PartnerKnowledge {
   readonly nick: string;
   /**
-   * Known true while they share a Channel with Self or `MONITOR` says they are online,
-   * known false while `MONITOR` says they are offline, and unknown otherwise, as with no
+   * Known true while they share a Channel with Self or `MONITOR` or `WATCH` says they are
+   * online, known false while it says they are offline, and unknown otherwise, as with no
    * Session.
    */
   readonly here: Fact<boolean>;

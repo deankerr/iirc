@@ -8,12 +8,15 @@ Real Sessions on real Ircds, written in the transcript format and replayed throu
 | `ergo/floor.irc`            | No `CAP` at all, over plaintext                              |
 | `ngircd/first-features.irc` | The same request, of which ngircd offers only `multi-prefix` |
 | `ngircd/floor.irc`          | No `CAP` at all                                              |
+| `hybrid/watch.irc`          | No `CAP`, and presence through `WATCH`, with a limit of 3    |
 
 They sit at the repository's root because no one package owns them: the Client's tests read them, and a recorder writes them.
 
 ## How they were made
 
 A scripted Self and a scripted peer played one Session on a private Ergo 2.19.1 and a private ngircd, on loopback ports. The peer takes the nick `iirc` first, so Self meets a `433` and becomes `iirc_`. Then Self joins `#iirc`, the peer joins and talks, a Message goes each way in the Channel and directly, Self asks for `NAMES` and the Channel's modes, sends a `PING`, answers the Ircd's, and quits. The recorder is kept at the git tag `spike/transcript`, in `packages/transcript`. The planned recorder is the Daemon itself, run against a private Ircd as `bun run e2e` does, with its Journal printed through a normaliser that follows the rules below.
+
+`hybrid/watch.irc` was played much the same way by a throwaway script on ircd-hybrid 8.2.34, from before hybrid replaced `WATCH` with `MONITOR`, with its DNS answering nothing. A `holder` keeps `iirc` all Session, so Self stays `iirc_` and never asks for it back. After the Direct Messages, `peer2` messages Self and leaves before Self watches it, then comes and goes, and Self closes its Timeline. The script also overflows the list once, which the Client never does, to record a real `512`.
 
 ## Normalising
 
@@ -25,10 +28,10 @@ Every `<<` Line stays real bytes that a Client could receive, so a transcript fe
 | `msgid` tag | `m1`, `m2`, … in order of first sight, the same stand-in every time the same id appears |
 | `batch` tag and `BATCH ±ref` | `b1`, `b2`, … the same way |
 | Tag order | Sorted by key, since Ergo writes tags in Go map order |
-| `329` and `333` timestamps | Whole seconds from the second Self dialled |
+| `329` and `333` timestamps, and `WATCH`'s timestamps | Whole seconds from the second Self dialled |
 | `353` names | Sorted by nick, with prefixes kept, since Ergo lists them in map order |
 | `003`'s text | `This server was created at the epoch` |
-| `250`'s text | `Highest connection count: 2`, since ngircd counts readiness checks |
+| ngircd's `250` text | `Highest connection count: 2`, since ngircd counts readiness checks |
 | Hostnames | Stable by configuration, with no cloaking and no DNS, so every host is `127.0.0.1` |
 | Ports | `-> dial` names the Ircd and its well-known port, such as `ergo.test:6697 tls`, not the port chosen for the run |
 | Credentials | A Line that carried one is written as its placeholder, such as `>> AUTHENTICATE {AuthenticatePlain iirc}`, and never as bytes |
@@ -37,7 +40,7 @@ Every `<<` Line stays real bytes that a Client could receive, so a transcript fe
 
 ## What they show
 
-Ergo and ngircd are two examples of what the protocol allows, not its two cases. Each difference here is a freedom any Ircd may take, so the Client accepts it from every Ircd:
+Ergo, ngircd, and hybrid are examples of what the protocol allows, not its cases. Each difference here is a freedom any Ircd may take, so the Client accepts it from every Ircd:
 
 - **`433` comes at different times.** Ergo with `CAP` holds the nick check until `CAP END`, after SASL's `903`. ngircd answers as soon as it reads `NICK`, even mid-negotiation. A Client must handle `433` at any point before `001`.
 - **Some Ircds pace us.** ngircd advertises `PENALTY` and held a reply for 2 seconds after our second `NICK`.
@@ -49,4 +52,5 @@ Ergo and ngircd are two examples of what the protocol allows, not its two cases.
 - **`labeled-response` has two shapes.** A one-Line reply carries `label` itself. A reply of many Lines comes as a batch, and only its `BATCH +` Line carries the label.
 - **SASL's numerics come before registration,** with `*` for the nick: `900 * * iirc` and `903 *`.
 - **Quitting differs.** Ergo echoes our own `QUIT`, then sends `ERROR`. ngircd sends a statistics `NOTICE`, then `ERROR`. Both then close cleanly.
+- **Presence may come only through `WATCH`.** hybrid offers `WATCH=3` and no `MONITOR`. Its numerics put the nick, user, host, and signon time in separate parameters, with `* * 0` for a nick offline or one taken off, and `512` names one nick.
 - **ISUPPORT differs where it matters.** ngircd has `NICKLEN=9` and `CHANTYPES=#&+`. Ergo has `UTF8ONLY`, `NICKLEN=32`, and three `005` Lines.

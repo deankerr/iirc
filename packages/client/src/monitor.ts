@@ -1,12 +1,15 @@
 /**
  * `MONITOR`: where an Ircd offers it in ISUPPORT, the Client monitors the nick Self wants
  * back and each open Direct Message partner, and is told when their holders come and go.
+ * Where it offers only the older `WATCH`, the same list is kept through that, and what
+ * the Ircd tells is read the same way, so only the Lines differ.
  *
  * The list is derived, never kept: the nick Self wants back first, then the partners,
- * most recently messaged first, cut to `MONITOR`'s limit, less what a `734` refused on
- * this Connection. The Connection keeps only what it sent, so after a step that may change
- * the list, the difference is sent: `MONITOR -`, then `MONITOR +`. Each Session starts
- * with nothing sent, so the whole list goes out as the `005` that offers `MONITOR` comes.
+ * most recently messaged first, cut to the command's limit, less what a `734` or `512`
+ * refused on this Connection. The Connection keeps only what it sent, so after a step that
+ * may change the list, the difference is sent: the nicks taken off, then those added. Each
+ * Session starts with nothing sent, so the whole list goes out as the `005` that offers
+ * the command comes.
  *
  * The partners are folded from the Client's own News, as a projection folds Timelines.
  *
@@ -20,8 +23,9 @@ import {
   nick as nickLine,
   parseSource,
   upperCaseAscii,
+  watch,
 } from "@iirc/protocol/line";
-import type { Line } from "@iirc/protocol/line";
+import type { Line, OutboundLine, Rejected, Source } from "@iirc/protocol/line";
 
 import { online } from "./acts.ts";
 import { pruneUsers, see } from "./channels.ts";
@@ -31,7 +35,7 @@ import type { Activity, Closable, News, Where } from "./news.ts";
 import { reclaim, wantedBack } from "./reclaim.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
-import type { Monitoring, State, Watched } from "./state.ts";
+import type { MonitorCommand, Monitoring, State, Watched } from "./state.ts";
 import { maxPartners, unmonitored } from "./state.ts";
 import { openOf, partnerHere, sessionOf } from "./views.ts";
 import { named, routeActivity } from "./where.ts";
@@ -180,17 +184,33 @@ const followPartners = (run: Run): void => {
 
 // The list
 
-// `MONITOR`'s limit, or `undefined` for none: the token with no value has none.
+/**
+ * The command that keeps the list: `MONITOR` where ISUPPORT offers it, else `WATCH` where
+ * it offers that, else none.
+ * @param isupport - The Connection's ISUPPORT.
+ * @returns The command, or `undefined` for none.
+ */
+const commandOf = (
+  isupport: ReadonlyMap<string, string | undefined>
+): MonitorCommand | undefined => {
+  if (isupport.has("MONITOR")) {
+    return "MONITOR";
+  }
+
+  return isupport.has("WATCH") ? "WATCH" : undefined;
+};
+
+// The command's limit, or `undefined` for none: the token with no value has none.
 const limitOf = (value: string | undefined): number | undefined =>
   value !== undefined && /^\d{1,9}$/u.test(value) ? Number(value) : undefined;
 
 /**
  * The nicks to monitor now, by folded nick, in the stated order: the nick Self wants
- * back, then the partners, most recently messaged first, cut to `MONITOR`'s limit, less
- * those a `734` refused on this Connection. Self, and a name that is no nick, are left out.
+ * back, then the partners, most recently messaged first, cut to the command's limit, less
+ * those refused on this Connection. Self, and a name that is no nick, are left out.
  * @param state - The State.
  * @param refused - What a `734` refused on this Connection.
- * @param limit - `MONITOR`'s limit, or `undefined` for none.
+ * @param limit - The command's limit, or `undefined` for none.
  * @returns The nicks, as sent, by folded nick.
  */
 const listOf = (
@@ -227,27 +247,37 @@ const listOf = (
   return new Map([...list].filter(([key]) => !refused.has(key)));
 };
 
-// Sends the nicks with one modifier, as few to a Line as fit, and no more than `TARGMAX` says.
+const build = (
+  command: MonitorCommand,
+  modifier: "+" | "-",
+  nicks: readonly string[]
+): OutboundLine | Rejected =>
+  command === "MONITOR" ? monitor(modifier, nicks) : watch(modifier, nicks);
+
+// Sends the nicks with one modifier, as few to a Line as fit, and no more than `TARGMAX`
+// says, or than a Line has parameters for `WATCH`'s.
 const sendAll = (
   run: Run,
+  command: MonitorCommand,
   modifier: "+" | "-",
-  nicks: readonly string[],
-  most: number | undefined
+  nicks: readonly string[]
 ): void => {
+  const most = targetLimitsOf(openOf(run.state)?.isupport.get("TARGMAX")).get(command);
   let line: readonly string[] = [];
 
   const flush = () => {
     if (line.length > 0) {
-      send(run, monitor(modifier, line), "MONITOR");
+      send(run, build(command, modifier, line), command);
     }
   };
 
   for (const nick of nicks) {
     const longer = [...line, nick];
-    const built = monitor(modifier, longer);
+    const built = build(command, modifier, longer);
 
     const full =
-      longer.length > (most ?? Infinity) || (isRejected(built) && built.reason === "TooLong");
+      longer.length > (most ?? Infinity) ||
+      (isRejected(built) && (built.reason === "TooLong" || built.reason === "TooManyParameters"));
 
     if (full && line.length > 0) {
       flush();
@@ -281,51 +311,65 @@ const refolded = (run: Run): void => {
   });
 };
 
-// Sends the difference between what is wanted and what was sent.
+// Sends the difference between what is wanted and what was sent. A list another command
+// keeps, as when a later `005` offers `MONITOR` after one offered `WATCH`, is taken off
+// that command whole and sent with this one, keeping what was heard of each nick.
 const reconcile = (run: Run): void => {
   const open = openOf(run.state);
+  const command = open === undefined ? undefined : commandOf(open.isupport);
 
-  if (open === undefined || !online(run) || open.monitoring.off || !open.isupport.has("MONITOR")) {
+  if (open === undefined || command === undefined || !online(run) || open.monitoring.off) {
     return;
   }
 
-  const { refused, watched } = open.monitoring;
-  const wanted = listOf(run.state, refused, limitOf(open.isupport.get("MONITOR")));
-  const most = targetLimitsOf(open.isupport.get("TARGMAX")).get("MONITOR");
-  const dropped = [...watched].filter(([key]) => !wanted.has(key));
-  const added = [...wanted].filter(([key]) => !watched.has(key));
+  const { watched } = open.monitoring;
+  const moved = open.monitoring.command === command ? undefined : open.monitoring.command;
+  const refused = moved === undefined ? open.monitoring.refused : new Set<string>();
+  const sent = moved === undefined ? watched : new Map<string, Watched>();
+  const wanted = listOf(run.state, refused, limitOf(open.isupport.get(command)));
+  const dropped = [...sent].filter(([key]) => !wanted.has(key));
+  const added = [...wanted].filter(([key]) => !sent.has(key));
 
-  if (dropped.length === 0 && added.length === 0) {
+  if (moved === undefined && dropped.length === 0 && added.length === 0) {
     return;
+  }
+
+  if (moved !== undefined) {
+    sendAll(
+      run,
+      moved,
+      "-",
+      [...watched.values()].map((each) => each.nick)
+    );
   }
 
   sendAll(
     run,
+    command,
     "-",
-    dropped.map(([, each]) => each.nick),
-    most
+    dropped.map(([, each]) => each.nick)
   );
   sendAll(
     run,
+    command,
     "+",
-    added.map(([, nick]) => nick),
-    most
+    added.map(([, nick]) => nick)
   );
 
-  const next = new Map(watched);
+  const next = new Map(sent);
 
   for (const [key] of dropped) {
     next.delete(key);
   }
 
   for (const [key, nick] of added) {
-    next.set(key, { here: { _tag: "Unknown" }, nick });
+    next.set(key, { here: watched.get(key)?.here ?? { _tag: "Unknown" }, nick });
   }
 
-  changeMonitoring(run, (monitoring) => ({ ...monitoring, watched: next }));
+  changeMonitoring(run, (monitoring) => ({ ...monitoring, command, refused, watched: next }));
   pruneUsers(
     run,
-    dropped.map(([key]) => key)
+    [...watched.keys()].filter((key) => !next.has(key))
   );
 };
 
@@ -500,7 +544,7 @@ const partnersLearned = (run: Run): void => {
 /**
  * After a step, follows the partners from its News, tells of those whose presence changed
  * with nothing else saying so, and when the list may have changed, sends the difference.
- * Without `MONITOR` in ISUPPORT, nothing is sent.
+ * Without `MONITOR` or `WATCH` in ISUPPORT, nothing is sent.
  * @param run - The step, with its News gathered.
  */
 export const monitorAfter = (run: Run): void => {
@@ -520,16 +564,26 @@ export const monitorAfter = (run: Run): void => {
 
 // What the Ircd tells
 
-/** The numerics that tell of the monitor list: `730` online, `731` offline, and `734` full. */
-const replies: ReadonlySet<string> = new Set(["730", "731", "734"]);
+/** `MONITOR`'s numerics: `730` online, `731` offline, and `734` full. */
+const monitorReplies: ReadonlySet<string> = new Set(["730", "731", "734"]);
+
+/**
+ * `WATCH`'s numerics: `604` online and `605` offline when a nick is added, `600` and `601`
+ * when its holder comes and goes, `602` when it is taken off, and `512` full.
+ */
+const watchReplies: ReadonlySet<string> = new Set(["512", "600", "601", "602", "604", "605"]);
 
 /**
  * Whether a command is a numeric that tells of the monitor list, which answers no Lookup
- * or action, whatever nick it names.
+ * or action, whatever nick it names. `WATCH`'s count only while it keeps the list, as
+ * other Ircds give some of those numbers other meanings.
+ * @param run - The step.
  * @param command - The command.
  * @returns Whether it is.
  */
-export const isMonitorReply = (command: string): boolean => replies.has(command);
+export const isMonitorReply = (run: Run, command: string): boolean =>
+  monitorReplies.has(command) ||
+  (watchReplies.has(command) && openOf(run.state)?.monitoring.command === "WATCH");
 
 const targetsOf = (list: string): readonly string[] =>
   list.split(",").filter((target) => target !== "");
@@ -576,9 +630,8 @@ const setHere = (run: Run, key: string, watched: Watched, here: boolean): void =
 const isOffline = (watched: Watched): boolean =>
   watched.here._tag === "Known" && !watched.here.value;
 
-// `730`: a monitored nick is online, with its mask when the Ircd gives one.
-const cameOnline = (run: Run, arrival: Arrival, target: string): void => {
-  const source = parseSource(target);
+// `730`, `600`, or `604`: a monitored nick is online, with its mask when the Ircd gives one.
+const cameOnline = (run: Run, arrival: Arrival, source: Source): void => {
   const found = watchedOf(run, source.nick);
 
   if (found === undefined) {
@@ -603,10 +656,10 @@ const cameOnline = (run: Run, arrival: Arrival, target: string): void => {
   }
 };
 
-// `731`: a monitored nick is offline. The first time the Connection hears so, or a change
-// from online, frees it, so Self asks for it when it is the nick Self wants back.
-const wentOffline = (run: Run, arrival: Arrival, target: string): void => {
-  const { nick } = parseSource(target);
+// `731`, `601`, or `605`: a monitored nick is offline. The first time the Connection hears
+// so, or a change from online, frees it, so Self asks for it when it is the nick Self
+// wants back.
+const wentOffline = (run: Run, arrival: Arrival, nick: string): void => {
   const found = watchedOf(run, nick);
 
   if (found === undefined) {
@@ -629,8 +682,8 @@ const wentOffline = (run: Run, arrival: Arrival, target: string): void => {
   reclaim(run, nick);
 };
 
-// `734 <client> <limit> <targets>`: the list is full, and these were not added. They are
-// not sent again on this Connection.
+// `734 <client> <limit> <targets>` or `512 <client> <nick>`: the list is full, and these
+// were not added. They are not sent again on this Connection.
 const listFull = (run: Run, targets: readonly string[]): void => {
   const fold = folder(run.state);
   const keys = targets.map((target) => fold(target));
@@ -650,15 +703,67 @@ const listFull = (run: Run, targets: readonly string[]): void => {
   pruneUsers(run, keys);
 };
 
+// A `WATCH` numeric, `<client> <nick> <user> <host> <time> :<text>`, or `<client> <nick>
+// :<text>` for `512`. A `*` for the user or host is none.
+const watchReply = (run: Run, arrival: Arrival): void => {
+  const { line } = arrival;
+  const [, nick, user, host] = line.params;
+
+  if (nick === undefined) {
+    ignore(run, { _tag: "Malformed", command: line.command });
+
+    return;
+  }
+
+  switch (line.command) {
+    case "600":
+    case "604": {
+      const known = user !== undefined && user !== "*" && host !== undefined && host !== "*";
+
+      cameOnline(run, arrival, {
+        host: known ? host : undefined,
+        nick,
+        user: known ? user : undefined,
+      });
+
+      break;
+    }
+
+    case "601":
+    case "605": {
+      wentOffline(run, arrival, nick);
+
+      break;
+    }
+
+    case "512": {
+      listFull(run, [nick]);
+
+      break;
+    }
+
+    default:
+    // `602`: taken off, as asked.
+  }
+};
+
 /**
- * Reads a live `730`, `731`, or `734`. Only what tells of a nick on the list counts:
- * the first status after `MONITOR +` is learned silently, and only a change from what the
- * Connection knew is told in a partner's Timeline.
+ * Reads a live numeric that tells of the monitor list, as {@link isMonitorReply} says.
+ * Only what tells of a nick on the list counts: the first status after it is added is
+ * learned silently, and only a change from what the Connection knew is told in a
+ * partner's Timeline.
  * @param run - The step.
  * @param arrival - The Line, live.
  */
 export const monitorReply = (run: Run, arrival: Arrival): void => {
   const { line } = arrival;
+
+  if (watchReplies.has(line.command)) {
+    watchReply(run, arrival);
+
+    return;
+  }
+
   const [, second, third] = line.params;
   const list = line.command === "734" ? third : second;
 
@@ -673,7 +778,7 @@ export const monitorReply = (run: Run, arrival: Arrival): void => {
   switch (line.command) {
     case "730": {
       for (const target of targets) {
-        cameOnline(run, arrival, target);
+        cameOnline(run, arrival, parseSource(target));
       }
 
       break;
@@ -681,7 +786,7 @@ export const monitorReply = (run: Run, arrival: Arrival): void => {
 
     case "731": {
       for (const target of targets) {
-        wentOffline(run, arrival, target);
+        wentOffline(run, arrival, parseSource(target).nick);
       }
 
       break;
@@ -694,9 +799,9 @@ export const monitorReply = (run: Run, arrival: Arrival): void => {
 };
 
 /**
- * A live Line that refuses the command itself, by structure: a `421` or `461` naming
- * `MONITOR`, or a `FAIL MONITOR`. Monitoring is off for the rest of the Connection, and
- * nothing is known of the nicks it watched.
+ * A live Line that refuses the command that keeps the list itself, by structure: a `421`
+ * or `461` naming it, or a `FAIL` of it. Monitoring is off for the rest of the Connection,
+ * and nothing is known of the nicks it watched.
  * @param run - The step.
  * @param line - The Line.
  */
@@ -704,16 +809,19 @@ export const monitorRefused = (run: Run, line: Line): void => {
   const [first, second] = line.params;
   const named = line.command === "FAIL" ? first : second;
 
+  const monitoring = openOf(run.state)?.monitoring;
+
   const refuses =
     (line.command === "421" || line.command === "461" || line.command === "FAIL") &&
     named !== undefined &&
-    upperCaseAscii(named) === "MONITOR";
+    monitoring?.command !== undefined &&
+    upperCaseAscii(named) === monitoring.command;
 
-  const watched = openOf(run.state)?.monitoring.watched;
-
-  if (!refuses || watched === undefined) {
+  if (!refuses) {
     return;
   }
+
+  const { watched } = monitoring;
 
   changeMonitoring(run, () => ({ ...unmonitored, off: true }));
   pruneUsers(run, [...watched.keys()]);
@@ -724,7 +832,7 @@ export const monitorRefused = (run: Run, line: Line): void => {
  * nick is offline from now, so the `731` that follows tells nothing again.
  * @param run - The step.
  * @param nick - The nick left.
- * @returns Whether the leave is news, rather than one `MONITOR` already told of.
+ * @returns Whether the leave is news, rather than one `MONITOR` or `WATCH` already told of.
  */
 export const left = (run: Run, nick: string): boolean => {
   const found = watchedOf(run, nick);
