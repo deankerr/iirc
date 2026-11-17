@@ -92,8 +92,11 @@ export interface CommandContext {
    * not the one shown, and `/next-unread` may go to it, which shows it.
    */
   readonly behind: boolean;
-  /** Whether the focused Timeline's Network has a Session. */
-  readonly session: boolean;
+  /**
+   * Whether the focused Timeline's Network has a Session, or `undefined` while that is not
+   * known yet. A command that needs one is refused until it does.
+   */
+  readonly session: boolean | undefined;
   /** Every Timeline, in the sidebar's order. */
   readonly timelines: readonly TimelineId[];
   /**
@@ -444,6 +447,18 @@ const unfocused = <A>(
  */
 const removedRefusal = (network: NetworkId) =>
   `${network} was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove ${network} drops them.`;
+
+/**
+ * Why nothing is said on a Network with no Session, in words: that it is not connected, or,
+ * while that is not known yet, that it is not known.
+ * @param network - The Network, or what stands for it.
+ * @param session - `false` once it is known to have none, `undefined` while not known.
+ * @returns The words.
+ */
+const noSession = (network: string, session: false | undefined) =>
+  session === false
+    ? `${network} is not connected, so nothing can be said there now.`
+    : `Whether ${network} is connected is not known yet, so nothing can be said there now.`;
 
 /**
  * Why a Credential's value typed after `/set` is refused, in words.
@@ -2250,8 +2265,8 @@ const inDraft = (
     return invalid(`Say what? Type it after ${name}.`);
   }
 
-  if (!context.session) {
-    return invalid(`${draft.network} is not connected, so nothing can be said there now.`);
+  if (context.session !== true) {
+    return invalid(noSession(draft.network, context.session));
   }
 
   return parsed([
@@ -2821,9 +2836,9 @@ const unmetOne = (condition: Condition, context: CommandContext): string | undef
     }
 
     case "Session": {
-      return context.session
+      return context.session === true
         ? undefined
-        : `${focus?.network ?? "The Network"} is not connected, so nothing can be said there now.`;
+        : noSession(focus?.network ?? "The Network", context.session);
     }
 
     case "Live": {
