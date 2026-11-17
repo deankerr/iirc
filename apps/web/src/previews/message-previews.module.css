@@ -1,6 +1,6 @@
 /*
  * A Message's Previews: under its text, in the text's column, as wide as its text may run,
- * marked by a rule at their start, one row each. A row pending is one line, so a Preview
+ * marked by a rule at their start, one row each, a little apart so two images never touch. A row pending is one line, so a Preview
  * that arrives folded moves nothing below it. Nothing in it scrolls sideways. Its media is
  * as tall as `--preview-media-height` at most, which the view sets from the option.
  */
@@ -8,6 +8,7 @@
   display: flex;
   grid-column: 3 / 4;
   flex-direction: column;
+  gap: var(--space-1);
   min-width: 0;
   max-width: var(--widest-line, none);
   margin: var(--space-1) 0;
