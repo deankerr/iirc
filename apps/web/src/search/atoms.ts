@@ -143,10 +143,11 @@ export const closeSearch = Atom.fnSync((_, get) => {
 }).pipe(Atom.keepAlive);
 
 /**
- * Opens a result's Timeline read around it, with it brought into view and marked, letting
- * go of what was being completed, since the composer then stands under that Timeline.
+ * Opens a Timeline read around a position, with it brought into view and marked, letting
+ * go of what was being completed, since the composer then stands under that Timeline. A
+ * result is one place to go, and a reply's quotation of what it answers is another.
  */
-export const jumpTo = Atom.fnSync((item: TimelineItem, get) => {
+export const jumpTo = Atom.fnSync((item: Pick<TimelineItem, "position" | "timeline">, get) => {
   cancelCompletion(get.registry);
   navigated(get.registry, { _tag: "Jumped", position: item.position, timeline: item.timeline });
 }).pipe(Atom.keepAlive);

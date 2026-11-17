@@ -25,6 +25,7 @@ import {
   SayRequest,
   SignInRequest,
   TimelineChangesEvent,
+  TimelineItem,
   UiEvent,
   UiValue,
   WindowQuery,
@@ -975,6 +976,50 @@ describe("the contract", () => {
       Schema.is(Activity)({ ...pong, roundTrip: -1 }),
       Schema.is(Activity)({ ...pong, roundTrip: 0.5 }),
     ]).toStrictEqual([request, refused, reply, pong, unsent, sent, false, false, false]);
+  });
+
+  it("carries what a Message answers, a Direct Message's Channel, and what an item answers, every word Untrusted", () => {
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const text = JSON.stringify(document);
+    const position = { at: Instant.make(1_762_560_000_000), n: 0, sequence: 3 };
+    const cursor = cursorOf(position);
+
+    const encoded: typeof TimelineItem.Encoded = {
+      answered: { kind: "Privmsg", position: cursor, sender: "peer", text: "hello" },
+      changed: 4,
+      content: {
+        _tag: "Message",
+        answers: "m1",
+        at: { _tag: "Unknown" },
+        context: "#iirc",
+        id: { _tag: "Unknown" },
+        kind: "Privmsg",
+        live: true,
+        ours: null,
+        sender: "pal",
+        tags: [{ key: "+reply", value: "m1" }],
+        target: "iirc",
+        text: "hi",
+      },
+      level: "Highlight",
+      network: "libera",
+      position: cursor,
+      sequence: 4,
+      timeline: timelineIdOf(1, 0, 1),
+    };
+
+    const decoded = Schema.decodeSync(TimelineItem)(encoded);
+
+    expect([
+      decoded.answered?.position,
+      Schema.encodeSync(TimelineItem)(decoded),
+      Schema.decodeSync(TimelineItem)({ ...encoded, answered: null }).answered,
+      text.includes(
+        `"sender":${untrusted},"text":${untrusted}},"required":["kind","position","sender","text"]`
+      ),
+      text.includes('"answers":{"anyOf":[{"$ref":"#/components/schemas/UntrustedMessageId"}'),
+      text.includes(`"context":{"anyOf":[${untrusted}`),
+    ]).toStrictEqual([position, encoded, null, true, true, true]);
   });
 
   it("carries an invitation as who invited and to which Channel, both Untrusted", () => {

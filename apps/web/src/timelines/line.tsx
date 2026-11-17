@@ -4,19 +4,23 @@
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
  * one's words starting where a Message's text does. In a Timeline too narrow for those
  * columns, a row is one run of text that wraps under itself. Failed Connections in a row
- * say how many and when. A Message's Previews, if it has any, are under its text. Every name
- * and every text a Network sent sits in its own isolate, as a text node.
+ * say how many and when. A reply has what it answers above it, as a line that goes there
+ * when pressed, and a Direct Message says which Channel it is about. A Message's Previews,
+ * if it has any, are under its text. Every name and every text a Network sent sits in its
+ * own isolate, as a text node.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { lineOf } from "@iirc/frontend/render";
+import type { TimelineItem } from "@iirc/api";
+import { lineOf, quotedOf } from "@iirc/frontend/render";
 import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
 import { perform } from "../composer/atoms.ts";
 import { dayShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
+import { jumpTo } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
@@ -94,6 +98,45 @@ export const Nick = ({ colour, nick }: { readonly colour: number; readonly nick:
 
 // Delivery that failed, drawn as not sent.
 const failed: ReadonlySet<Delivery> = new Set(["Unsent", "Rejected"]);
+
+/**
+ * What a reply answers, as one dim line above it that goes to that Message when pressed:
+ * who said it, in their colour, and its text, cut to the line's width. A Message that
+ * answers nothing the Timeline holds has none.
+ * @param props - The reply, as an item.
+ * @returns The line, or nothing.
+ */
+const Answered = ({ item }: { readonly item: TimelineItem }) => {
+  const jump = useAtomSet(jumpTo);
+
+  if (item.answered === null) {
+    return null;
+  }
+
+  const quoted = quotedOf(item.answered);
+  const nick = <Nick colour={quoted.colour} nick={quoted.nick} />;
+
+  return (
+    <>
+      <div className={styles.answered}>
+        <Button
+          aria-label="Go to the message this answers"
+          onPress={() => {
+            jump({ position: quoted.position, timeline: item.timeline });
+          }}
+          size="small"
+          variant="text"
+        >
+          <span className={styles.quote}>
+            <span aria-hidden>{"\u21B3"}</span> {quoted.kind === "Action" ? <>* {nick}</> : null}
+            {quoted.kind === "Notice" ? <>-{nick}-</> : null}
+            {quoted.kind === "Privmsg" ? <>{nick}:</> : null} <bdi>{quoted.text}</bdi>
+          </span>
+        </Button>
+      </div>{" "}
+    </>
+  );
+};
 
 /**
  * An offer to join a Channel, which does what `/join` does when pressed, and nothing sooner.
@@ -305,6 +348,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 
   return (
     <div className={tone}>
+      <Answered item={row.item} />
       {time}{" "}
       <span className={styles.sender}>
         <span className={styles.said}>
@@ -315,6 +359,14 @@ const RowLine = ({ row }: { readonly row: Row }) => {
       </span>{" "}
       <bdi className={styles.text}>
         <Inlines inlines={line.text} />
+        {line.context === undefined ? null : (
+          <>
+            {" "}
+            <span className={styles.context}>
+              in <bdi>{line.context}</bdi>
+            </span>
+          </>
+        )}
       </bdi>
       {delivery === undefined ? null : (
         <>

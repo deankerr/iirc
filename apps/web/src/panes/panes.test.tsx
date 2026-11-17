@@ -73,10 +73,13 @@ const cursor = (at: number, sequence: number) =>
  * @returns The item, as the wire writes it.
  */
 const said = (sequence: number): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: sequence,
   content: {
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,

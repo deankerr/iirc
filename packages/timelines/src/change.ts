@@ -161,3 +161,29 @@ export const delivered = (before: Delivery, change: DeliveryChange): Delivery | 
     }
   }
 };
+
+/** An item as {@link answering} reads it. */
+export interface Leveled {
+  readonly content: Content;
+  /** Its level, or `undefined` for one Self said. */
+  readonly level: Level | undefined;
+}
+
+/**
+ * An added item's level once what it answers is known, which every store applies alike as
+ * it adds the item: a live Message that answers one Self said is a Highlight, since it is
+ * addressed to Self, and otherwise its level is as the fold gave it. One Self said stays
+ * without a level, and one from history calls for no Highlight, as the Client's rule says.
+ * @param added - The item being added.
+ * @param answered - The item in the same Timeline whose message id `added` answers, as
+ *   the store holds it now, or `undefined` when none is held.
+ * @returns Its level.
+ */
+export const answering = (added: Leveled, answered: Leveled | undefined): Level | undefined =>
+  added.level !== undefined &&
+  added.content._tag === "Message" &&
+  added.content.live &&
+  answered?.content._tag === "Message" &&
+  answered.level === undefined
+    ? "Highlight"
+    : added.level;

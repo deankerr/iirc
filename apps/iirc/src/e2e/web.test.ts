@@ -104,6 +104,62 @@ const decodeStanding = Schema.decodeUnknownSync(
   )
 );
 
+/** What the end-to-end run reads of a Network's Timelines: each one's id, name, and kind. */
+const decodeTimelineIds = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      timelines: Schema.Array(
+        Schema.Struct({ id: Schema.String, kind: Schema.String, name: Schema.String })
+      ),
+    })
+  )
+);
+
+/** What the end-to-end run reads of a Timeline's window: each Message's text, and the id the Ircd gave one of ours. */
+const decodeWindowMessages = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      items: Schema.Array(
+        Schema.Struct({
+          content: Schema.Struct({
+            _tag: Schema.String,
+            ours: Schema.optionalKey(
+              Schema.NullOr(
+                Schema.Struct({
+                  delivery: Schema.Struct({
+                    _tag: Schema.String,
+                    id: Schema.optionalKey(
+                      Schema.Struct({
+                        _tag: Schema.String,
+                        value: Schema.optionalKey(Schema.String),
+                      })
+                    ),
+                  }),
+                })
+              )
+            ),
+            text: Schema.optionalKey(Schema.String),
+          }),
+        })
+      ),
+    })
+  )
+);
+
+/** What the end-to-end run reads of a Network's Timelines: each one's name and unread Highlights. */
+const decodeUnreadHighlights = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      timelines: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          unread: Schema.Struct({ highlights: Schema.Finite }),
+        })
+      ),
+    })
+  )
+);
+
 /** What the end-to-end run reads of an Upload. */
 const UploadRead = Schema.Struct({
   deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
@@ -5303,6 +5359,173 @@ describe("the web frontend on iirc daemon --web", () => {
           standingBefore: undefined,
         });
       } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shows what a reply answers above it, counts a reply to Self's Message as a Highlight, goes to that Message when pressed, and draws a reply to an unknown Message plain",
+    { timeout: 120_000 },
+    async () => {
+      // Ergo, which relays `+reply` and gives each Message an id.
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "reply"),
+        "#iirc-reply",
+        { start: startErgo }
+      );
+
+      const replier = await connectPeer({
+        caps: ["message-tags"],
+        host: ngircd.host,
+        nick: "replier",
+        port: ngircd.plainPort,
+      });
+
+      const asked = "what is the plan";
+      const unmatched = "a reply to nothing held";
+      const fillers = Array.from({ length: 30 }, (_, index) => `filler ${index + 1}`);
+
+      /**
+       * The Channel's Timeline.
+       * @returns Its id.
+       */
+      const timelineOf = async () => {
+        const answer = await api("GET", "/networks/private/timelines");
+
+        return decodeTimelineIds(await answer.text()).timelines.find(
+          (one) => one.kind === "Channel" && one.name === channel
+        )?.id;
+      };
+
+      /**
+       * The id the Ircd gave Self's Message, once it is known.
+       * @returns The id.
+       */
+      const idOf = async () => {
+        const timeline = await timelineOf();
+
+        const answer =
+          timeline === undefined ? undefined : await api("GET", `/timelines/${timeline}`);
+
+        const items = answer === undefined ? [] : decodeWindowMessages(await answer.text()).items;
+
+        // The id the Ircd gave one of ours is in its echo, which confirmed it.
+        return items.find((one) => one.content.text === asked)?.content.ours?.delivery.id?.value;
+      };
+
+      const highlightsOf = async () => {
+        const answer = await api("GET", "/networks/private/timelines");
+
+        return decodeUnreadHighlights(await answer.text()).timelines.find(
+          (one) => one.name === channel
+        )?.unread;
+      };
+
+      try {
+        replier.send(`JOIN ${channel}`);
+        await replier.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("replier!") === true,
+          "the replier's own JOIN"
+        );
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        await page.getByRole("row", { exact: true, name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        await composer.fill(asked);
+        await composer.press("Enter");
+        await log.getByText(asked).waitFor();
+
+        await expect.poll(idOf, { interval: 100, timeout: 10_000 }).toBeDefined();
+        const id = await idOf();
+
+        // Somewhere else, so what comes is unread, and Self's Message is far above it.
+        await page.keyboard.press("Alt+ArrowUp");
+        await page.getByRole("log", { name: "private" }).waitFor();
+
+        for (const text of fillers) {
+          peer.send(`PRIVMSG ${channel} :${text}`);
+        }
+
+        replier.send(`@+reply=not-a-message-id PRIVMSG ${channel} :${unmatched}`);
+        replier.send(`@+reply=${id} PRIVMSG ${channel} :the plan is lunch`);
+
+        await expect
+          .poll(highlightsOf, { interval: 100, timeout: 20_000 })
+          .toStrictEqual({ highlights: 1 });
+
+        await page
+          .getByRole("row", { name: /1 highlight/u })
+          .first()
+          .waitFor();
+
+        // Its row now says what is unread in it.
+        await page.getByRole("row", { name: new RegExp(`^${channel}`, "u") }).click();
+        await log.getByText("the plan is lunch").waitFor();
+
+        const replyRow = log.locator("[data-index]", { hasText: "the plan is lunch" });
+        const plainRow = log.locator("[data-index]", { hasText: unmatched });
+        const goes = replyRow.getByRole("button", { name: "Go to the message this answers" });
+
+        await goes.waitFor();
+
+        const plainWords = await plainRow.textContent();
+        const quotation = await goes.textContent();
+
+        const shown = {
+          plain: await plainRow.getByRole("button").count(),
+          plainText: plainWords?.replace(/^\S+ /u, ""),
+          quoted: quotation?.replaceAll(/[\u2066-\u2069]/gu, ""),
+        };
+
+        await screenshot(page, "after-reply-desktop.png");
+
+        // A phone, where a row wraps under itself instead of using columns.
+        await page.setViewportSize({ height: 844, width: 390 });
+        await replyRow.waitFor();
+        await screenshot(page, "after-reply-phone.png");
+        await page.setViewportSize({ height: 800, width: 1280 });
+
+        await goes.focus();
+        await page.keyboard.press("Enter");
+
+        const target = log.locator("[data-target]");
+
+        await target.waitFor();
+
+        const landed = await target.textContent();
+        const went = landed?.replaceAll(/[\u2066-\u2069]/gu, "");
+
+        await screenshot(page, "after-reply-jumped.png");
+
+        expect({
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          shown,
+          went: went?.includes(asked),
+        }).toStrictEqual({
+          problems: [],
+          shown: {
+            plain: 0,
+            plainText: `<replier> ${unmatched}`,
+            quoted: `\u21B3 iirc: ${asked}`,
+          },
+          went: true,
+        });
+      } finally {
+        replier.close();
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

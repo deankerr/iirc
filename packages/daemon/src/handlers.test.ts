@@ -1701,6 +1701,65 @@ describe("the handlers", () => {
     ]);
   });
 
+  it("gives a reply what it answers, a Highlight when it answers Self, and a Direct Message its Channel", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        expect(yield* heard(call)).toBe("CAP LS 302");
+        expect(yield* heard(call)).toBe("NICK iirc");
+        expect(yield* heard(call)).toBe("USER iirc 0 * iirc");
+        yield* say(call, ":irc.test CAP * LS :message-tags");
+        expect(yield* heard(call)).toBe("CAP REQ message-tags");
+        yield* say(call, ":irc.test CAP * ACK :message-tags");
+        expect(yield* heard(call)).toBe("CAP END");
+        yield* say(call, ":irc.test 001 iirc :Welcome");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, "@msgid=m1 :peer!u@h PRIVMSG #iirc :question");
+        yield* say(call, "@msgid=m2 :iirc!~iirc@iirc.test PRIVMSG #iirc :from my phone");
+        yield* say(call, "@msgid=m3;+reply=m1 :pal!u@h PRIVMSG #iirc :answer");
+        yield* say(call, "@msgid=m4;+reply=m2 :pal!u@h PRIVMSG #iirc :to you");
+        yield* say(call, "@msgid=m5;+reply=m9 :pal!u@h PRIVMSG #iirc :to nothing");
+        yield* say(call, "@+channel-context=#iirc :bot!b@h NOTICE iirc :helping");
+        yield* settle;
+
+        const items = (name: string) =>
+          timelineNamed(api, name).pipe(
+            Effect.flatMap((timeline) =>
+              api.timelines.window({ params: { timeline }, query: { limit: 10 } })
+            ),
+            Effect.map((window) => window.items.filter((item) => item.content._tag === "Message"))
+          );
+
+        return {
+          channel: (yield* items("#iirc")).map((item) => [
+            textOf(item),
+            item.content._tag === "Message" ? item.content.answers : undefined,
+            item.answered === null ? null : `${item.answered.sender} :${item.answered.text}`,
+            item.level,
+          ]),
+          direct: (yield* items("bot")).map((item) =>
+            item.content._tag === "Message" ? item.content.context : undefined
+          ),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      channel: [
+        ["question", null, null, "Message"],
+        ["from my phone", null, null, null],
+        ["answer", "m1", "peer :question", "Message"],
+        ["to you", "m2", "iirc :from my phone", "Highlight"],
+        ["to nothing", "m9", null, "Message"],
+      ],
+      direct: ["#iirc"],
+    });
+  });
+
   it("reads a merged Timeline's id as the one it went to, and refuses an id never given", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

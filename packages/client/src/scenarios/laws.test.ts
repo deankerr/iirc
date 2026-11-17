@@ -66,7 +66,7 @@ const transcript = (set: readonly CapName[]): string => {
     }),
     joined(base, "#iirc", ["@+op", "+voiced", "peer"]),
     lines(
-      "<< @msgid=m1;time=2026-01-01T00:00:00.500Z;+draft/reply=m0 :peer!u@h PRIVMSG #iirc :hello",
+      "<< @msgid=m1;time=2026-01-01T00:00:00.500Z;+reply=m0 :peer!u@h PRIVMSG #iirc :hello",
       "<< :irc.test BATCH +b netsplit irc.hub other.host",
       "<< @batch=b :gone!u@h QUIT :irc.hub other.host",
       "<< :irc.test BATCH -b",

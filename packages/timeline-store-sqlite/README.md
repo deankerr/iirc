@@ -25,7 +25,7 @@ CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NO
   removed INTEGER NOT NULL, life INTEGER NOT NULL, closed INTEGER) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
   network TEXT NOT NULL, step INTEGER NOT NULL, message_id TEXT, intent TEXT,
-  content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT,
+  content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT, answers TEXT,
   UNIQUE (timeline, cursor)) STRICT;
 CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEXT NOT NULL,
   changed INTEGER NOT NULL) STRICT;
@@ -37,7 +37,7 @@ CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed 
   life INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 8;  -- the layout's version
+PRAGMA user_version = 9;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.
@@ -46,12 +46,14 @@ PRAGMA user_version = 8;  -- the layout's version
 - **Text compares as `BINARY`,** which on UTF-8 is by code point, the order the port's tie-break asks of Network ids.
 - **An item's `id` is its row,** which it keeps when a merge moves it, since a merge moves items in place, so the search index, which knows an item only by its row, still finds it. It is an `INTEGER PRIMARY KEY`, so no `VACUUM` renumbers it. `(timeline, cursor)` is unique beside it, as the key it was.
 - **`sender` is a Message's sender, folded** by `foldForSearch`, for a search kept to one sender, and `NULL` for anything but a Message, which a search never finds.
+- **`answers` is the message id a Message answers,** from its content, so the item it answers is found in its Timeline by `items_by_message_id` without reading the content.
 - **`search` holds each Message's text, folded,** as `searchableOf` gives it, under its item's `id`. It is contentless, so it keeps the index and not a second copy of the text, and `contentless_delete` lets a row leave it.
 
 | Read | Served by |
 | --- | --- |
 | `window` | the unique key `(timeline, cursor)`, from the position in either direction, with the Timeline and any tombstone found by id |
 | one item per message id, as `Added` and `Merged` keep it | `items_by_message_id`, unique on `(timeline, message_id)` where there is one |
+| what a reply answers, on every read that gives items, and as `Added` gives its level | `items_by_message_id`, one seek for each item given, by its Timeline and `answers`. A search seeks for its page alone, once it is kept |
 | `Confirmed`, `Unsent`, and `Rejected` | `items_by_intent` on `(network, intent)` |
 | `locate` | `items_by_step` on `(network, step, cursor, timeline)`, from the page's `after` by the row value `(cursor, timeline)`, covered by the index |
 | `timeline` | the primary key of `tombstones` for where a merged id went, then the primary key of `timelines`, and the primary key of `items` for its latest position |

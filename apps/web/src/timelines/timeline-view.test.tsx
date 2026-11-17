@@ -62,10 +62,13 @@ const message = (
     readonly intent: string;
   } | null = null
 ): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: sequence,
   content: {
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
@@ -82,7 +85,38 @@ const message = (
   timeline: iirc,
 });
 
+/**
+ * A reply, as an item, to what an earlier item said.
+ * @param sequence - Its sequence.
+ * @param answered - The Message it answers, as the Daemon resolved it, or none held.
+ * @param more - What else of its Message to change.
+ * @returns The item.
+ */
+const replied = (
+  sequence: number,
+  answered: (typeof TimelineItem.Encoded)["answered"],
+  more: { readonly answers?: string | null; readonly context?: string | null } = {}
+): typeof TimelineItem.Encoded => ({
+  ...message(sequence),
+  answered,
+  content: {
+    _tag: "Message",
+    answers: more.answers === undefined ? "msg-1" : more.answers,
+    at: { _tag: "Unknown" },
+    context: more.context ?? null,
+    id: { _tag: "Unknown" },
+    kind: "Privmsg",
+    live: true,
+    ours: null,
+    sender: "peer",
+    tags: [],
+    target: "#iirc",
+    text: `line ${sequence}`,
+  },
+});
+
 const joined = (sequence: number): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: sequence,
   content: {
     _tag: "Activity",
@@ -147,6 +181,24 @@ const asked = (
     live: true,
   },
 });
+
+/**
+ * Text without the isolates a Network's text is drawn in.
+ * @param text - The text.
+ * @returns It, or nothing.
+ */
+const plain = (text: string | null | undefined) => text?.replaceAll(/[\u2066-\u2069]/gu, "");
+
+/**
+ * What a row says besides its quotation, which sits before the time, and past the time.
+ * @param one - The row.
+ * @returns Its words.
+ */
+const restOf = (one: HTMLElement) =>
+  plain(one.textContent)
+    ?.replace(plain(one.querySelector("button")?.textContent) ?? "", "")
+    .trim()
+    .replace(/^\S+ /u, "");
 
 /**
  * Waits until something holds, letting React render what changed meanwhile.
@@ -1090,6 +1142,114 @@ describe("what the view says it shows", () => {
         row: "-- peer invited you to #elsewhere join",
       },
     });
+  });
+
+  it("shows what a reply answers above it, and goes to that Message when pressed", async () => {
+    const original = {
+      ...message(1),
+      content: { ...message(1).content, sender: "alice", text: "the first thing" },
+    };
+
+    const answered = {
+      kind: "Privmsg",
+      position: original.position,
+      sender: "alice",
+      text: "the first thing",
+    } as const;
+
+    const items = [
+      original,
+      ...Array.from({ length: 4 }, (_, index) => message(index + 2)),
+      replied(6, answered),
+    ];
+
+    const { daemon, registry } = await signedIn([], items);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 6"));
+
+    const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+      one.textContent?.includes("line 6")
+    );
+
+    const button = row?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Go to the message this answers"]'
+    );
+
+    const before = {
+      buttons: row?.querySelectorAll("button").length,
+      quote: button?.textContent?.replaceAll(/[\u2066-\u2069]/gu, ""),
+      reads: daemon.windowsRead.length,
+    };
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await settled(() => {
+      const shown = registry.get(openTimeline);
+
+      return shown._tag === "Shown" && shown.window.target?.sequence === 1;
+    });
+
+    const shown = registry.get(openTimeline);
+
+    expect({
+      around: daemon.windowsRead.at(-1)?.includes("around="),
+      before,
+      following: shown._tag === "Shown" ? shown.window.following : undefined,
+    }).toStrictEqual({
+      around: true,
+      before: { buttons: 1, quote: "\u21B3 alice: the first thing", reads: before.reads },
+      following: false,
+    });
+  });
+
+  it("shows a reply to an Action as an Action, and a reply that answers nothing held as a plain Message with no button", async () => {
+    const answered = {
+      kind: "Action",
+      position: message(1).position,
+      sender: "alice",
+      text: "waves",
+    } as const;
+
+    const { registry } = await signedIn([], [replied(1, answered), replied(2, null)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("line ")
+    );
+
+    expect(
+      rows.map((one) => [plain(one.querySelector("button")?.textContent), restOf(one)])
+    ).toStrictEqual([
+      ["\u21B3 * alice waves", "<peer> line 1"],
+      [undefined, "<peer> line 2"],
+    ]);
+  });
+
+  it("says which Channel a Direct Message is about", async () => {
+    const { registry } = await signedIn(
+      [],
+      [replied(1, null, { answers: null, context: "#elsewhere" })]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 1"));
+
+    const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+      one.textContent?.includes("line 1")
+    );
+
+    expect(row?.textContent?.replaceAll(/[\u2066-\u2069]/gu, "").replace(/^\S+ /u, "")).toBe(
+      "<peer> line 1 in #elsewhere"
+    );
   });
 
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {

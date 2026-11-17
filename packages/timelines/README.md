@@ -8,7 +8,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, life, sequence, at, news }  // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 12
+projectionVersion: number                         // 14
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
@@ -22,6 +22,7 @@ foldForSearch(text): string                       // simple lower case, by Unico
 searchFolding: string                             // "simple-lower/17.0", which a store keeps
 SearchText                                         // a branded Schema: 3 to 510 code points folded
 searchableOf(content): { text, sender } | undefined
+answering(added, answered): Level | undefined      // the level a store gives an added reply
 ```
 
 ## The fold holds the directory, and the store the rest
@@ -70,7 +71,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |
 | `Ignored` | Nothing. |
 
-An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, for an Activity the Activity itself, and for an `ActionRefused` what the action tried, never its text or a mode's parameter, its intent, and the reason, `Rejected` with the `reply` or `Unsent`. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, and its **level** in that Timeline, below. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
+An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, the id it `answers` by `+reply`, the Channel a Direct Message names as its `context` by `+channel-context`, `live`, and its `at` and `id` facts, for an Activity the Activity itself, and for an `ActionRefused` what the action tried, never its text or a mode's parameter, its intent, and the reason, `Rejected` with the `reply` or `Unsent`. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, and its **level** in that Timeline, below. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
 
 A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed`, while the Network is not already in one, and ends at the next `SessionBegan`. Each is reported as `Gap { from, to }`, once with `to` left out when it begins, and again with `to` when it ends. A Session that a restart ended began its Gap at the last step folded for the Network before it, since the Daemon may have been gone since then and the fold cannot tell.
 
@@ -86,12 +87,12 @@ Each `Added` item has a **level**, how much it calls for the Owner in its Timeli
 
 | Level | Items |
 | --- | --- |
-| `Highlight` | A Message whose `highlight` is set, wherever it stands, and an invitation happening now, since it is addressed to Self. |
+| `Highlight` | A Message whose `highlight` is set, wherever it stands, a live Message that answers one Self said, and an invitation happening now, since each is addressed to Self. |
 | `Direct` | Any other Message in a Direct Message Timeline. |
 | `Message` | Any other Message in a Channel's Timeline. |
 | `Activity` | An Activity, a Session's start or end, a failed Connection, and a Message in the Network's own Timeline. |
 
-A Message Self said, one with `ours` or `self`, has no level, and never counts, and neither does an `ActionRefused`, which is ours too. One News placed in many Timelines can have a different level in each. `unreadCap` is the most a store counts of one level after a Read Marker: a count of `unreadCap + 1` means more than that.
+A Message Self said, one with `ours` or `self`, has no level, and never counts, and neither does an `ActionRefused`, which is ours too. Only a store holds what a reply answers, so `answering(added, answered)` is the rule every store applies as it adds an item, before counting it: given the item in the same Timeline whose message id it answers, as the store holds it then, a live Message with a level becomes a `Highlight` when that item is a Message Self said, and otherwise keeps the level the fold gave it. One News placed in many Timelines can have a different level in each. `unreadCap` is the most a store counts of one level after a Read Marker: a count of `unreadCap + 1` means more than that.
 
 ## Closing
 

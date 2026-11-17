@@ -7,7 +7,7 @@ import type { Closable, Marked, News, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { describe, expect, it } from "vitest";
 
-import { delivered } from "./change.ts";
+import { answering, delivered } from "./change.ts";
 import type { Change } from "./change.ts";
 import { emptyDirectory, step } from "./fold.ts";
 import type { Directory, Happened } from "./fold.ts";
@@ -47,21 +47,26 @@ const message = (
     readonly ours?: { readonly intent: string; readonly echo: boolean };
     readonly highlight?: boolean;
     readonly self?: boolean;
+    readonly answers?: string;
+    readonly context?: string;
+    readonly live?: boolean;
   } = {}
 ): News => ({
   _tag: "Message",
+  answers: options.answers === undefined ? undefined : MessageId.make(options.answers),
   at: options.at ?? known(t0),
+  context: options.context,
   highlight: options.highlight ?? false,
   id: options.id ?? unknown,
   kind: "Privmsg",
-  live: true,
+  live: options.live ?? true,
   ours:
     options.ours === undefined
       ? undefined
       : { echo: options.ours.echo, intent: IntentId.make(options.ours.intent) },
   self: options.self ?? options.ours !== undefined,
   sender: "peer",
-  tags: new Map([["+draft/reply", "abc"]]),
+  tags: new Map([["+reply", "abc"]]),
   target: "#iirc",
   text: options.text ?? "hi",
   where,
@@ -215,13 +220,15 @@ describe("items", () => {
     expect(added.map(({ messageId }) => messageId)).toStrictEqual(["m1", undefined, undefined]);
     expect(added[0]?.content).toStrictEqual({
       _tag: "Message",
+      answers: undefined,
       at: known(later(-5000)),
+      context: undefined,
       id: known("m1"),
       kind: "Privmsg",
       live: true,
       ours: undefined,
       sender: "peer",
-      tags: [["+draft/reply", "abc"]],
+      tags: [["+reply", "abc"]],
       target: "#iirc",
       text: "hi",
     });
@@ -244,6 +251,54 @@ describe("items", () => {
       ["i1", "Pending"],
       ["i2", "Unconfirmed"],
     ]);
+  });
+});
+
+describe("a reply", () => {
+  it("carries what it answers, and a Direct Message the Channel it was said in the context of", () => {
+    const { changes } = fold([
+      happened(1, [
+        message([channel("#iirc")], { answers: "m0" }),
+        message([direct("peer")], { context: "#iirc" }),
+      ]),
+    ]);
+
+    expect(
+      ofTag(changes, "Added").map(({ content }) =>
+        content._tag === "Message" ? [content.answers, content.context] : undefined
+      )
+    ).toStrictEqual([
+      ["m0", undefined],
+      [undefined, "#iirc"],
+    ]);
+  });
+
+  it("is a Highlight as every store adds it, when it is live and answers a Message Self said", () => {
+    const [peers, ours, history, refused] = fold([
+      happened(1, [
+        message([channel("#iirc")], { answers: "m0" }),
+        message([channel("#iirc")], { ours: { echo: true, intent: "i1" } }),
+        message([channel("#iirc")], { answers: "m0", live: false }),
+        message([channel("#iirc")], { answers: "m0", ours: { echo: true, intent: "i2" } }),
+      ]),
+    ]).changes.filter((change) => change._tag === "Added");
+
+    if (
+      peers === undefined ||
+      ours === undefined ||
+      history === undefined ||
+      refused === undefined
+    ) {
+      throw new Error("Expected four items.");
+    }
+
+    expect([
+      answering(peers, ours),
+      answering(peers, peers),
+      answering(peers, undefined),
+      answering(history, ours),
+      answering(refused, ours),
+    ]).toStrictEqual(["Highlight", "Message", "Message", "Message", undefined]);
   });
 });
 

@@ -672,7 +672,7 @@ const RefusedAction = Schema.Struct({
   where: Schema.TaggedUnion({ Channel: Named.fields, Network: {} }),
 });
 
-/** A client-only tag on a Message, such as `+draft/reply`. */
+/** A client-only tag on a Message, such as `+reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
 /** What was looked up: a `WHOIS` or a `WHOWAS` and the nick, or a Channel's list and its name, as the Owner gave it. */
@@ -830,7 +830,14 @@ export const News = Schema.TaggedUnion({
   /** A Lookup is over, and this is all it found. Exactly one comes for each. */
   LookedUp: { intent: IntentId, lookup: Lookup, result: LookResult },
   Message: {
+    /** The id of the Message it answers, from a `+reply` tag. */
+    answers: Schema.NullOr(MessageId),
     at: Fact(Instant),
+    /**
+     * The Channel a Direct Message was said in the context of, from a `+channel-context`
+     * tag, only on a Message to a User and only when it names a Channel.
+     */
+    context: Schema.NullOr(Untrusted),
     /**
      * Whether it calls for the Owner: said live by a User other than Self, naming Self's
      * nick or a highlight word as a whole word.
@@ -1186,7 +1193,14 @@ export const ItemContent = Schema.TaggedUnion({
    */
   ConnectionFailed: { at: Instant, ircd: IrcdAddress, opened: Schema.Boolean, reason: EndReason },
   Message: {
+    /** The id of the Message it answers, from a `+reply` tag, which the item's `answered` resolves. */
+    answers: Schema.NullOr(MessageId),
     at: Fact(Instant),
+    /**
+     * The Channel a Direct Message was said in the context of, from a `+channel-context`
+     * tag, only on a Message to a User and only when it names a Channel.
+     */
+    context: Schema.NullOr(Untrusted),
     id: Fact(MessageId),
     kind: SayKind,
     live: Schema.Boolean,
@@ -1218,11 +1232,30 @@ export const Level = Schema.Literals(["Highlight", "Direct", "Message", "Activit
 export type Level = typeof Level.Type;
 
 /**
+ * The Message a reply answers, as it stands when read: where it stands in the reply's
+ * Timeline, who said it, how, and its text, the Ircd's once it confirmed one of ours.
+ */
+export const Answered = Schema.Struct({
+  kind: SayKind,
+  position: Cursor,
+  sender: Untrusted,
+  text: Untrusted,
+});
+
+/** The decoded form of {@link Answered}. */
+export type Answered = typeof Answered.Type;
+
+/**
  * One item of a Timeline, as it stands now: where it stands, the step that made it, which
  * `GET /api/networks/{network}/at/{sequence}` finds it by, how much it calls for the Owner,
- * and the last step that changed it.
+ * what it answers, and the last step that changed it.
  */
 export const TimelineItem = Schema.Struct({
+  /**
+   * For a Message whose `answers` names one, the Message with that id in the same Timeline,
+   * resolved as of the read, or `null` when the Timeline holds none.
+   */
+  answered: Schema.NullOr(Answered),
   changed: Sequence,
   content: ItemContent,
   level: Schema.NullOr(Level),

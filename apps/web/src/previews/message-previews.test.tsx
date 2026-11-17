@@ -58,10 +58,13 @@ const listed = (
  * @returns The item.
  */
 const message = (sequence: number, text: string): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: sequence,
   content: {
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,

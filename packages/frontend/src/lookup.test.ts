@@ -787,6 +787,7 @@ const refusedChange = (intent: string) =>
     gaps: [],
     items: [
       {
+        answered: null,
         changed: 11,
         content: {
           _tag: "ActionRefused",

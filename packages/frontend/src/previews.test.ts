@@ -66,7 +66,9 @@ const at = (sequence: number): Position =>
 const said = (text: string) =>
   Schema.decodeSync(ItemContent)({
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,

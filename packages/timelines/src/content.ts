@@ -66,6 +66,10 @@ export type Content =
       readonly kind: SayKind;
       /** Client-only tags, as `[name, value]` pairs in the order they came. */
       readonly tags: readonly (readonly [string, string])[];
+      /** The id of the Message it answers, from `+reply`, which a store finds in the same Timeline. */
+      readonly answers: MessageId | undefined;
+      /** The Channel a Direct Message was said in the context of, from `+channel-context`. */
+      readonly context: string | undefined;
       readonly ours: OursItem | undefined;
     }
   | {

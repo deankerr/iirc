@@ -447,6 +447,7 @@ describe("the Lookup card", () => {
           gaps: [],
           items: [
             {
+              answered: null,
               changed: 50,
               content: {
                 _tag: "ActionRefused",
@@ -539,6 +540,7 @@ describe("the Lookup card", () => {
             gaps: [],
             items: [
               {
+                answered: null,
                 changed: sequence,
                 content: {
                   _tag: "Activity",

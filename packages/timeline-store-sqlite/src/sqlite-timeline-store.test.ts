@@ -65,7 +65,9 @@ const said = (
   _tag: "Added",
   content: {
     _tag: "Message",
+    answers: MessageId.make("abc"),
     at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    context: undefined,
     id:
       id === undefined
         ? { _tag: "Unknown" }
@@ -74,7 +76,7 @@ const said = (
     live: true,
     ours: { delivery: { _tag: "Pending" }, intent: IntentId.make(`intent-${text}`) },
     sender: "iirc",
-    tags: [["+draft/reply", "abc"]],
+    tags: [["+reply", "abc"]],
     target: "#a",
     text,
   },
@@ -92,7 +94,9 @@ const heard = (sequence: number, text: string, timeline = channel): Change => ({
   _tag: "Added",
   content: {
     _tag: "Message",
+    answers: undefined,
     at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    context: undefined,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
@@ -841,13 +845,14 @@ describe("the file", () => {
         });
 
         // A search walks the index's matches, finds each item by its row, and keeps only
-        // its page of them in order, never walking a table.
+        // its page of them in order, never walking a table. What each reply answers is
+        // found for the page alone, by `items_by_message_id`.
         const searched = planned.filter((each) => each.read.startsWith("search"));
 
         expect(
           searched.map(({ plan, sql }) => ({
             index: plan.split("\n").filter((line) => /SCAN|SEARCH|TEMP/u.test(line)),
-            limited: /LIMIT \?\s*$/u.test(sql),
+            limited: /LIMIT \?\s*\) AS page/u.test(sql),
           }))
         ).toStrictEqual([
           {
@@ -857,6 +862,9 @@ describe("the file", () => {
               // Where a merged id went, once.
               "SEARCH tombstones USING INDEX sqlite_autoindex_tombstones_1 (id=?)",
               "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN page",
+              "SEARCH answered USING INDEX items_by_message_id (timeline=? AND message_id=?)",
+              "SEARCH answered USING INDEX items_by_message_id (timeline=? AND message_id=?)",
             ],
             limited: true,
           },
@@ -865,6 +873,9 @@ describe("the file", () => {
               expect.stringMatching(/^SCAN search VIRTUAL TABLE INDEX \d+:M/u),
               "SEARCH items USING INTEGER PRIMARY KEY (rowid=?)",
               "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN page",
+              "SEARCH answered USING INDEX items_by_message_id (timeline=? AND message_id=?)",
+              "SEARCH answered USING INDEX items_by_message_id (timeline=? AND message_id=?)",
             ],
             limited: true,
           },

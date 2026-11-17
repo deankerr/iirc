@@ -307,12 +307,13 @@ Tab completion in the composer, as a reducer. It completes the word that ends at
 
 ## Rendering
 
-What an item shows, as data for a view to draw. `lineOf` gives a line and `formatted` the runs of a text. Nothing in it is markup.
+What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf` the short quotation of what a reply answers, and `formatted` the runs of a text. Nothing in it is markup.
 
 - **Formatting is data.** mIRC bold, italic, colours, and the rest become styles on runs.
 - **A link is one of `http`, `https`, `irc`, or `ircs`.** Anything else, `javascript:` and `data:` included, stays text.
 - **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end. The work is linear in the text, however hostile.
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
+- **A reply's quotation is one plain line:** its sender in their colour slot, how it was said, its text as plain text, and the position it stands at, for a view to go to. A Direct Message's `context`, the Channel it is about, is contained like any name.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.

@@ -42,8 +42,8 @@ describe("message-tags", () => {
       transcript: [
         ...withCaps("message-tags"),
         lines(
-          "<< @+draft/reply=m0;example.com/vendor=x;+typing;msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
-          '?? message Privmsg peer #iirc id=ircd:m1 in=channel:#iirc tags=+draft/reply="m0";+typing="" :hi'
+          "<< @+reply=m0;example.com/vendor=x;+typing;msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
+          '?? message Privmsg peer #iirc id=ircd:m1 in=channel:#iirc tags=+reply="m0";+typing="" answers=m0 :hi'
         ),
       ],
     });

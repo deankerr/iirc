@@ -437,10 +437,13 @@ describe("ordering nicks", () => {
 });
 
 const said = (sequence: number, sender: string, ours = false): typeof TimelineItem.Encoded => ({
+  answered: null,
   changed: sequence,
   content: {
     _tag: "Message",
+    answers: null,
     at: { _tag: "Unknown" },
+    context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,

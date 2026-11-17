@@ -147,7 +147,9 @@ const messageId = fc.constantFrom("m1", "m2").map((each) => MessageId.make(each)
 const news: fc.Arbitrary<News> = fc.oneof(
   fc.record({
     _tag: fc.constant("Message"),
+    answers: fc.option(messageId, { nil: undefined }),
     at: fact(at),
+    context: fc.option(fc.constant("#a"), { nil: undefined }),
     highlight: fc.boolean(),
     id: fact(messageId),
     kind: fc.constant("Privmsg"),

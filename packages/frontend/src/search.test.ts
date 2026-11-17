@@ -260,10 +260,13 @@ describe("reading a query", () => {
 
 const message = (sequence: number, text: string, sender = "peer") =>
   decodeItem({
+    answered: null,
     changed: sequence,
     content: {
       _tag: "Message",
+      answers: null,
       at: { _tag: "Unknown" },
+      context: null,
       id: { _tag: "Unknown" },
       kind: "Privmsg",
       live: true,
