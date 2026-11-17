@@ -2,7 +2,8 @@
  * Who is here: what a Timeline shows at its head, and a Channel's members, as a reducer
  * over what the runtime read from the Channel's routes and what the changes stream said.
  * The Daemon reads the Channel as the Client knows it now, so this holds the latest read of
- * the open Channel only, and says to read it again when a change could have changed it.
+ * each Channel the Sidebar lists or a Pane shows, so one opens with its head already read,
+ * and says to read it again when a change could have changed it.
  *
  * @packageDocumentation
  */
@@ -24,7 +25,7 @@ import type { Intent } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { endReason, formatted, nickColour } from "./render.ts";
 import type { Inline } from "./render.ts";
-import { isRemoved, opened, resolve } from "./timelines.ts";
+import { isRemoved, opened, resolve, sidebar } from "./timelines.ts";
 import type { Connection, NetworkView, Timelines } from "./timelines.ts";
 
 /** Where Self stands with a Channel the Client holds. */
@@ -603,9 +604,9 @@ export const reduceChannel = (state: Channel, event: ChannelEvent): Channel => {
   }
 };
 
-// Every Channel the Panes show.
+// Every Channel held: those the Sidebar lists and those the Panes show.
 
-/** The Channels the Panes show, each as last read, by its Timeline. */
+/** The Channels held, each as last read, by its Timeline. */
 export type Channels = ReadonlyMap<TimelineId, Channel>;
 
 /** Nothing read yet. */
@@ -642,11 +643,36 @@ export const openChannels = (state: Timelines): readonly OpenChannel[] => {
 };
 
 /**
- * The reads to make now, for every Channel the Panes show, as `channelReads` gives each:
+ * Every Channel whose head is held, so each opens with its head already read: those the
+ * Panes show, the focused Pane's first, then each other the Sidebar lists, of a Network not
+ * removed, in its order. A removed Network's are read only once a Pane shows one.
+ * @param state - The Timelines.
+ * @returns The Channels.
+ */
+export const heldChannels = (state: Timelines): readonly OpenChannel[] => {
+  const shown = openChannels(state);
+
+  const listed = sidebar(state).flatMap((network) =>
+    network.removed
+      ? []
+      : network.timelines.flatMap((timeline) =>
+          timeline.kind !== "Channel" ||
+          timeline.removed ||
+          shown.some((one) => one.timeline === timeline.id)
+            ? []
+            : [{ network: timeline.network, timeline: timeline.id }]
+        )
+  );
+
+  return [...shown, ...listed];
+};
+
+/**
+ * The reads to make now, for every Channel held, as `channelReads` gives each:
  * its head, and its members only where they show, so a Channel whose members are hidden is
  * never asked for them.
  * @param state - The Channels.
- * @param open - The Channels shown.
+ * @param open - The Channels held.
  * @param members - The Channels whose members show, by their Timelines' ids.
  * @returns The reads.
  */
@@ -661,12 +687,17 @@ export const channelsReads = (
 
 /**
  * What happened to the Channels: an event of one, which goes to the Channel it is of, or of
- * the changes stream, which goes to each, or `Kept`, the Channels the Panes show, which
- * lets go of every other.
+ * the changes stream, which goes to each, or `Kept`, the Channels whose heads are held,
+ * which lets go of every other, and of these, those a Pane shows, whose members are kept,
+ * which lets go of every other's members.
  */
 export type ChannelsEvent =
   | ChannelEvent
-  | { readonly _tag: "Kept"; readonly timelines: readonly TimelineId[] };
+  | {
+      readonly _tag: "Kept";
+      readonly timelines: readonly TimelineId[];
+      readonly shown: readonly TimelineId[];
+    };
 
 /**
  * The Channels after an event.
@@ -677,9 +708,27 @@ export type ChannelsEvent =
 export const reduceChannels = (state: Channels, event: ChannelsEvent): Channels => {
   switch (event._tag) {
     case "Kept": {
-      const kept = [...state].filter(([timeline]) => event.timelines.includes(timeline));
+      let changed = false;
 
-      return kept.length === state.size ? state : new Map(kept);
+      const kept = [...state].flatMap(([timeline, held]): [TimelineId, Channel][] => {
+        if (!event.timelines.includes(timeline)) {
+          changed = true;
+
+          return [];
+        }
+
+        if (event.shown.includes(timeline) || held.roster === unreadRoster) {
+          return [[timeline, held]];
+        }
+
+        changed = true;
+
+        // A page of members answered just before the runtime let go of its read is still
+        // taken: it is as current as any read.
+        return [[timeline, { ...held, roster: unreadRoster }]];
+      });
+
+      return changed ? new Map(kept) : state;
     }
 
     case "Changed":

@@ -75,7 +75,7 @@ The core decides and this package draws and does the I/O.
   | `uiSync` | Follows the options under `ui` |
   | `ownerSync` | Follows the options under `store`, `uploads`, and `previews` while the options or the Uploads show |
   | `uploadsSync` | Reads the Uploads' first page while a Pane shows the Uploads, again when "Show deleted" is switched, then follows their Changes after it, and after the last one folded in whenever it follows again, and which Uploads' bytes are missing |
-  | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
+  | `channelSync` | Reads the head of each Channel the Sidebar lists, a Pane shows, or whose list a Lookup card is, and the members of each shown, the heads of those no Pane shows two at a time |
   | `marking` | Marks read what `markDue` says, after a second |
   | `previewsSync` | Follows the stream of Previews while any Timeline's mode asks, and makes each ask the core gives once it is followed |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |

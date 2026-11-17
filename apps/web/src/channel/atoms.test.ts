@@ -189,12 +189,13 @@ const inChannel = async (
 
   const registry = registryFor(fake.fetch, more.waits);
 
+  // Held from the first, since the head is read as soon as the Sidebar lists it.
+  fake.daemon.holdChannels = more.holdHead ?? false;
   await run(registry, check, undefined);
   registry.mount(sync);
   registry.mount(channelSync);
   registry.mount(completer);
   await eventually(() => fake.daemon.followers.length === 1);
-  fake.daemon.holdChannels = more.holdHead ?? false;
   registry.set(open, timelineId(iirc));
   await until(registry, openTimeline, (shown) => shown._tag === "Shown");
 
@@ -672,6 +673,43 @@ describe("re-reading under sustained Activity", () => {
       expect({ asked, reads: daemon.channelsRead.length }).toStrictEqual({ asked: 1, reads: 2 });
     }
   );
+});
+
+describe("the heads of Channels the Sidebar lists", () => {
+  it("are asked two at a time, one a Pane opens meanwhile at once, and each is read", async () => {
+    const others = [7, 8, 9, 10].map((sequence) =>
+      listed(idOf(sequence), `#c${sequence}`, "Channel")
+    );
+
+    const { daemon } = await inChannel([member("op")], { holdHead: true, timelines: others });
+    const ours = daemon.channels.get(iirc);
+
+    // Each is a Channel the Daemon reads, once its held reads are let go.
+    for (const other of others) {
+      if (ours !== undefined) {
+        daemon.channels.set(other.id, {
+          ...ours,
+          header: { ...ours.header, name: other.name, timeline: timelineId(other.id) },
+        });
+      }
+    }
+
+    // Give every read its chance to be asked.
+    await wait(200);
+    const atOnce = daemon.held.channel.length;
+    // The open Channel's read is asked though the heads before it hold every turn.
+    const opened = daemon.channelsAsked.includes(iirc);
+
+    daemon.holdChannels = false;
+    release(daemon.held.channel);
+    await eventually(() => daemon.channelsRead.length === 5);
+
+    expect({ atOnce, opened, reads: new Set(daemon.channelsRead).size }).toStrictEqual({
+      atOnce: 3,
+      opened: true,
+      reads: 5,
+    });
+  });
 });
 
 describe("completing by the Network's CHANTYPES", () => {

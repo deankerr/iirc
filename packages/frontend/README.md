@@ -275,7 +275,7 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 
 `@iirc/frontend/channel`: what each Pane's Timeline shows at its head, and its Channel's members, as a reducer over what the runtime read from `GET /api/timelines/{id}/channel` and `/members`. The Daemon answers with the Channel as the Client knows it now, so this holds the latest read and says when to read again.
 
-- **The head is read for each Channel a Pane shows, and the members only while they show.**
+- **The head is held for each Channel the Sidebar lists or a Pane shows, so one opens with it already read, and the members are read only while they show.** `heldChannels` lists them, the shown first. A removed Network's Channel is read only once a Pane shows it, and a Channel's members are let go of once no Pane shows it. Each join, part or quit in one reads its head again, at most once a second.
 - **What may have changed a Channel is read again, coalesced, never cancelled.** An Activity in it, its Timeline's `head` moved past the one last seen, a Gap, an overflow, or a reset leaves it dirty. `refreshDelay` spaces the reads: 250 ms after the first change, and no more than once a second while changes keep coming.
 - **Members are read again from the start, as many as were held.** The Daemon orders them by rank, which any `MODE` can move, so patching the list would need to know what each Activity means for every member.
 - **The header says what the head said.** A Channel's shows its topic, formatted, with who set it and when, its modes, and its count, and a Direct Message's whether its partner is on the Network. Where Self stands otherwise is in words, such as kicked or joining.

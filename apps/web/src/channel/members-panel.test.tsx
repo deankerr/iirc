@@ -13,7 +13,7 @@ import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { channelSync } from "./atoms.ts";
-import { membersShown, paneMeasured } from "./state.ts";
+import { channelState, membersShown, paneMeasured } from "./state.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -78,12 +78,14 @@ const settled = async (holds: () => boolean) => {
  * @param setAt - When the topic was set, if known.
  * @param people - Its members, `op` and `peer` unless given.
  * @param held - The prefix modes Self holds there, or none while they are not read.
+ * @param opening - Whether `#iirc` is opened, or left listed in the Sidebar alone.
  * @returns The fake, the registry, and the page.
  */
 const signedIn = async (
   setAt: number | null = null,
   people: readonly (typeof Member.Encoded)[] = [member("op", ["o"]), member("peer")],
-  held: readonly string[] | null = null
+  held: readonly string[] | null = null,
+  opening = true
 ) => {
   const fake = fakeDaemon();
 
@@ -145,6 +147,10 @@ const signedIn = async (
   });
 
   await settled(() => fake.daemon.followers.length === 1);
+
+  if (!opening) {
+    return { ...fake, container, registry };
+  }
 
   await act(async () => {
     registry.set(open, Schema.decodeSync(TimelineId)(iirc));
@@ -226,6 +232,66 @@ describe("a Pane's status bar", () => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
+  });
+
+  it("opens a Channel the Sidebar lists with its topic, modes and count in the first frame drawn", async () => {
+    const { container, daemon, registry } = await signedIn(null, undefined, null, false);
+
+    // Its head is read while it is only listed, before any Pane shows it.
+    let held = true;
+
+    await act(async () => {
+      held = await eventually(
+        () =>
+          registry.get(channelState).get(Schema.decodeSync(TimelineId)(iirc))?.head.header !==
+          undefined
+      ).then(
+        () => true,
+        () => false
+      );
+    });
+
+    // A read that opening it begins is held, so the bar shows only what was held before.
+    daemon.holdChannels = true;
+
+    // Every frame the bar is drawn in, from the one that opens it on.
+    const frames: string[] = [];
+
+    const drawn = () => {
+      const text = bar()?.textContent;
+      const count = toggle()?.getAttribute("aria-label");
+
+      if (text !== undefined && count !== undefined && frames.at(-1) !== `${text} ${count}`) {
+        frames.push(`${text} ${count}`);
+      }
+    };
+
+    const observer = new MutationObserver(drawn);
+
+    observer.observe(container, { characterData: true, childList: true, subtree: true });
+    await act(async () => {
+      registry.set(open, Schema.decodeSync(TimelineId)(iirc));
+      await Promise.resolve();
+    });
+    drawn();
+    await settled(() => container.querySelector('[role="log"]') !== null);
+    drawn();
+    observer.disconnect();
+    daemon.holdChannels = false;
+
+    for (const release of daemon.held.channel.splice(0)) {
+      release();
+    }
+
+    expect({
+      held,
+      shows: frames.map((frame) => [
+        frame.includes("+n"),
+        frame.includes("the plan"),
+        frame.endsWith("Members, 2"),
+      ]),
+    }).toStrictEqual({ held: true, shows: frames.map(() => [true, true, true]) });
+    expect(frames.length).toBeGreaterThan(0);
   });
 
   it("says the count once, in the toggle, and discloses the topic in full, isolated, under its one line", async () => {
