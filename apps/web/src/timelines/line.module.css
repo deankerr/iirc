@@ -21,6 +21,7 @@
 .highlight,
 .unsent,
 .activity,
+.numeric,
 .refused,
 .session,
 .gap,
@@ -333,6 +334,7 @@
   .highlight,
   .unsent,
   .activity,
+  .numeric,
   .refused,
   .session,
   .gap,
@@ -349,6 +351,7 @@
   .highlight,
   .unsent,
   .activity,
+  .numeric,
   .refused,
   .session {
     padding-inline-end: max(var(--space-3), 100% - var(--space-3) - var(--widest-line, 100%));

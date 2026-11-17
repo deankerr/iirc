@@ -295,11 +295,14 @@ const RepeatedWords = ({
   return <span className={styles.repeated}>{` \u00D7${count}, ${first}\u2013${latest}`}</span>;
 };
 
-/** Each description's tone, as its class: a refused action of ours is dim, like Activity. */
+/**
+ * Each description's tone, as its class: Activity, a Session, and a refusal of ours are dim,
+ * and a numeric's words are not.
+ */
 const toneClass = {
   Activity: styles.activity,
   // An Ircd's own words read as plainly as a Message's, beside their dim number.
-  Numeric: undefined,
+  Numeric: styles.numeric,
   Refused: styles.refused,
   Session: styles.session,
 } as const;
