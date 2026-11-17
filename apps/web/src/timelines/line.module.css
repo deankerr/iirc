@@ -492,6 +492,26 @@
     padding-inline-end: calc(var(--target-size) + var(--space-1));
   }
 
+  /*
+   * As one run, a Message with a menu keeps room for its button and still wraps at the
+   * widest line, whichever needs more. The two rules must stay alike.
+   */
+  @container (max-width: 36em) {
+    .menued.menued {
+      padding-inline-end: max(
+        var(--target-size) + var(--space-1),
+        100% - var(--space-3) - var(--widest-line, 100%)
+      );
+    }
+  }
+
+  :global([data-line="inline"]) .menued.menued {
+    padding-inline-end: max(
+      var(--target-size) + var(--space-1),
+      100% - var(--space-3) - var(--widest-line, 100%)
+    );
+  }
+
   .action {
     min-height: var(--target-size);
   }
