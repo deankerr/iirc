@@ -171,6 +171,49 @@ describe("MONITOR", () => {
     expect(client.known(run.state).self?.nick).toBe("iirc");
   });
 
+  it("never asks again for a nick Self was renamed off unasked, until the next Session", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(
+        ">> MONITOR + iirc",
+        "<< :irc.test 731 other :iirc",
+        ">> NICK iirc",
+        "<< :other!~iirc@iirc.test NICK :iirc",
+        ">> MONITOR - iirc",
+        "# Services rename Self off the nick, with no NICK of ours.",
+        "<< :iirc!~iirc@iirc.test NICK :Guest1",
+        "<< :irc.test 731 Guest1 :iirc"
+      ),
+      reconnected("MONITOR"),
+      lines(">> MONITOR + iirc")
+    );
+
+    expect([sent(run, "NICK"), sent(run, "MONITOR")]).toStrictEqual([
+      ["NICK iirc", "NICK other", "NICK iirc", "NICK iirc", "NICK other"],
+      ["MONITOR + iirc", "MONITOR - iirc", "MONITOR + iirc"],
+    ]);
+  });
+
+  it("lets a partner's rename onto another partner's nick take that nick's place, as its Timeline does", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(">> MONITOR + iirc"),
+      joined(base, "#iirc", ["alice"], { nick: "other" }),
+      lines(
+        "<< :alicia!u@h PRIVMSG other :an old Timeline",
+        ">> MONITOR + alicia",
+        "<< :bob!u@h PRIVMSG other :hi",
+        ">> MONITOR + bob",
+        "<< :alice!u@h PRIVMSG other :hi",
+        ">> MONITOR + alice",
+        "<< :alice!u@h NICK alicia",
+        ">> MONITOR - alice"
+      )
+    );
+
+    expect([...client.known(run.state).partners.keys()]).toStrictEqual(["bob", "alicia"]);
+  });
+
   it("never monitors the preferred nick once the Owner chose a nick this Session", () => {
     const run = played(
       settled("MONITOR"),
@@ -516,10 +559,15 @@ describe("telling that a partner's presence changed", () => {
     const run = played(
       settled("MONITOR"),
       lines(">> MONITOR + iirc", "<< :alice!u@h PRIVMSG other :hi", ">> MONITOR + alice"),
-      joined(base, "#iirc", ["alice"], { nick: "other" })
+      joined(base, "#iirc", ["alice", "bob"], { nick: "other" }),
+      lines(
+        "<< :bob!u@h PART #iirc",
+        "<< :alice!u@h PART #iirc",
+        "?? partner-learned partner:alice"
+      )
     );
 
-    expect(learned(run)).toStrictEqual(["alice"]);
+    expect(learned(run)).toStrictEqual(["alice", "alice"]);
   });
 
   it("tells of each partner when the Session ends and they are no longer known to be here", () => {

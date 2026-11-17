@@ -43,7 +43,14 @@ import { isMonitorReply, left, monitorRefused, monitorReply } from "./monitor.ts
 import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { oper, operAnswered } from "./oper.ts";
-import { reclaim, reclaimAsked, reclaimOver, reclaimRefused, reclaimTaken } from "./reclaim.ts";
+import {
+  reclaim,
+  reclaimAsked,
+  reclaimOver,
+  reclaimRefused,
+  reclaimTaken,
+  yieldedBy,
+} from "./reclaim.ts";
 import {
   abandon,
   capLine,
@@ -209,6 +216,8 @@ const isSameNick = (run: Run, first: string, second: string): boolean => {
 // free a nick Self wants back.
 const nickSettled = (run: Run, from: string, to: string): void => {
   if (isSelf(run, from)) {
+    yieldedBy(run, from, to);
+
     // The Client's own ask answers a change to its nick when it was sent first.
     if (!reclaimTaken(run, to)) {
       answered(run, "NICK", [to]);
@@ -515,6 +524,7 @@ const welcome = (run: Run, line: Line): void => {
       opering: false,
       realname: { _tag: "Known", at: phase.opened, from: "ours", value: realname },
       server: line.source ?? link.ircd.host,
+      yielded: false,
     },
   }));
   run.news.push({ _tag: "SessionBegan", at: run.at, nick });

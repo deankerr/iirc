@@ -1,4 +1,3 @@
-import { shares } from "./channels.ts";
 /**
  * Facts going stale. When the last Feature that keeps a fact turns off, the fact is
  * rewritten as stale in State at that moment, so whatever is said of it afterwards is
@@ -6,6 +5,7 @@ import { shares } from "./channels.ts";
  *
  * @packageDocumentation
  */
+import { shares } from "./channels.ts";
 import type { Kept } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import type { Fact } from "./known.ts";

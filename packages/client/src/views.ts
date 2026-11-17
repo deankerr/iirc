@@ -194,44 +194,50 @@ export const knownBeforeOf = (state: State): KnownBefore => ({
 });
 
 /**
- * Whether each open Direct Message partner is on the Network now: `MONITOR`'s word while
- * it says online, then sharing a Channel with Self, as of the last Line heard, then
- * `MONITOR`'s word that they are offline.
+ * Whether one partner is on the Network now: `MONITOR`'s word while it says online, then
+ * sharing a Channel with Self, as of the last Line heard, then `MONITOR`'s word that they
+ * are offline, and unknown with no Session. It reads each Channel once, never its members.
+ * @param state - The State.
+ * @param fold - Folds a nick by the casemapping in force.
+ * @param nick - The partner's nick.
+ * @returns Whether they are here.
+ */
+export const partnerHere = (
+  state: State,
+  fold: (name: string) => string,
+  nick: string
+): Fact<boolean> => {
+  const session = sessionOf(state);
+  const key = fold(nick);
+  const told = openOf(state)?.monitoring.watched.get(key)?.here ?? unknown;
+
+  if (session === undefined || (told._tag === "Known" && told.value)) {
+    return session === undefined ? unknown : told;
+  }
+
+  const shared = [...state.channels.values()].some(
+    ({ phase }) => phase._tag === "Joined" && phase.members.has(key)
+  );
+
+  return shared ? { _tag: "Known", at: session.keepalive.heard, from: "ircd", value: true } : told;
+};
+
+/**
+ * Whether each open Direct Message partner is on the Network now, as {@link partnerHere}.
  * @param state - The State.
  * @param fold - Folds a nick by the casemapping in force.
  * @returns The partners, as `where` keys them.
  */
-export const partnersOf = (
+const partnersOf = (
   state: State,
   fold: (name: string) => string
-): ReadonlyMap<string, PartnerKnowledge> => {
-  const open = openOf(state);
-  const session = sessionOf(state);
-
-  const hereOf = (nick: string): Fact<boolean> => {
-    const key = fold(nick);
-    const told = open?.monitoring.watched.get(key)?.here ?? unknown;
-
-    if (session === undefined || (told._tag === "Known" && told.value)) {
-      return session === undefined ? unknown : told;
-    }
-
-    const shared = [...state.channels.values()].some(
-      ({ phase }) => phase._tag === "Joined" && phase.members.has(key)
-    );
-
-    return shared
-      ? { _tag: "Known", at: session.keepalive.heard, from: "ircd", value: true }
-      : told;
-  };
-
-  return new Map(
+): ReadonlyMap<string, PartnerKnowledge> =>
+  new Map(
     [...state.partners].map(([key, nick]): [string, PartnerKnowledge] => [
       key,
-      { here: hereOf(nick), nick },
+      { here: partnerHere(state, fold, nick), nick },
     ])
   );
-};
 
 /**
  * What is known, for Views.

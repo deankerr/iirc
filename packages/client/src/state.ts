@@ -94,6 +94,12 @@ type Presence =
        */
       readonly chosen: boolean;
       /**
+       * Whether the Network renamed Self off the first configured nick in this Session,
+       * with no `NICK` of ours asking, as services do: from then that nick is not taken
+       * back, so the Client never asks for it in a loop with them.
+       */
+      readonly yielded: boolean;
+      /**
        * While Channels wait on a service login, when they are joined anyway, or
        * `undefined` once they need not wait.
        */

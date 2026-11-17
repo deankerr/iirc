@@ -27,13 +27,13 @@ import { online } from "./acts.ts";
 import { pruneUsers, see } from "./channels.ts";
 import type { Arrival } from "./feature.ts";
 import type { Fact } from "./known.ts";
-import type { Closable, News, Where } from "./news.ts";
+import type { Activity, Closable, News, Where } from "./news.ts";
 import { reclaim, wantedBack } from "./reclaim.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Monitoring, State, Watched } from "./state.ts";
 import { maxPartners, unmonitored } from "./state.ts";
-import { openOf, partnersOf, sessionOf } from "./views.ts";
+import { openOf, partnerHere, sessionOf } from "./views.ts";
 import { named, routeActivity } from "./where.ts";
 
 // Partners
@@ -82,7 +82,9 @@ const afterMessage = (
   return next;
 };
 
-// A live rename moves a partner's Timeline to their new nick.
+// A live rename moves a partner's Timeline to their new nick, where it keeps its place.
+// As in the projection, a partner already keyed by the new nick is detached, and the one
+// who renamed takes the key.
 const afterRename = (
   partners: ReadonlyMap<string, string>,
   where: readonly Where[]
@@ -90,8 +92,16 @@ const afterRename = (
   let next: Map<string, string> | undefined;
 
   for (const each of where) {
-    if (each._tag === "DirectRenamed" && (next ?? partners).has(each.key)) {
-      next = rekeyed(next ?? partners, (key, name) =>
+    const from = next ?? partners;
+
+    if (each._tag === "DirectRenamed" && from.has(each.key)) {
+      const detached = new Map(from);
+
+      if (each.to.key !== each.key) {
+        detached.delete(each.to.key);
+      }
+
+      next = rekeyed(detached, (key, name) =>
         key === each.key ? [each.to.key, each.to.name] : [key, name]
       );
     }
@@ -321,22 +331,31 @@ const reconcile = (run: Run): void => {
 // Whether a step may have changed the list: the partners, Self's nick or the Owner's
 // choice of it, the Configuration, ISUPPORT, the casemapping, what was refused, or the
 // Connection or Session itself. Each is compared by reference, so this costs nothing.
-const mayChange = (before: State, after: State): boolean => {
-  const was = openOf(before);
-  const now = openOf(after);
+// Whether the Session, or Self's nick or what Self may take back in it, changed.
+const sessionChanged = (before: State, after: State): boolean => {
   const wasSession = sessionOf(before);
   const nowSession = sessionOf(after);
 
   return (
+    wasSession?.nick !== nowSession?.nick ||
+    wasSession?.chosen !== nowSession?.chosen ||
+    wasSession?.yielded !== nowSession?.yielded ||
+    (wasSession === undefined) !== (nowSession === undefined)
+  );
+};
+
+const mayChange = (before: State, after: State): boolean => {
+  const was = openOf(before);
+  const now = openOf(after);
+
+  return (
+    sessionChanged(before, after) ||
     before.partners !== after.partners ||
     before.configuration !== after.configuration ||
     before.casemapping !== after.casemapping ||
     was?.isupport !== now?.isupport ||
     was?.monitoring.refused !== now?.monitoring.refused ||
-    was?.monitoring.off !== now?.monitoring.off ||
-    wasSession?.nick !== nowSession?.nick ||
-    wasSession?.chosen !== nowSession?.chosen ||
-    (wasSession === undefined) !== (nowSession === undefined)
+    was?.monitoring.off !== now?.monitoring.off
   );
 };
 
@@ -345,10 +364,96 @@ const sameHere = (left: Fact<boolean>, right: Fact<boolean>): boolean =>
   left._tag === right._tag &&
   (left._tag !== "Known" || (right._tag === "Known" && left.value === right.value));
 
+// The nicks an Activity names whose membership it may change.
+const membersNamed = (activity: Activity): readonly string[] => {
+  if (activity._tag === "NickChanged") {
+    return [activity.from, activity.to];
+  }
+
+  return activity._tag === "Joined" ||
+    activity._tag === "Parted" ||
+    activity._tag === "Kicked" ||
+    activity._tag === "Quit"
+    ? [activity.nick]
+    : [];
+};
+
+// The nicks whose `MONITOR` entry the step changed, added, or took off.
+const watchedChanged = (run: Run): readonly string[] => {
+  const was = openOf(run.before)?.monitoring.watched ?? new Map<string, Watched>();
+  const now = openOf(run.state)?.monitoring.watched ?? new Map<string, Watched>();
+
+  if (was === now) {
+    return [];
+  }
+
+  return [
+    ...[...now].flatMap(([key, watched]) => (was.get(key) === watched ? [] : [watched.nick])),
+    ...[...was].flatMap(([key, watched]) => (now.has(key) ? [] : [watched.nick])),
+  ];
+};
+
+/**
+ * The partners whose presence the step may have changed, by key, or `undefined` for
+ * every one: when the Session came or went, the casemapping changed, a Channel's members
+ * were replaced, or Self joined or left a Channel. Otherwise only the nicks the step's
+ * Activities named, and those whose `MONITOR` entry changed, so a step costs what its
+ * Line touches.
+ * @param run - The step, with its partners followed.
+ * @returns The keys, or `undefined` for all.
+ */
+const touchedPartners = (run: Run): ReadonlySet<string> | undefined => {
+  const { before, state } = run;
+
+  if (
+    (sessionOf(before) === undefined) !== (sessionOf(state) === undefined) ||
+    before.casemapping !== state.casemapping ||
+    before.declared !== state.declared
+  ) {
+    return undefined;
+  }
+
+  if (
+    before.channels === state.channels &&
+    openOf(before)?.monitoring.watched === openOf(state)?.monitoring.watched
+  ) {
+    return new Set();
+  }
+
+  const fold = folder(state);
+
+  const selves = new Set(
+    [sessionOf(before)?.nick, sessionOf(state)?.nick].flatMap((nick) =>
+      nick === undefined ? [] : [fold(nick)]
+    )
+  );
+
+  const nicks = [...watchedChanged(run)];
+
+  for (const news of run.news) {
+    if (news._tag === "ChannelLearned") {
+      return undefined;
+    }
+
+    if (news._tag === "Activity") {
+      const members = membersNamed(news.activity);
+
+      if (news.activity._tag !== "NickChanged" && members.some((nick) => selves.has(fold(nick)))) {
+        return undefined;
+      }
+
+      nicks.push(...members);
+    }
+  }
+
+  return new Set(nicks.map((nick) => named(run, nick).key));
+};
+
 /**
  * Tells of each partner who was one before the step and whether they are here changed in
  * it, unless the step's News already says so in their Timeline: an Activity there. Nothing
- * else tells a Frontend, as the first status `MONITOR` gives is learned silently.
+ * else tells a Frontend, as the first status `MONITOR` gives is learned silently. Only the
+ * partners the step may have touched are compared.
  * @param run - The step, with its partners followed.
  */
 const partnersLearned = (run: Run): void => {
@@ -356,8 +461,11 @@ const partnersLearned = (run: Run): void => {
     return;
   }
 
-  const was = partnersOf(run.before, folder(run.before));
-  const now = partnersOf(run.state, folder(run.state));
+  const touched = touchedPartners(run);
+
+  if (touched?.size === 0) {
+    return;
+  }
 
   const reported = new Set(
     run.news.flatMap((one) =>
@@ -367,11 +475,21 @@ const partnersLearned = (run: Run): void => {
     )
   );
 
-  for (const [key, partner] of now) {
-    const before = was.get(key);
+  const keys = touched ?? new Set(run.state.partners.keys());
+  const foldBefore = folder(run.before);
+  const foldNow = folder(run.state);
 
-    if (before !== undefined && !reported.has(key) && !sameHere(before.here, partner.here)) {
-      run.news.push({ _tag: "PartnerLearned", partner: { key, name: partner.nick } });
+  for (const key of keys) {
+    const was = run.before.partners.get(key);
+    const nick = run.state.partners.get(key);
+
+    if (
+      was !== undefined &&
+      nick !== undefined &&
+      !reported.has(key) &&
+      !sameHere(partnerHere(run.before, foldBefore, was), partnerHere(run.state, foldNow, nick))
+    ) {
+      run.news.push({ _tag: "PartnerLearned", partner: { key, name: nick } });
     }
   }
 };

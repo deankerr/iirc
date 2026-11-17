@@ -22,7 +22,8 @@ import { openOf, sessionOf } from "./views.ts";
 
 /**
  * The nick Self wants back: the first the Configuration lists, while Self holds another
- * it settled for in a Session, and the Owner has not chosen a nick in it.
+ * it settled for in a Session, the Owner has not chosen a nick in it, and the Network has
+ * not renamed Self off it unasked.
  * @param state - The State.
  * @returns The nick, or `undefined` when Self wants none back.
  */
@@ -30,7 +31,7 @@ export const wantedBack = (state: State): string | undefined => {
   const session = sessionOf(state);
   const [preferred] = state.configuration?.nicks ?? [];
 
-  if (session === undefined || preferred === undefined || session.chosen) {
+  if (session === undefined || preferred === undefined || session.chosen || session.yielded) {
     return undefined;
   }
 
@@ -70,6 +71,37 @@ export const reclaim = (run: Run, left: string): void => {
     awaited: open.awaited + 1,
     reclaims: [...open.reclaims, { nick: preferred, order: open.awaited }].slice(-maxReclaims),
   }));
+};
+
+/**
+ * Self's nick changed, live. A change off the first configured nick while the Owner has
+ * chosen none this Session was asked by no `NICK` of ours, since the Client asks only for
+ * that nick: the Network made it, as services do, and the nick is not taken back for the
+ * rest of the Session.
+ * @param run - The step.
+ * @param from - Self's nick before.
+ * @param to - Self's nick after.
+ */
+export const yieldedBy = (run: Run, from: string, to: string): void => {
+  const session = sessionOf(run.state);
+  const [preferred] = run.state.configuration?.nicks ?? [];
+  const fold = folder(run.state);
+
+  if (
+    session === undefined ||
+    session.chosen ||
+    preferred === undefined ||
+    fold(from) !== fold(preferred) ||
+    fold(to) === fold(preferred)
+  ) {
+    return;
+  }
+
+  updateOpen(run, (open) =>
+    open.presence._tag === "Session"
+      ? { ...open, presence: { ...open.presence, yielded: true } }
+      : open
+  );
 };
 
 // The numerics that refuse a `NICK`, by the nick they name second: RFC 2812's, and `438`,
