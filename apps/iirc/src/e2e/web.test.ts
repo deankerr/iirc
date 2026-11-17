@@ -172,6 +172,36 @@ const placed = async (on: Page) => {
   });
 };
 
+/** What the end-to-end run reads of `known`: each open Direct Message partner, and whether they are here. */
+const decodePartners = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      partners: Schema.Array(
+        Schema.Struct({
+          here: Schema.Struct({ _tag: Schema.String, value: Schema.optionalKey(Schema.Boolean) }),
+          nick: Schema.String,
+        })
+      ),
+    })
+  )
+);
+
+/** What the end-to-end run reads of a Timeline's window: the kind of each Activity in it. */
+const decodeActivityKinds = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      items: Schema.Array(
+        Schema.Struct({
+          content: Schema.Struct({
+            _tag: Schema.String,
+            activity: Schema.optionalKey(Schema.Struct({ _tag: Schema.String })),
+          }),
+        })
+      ),
+    })
+  )
+);
+
 /** What the end-to-end run reads of an Upload. */
 const UploadRead = Schema.Struct({
   deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
@@ -5819,6 +5849,135 @@ describe("the web frontend on iirc daemon --web", () => {
       } finally {
         asker.close();
         peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shows whether a Direct Message's partner is on the Network, as MONITOR tells it, when they share no Channel and quit and return",
+    { timeout: 120_000 },
+    async () => {
+      // Ergo, which offers `MONITOR` and tells a monitoring User when a nick comes and goes.
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "presence"),
+        "#iirc-presence",
+        { start: startErgo }
+      );
+
+      let partner: Peer = peer;
+
+      /**
+       * What `known` says of the one partner: whether they are here, or that it does not say.
+       * @returns `here`, `gone`, `unknown`, or `none` for no partner.
+       */
+      const hereOf = async () => {
+        const answer = await api("GET", "/networks/private/known");
+
+        const one = decodePartners(await answer.text()).partners.find(
+          (each) => each.nick === "peer"
+        );
+
+        if (one === undefined) {
+          return "none";
+        }
+
+        if (one.here._tag !== "Known") {
+          return "unknown";
+        }
+
+        return one.here.value === true ? "here" : "gone";
+      };
+
+      /**
+       * The kinds of Activity in the partner's Direct Message Timeline, in order.
+       * @returns The kinds.
+       */
+      const presenceKinds = async () => {
+        const list = await api("GET", "/networks/private/timelines");
+
+        const id = decodeTimelineIds(await list.text()).timelines.find(
+          (one) => one.kind === "Direct"
+        )?.id;
+
+        if (id === undefined) {
+          return [];
+        }
+
+        const window = await api("GET", `/timelines/${id}`);
+
+        return decodeActivityKinds(await window.text())
+          .items.flatMap((one) =>
+            one.content._tag === "Activity" ? [one.content.activity?._tag] : []
+          )
+          .filter((kind) => kind === "CameOnline" || kind === "WentOffline");
+      };
+
+      try {
+        // Sharing no Channel with Self, so only `MONITOR` can say whether they are here.
+        peer.send(`PART ${channel}`);
+        peer.send("PRIVMSG iirc :are you there");
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        await page.getByRole("row", { name: /^peer/u }).click();
+
+        const log = page.getByRole("log", { name: "peer" });
+        const online = page.locator('[data-presence="online"]');
+        const offline = page.locator('[data-presence="offline"]');
+
+        await log.getByText("are you there").waitFor();
+        await expect.poll(hereOf, { interval: 100, timeout: 20_000 }).toBe("here");
+        // What `MONITOR` first says of a partner is silent, so no step tells a Pane that was
+        // already open; opening the Timeline again reads `known` afresh.
+        await page
+          .getByRole("row", { name: /^private/u })
+          .first()
+          .click();
+        await page.getByRole("row", { name: /^peer/u }).click();
+        await online.waitFor();
+        await screenshot(page, "73-after-here-desktop.png");
+        await page.setViewportSize({ height: 844, width: 390 });
+        await online.waitFor();
+        await screenshot(page, "73-after-here-phone.png");
+        await page.setViewportSize({ height: 800, width: 1280 });
+
+        // They leave the Network: Self is told by `MONITOR`, with no Channel to say it.
+        peer.send("QUIT :gone");
+        peer.close();
+        await expect.poll(hereOf, { interval: 100, timeout: 20_000 }).toBe("gone");
+        await offline.waitFor();
+        await screenshot(page, "73-after-gone-desktop.png");
+        await page.setViewportSize({ height: 844, width: 390 });
+        await offline.waitFor();
+        await screenshot(page, "73-after-gone-phone.png");
+        await page.setViewportSize({ height: 800, width: 1280 });
+
+        // And return, under the same nick.
+        partner = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+        await expect.poll(hereOf, { interval: 100, timeout: 20_000 }).toBe("here");
+        await online.waitFor();
+        await screenshot(page, "73-after-back-desktop.png");
+
+        expect({
+          here: await hereOf(),
+          kinds: await presenceKinds(),
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+        }).toStrictEqual({
+          here: "here",
+          kinds: ["WentOffline", "CameOnline"],
+          problems: [],
+        });
+      } finally {
+        partner.close();
         child.kill("SIGTERM");
         await child.exited;
         await ngircd.stop();

@@ -3,6 +3,7 @@ declare const styles: {
   readonly disclosure: string;
   readonly dim: string;
   readonly full: string;
+  readonly online: string;
   readonly topic: string;
 };
 

@@ -664,6 +664,22 @@ describe("lines", () => {
     ]);
   });
 
+  it("shows a partner coming and going as arriving and leaving, in a few words", () => {
+    expect(
+      [
+        activity({ _tag: "CameOnline", nick: "peer" }),
+        activity({ _tag: "WentOffline", nick: "peer" }),
+      ].map((each) => {
+        const line = lineOf(each);
+
+        return [line._tag === "Description" && line.marker, read(line)];
+      })
+    ).toStrictEqual([
+      ["-->", "<peer> is online"],
+      ["<--", "<peer> went offline"],
+    ]);
+  });
+
   it("shows an invitation by who invited and where, with an offer to join that Channel", () => {
     const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#elsewhere" }));
 

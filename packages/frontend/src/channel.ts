@@ -25,7 +25,7 @@ import { panesOf } from "./layout.ts";
 import { endReason, formatted, nickColour } from "./render.ts";
 import type { Inline } from "./render.ts";
 import { isRemoved, opened, resolve } from "./timelines.ts";
-import type { Connection, Timelines } from "./timelines.ts";
+import type { Connection, NetworkView, Timelines } from "./timelines.ts";
 
 /** Where Self stands with a Channel the Client holds. */
 export type Standing = NonNullable<ChannelHeader["standing"]>;
@@ -671,12 +671,16 @@ export type TopicShown =
       readonly stale: boolean;
     };
 
+/** Whether a Direct Message partner is on the Network, or not known to be either. */
+export type Presence = "Here" | "Gone" | "Unknown";
+
 /**
  * What a Timeline shows at its head.
  *
  * - `Channel`: its name, topic, modes, how many members, and, when Self is not in it, why,
  *   in words.
- * - `Direct`: the partner's name, and when it no longer follows them, why.
+ * - `Direct`: the partner's name, whether they are on the Network, and when it no longer
+ *   follows them, why.
  * - `Network`: its id, and how its connection stands, in words.
  */
 export type Header =
@@ -694,6 +698,11 @@ export type Header =
       readonly _tag: "Direct";
       readonly timeline: TimelineId;
       readonly name: string;
+      /**
+       * Whether the partner is on the Network, as `known` says while Self is connected:
+       * `Unknown` when it does not say, or the Timeline does not follow them.
+       */
+      readonly presence: Presence;
       /** Why it no longer follows its partner, in words, when it does not. */
       readonly note: string | undefined;
     }
@@ -839,6 +848,33 @@ const topicShown = (topic: ChannelHeader["topic"]): TopicShown => {
 };
 
 /**
+ * Whether a Direct Message partner is on the Network, from what `known` last said.
+ * @param network - The Timeline's Network, if held.
+ * @param description - The Timeline, as its Network lists it.
+ * @returns Whether they are.
+ */
+const presenceOf = (
+  network: NetworkView | undefined,
+  description: { readonly key: string | null; readonly detached: boolean }
+): Presence => {
+  if (
+    network?.connection._tag !== "Connected" ||
+    description.detached ||
+    description.key === null
+  ) {
+    return "Unknown";
+  }
+
+  const here = network.partners.get(description.key);
+
+  if (here === undefined) {
+    return "Unknown";
+  }
+
+  return here ? "Here" : "Gone";
+};
+
+/**
  * What a Pane's open Timeline shows at its head, from what its Network lists and, for a
  * Channel, its head as last read.
  * @param state - The Timelines.
@@ -885,6 +921,7 @@ export const headerOf = (
         note: description.detached
           ? "no longer follows its partner, who changed nick: use /msg <nick> <text>"
           : undefined,
+        presence: presenceOf(network, description),
         timeline,
       };
     }

@@ -297,7 +297,13 @@ describe("the header", () => {
     await wait(50);
 
     expect({ direct, network, reads: daemon.channelsRead.length - reads }).toStrictEqual({
-      direct: { _tag: "Direct", name: "peer", note: undefined, timeline: peer },
+      direct: {
+        _tag: "Direct",
+        name: "peer",
+        note: undefined,
+        presence: "Unknown",
+        timeline: peer,
+      },
       network: { _tag: "Network", name: "libera", status: "connected", timeline: own },
       reads: 0,
     });

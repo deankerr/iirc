@@ -1173,6 +1173,7 @@ export const fakeDaemon = () => {
           chantypes,
           declared,
           life: daemon.lives.get(known.network ?? "") ?? 1,
+          partners: [],
           self: daemon.selves.get(known.network ?? "") ?? null,
           session,
           users: [],

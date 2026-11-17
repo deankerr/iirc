@@ -93,6 +93,7 @@ const Activity = Schema.TaggedUnion({
     away: Schema.NullOr(Schema.Struct({ message: Schema.String })),
     nick: Schema.String,
   },
+  CameOnline: { nick: Schema.String },
   CtcpReply: { ...ctcp, roundTrip: Schema.NullOr(Schema.Finite) },
   CtcpRequest: {
     ...ctcp,
@@ -138,6 +139,7 @@ const Activity = Schema.TaggedUnion({
     kind: Schema.Literals(["FAIL", "WARN", "NOTE"]),
   },
   TopicChanged: { by: Schema.String, channel: Schema.String, topic: Schema.NullOr(Topic) },
+  WentOffline: { nick: Schema.String },
 });
 
 const EndReason = Schema.TaggedUnion({

@@ -8,6 +8,11 @@
   color: var(--color-muted);
 }
 
+/* A Direct Message's partner is on the Network: the one place the bar says so in colour. */
+.online {
+  color: var(--color-ok);
+}
+
 /* The topic, cut to what is left of the bar's line: the topic's own text, which a press
    discloses, and so not one of the buttons, whose box would neither fill nor cut it. */
 .topic {

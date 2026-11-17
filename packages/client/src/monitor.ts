@@ -147,7 +147,7 @@ const partnersAfter = (
  * the Network clears them. Past the bound, the least recently messaged are dropped.
  * @param run - The step, with its News gathered.
  */
-export const followPartners = (run: Run): void => {
+const followPartners = (run: Run): void => {
   let partners: ReadonlyMap<string, string> = run.state.partners;
 
   for (const news of run.news) {

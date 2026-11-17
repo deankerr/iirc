@@ -533,6 +533,7 @@ describe("the sources", () => {
         _tag: "StatusRead",
         life: 1,
         network,
+        partners: [],
         self: null,
         session: Schema.decodeSync(SessionKnowledge)({
           _tag: "Registered",

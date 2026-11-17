@@ -1,9 +1,10 @@
-import type { TimelineItem, Timeline } from "@iirc/api";
+import type { TimelineItem, Timeline, Activity } from "@iirc/api";
 import {
   ChannelHeader,
   MemberPage,
   NetworkEntry,
   NetworkId,
+  PartnerKnowledge,
   SessionKnowledge,
   TimelineChange,
   TimelineId,
@@ -33,7 +34,7 @@ import {
 } from "./channel.ts";
 import type { Channel, ChannelEvent, ChannelRead, ChannelsEvent, OpenChannel } from "./channel.ts";
 import { formatted } from "./render.ts";
-import { initialTimelines, reduceTimelines } from "./timelines.ts";
+import { initialTimelines, reduceTimelines, wanted } from "./timelines.ts";
 import type { Timelines, TimelinesEvent } from "./timelines.ts";
 
 // Wire forms, parsed as the API parses them.
@@ -140,11 +141,13 @@ const joined = (sequence: number, timeline = iirc): typeof TimelineItem.Encoded 
  * as `iirc`, and `open` opened and read with `items`.
  * @param open - The Timeline opened, if any.
  * @param items - Its items.
+ * @param partners - The Direct Message partners `known` says of.
  * @returns The state.
  */
 const world = (
   open: string | undefined,
-  items: readonly (typeof TimelineItem.Encoded)[] = []
+  items: readonly (typeof TimelineItem.Encoded)[] = [],
+  partners: readonly (typeof PartnerKnowledge.Encoded)[] = []
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
     _tag: "Live",
@@ -178,6 +181,7 @@ const world = (
       _tag: "StatusRead",
       life: 1,
       network,
+      partners: partners.map((one) => Schema.decodeSync(PartnerKnowledge)(one)),
       self: null,
       session: Schema.decodeSync(SessionKnowledge)({
         _tag: "Registered",
@@ -777,7 +781,13 @@ describe("the header", () => {
       network: headerOf(world(own), initialChannel),
       unread: headerOf(world(iirc), initialChannel),
     }).toStrictEqual({
-      direct: { _tag: "Direct", name: "peer", note: undefined, timeline: peer },
+      direct: {
+        _tag: "Direct",
+        name: "peer",
+        note: undefined,
+        presence: "Unknown",
+        timeline: peer,
+      },
       network: { _tag: "Network", name: "libera", status: "connected", timeline: own },
       unread: {
         _tag: "Channel",
@@ -788,6 +798,116 @@ describe("the header", () => {
         timeline: iirc,
         topic: { _tag: "Unknown" },
       },
+    });
+  });
+});
+
+/**
+ * What `known` says of the Direct Message partner `peer`.
+ * @param here - Whether they are here, or none for not saying.
+ * @returns The partners.
+ */
+const partnersKnown = (here: boolean | undefined): readonly (typeof PartnerKnowledge.Encoded)[] => [
+  {
+    here:
+      here === undefined
+        ? { _tag: "Unknown" }
+        : { _tag: "Known", at: 1, from: "ircd", value: here },
+    key: "peer",
+    nick: "peer",
+  },
+];
+
+/**
+ * Whether a Direct Message's partner is on the Network, as its header says.
+ * @param state - The Timelines, with the Direct Message open.
+ * @returns What the header says.
+ */
+const presenceShown = (state: Timelines) => {
+  const one = headerOf(state, initialChannel);
+
+  return one?._tag === "Direct" ? one.presence : one;
+};
+
+/**
+ * The reads of `known` that are wanted.
+ * @param state - The Timelines.
+ * @returns The reads.
+ */
+const statusWanted = (state: Timelines) => wanted(state).filter((one) => one._tag === "Status");
+
+/**
+ * An item in a Timeline: an Activity.
+ * @param activity - The Activity.
+ * @param timeline - The Timeline.
+ * @returns The item.
+ */
+const activityIn = (
+  activity: typeof Activity.Encoded,
+  timeline: string
+): typeof TimelineItem.Encoded => ({
+  ...joined(11, timeline),
+  content: {
+    _tag: "Activity",
+    activity,
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+});
+
+describe("a Direct Message's partner", () => {
+  it("shows whether they are on the Network as `known` says, and nothing it does not say", () => {
+    expect([
+      presenceShown(world(peer, [], partnersKnown(true))),
+      presenceShown(world(peer, [], partnersKnown(false))),
+      presenceShown(world(peer, [], partnersKnown(undefined))),
+      presenceShown(world(peer)),
+      presenceShown(world(bob, [], partnersKnown(true))),
+    ]).toStrictEqual(["Here", "Gone", "Unknown", "Unknown", "Unknown"]);
+  });
+
+  it("reads `known` again when one comes, goes, quits, or changes nick in their Timeline, and on opening it", () => {
+    const quiet = world(own);
+
+    const arrived = (activity: typeof Activity.Encoded, timeline: string) =>
+      reduceTimelines(quiet, {
+        _tag: "Changed",
+        change: decodeChange({
+          dropped: [],
+          gaps: [],
+          items: [activityIn(activity, timeline)],
+          merged: [],
+          removals: [],
+          sequence: 11,
+          timelines: [],
+        }),
+        place: { sequence: 11, version: 1 },
+      });
+
+    expect({
+      came: statusWanted(arrived({ _tag: "CameOnline", nick: "peer" }, peer)).length,
+      gone: statusWanted(arrived({ _tag: "WentOffline", nick: "peer" }, peer)).length,
+      joined: statusWanted(arrived({ _tag: "Joined", channel: "#iirc", nick: "peer" }, iirc))
+        .length,
+      opened: statusWanted(reduceTimelines(quiet, { _tag: "Opened", timeline: timelineId(peer) }))
+        .length,
+      opensChannel: statusWanted(
+        reduceTimelines(quiet, { _tag: "Opened", timeline: timelineId(iirc) })
+      ).length,
+      quiet: statusWanted(quiet).length,
+      quit: statusWanted(arrived({ _tag: "Quit", nick: "peer", reason: null }, peer)).length,
+      renamed: statusWanted(arrived({ _tag: "NickChanged", from: "peer", to: "peer2" }, peer))
+        .length,
+    }).toStrictEqual({
+      came: 1,
+      gone: 1,
+      joined: 0,
+      opened: 1,
+      opensChannel: 0,
+      quiet: 0,
+      quit: 1,
+      renamed: 1,
     });
   });
 });

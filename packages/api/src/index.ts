@@ -86,6 +86,7 @@ export {
   Closable,
   Member,
   MemberKnowledge,
+  PartnerKnowledge,
   MemberPage,
   MembersAfter,
   MembersQuery,

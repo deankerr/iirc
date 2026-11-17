@@ -500,11 +500,13 @@ const CtcpAnswer = Schema.TaggedUnion({
  * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`. An
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
  * `channel`, which it may join. An `AccountChanged` is a User logging in to `account`, or
- * out of theirs with `null`.
+ * out of theirs with `null`. `CameOnline` and `WentOffline` are a monitored Direct Message
+ * partner coming onto the Network or leaving it, in their Direct Message Timeline.
  */
 export const Activity = Schema.TaggedUnion({
   AccountChanged: { account: Schema.NullOr(Untrusted), nick: Untrusted },
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
+  CameOnline: { nick: Untrusted },
   CtcpReply: {
     ...ctcp,
     roundTrip: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -523,6 +525,7 @@ export const Activity = Schema.TaggedUnion({
   Quit: { nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   StandardReply: standardReply,
   TopicChanged: { by: Untrusted, channel: Untrusted, topic: Schema.NullOr(Topic) },
+  WentOffline: { nick: Untrusted },
 });
 
 /** The decoded form of {@link Activity}. */
@@ -1597,6 +1600,16 @@ export const ChannelKnowledge = Schema.Struct({
 /** The decoded form of {@link ChannelKnowledge}. */
 export type ChannelKnowledge = typeof ChannelKnowledge.Type;
 
+/** An open Direct Message partner, under the key their Timeline has, and whether they are on the Network. */
+export const PartnerKnowledge = Schema.Struct({
+  here: Fact(Schema.Boolean),
+  key: Untrusted,
+  nick: Untrusted,
+});
+
+/** The decoded form of {@link PartnerKnowledge}. */
+export type PartnerKnowledge = typeof PartnerKnowledge.Type;
+
 /** Everything a Client knows of its Network. Keys are folded by the Network's casemapping. */
 export const Knowledge = Schema.Struct({
   /** How this Connection folds names: `rfc1459` until its Ircd says otherwise. */
@@ -1611,6 +1624,8 @@ export const Knowledge = Schema.Struct({
   declared: Schema.NullOr(Casemapping),
   /** The life of the Network this is known of. */
   life: Life,
+  /** The open Direct Message partners, least recently messaged first. */
+  partners: Schema.Array(PartnerKnowledge),
   self: Schema.NullOr(UserKnowledge),
   session: SessionKnowledge,
   users: Schema.Array(KeyedUser),

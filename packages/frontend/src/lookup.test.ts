@@ -126,6 +126,7 @@ const world = (open: string | undefined): Timelines => {
       _tag: "StatusRead",
       life: 1,
       network,
+      partners: [],
       self: null,
       session: Schema.decodeSync(SessionKnowledge)({
         _tag: "Registered",
