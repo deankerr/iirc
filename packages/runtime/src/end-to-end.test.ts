@@ -55,7 +55,11 @@ const describeNews = (happened: readonly Happened[]) =>
         }
 
         case "Activity": {
-          return [one.activity._tag];
+          return [
+            one.activity._tag === "Numeric"
+              ? `${one.activity._tag} ${one.activity.numeric}`
+              : one.activity._tag,
+          ];
         }
 
         case "ChannelLearned":
@@ -168,6 +172,10 @@ describe("the real Client on the in-memory ports", () => {
     expect(result.news).toStrictEqual([
       'ConnectionFailed {"_tag":"Upgrading","port":6697}',
       "began iirc",
+      "Numeric 001",
+      "Numeric 002",
+      "Numeric 003",
+      "Numeric 004",
       "Joined",
       "iirc #iirc :hello (ours)",
       "peer #iirc :hi there",
