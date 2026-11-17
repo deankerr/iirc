@@ -3,8 +3,17 @@ import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { closeOf, initialLeaving, leaveOf, reduceLeaving } from "./closing.ts";
-import type { Leaving, LeavingEvent } from "./closing.ts";
+import {
+  closedBy,
+  closeOf,
+  closingShown,
+  initialClosing,
+  initialLeaving,
+  leaveOf,
+  reduceClosing,
+  reduceLeaving,
+} from "./closing.ts";
+import type { ClosingEvent, Leaving, LeavingEvent } from "./closing.ts";
 import type { Naming } from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
@@ -172,5 +181,58 @@ describe("the offer to leave a Channel instead", () => {
       initialLeaving,
       { _tag: "Offered", channel: "#iirc", failure: undefined, network: libera, sending: false },
     ]);
+  });
+});
+
+const channel = timelineOf("Channel", "#iirc");
+
+const heldWith = (timeline: Timeline) =>
+  new Map([[libera, { timelines: new Map([[timeline.id, timeline]]) }]]);
+
+const closes = (events: readonly ClosingEvent[]) => {
+  let state = initialClosing;
+
+  for (const event of events) {
+    state = reduceClosing(state, event);
+  }
+
+  return state;
+};
+
+describe("a close on its way", () => {
+  it("finds its Timeline by the name the Daemon gives it, and none by another case or a status prefix", () => {
+    const named = (target: string) =>
+      closedBy(heldWith(channel), { _tag: "CloseTimeline", network: libera, target });
+
+    expect([named("#iirc"), named("#IIRC"), named("@#iirc")]).toStrictEqual([
+      channel.id,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("shows its Timeline closed from when it is asked until the stream says it is, once answered closed", () => {
+    const asked = closes([{ _tag: "Asked", timeline: channel.id }]);
+    const answered = reduceClosing(asked, { _tag: "Answered", ask: 0, closedAt: 5 });
+
+    expect({
+      answered: [...closingShown(answered, heldWith(channel))],
+      asked: [...closingShown(asked, heldWith(channel))],
+      said: [
+        ...closingShown(
+          answered,
+          heldWith(timelineOf("Channel", "#iirc", { changed: 5, closed: true }))
+        ),
+      ],
+    }).toStrictEqual({ answered: [channel.id], asked: [channel.id], said: [] });
+  });
+
+  it("shows its Timeline again once it is refused or failed", () => {
+    const refused = closes([
+      { _tag: "Asked", timeline: channel.id },
+      { _tag: "Answered", ask: 0, closedAt: undefined },
+    ]);
+
+    expect([...closingShown(refused, heldWith(channel))]).toStrictEqual([]);
   });
 });

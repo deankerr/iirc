@@ -4102,13 +4102,20 @@ export interface SidebarNetwork {
  * The Networks, each with its Timelines in sidebar order: those not removed by id, then
  * those removed with their Timelines kept, by id. A Timeline closed, with nothing arrived
  * in it since, is left out while no Pane has it open, and listed while one does, so opening
- * it from the palette or the search shows it for as long as it is open.
+ * it from the palette or the search shows it for as long as it is open. One the Owner asked
+ * to close counts as closed from when it is asked.
  * @param state - The state.
+ * @param closing - The Timelines asked to be closed that the Daemon has yet to say are.
  * @returns The sidebar.
  */
-export const sidebar = (state: Timelines): readonly SidebarNetwork[] => {
+export const sidebar = (
+  state: Timelines,
+  closing: ReadonlySet<TimelineId> = new Set()
+): readonly SidebarNetwork[] => {
   const open = new Set(openIn(state.layout).map((one) => resolve(state, one)));
-  const hidden = (timeline: Timeline) => timeline.closed && !open.has(timeline.id);
+
+  const hidden = (timeline: Timeline) =>
+    (timeline.closed || closing.has(timeline.id)) && !open.has(timeline.id);
 
   return [...state.networks.values()]
     .map((network) => {

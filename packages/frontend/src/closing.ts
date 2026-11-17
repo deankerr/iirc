@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import type { ActionRequest, NetworkId, Timeline } from "@iirc/api";
+import type { ActionRequest, NetworkId, Timeline, TimelineId } from "@iirc/api";
 
 import type { CloseTimeline } from "./commands.ts";
 import { wantsChannel } from "./options.ts";
@@ -151,3 +151,113 @@ export const offerOf = (channel: string, network: NetworkId) => ({
   body: `A Channel you are in stays in the sidebar. Leaving parts it, and takes it from ${network}'s Channels if it is among them. Once you have left, it can be closed.`,
   title: `You are in ${channel}. Leave it?`,
 });
+
+/**
+ * A close the Owner asked for, of the Timeline it names: `ask` tells it apart, and `closedAt`
+ * is the step the Daemon answered it `Closed` in, while the changes stream has yet to say
+ * so, or none while it is not answered.
+ */
+export interface AskedClose {
+  readonly ask: number;
+  readonly timeline: TimelineId;
+  readonly closedAt: number | undefined;
+}
+
+/** The Timelines held of each Network, as the Timelines' state holds them. */
+export type Held = ReadonlyMap<
+  NetworkId,
+  { readonly timelines: ReadonlyMap<TimelineId, Timeline> }
+>;
+
+/** The closes on their way, and the number the next one asked gets. */
+export interface Closing {
+  readonly asked: readonly AskedClose[];
+  readonly next: number;
+}
+
+/**
+ * What happened to a close.
+ *
+ * - `Asked`: the Owner asked to close a Timeline, with the number `ask` it is told apart by.
+ * - `Answered`: the Daemon closed it in step `closedAt`, which the stream has yet to say,
+ *   or the close is over, refused, failed, or already said, as none.
+ */
+export type ClosingEvent =
+  | { readonly _tag: "Asked"; readonly timeline: TimelineId }
+  | { readonly _tag: "Answered"; readonly ask: number; readonly closedAt: number | undefined };
+
+/** No close on its way. */
+export const initialClosing: Closing = { asked: [], next: 0 };
+
+/**
+ * The closes after an event.
+ * @param state - The closes before.
+ * @param event - What happened.
+ * @returns The closes after.
+ */
+export const reduceClosing = (state: Closing, event: ClosingEvent): Closing => {
+  switch (event._tag) {
+    case "Asked": {
+      return {
+        asked: [...state.asked, { ask: state.next, closedAt: undefined, timeline: event.timeline }],
+        next: state.next + 1,
+      };
+    }
+
+    case "Answered": {
+      return {
+        ...state,
+        asked: state.asked.flatMap((one) => {
+          if (one.ask !== event.ask) {
+            return [one];
+          }
+
+          return event.closedAt === undefined ? [] : [{ ...one, closedAt: event.closedAt }];
+        }),
+      };
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
+/**
+ * The Timeline a close names, found by its name as the Daemon gives it, so a Target typed
+ * in another case, or with a status prefix, finds none, and shows only once it is answered.
+ * @param held - The Timelines held.
+ * @param close - The close.
+ * @returns The Timeline, or none.
+ */
+export const closedBy = (held: Held, close: CloseTimeline): TimelineId | undefined =>
+  [...(held.get(close.network)?.timelines.values() ?? [])].find(
+    (one) => closeOf(one) !== undefined && one.name === close.target
+  )?.id;
+
+/**
+ * The Timelines that show as closed before the Daemon says so: each asked to be and not yet
+ * answered, and each it answered closed whose Timeline has not changed since, until the
+ * stream says it is.
+ * @param state - The closes.
+ * @param held - The Timelines held.
+ * @returns Their ids.
+ */
+export const closingShown = (state: Closing, held: Held): ReadonlySet<TimelineId> => {
+  const changedOf = (id: TimelineId) =>
+    [...held.values()].find((network) => network.timelines.has(id))?.timelines.get(id)?.changed;
+
+  return new Set(
+    state.asked
+      .filter((one) => {
+        if (one.closedAt === undefined) {
+          return true;
+        }
+
+        const changed = changedOf(one.timeline);
+
+        return changed !== undefined && changed < one.closedAt;
+      })
+      .map((one) => one.timeline)
+  );
+};

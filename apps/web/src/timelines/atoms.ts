@@ -13,6 +13,8 @@ import type {
   TimelineId,
   TimelineItem,
 } from "@iirc/api";
+import { closingShown, initialClosing } from "@iirc/frontend/closing";
+import type { Closing } from "@iirc/frontend/closing";
 import { notificationsOf } from "@iirc/frontend/notifications";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
@@ -56,8 +58,22 @@ import { signedIn, signInState } from "../sign-in/atoms.ts";
 /** Everything the Frontend holds of the Timelines, as the core folds it. */
 export const timelinesState = Atom.make<Timelines>(initialTimelines).pipe(Atom.keepAlive);
 
-/** The Networks and their Timelines, in sidebar order. */
-export const sidebarNetworks = Atom.make((get) => sidebar(get(timelinesState)));
+/**
+ * The closes the Owner asked for, as the core folds them. It outlives a sign-in, since each
+ * is let go of once answered, however that ends, and what an earlier one answered closed
+ * holds only until the stream says so.
+ */
+export const closingState = Atom.make<Closing>(initialClosing).pipe(Atom.keepAlive);
+
+/**
+ * The Networks and their Timelines, in sidebar order, a Timeline asked to be closed left
+ * out from when it is asked.
+ */
+export const sidebarNetworks = Atom.make((get) => {
+  const state = get(timelinesState);
+
+  return sidebar(state, closingShown(get(closingState), state.networks));
+});
 
 /** Whether the Network list was ever read, so having no Network says none is configured. */
 export const listedNetworks = Atom.make((get) => networksListed(get(timelinesState)));
