@@ -1007,6 +1007,21 @@ describe("formatting a draft", () => {
     ]);
   });
 
+  it("puts a style pending past the end of the draft at its end, as after `/bold` is sent", () => {
+    const state = fold([formatted(5, 5), typed("x", 1)]);
+
+    expect([
+      draftOf(fold([formatted(5, 5)]), channel).typing?.at,
+      draftOf(state, channel).text,
+    ]).toStrictEqual([0, "\u0002x"]);
+  });
+
+  it("sends no line that only formatted whitespace makes, as the draft shows it blank", () => {
+    const state = fold([edited("a\n \nb"), formatted(0, 5)]);
+
+    expect(submit(state, channel, context).intents).toStrictEqual([say("\u0002a"), say("\u0002b")]);
+  });
+
   it("leaves no code with nothing after it once a run is deleted", () => {
     const state = fold([edited("a b c"), formatted(2, 3), typed("a  c", 2)]);
 

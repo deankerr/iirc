@@ -43,12 +43,12 @@ const breaks = /(?<lineBreak>[\r\n])/u;
 const isBreak = (character: string | undefined) => character === "\n" || character === "\r";
 
 /**
- * Whether text holds a formatting code: stripping takes every code out, so it is left as it
- * was only when it holds none.
+ * Whether text, such as a draft, holds a formatting code: stripping takes every code out, so
+ * it is left as it was only when it holds none.
  * @param text - The text.
  * @returns Whether it does.
  */
-const anyCode = (text: string) => stripFormatting(text) !== text;
+export const hasFormatting = (text: string): boolean => stripFormatting(text) !== text;
 
 /**
  * Some lines read, each from `from`, each break taking the style before it.
@@ -119,13 +119,6 @@ const write = ({ plain, styles }: Styled): string => {
  * @returns Its plain text.
  */
 export const plainOf = (text: string): string => stripFormatting(text);
-
-/**
- * Whether a draft holds any formatting code.
- * @param text - The draft's text.
- * @returns Whether it does.
- */
-export const hasFormatting = (text: string): boolean => anyCode(text);
 
 /**
  * A draft's lines, each with its own codes, as each is sent, and as a view draws it.
@@ -293,7 +286,7 @@ export const merged = (text: string, value: string, { caret, pending }: Hint): s
 
   const put = value.slice(start, start + inserted);
 
-  const typed = anyCode(put)
+  const typed = hasFormatting(put)
     ? readFrom(put, style)
     : { plain: put, styles: Array.from({ length: put.length }, () => style) };
 
@@ -350,16 +343,18 @@ export const formattedIn = (text: string, start: number, end: number, format: Fo
  * force is pending no longer.
  * @param text - The draft's text.
  * @param pending - The style pending now, at this caret or another.
- * @param at - The caret, in the plain text.
+ * @param caret - The caret, in the plain text, read as the end when past it.
  * @param format - What is put over it.
  * @returns The style pending after, or none.
  */
 export const pendingAfter = (
   text: string,
   pending: Pending | undefined,
-  at: number,
+  caret: number,
   format: Format
 ): Pending | undefined => {
+  // A caret read past the end, as from a textarea not yet drawn again, is at the end.
+  const at = Math.max(Math.min(caret, plainOf(text).length), 0);
   const inForce = styleAt(text, at);
   const from = pending?.at === at ? pending.style : inForce;
   const style = putOver(from, format, format._tag === "Toggle" && !from[format.flag]);

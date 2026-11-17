@@ -446,7 +446,7 @@ export const contextOf = (
  * @returns Its lines.
  */
 export const linesOf = (text: string): readonly string[] =>
-  text.split(/\r\n|\r|\n/u).filter((line) => line.trim() !== "");
+  text.split(/\r\n|\r|\n/u).filter((line) => plainOf(line).trim() !== "");
 
 /**
  * The keys of the commands lines run, in order, as the palette remembers them: a line that

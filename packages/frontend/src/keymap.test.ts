@@ -69,6 +69,7 @@ const at = (
   composer: true,
   covered: false,
   editing: false,
+  inComposer: false,
   palette: false,
   platform: "Other",
   ...more,
@@ -505,11 +506,11 @@ const clashes = (texts: readonly BindingText[]) => {
 };
 
 describe("the formatting keys", () => {
-  it("resolve to formatting the composer while typing, but not outside a field or while the palette is open", () => {
+  it("resolve to formatting the composer while typing in it, but not in another field, outside one, or while the palette is open", () => {
     const chord = (key: string, shift = false) =>
       resolve(
         defaultKeymap,
-        at({ editing: true }),
+        at({ editing: true, inComposer: true }),
         press(shift ? key.toUpperCase() : key, `Key${key.toUpperCase()}`, { ctrl: true, shift })
       );
 
@@ -519,11 +520,16 @@ describe("the formatting keys", () => {
       italic: chord("i"),
       mac: resolve(
         defaultKeymap,
-        at({ editing: true, platform: "Mac" }),
+        at({ editing: true, inComposer: true, platform: "Mac" }),
         press("b", "KeyB", { meta: true })
       ),
       monospace: chord("e"),
-      open: resolve(defaultKeymap, at({ palette: true }), press("b", "KeyB", { ctrl: true })),
+      open: resolve(
+        defaultKeymap,
+        at({ editing: true, inComposer: true, palette: true }),
+        press("b", "KeyB", { ctrl: true })
+      ),
+      otherField: resolve(defaultKeymap, at({ editing: true }), press("r", "KeyR", { ctrl: true })),
       outside: resolve(defaultKeymap, at({}), press("r", "KeyR", { ctrl: true })),
       reverse: chord("r"),
       strikethrough: chord("x", true),
@@ -535,6 +541,7 @@ describe("the formatting keys", () => {
       mac: [{ _tag: "Format", format: "bold" }],
       monospace: [{ _tag: "Format", format: "monospace" }],
       open: undefined,
+      otherField: undefined,
       outside: undefined,
       reverse: [{ _tag: "Format", format: "reverse" }],
       strikethrough: [{ _tag: "Format", format: "strikethrough" }],

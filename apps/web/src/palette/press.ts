@@ -97,6 +97,7 @@ const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent)
     composer: composerInput(document) !== undefined,
     covered: covered(target),
     editing: editing(target),
+    inComposer: target !== null && target === composerInput(document),
     palette: registry.get(paletteState).open,
     platform,
   };

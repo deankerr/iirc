@@ -117,6 +117,7 @@
  * wrapping, and room for a scrollbar, and it scrolls with it.
  */
 .backdrop {
+  max-height: calc(6 * var(--line-height) * 1em);
   padding: 0;
   overflow: hidden;
   color: var(--color-text);
@@ -391,6 +392,7 @@
   }
 
   .backdrop {
+    max-height: calc(6 * var(--line-height) * 1em + 2 * var(--field-pad));
     padding-block: var(--field-pad);
   }
 }
