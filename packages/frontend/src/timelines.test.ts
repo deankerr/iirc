@@ -2951,7 +2951,8 @@ describe("the Panes", () => {
     // The Timelines are not read yet, so the layout kept waits.
     const waiting = reduceTimelines(timelinesWith(windowCap), { _tag: "Restore", layout });
 
-    // The Owner went elsewhere first, so the layout kept is let go at once.
+    // The Owner went elsewhere first, as `following` opened a Timeline, so the layout kept
+    // is let go at once.
     const letGo = reduceTimelines(
       { ...following(), layout: single(emptyView) },
       { _tag: "Restore", layout }

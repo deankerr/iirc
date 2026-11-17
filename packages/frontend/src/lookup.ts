@@ -595,8 +595,7 @@ export const shownCard = (state: Lookups, timelines: Timelines, pane: string): C
   const shown = opened(timelines, pane);
 
   return card !== undefined &&
-    shown._tag !== "Closed" &&
-    shown._tag !== "Restoring" &&
+    "timeline" in shown &&
     shown.timeline === resolve(timelines, card.look.timeline)
     ? card
     : undefined;
