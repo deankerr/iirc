@@ -295,6 +295,16 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 - **What found no User, or no mask, is said in words,** naming the reply's numeric, and a list cut short says so.
 - **A `WARN` or `NOTE`, or a later `FAIL`, the Network gave with its result is a line under it,** by its kind, command, code, context, and description, each contained.
 
+## The menu on a nick
+
+`@iirc/frontend/nick-menu`: what the menu on a nick offers (`nickEntries`), and whether its User is still in the Channel it was opened in, as a reducer, `reduceNickMenus`, over what the members route answered.
+
+- **Each entry is the command the Composer would run,** by the registry, and is offered only where that command runs. Mention starts the composer with the nick and `: `.
+- **Operating is offered by one rule, `mayOperate`:** Self holds operator, or a rank above it in `PREFIX`, in the Channel's head, as removing a mask from a Lookup card is.
+- **It acts only on its own Pane's Timeline.** With the focus on another, it offers nothing.
+- **What needs the User there needs them found there.** `presenceWanted` asks the members route for the nicks that start with theirs, and only one that folds as theirs does, by the casemapping the Network's Connection folds names by, says they are there. None, with no more to read, says they are gone, and a failure, or more to read, says nothing. Op, voice, deop, devoice, and kick wait for them to be found, and ban does not.
+- **Nothing is offered that the Network would refuse for want of status.** Deop, devoice, and kick are left out of a member who outranks Self, by `outranks`: the highest prefix they hold stands strictly above Self's in `PREFIX`, or which they hold is not known. Equal rank is allowed, since Ircds differ.
+
 ## Completion
 
 Tab completion in the composer, as a reducer. It completes the word that ends at the caret, cycles through candidates, and gives back what was typed on Escape.

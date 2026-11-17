@@ -22,6 +22,7 @@ import type {
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 
+import { mayOperate } from "./channel.ts";
 import type { Act, Intent, Parsed } from "./commands.ts";
 import { contained, nickColour } from "./render.ts";
 import { opened, resolve } from "./timelines.ts";
@@ -1011,32 +1012,6 @@ const noteText = (note: StandardReply): string => {
 };
 
 /**
- * Whether Self may change a Channel's lists, by the prefixes Self holds there, as far as
- * they are known: operator, `o`, or a rank above it in `PREFIX`. A half-operator is not
- * offered it: whether one may change a list differs by Ircd, and nothing in ISUPPORT says.
- * The Network decides in the end, and a refusal shows in the Channel's Timeline.
- * @param head - The Channel's head.
- * @returns Whether Self may.
- */
-export const mayChangeLists = (head: ChannelHeader): boolean => {
-  const { held } = head;
-  const operator = head.ranks.findIndex((one) => one.mode === "o");
-
-  let modes: readonly string[] = [];
-
-  if (held?._tag === "Known") {
-    modes = held.value;
-  } else if (held?._tag === "Partial") {
-    modes = held.atLeast;
-  }
-
-  return (
-    operator !== -1 &&
-    head.ranks.some((one, index) => index <= operator && modes.includes(one.mode))
-  );
-};
-
-/**
  * The act that removes a mask from a card's list, while the head of that list's own Channel,
  * as held live, says Self may, and gives the list's mode. A head of any other Channel says
  * nothing of it.
@@ -1062,7 +1037,7 @@ const removing = (
 
   const mode = listMode(head, lookup._tag);
 
-  return head === undefined || mode === null || mode === undefined || !mayChangeLists(head)
+  return head === undefined || mode === null || mode === undefined || !mayOperate(head)
     ? undefined
     : (mask) => ({
         _tag: "Act",

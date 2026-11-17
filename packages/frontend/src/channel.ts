@@ -30,6 +30,61 @@ import type { Connection, NetworkView, Timelines } from "./timelines.ts";
 /** Where Self stands with a Channel the Client holds. */
 export type Standing = NonNullable<ChannelHeader["standing"]>;
 
+/**
+ * Where the highest prefix Self holds stands in the Channel's `PREFIX`, as far as it is
+ * known: its index there, lower for a higher rank, or beyond them all for none.
+ * @param head - The Channel's head.
+ * @returns The index.
+ */
+const heldRank = (head: ChannelHeader): number => {
+  const { held } = head;
+
+  let modes: readonly string[] = [];
+
+  if (held?._tag === "Known") {
+    modes = held.value;
+  } else if (held?._tag === "Partial") {
+    modes = held.atLeast;
+  }
+
+  const index = head.ranks.findIndex((one) => modes.includes(one.mode));
+
+  return index === -1 ? head.ranks.length : index;
+};
+
+/**
+ * Whether Self may operate in a Channel, by the prefixes Self holds there, as far as they
+ * are known: operator, `o`, or a rank above it in `PREFIX`. A half-operator is not offered
+ * it: what one may do differs by Ircd, and nothing in ISUPPORT says. The Network decides
+ * in the end, and a refusal shows in the Channel's Timeline.
+ * @param head - The Channel's head.
+ * @returns Whether Self may.
+ */
+export const mayOperate = (head: ChannelHeader): boolean => {
+  const operator = head.ranks.findIndex((one) => one.mode === "o");
+
+  return operator !== -1 && heldRank(head) <= operator;
+};
+
+/**
+ * Whether a member outranks Self in a Channel: the highest prefix they hold stands
+ * strictly above the highest Self holds, by `PREFIX`. Equal ranks do not, since what one
+ * may do to the other differs by Ircd. A member whose prefixes are not known is taken to,
+ * so nothing is offered that the Network may refuse for want of status.
+ * @param head - The Channel's head.
+ * @param prefixes - The prefixes the member holds, or none while they are not known.
+ * @returns Whether they outrank Self.
+ */
+export const outranks = (head: ChannelHeader, prefixes: readonly string[] | undefined): boolean => {
+  if (prefixes === undefined) {
+    return true;
+  }
+
+  const theirs = head.ranks.findIndex((one) => prefixes.includes(one.mode));
+
+  return theirs !== -1 && theirs < heldRank(head);
+};
+
 /** How many members a page asks for, and the most a read again asks for at once. */
 export const membersPage = 100;
 const largestMembersPage = 500;
@@ -969,6 +1024,8 @@ export interface MemberRow {
   readonly nick: string;
   /** The symbol of the highest prefix they hold, such as `@`, or none. */
   readonly symbol: string | undefined;
+  /** The prefixes they hold, or none while which they hold is not known. */
+  readonly prefixes: readonly string[] | undefined;
   readonly away: boolean;
   /** Their User's account, as it was if that is all that is known. */
   readonly account: MemberAccount;
@@ -996,6 +1053,32 @@ const accountOf = (fact: Member["account"]): MemberAccount => {
 
     case "Unknown": {
       return fact;
+    }
+
+    default: {
+      return fact satisfies never;
+    }
+  }
+};
+
+/**
+ * The prefixes a member holds, when that is known: all of them, or at least these.
+ * @param fact - The fact.
+ * @returns The modes, or none while they are not known, as when the fact is stale.
+ */
+export const knownPrefixes = (fact: Member["prefixes"]): readonly string[] | undefined => {
+  switch (fact._tag) {
+    case "Known": {
+      return fact.value;
+    }
+
+    case "Partial": {
+      return fact.atLeast;
+    }
+
+    case "Stale":
+    case "Unknown": {
+      return undefined;
     }
 
     default: {
@@ -1071,6 +1154,7 @@ export const memberRow = (member: Member, ranks: readonly Rank[]): MemberRow => 
     colour: nickColour(member.nick),
     label: words.join(", "),
     nick: member.nick,
+    prefixes: knownPrefixes(member.prefixes),
     symbol: highest?.symbol,
   };
 };

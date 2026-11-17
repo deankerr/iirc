@@ -2,9 +2,9 @@
  * A Pane's Channel's members, under its status bar while they show: a virtualized grid
  * list, most privileged first, each member with their rank's symbol, in their nick's
  * colour, and dimmed while away, read a page at a time as the Owner scrolls. A press, a
- * tap, or Enter on a member opens a menu of what to do with them, anchored to their row:
- * open their Direct Message, as `/query` does, first, so Enter twice opens it, look them
- * up, as `/whois` does, or mention them in the composer.
+ * tap, or Enter on a member opens the menu on their nick, anchored to their row, with the
+ * account they are logged in to above it, Query first, so Enter twice opens their Direct
+ * Message.
  *
  * Where the Pane is wide, they are a column beside its Timeline, a region. Where it is
  * narrow, they lie over its Timeline instead, a dialog that leaves the page usable, and on
@@ -16,10 +16,8 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId } from "@iirc/api";
 import type { MemberAccount, MemberRow } from "@iirc/frontend/channel";
-import { commandNamed, runIn } from "@iirc/frontend/commands";
-import type { Intent } from "@iirc/frontend/commands";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import {
   Collection,
   Dialog,
@@ -27,16 +25,13 @@ import {
   GridListItem,
   GridListLoadMoreItem,
   ListLayout,
-  Menu,
-  MenuItem,
   Modal,
   ModalOverlay,
-  Popover,
   Virtualizer,
 } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
-import { commandContext, perform } from "../composer/atoms.ts";
+import { NickMenu } from "../nick/nick-menu.tsx";
 import { leadingShown, sizeShown } from "../options/ui.ts";
 import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
@@ -96,97 +91,6 @@ const Account = ({ account }: { readonly account: MemberAccount }) => {
       return account satisfies never;
     }
   }
-};
-
-/**
- * What can be done with a member, as a menu anchored to their row: open their Direct
- * Message, as `/query` does, look them up, as `/whois` does, or mention them, starting the
- * composer with their nick. Above them, dimly, the account they are logged in to, or that
- * they are not logged in, when that is known. Choosing one puts away members that lie over
- * something.
- * @param props - The member, their account, their row, and what closes the menu.
- * @returns The menu.
- */
-const Actions = ({
-  account,
-  anchor,
-  nick,
-  onClose,
-}: {
-  readonly nick: string;
-  readonly account: MemberAccount;
-  readonly anchor: RefObject<HTMLElement | null>;
-  readonly onClose: () => void;
-}) => {
-  const context = useAtomValue(commandContext);
-  const carryOut = useAtomSet(perform);
-  const dismiss = useAtomSet(membersDismissed);
-
-  const query = commandNamed("query");
-  const whois = commandNamed("whois");
-  const queried = query === undefined ? undefined : runIn(query, nick, context);
-  const looked = whois === undefined ? undefined : runIn(whois, nick, context);
-
-  const actions = [
-    ...(queried?._tag === "Parsed"
-      ? [{ id: "query", intents: queried.value, label: `Query ${nick}`, text: "query" }]
-      : []),
-    ...(looked?._tag === "Parsed"
-      ? [{ id: "whois", intents: looked.value, label: `Whois ${nick}`, text: "whois" }]
-      : []),
-    {
-      id: "mention",
-      intents: [{ _tag: "FocusComposer", text: `${nick}: ` }] satisfies readonly Intent[],
-      label: `Mention ${nick}`,
-      text: "mention",
-    },
-  ];
-
-  return (
-    <Popover
-      className={styles.popover}
-      isOpen
-      offset={0}
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          onClose();
-        }
-      }}
-      placement="bottom start"
-      triggerRef={anchor}
-    >
-      <Account account={account} />
-      <Menu
-        aria-label={`What to do with ${nick}`}
-        autoFocus="first"
-        className={styles.menu}
-        items={actions}
-        onAction={(key) => {
-          const chosen = actions.find((action) => action.id === String(key));
-
-          onClose();
-
-          if (chosen !== undefined) {
-            dismiss(undefined);
-            carryOut(chosen.intents);
-          }
-        }}
-      >
-        {(action) => (
-          <MenuItem
-            aria-label={action.label}
-            className={styles.action}
-            id={action.id}
-            textValue={action.text}
-          >
-            {/* Where a rank's symbol is in the row above, so each word starts where its nick does. */}
-            <span aria-hidden className={styles.symbol} />
-            {action.text}
-          </MenuItem>
-        )}
-      </Menu>
-    </Popover>
-  );
 };
 
 /**
@@ -276,14 +180,17 @@ const Members = ({
         </GridList>
       </Virtualizer>
       {opened === undefined ? null : (
-        <Actions
-          account={opened.account}
+        <NickMenu
           anchor={anchor}
           nick={opened.nick}
           onClose={() => {
             setMenu(undefined);
           }}
-        />
+          presence={{ _tag: "Here", prefixes: opened.prefixes }}
+          timeline={timeline}
+        >
+          <Account account={opened.account} />
+        </NickMenu>
       )}
     </>
   );
