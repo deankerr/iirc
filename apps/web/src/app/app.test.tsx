@@ -141,6 +141,31 @@ describe("the page as it starts", () => {
     });
   });
 
+  it("offers to sign out from the wait, which a follow that never answers would otherwise hold", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.signedIn = true;
+    fake.daemon.hangUiChanges = true;
+    const registry = registryFor(fake.fetch);
+
+    await run(registry, check, undefined);
+    const { container } = await render(registry);
+
+    const button = [...container.querySelectorAll("button")].find(
+      (one) => one.textContent === "Sign out"
+    );
+
+    await act(async () => {
+      button?.click();
+      await eventually(() => !fake.daemon.signedIn);
+    });
+
+    expect({ offered: button !== undefined, signedIn: fake.daemon.signedIn }).toStrictEqual({
+      offered: true,
+      signedIn: false,
+    });
+  });
+
   it("draws a wait again on the next sign-in, never the last sign-in's options or the defaults", async () => {
     const fake = fakeDaemon();
 
