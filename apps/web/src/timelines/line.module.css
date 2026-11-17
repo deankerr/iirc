@@ -133,6 +133,29 @@
   white-space: pre-wrap;
 }
 
+/*
+ * What a reply answers, above it where its text starts and across to the edge, dim, and
+ * cut to one line. In a row that is one run of text, it is a line above the run.
+ */
+.answered {
+  grid-column: 3 / -1;
+  min-width: 0;
+  color: var(--color-muted);
+}
+
+.quote {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Channel a Direct Message is about, dim, after its text. */
+.context {
+  color: var(--color-muted);
+}
+
 /* Kept whole, so "refused: 404" never leaves its number on the next line. */
 .delivery {
   color: var(--color-muted);

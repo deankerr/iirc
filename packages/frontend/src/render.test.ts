@@ -1,4 +1,4 @@
-import { ItemContent, NetworkId } from "@iirc/api";
+import { Answered, ItemContent, NetworkId } from "@iirc/api";
 import type { Activity, Delivery, EndReason } from "@iirc/api";
 import { plainStyle } from "@iirc/protocol/format";
 import { Schema } from "effect";
@@ -16,6 +16,7 @@ import {
   nickSlots,
   plainLimit,
   plainText,
+  quotedOf,
   requested,
 } from "./render.ts";
 import type { Inline, Line } from "./render.ts";
@@ -420,11 +421,52 @@ describe("lines", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
       _tag: "Message",
       colour: nickColour("peer"),
+      context: undefined,
       delivered: undefined,
       delivery: undefined,
       kind: "Privmsg",
       nick: "peer",
       text: [{ _tag: "Text", style: bold, text: "hi" }],
+    });
+  });
+
+  it("says which Channel a Direct Message is about, contained, and nothing for one that names none", () => {
+    const about = lineOf(
+      content({
+        _tag: "Message",
+        answers: null,
+        at: unknown,
+        context: "#iirc\u202E",
+        id: unknown,
+        kind: "Privmsg",
+        live: true,
+        ours: null,
+        sender: "peer",
+        tags: [],
+        target: "iirc",
+        text: "hi",
+      })
+    );
+
+    expect(about._tag === "Message" ? about.context : "not a Message").toBe(
+      contained("#iirc\u202E")
+    );
+  });
+
+  it("quotes what a reply answers: its sender in their colour, how it was said, and its text as one plain line", () => {
+    const answered = Schema.decodeSync(Answered)({
+      kind: "Action",
+      position: "20000000000000-00000000000001-00000000",
+      sender: "al\u202Eice",
+      text: "\u0002waves\u0002 hello\u202E",
+    });
+
+    expect(quotedOf(answered)).toStrictEqual({
+      colour: nickColour("al\u202Eice"),
+      kind: "Action",
+      nick: contained("al\u202Eice"),
+      position: answered.position,
+      text: plainText("waves hello"),
     });
   });
 

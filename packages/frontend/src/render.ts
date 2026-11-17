@@ -9,6 +9,7 @@
 import type {
   ActionRequest,
   Activity,
+  Answered,
   Attempted,
   Delivery as WireDelivery,
   EndReason,
@@ -208,6 +209,8 @@ export type Line =
       readonly nick: string;
       readonly colour: number;
       readonly text: readonly Inline[];
+      /** The Channel a Direct Message is about, contained, when it names one. */
+      readonly context: string | undefined;
       readonly delivery: Delivery | undefined;
       /** How its delivery stands in a few words, or none when there is nothing to say. */
       readonly delivered: string | undefined;
@@ -865,6 +868,32 @@ const failedParts = (
 };
 
 /**
+ * The Message a reply answers, as a short quotation above the reply: who said it, in their
+ * colour, how, and its text as plain text for one line, which a view cuts to its width.
+ */
+export interface Quoted {
+  readonly colour: number;
+  readonly kind: "Privmsg" | "Notice" | "Action";
+  readonly nick: string;
+  /** Where it stands in the reply's Timeline, which a view goes to. */
+  readonly position: Answered["position"];
+  readonly text: string;
+}
+
+/**
+ * What a reply answers, as a quotation.
+ * @param answered - The Message it answers, as the Daemon resolved it.
+ * @returns The quotation.
+ */
+export const quotedOf = (answered: Answered): Quoted => ({
+  colour: nickColour(answered.sender),
+  kind: answered.kind,
+  nick: contained(answered.sender),
+  position: answered.position,
+  text: plainText(answered.text),
+});
+
+/**
  * An item as a line.
  * @param content - What the item shows.
  * @param network - The Network it belongs to, which a command it suggests names.
@@ -881,6 +910,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
       return {
         _tag: "Message",
         colour: nickColour(content.sender),
+        context: content.context === null ? undefined : contained(content.context),
         delivered: delivery === undefined ? undefined : deliveryWords(delivery),
         delivery: delivery?._tag,
         kind: content.kind,
