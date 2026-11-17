@@ -12,11 +12,13 @@ import type { NetworkId, TimelineId } from "@iirc/api";
 import { FontFamily, FontShown, fontNames, isFontName } from "@iirc/api/ui";
 import { Option as Maybe, Schema } from "effect";
 
-import { commands, commandWithId, interpret, runIn, unmet } from "./commands.ts";
-import type { CommandContext, Intent } from "./commands.ts";
+import { commands, commandWithId, interpret, namedIn, runIn, unmet } from "./commands.ts";
+import type { Command, CommandContext, Intent, NamedTimeline } from "./commands.ts";
 import { chordsFor } from "./keymap.ts";
 import type { Chord, Keymap } from "./keymap.ts";
 import type { Option } from "./options.ts";
+import { byScore, lower, ranked } from "./ranking.ts";
+import type { Matched } from "./ranking.ts";
 import { systemTheme } from "./theme.ts";
 import type { ListedTheme, ThemeOption } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
@@ -130,12 +132,15 @@ export interface Palette {
  * - `Closed`: it closes, as Escape does, choosing nothing.
  * - `Queried`: the Owner typed.
  * - `Chosen`: the Owner chose the entry with this key, which is remembered, and it closes.
+ * - `Ran`: the composer sent a draft that ran the commands with these keys, in order, which
+ *   are remembered as chosen, the last the newest.
  */
 export type PaletteEvent =
   | { readonly _tag: "Opened"; readonly scope: Scope }
   | { readonly _tag: "Closed" }
   | { readonly _tag: "Queried"; readonly query: string }
-  | { readonly _tag: "Chosen"; readonly key: string };
+  | { readonly _tag: "Chosen"; readonly key: string }
+  | { readonly _tag: "Ran"; readonly keys: readonly string[] };
 
 /** The palette closed, with nothing chosen yet. */
 export const initialPalette: Palette = { open: false, query: "", recent: [], scope: allScope };
@@ -173,123 +178,20 @@ export const reducePalette = (state: Palette, event: PaletteEvent): Palette => {
       return { ...state, open: false, recent: remember(state.recent, event.key) };
     }
 
+    case "Ran": {
+      let { recent } = state;
+
+      for (const key of event.keys) {
+        recent = remember(recent, key);
+      }
+
+      return { ...state, recent };
+    }
+
     default: {
       return event satisfies never;
     }
   }
-};
-
-/**
- * How well a query matches, best first: the text starts with it, it starts a word of the
- * text, it starts a word of the description, or its characters appear in the text in order.
- */
-const tiers = { Described: 1, Fuzzy: 0, Prefix: 3, WordStart: 2 } as const;
-
-/** How well an entry matches: its tier, then the lower `cost` the better. */
-interface Score {
-  readonly tier: number;
-  readonly cost: number;
-}
-
-/**
- * Orders scores best first.
- * @param left - One score.
- * @param right - The other.
- * @returns Their order.
- */
-const byScore = (left: Score, right: Score) => right.tier - left.tier || left.cost - right.cost;
-
-const lower = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
-
-const wordCharacter = /[\p{L}\p{N}]/u;
-
-/**
- * Where the query starts a word of the text: at its start, or after a character that is
- * not a letter or a digit, such as `.`, `#`, or a space.
- * @param text - The text, folded.
- * @param query - The query, folded.
- * @returns Where, or -1.
- */
-const wordStart = (text: string, query: string) => {
-  for (let at = text.indexOf(query); at !== -1; at = text.indexOf(query, at + 1)) {
-    if (at === 0 || !wordCharacter.test(text[at - 1] ?? "")) {
-      return at;
-    }
-  }
-
-  return -1;
-};
-
-/**
- * The span the query's characters cover in the text, in order, matching each as early as
- * it can after the last.
- * @param text - The text, folded.
- * @param query - The query, folded.
- * @returns The span and where it begins, or `null` when they do not all appear in order.
- */
-const subsequence = (text: string, query: string) => {
-  let first = -1;
-  let at = -1;
-
-  for (const character of query) {
-    at = text.indexOf(character, at + 1);
-
-    if (at === -1) {
-      return null;
-    }
-
-    first = first === -1 ? at : first;
-  }
-
-  return { first, span: at - first };
-};
-
-/**
- * How well a query matches names and a description.
- * @param query - The query, folded, not empty.
- * @param names - What the entry is called, best first.
- * @param description - What it is, or nothing.
- * @returns The score, or none when it does not match.
- */
-const scoreOf = (
-  query: string,
-  names: readonly string[],
-  description: string
-): Score | undefined => {
-  const folded = names.map(lower);
-  const best: Score[] = [];
-
-  for (const [index, name] of folded.entries()) {
-    // A name further down the list costs more, so the entry's own name wins over its others.
-    const penalty = index * 1000;
-
-    if (name.startsWith(query)) {
-      best.push({ cost: penalty + name.length, tier: tiers.Prefix });
-    }
-
-    const word = wordStart(name, query);
-
-    if (word !== -1) {
-      best.push({ cost: penalty + word * 100 + name.length, tier: tiers.WordStart });
-    }
-
-    const fuzzy = subsequence(name, query);
-
-    if (fuzzy !== null) {
-      best.push({
-        cost: penalty + fuzzy.span * 1000 + fuzzy.first * 100 + name.length,
-        tier: tiers.Fuzzy,
-      });
-    }
-  }
-
-  const described = description === "" ? -1 : wordStart(lower(description), query);
-
-  if (described !== -1) {
-    best.push({ cost: described, tier: tiers.Described });
-  }
-
-  return best.toSorted(byScore)[0];
 };
 
 /**
@@ -355,13 +257,7 @@ export const networkDescription = (entry: { readonly removed: boolean }) =>
  * @param entry - The entry.
  * @returns Its names and description.
  */
-/** What an entry is matched by. */
-interface Matched {
-  readonly names: readonly string[];
-  readonly description: string;
-}
-
-const matchedBy = (entry: Entry): Matched => {
+export const matchedBy = (entry: Entry): Matched => {
   switch (entry._tag) {
     case "Command": {
       const command = commandWithId(entry.id);
@@ -404,6 +300,14 @@ const matchedBy = (entry: Entry): Matched => {
 const decodeFamily = Schema.decodeUnknownOption(FontFamily);
 
 /**
+ * The family text names, or none when it names none, or names a font listed already.
+ * @param text - The text, trimmed, each run of spaces one.
+ * @returns The family.
+ */
+export const familyNamed = (text: string): FontFamily | undefined =>
+  Maybe.getOrUndefined(decodeFamily(text));
+
+/**
  * The family a query names after the word `font`, as in `font Fira Code`, or none when it
  * names none, or names a font the palette lists already.
  * @param query - The query, trimmed, without a leading `/`, each run of spaces one.
@@ -412,7 +316,7 @@ const decodeFamily = Schema.decodeUnknownOption(FontFamily);
 const familyQueried = (query: string): FontFamily | undefined => {
   const named = /^font (?<family>.+)$/iu.exec(query)?.groups?.family;
 
-  return named === undefined ? undefined : Maybe.getOrUndefined(decodeFamily(named));
+  return named === undefined ? undefined : familyNamed(named);
 };
 
 /** What the key of a font's entry in the palette starts with. */
@@ -431,6 +335,87 @@ export const fontOfKey = (key: string): FontShown | undefined =>
     : undefined;
 
 /**
+ * The key a command's entry is remembered by, once chosen or run.
+ * @param id - The command's id.
+ * @returns The key.
+ */
+export const commandKey = (id: string) => `command:${id}`;
+
+/**
+ * A command's entry.
+ * @param command - The command.
+ * @param keymap - The keymap, for the chords bound to it.
+ * @returns The entry.
+ */
+export const commandEntry = (command: Command, keymap: Keymap): Entry => ({
+  _tag: "Command",
+  chords: chordsFor(keymap, command.id),
+  description: command.description,
+  id: command.id,
+  key: commandKey(command.id),
+  name: command.name,
+  usage: command.usage,
+});
+
+/**
+ * A Timeline's entry.
+ * @param timeline - The Timeline, by name.
+ * @returns The entry.
+ */
+export const timelineEntry = (timeline: NamedTimeline): Entry => ({
+  _tag: "Timeline",
+  key: `timeline:${timeline.timeline}`,
+  kind: timeline.kind,
+  name: timeline.name,
+  network: timeline.network,
+  timeline: timeline.timeline,
+});
+
+/**
+ * A Network's entry, to remove it, or, removed with its Timelines kept, to drop them.
+ * @param network - The Network, and whether it was removed with its Timelines kept.
+ * @returns The entry.
+ */
+export const networkEntry = (network: {
+  readonly network: NetworkId;
+  readonly removed: boolean;
+}): Entry => ({
+  _tag: "Network",
+  key: `network:${network.network}`,
+  name: `${network.removed ? "drop" : "remove"} ${network.network}`,
+  network: network.network,
+  removed: network.removed,
+});
+
+/**
+ * The entries of the themes to set an option to: every theme, but `system` only as
+ * `theme`, since it follows the device.
+ * @param themes - Every theme.
+ * @param chosen - The one each option names on this device.
+ * @param option - The option choosing one sets.
+ * @returns The entries, in the themes' order.
+ */
+export const themeEntries = (
+  themes: readonly ListedTheme[],
+  chosen: Readonly<Record<ThemeOption, string>>,
+  option: ThemeOption
+): readonly Entry[] =>
+  themes.flatMap((theme): readonly Entry[] =>
+    option === "theme" || theme.name !== systemTheme
+      ? [
+          {
+            _tag: "Theme",
+            builtIn: theme.builtIn,
+            current: theme.name === chosen[option],
+            key: `theme:${theme.name}`,
+            name: theme.name,
+            option,
+          },
+        ]
+      : []
+  );
+
+/**
  * A font's entry.
  * @param font - The font.
  * @param current - The font in effect on this device.
@@ -444,11 +429,21 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
 });
 
 /**
+ * The entries of every font, and a family named, if any.
+ * @param family - The family named, if any.
+ * @param current - The font in effect on this device.
+ * @returns The entries, the bundled fonts first.
+ */
+export const fontEntries = (family: FontFamily | undefined, current: FontShown): readonly Entry[] =>
+  [...fontNames, ...(family === undefined ? [] : [family])].map((font) => fontEntry(font, current));
+
+/**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order, then those closed, which the sidebar leaves out; every Network, to remove it; every theme, to set the option given, but
- * `system` only as `theme`, since it follows the device; every font, and the family the
- * query names, if any; and every option read.
+ * sidebar's order, then those closed, which the sidebar leaves out; every Network, to
+ * remove it; every theme, to set the option given, but `system` only as `theme`, since it
+ * follows the device; every font, and the family the query names, if any; and every option
+ * read.
  * @param listing - What the palette lists from.
  * @param family - The family the query names, if any.
  * @param option - The option choosing a theme sets.
@@ -462,66 +457,20 @@ const everything = (
   {
     entries: commands
       .filter((one) => one.id !== "palette.open" && unmet(one.when, listing.context) === undefined)
-      .map((one) => ({
-        _tag: "Command",
-        chords: chordsFor(listing.keymap, one.id),
-        description: one.description,
-        id: one.id,
-        key: `command:${one.id}`,
-        name: one.name,
-        usage: one.usage,
-      })),
+      .map((one) => commandEntry(one, listing.keymap)),
     title: "Commands",
   },
+  { entries: namedIn(listing.sidebar).map(timelineEntry), title: "Timelines" },
+  { entries: listing.sidebar.map(networkEntry), title: "Networks" },
+  { entries: themeEntries(listing.themes, listing.chosen, option), title: "Themes" },
+  { entries: fontEntries(family, listing.font), title: "Fonts" },
   {
-    entries: listing.sidebar.flatMap((network) =>
-      [...network.timelines, ...network.closed].map((timeline): Entry => ({
-        _tag: "Timeline",
-        key: `timeline:${timeline.id}`,
-        kind: timeline.kind,
-        name: timeline.name,
-        network: network.network,
-        timeline: timeline.id,
-      }))
-    ),
-    title: "Timelines",
-  },
-  {
-    entries: listing.sidebar.map((network): Entry => ({
-      _tag: "Network",
-      key: `network:${network.network}`,
-      name: `${network.removed ? "drop" : "remove"} ${network.network}`,
-      network: network.network,
-      removed: network.removed,
-    })),
-    title: "Networks",
-  },
-  {
-    entries: listing.themes
-      .filter((theme) => option === "theme" || theme.name !== systemTheme)
-      .map((theme): Entry => ({
-        _tag: "Theme",
-        builtIn: theme.builtIn,
-        current: theme.name === listing.chosen[option],
-        key: `theme:${theme.name}`,
-        name: theme.name,
-        option,
-      })),
-    title: "Themes",
-  },
-  {
-    entries: [...fontNames, ...(family === undefined ? [] : [family])].map((font) =>
-      fontEntry(font, listing.font)
-    ),
-    title: "Fonts",
-  },
-  {
-    entries: listing.options.map((option): Entry => ({
+    entries: listing.options.map((one): Entry => ({
       _tag: "Option",
-      credential: option.kind._tag === "Credential",
-      description: option.description,
-      key: `option:${option.name}`,
-      name: option.name,
+      credential: one.kind._tag === "Credential",
+      description: one.description,
+      key: `option:${one.name}`,
+      name: one.name,
     })),
     title: "Options",
   },
@@ -532,8 +481,8 @@ const everything = (
  * newest first, and then each section in its own order. With one, only entries that match,
  * each section ranked best first, and the sections by their best entry. A leading `/` is
  * ignored, so `/set` finds `set`, and a run of spaces is one. Scoped to the themes, it lists
- * only them, to set the option it says, with nothing recent. A query of `font` and a family's name, such as
- * `font Fira Code`, offers that family among the fonts.
+ * only them, to set the option it says, with nothing recent. A query of `font` and a
+ * family's name, such as `font Fira Code`, offers that family among the fonts.
  * @param listing - What the palette lists from.
  * @param query - What the Owner typed.
  * @param recent - The keys of entries chosen recently, newest first.
@@ -582,24 +531,15 @@ export const sections = (
     ].filter((section) => section.entries.length > 0);
   }
 
-  const ranked = all.map((section) => {
-    const scored = section.entries.flatMap((entry) => {
-      const { description, names } = matchedBy(entry);
-      const score = scoreOf(wanted, names, description);
+  return all
+    .map((section) => {
+      const sorted = ranked(wanted, section.entries, matchedBy);
 
-      return score === undefined ? [] : [{ entry, score }];
-    });
-
-    // Sorting is stable, so entries that score the same keep the section's own order.
-    const sorted = scored.toSorted((left, right) => byScore(left.score, right.score));
-
-    return {
-      best: sorted[0]?.score,
-      section: { ...section, entries: sorted.map((one) => one.entry) },
-    };
-  });
-
-  return ranked
+      return {
+        best: sorted[0]?.score,
+        section: { ...section, entries: sorted.map((one) => one.item) },
+      };
+    })
     .filter((one) => one.best !== undefined)
     .toSorted((left, right) =>
       left.best === undefined || right.best === undefined ? 0 : byScore(left.best, right.best)

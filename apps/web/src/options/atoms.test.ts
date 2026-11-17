@@ -5,7 +5,8 @@ import { draftOf } from "@iirc/frontend/composer";
 import { Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { composerState, edit, send } from "../composer/atoms.ts";
+import { edit, send } from "../composer/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { check } from "../sign-in/atoms.ts";
 import {
   eventually,

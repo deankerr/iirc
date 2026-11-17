@@ -32,6 +32,7 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { composerPreview } from "../composer/composer-state.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { changeUi, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
@@ -136,8 +137,8 @@ export const offeredName = (draft: ImportDraft, read: Imported | undefined): str
   "";
 
 /**
- * The theme previewed, while there is one: the one the import dialog reads, or the one the
- * open palette highlights.
+ * The theme previewed, while there is one: the one the import dialog reads, the one the
+ * open palette highlights, or the one the Composer's list highlights.
  */
 const previewed = Atom.make((get): Palette | undefined => {
   const draft = get(importDraft);
@@ -148,14 +149,16 @@ const previewed = Atom.make((get): Palette | undefined => {
   }
 
   const highlighted = get(paletteHighlight);
+  const listed = get(composerPreview);
+  let name: string | undefined = undefined;
 
-  if (!get(paletteState).open || highlighted?.startsWith("theme:") !== true) {
-    return undefined;
+  if (get(paletteState).open && highlighted?.startsWith("theme:") === true) {
+    name = highlighted.slice("theme:".length);
+  } else if (listed?._tag === "Theme") {
+    ({ name } = listed);
   }
 
-  const ui = get(uiInEffect);
-
-  return paletteNamed(highlighted.slice("theme:".length), ui, get(prefersDark));
+  return name === undefined ? undefined : paletteNamed(name, get(uiInEffect), get(prefersDark));
 });
 
 /** The theme in effect on this device, or the one previewed, drawn by the core. */
@@ -169,14 +172,20 @@ export const drawnTheme = Atom.make((get) => {
 /**
  * The text's size, line height, font, and widest line in effect on this device, as the
  * root's custom properties, with the monospace font IRC's formatting asks for beside it:
- * the font the open palette highlights, while it highlights one, else the one in effect.
+ * the font the open palette or the Composer's list highlights, while one is highlighted, else
+ * the one in effect.
  * The widest line is in `ch`, the font's own `0` at the text's size, so it follows both,
  * and no bound is no property at all, which leaves a line as wide as its Pane.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string | undefined])[] => {
   const ui = get(uiInEffect);
   const highlighted = get(paletteState).open ? get(paletteHighlight) : undefined;
-  const font = (highlighted === undefined ? undefined : fontOfKey(highlighted)) ?? ui.font;
+  const listed = get(composerPreview);
+
+  const font =
+    (highlighted === undefined ? undefined : fontOfKey(highlighted)) ??
+    (listed?._tag === "Font" ? listed.font : undefined) ??
+    ui.font;
 
   return [
     ["--font-size", `${ui.size}px`],

@@ -8,6 +8,7 @@ declare const styles: {
   readonly candidate: string;
   readonly composer: string;
   readonly description: string;
+  readonly detail: string;
   readonly dropping: string;
   readonly failure: string;
   readonly fileIcon: string;
@@ -15,6 +16,7 @@ declare const styles: {
   readonly hint: string;
   readonly image: string;
   readonly input: string;
+  readonly keys: string;
   readonly line: string;
   readonly link: string;
   readonly list: string;

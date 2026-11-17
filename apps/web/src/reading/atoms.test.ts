@@ -6,7 +6,8 @@ import { openOf } from "@iirc/frontend/timelines";
 import { Effect, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { composerState, edit, send } from "../composer/atoms.ts";
+import { edit, send } from "../composer/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { optionsState } from "../options/atoms.ts";
 import { changeUiOption, readRule, uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";

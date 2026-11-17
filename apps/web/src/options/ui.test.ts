@@ -5,7 +5,8 @@ import { reduceOptions } from "@iirc/frontend/options";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { describe, expect, it } from "vitest";
 
-import { composerState, edit, send } from "../composer/atoms.ts";
+import { edit, send } from "../composer/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";

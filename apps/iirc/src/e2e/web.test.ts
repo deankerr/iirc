@@ -6163,7 +6163,8 @@ describe("the web frontend on iirc daemon --web", () => {
         };
 
         await page.keyboard.type("jo");
-        await expect.poll(async () => await options.allTextContents()).toHaveLength(1);
+        // Ranked as the palette ranks: `/join` first, then any command whose description matches.
+        await expect.poll(async () => await options.first().textContent()).toMatch(/^\/join/u);
         await page.keyboard.press("ArrowDown");
 
         const highlighted = {
