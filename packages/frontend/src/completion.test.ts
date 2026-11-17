@@ -534,7 +534,12 @@ describe("the sources", () => {
         life: 1,
         network,
         self: null,
-        session: Schema.decodeSync(SessionKnowledge)({ _tag: "Registered", ircd: "x", since: 1 }),
+        session: Schema.decodeSync(SessionKnowledge)({
+          _tag: "Registered",
+          ircd: "x",
+          since: 1,
+          tags: false,
+        }),
       },
       { _tag: "Opened", timeline: iirc },
       { _tag: "ReadStarted", read },

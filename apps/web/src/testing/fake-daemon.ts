@@ -316,6 +316,7 @@ const ActBody = Schema.fromJsonString(
 
 const SayBody = Schema.fromJsonString(
   Schema.Struct({
+    answers: Schema.optionalKey(Schema.String),
     intent: Schema.String,
     kind: Schema.String,
     target: Schema.String,
@@ -726,7 +727,7 @@ export const fakeDaemon = () => {
     selves: new Map<string, (typeof Knowledge.Encoded)["self"]>(),
     /** Each Network's connection, as `known` gives it. */
     sessions: new Map<string, (typeof Knowledge.Encoded)["session"]>([
-      ["libera", { _tag: "Registered", ircd: "ircd.test", since: 1 }],
+      ["libera", { _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }],
     ]),
     signInsFail: false,
     signedIn: false,

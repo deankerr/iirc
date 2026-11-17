@@ -6,11 +6,18 @@
  *
  * @packageDocumentation
  */
-import type { SearchQuery, TimelineChangesEvent, TimelineId, TimelineItem } from "@iirc/api";
+import type {
+  NetworkId,
+  SearchQuery,
+  TimelineChangesEvent,
+  TimelineId,
+  TimelineItem,
+} from "@iirc/api";
 import { notificationsOf } from "@iirc/frontend/notifications";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
+  carriesTags,
   followFrom,
   initialTimelines,
   keptLayout,
@@ -53,6 +60,11 @@ export const sidebarNetworks = Atom.make((get) => sidebar(get(timelinesState)));
 
 /** The focused Pane's open Timeline, as shown. */
 export const openTimeline = Atom.make((get) => opened(get(timelinesState)));
+
+/** Whether a Network's Session carries tags, so a Message there can answer another. */
+export const tagsOn = Atom.family((network: NetworkId) =>
+  Atom.make((get) => carriesTags(get(timelinesState), network))
+);
 
 /** Each Pane's open Timeline, as shown, by the Pane's id. */
 export const paneTimeline = Atom.family((pane: string) =>

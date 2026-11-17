@@ -131,6 +131,7 @@ const world = (open: string | undefined): Timelines => {
         _tag: "Registered",
         ircd: "ircd.test",
         since: 1,
+        tags: false,
       }),
     },
   ];

@@ -1,4 +1,4 @@
-import { CallerIntent, NetworkId, TimelineId } from "@iirc/api";
+import { CallerIntent, NetworkId, TimelineId, TimelineItem } from "@iirc/api";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -14,11 +14,12 @@ import {
   linesOf,
   placeOfDraft,
   reduceComposers,
+  replyOf,
   started,
   takeOffer,
   submit,
 } from "./composer.ts";
-import type { ComposerEvent, Composers, Notice, Place } from "./composer.ts";
+import type { Answering, ComposerEvent, Composers, Notice, Place } from "./composer.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timelineId = Schema.decodeSync(TimelineId);
@@ -732,5 +733,151 @@ describe("how long a notice lasts", () => {
       offering: carry(offering(draft)),
       outcome: carry({ _tag: "Noticed", message: "no", timeline: draft }),
     }).toStrictEqual({ complaint: undefined, offering: "Offering", outcome: "Outcome" });
+  });
+});
+
+const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
+
+const known = (value: string) => ({ _tag: "Known", at: 1, from: "ircd", value }) as const;
+
+describe("a reply", () => {
+  const position = `${hex(1000n + 2n ** 53n, 14)}-${hex(5n, 14)}-${hex(0n, 8)}`;
+
+  const item = (
+    content: Partial<Extract<typeof TimelineItem.Encoded.content, { _tag: "Message" }>> = {}
+  ) =>
+    Schema.decodeSync(TimelineItem)({
+      answered: null,
+      changed: 5,
+      content: {
+        _tag: "Message",
+        answers: null,
+        at: { _tag: "Unknown" },
+        context: null,
+        id: known("msg-1"),
+        kind: "Privmsg",
+        live: true,
+        ours: null,
+        sender: "alice",
+        tags: [],
+        target: "#iirc",
+        text: "is it on?",
+        ...content,
+      },
+      level: "Message",
+      network: "libera",
+      position,
+      sequence: 5,
+      timeline: "00000000000002-00000000-00000000",
+    });
+
+  const offered = replyOf(item(), true);
+
+  if (offered === undefined) {
+    throw new Error("a Message with an id, where tags are carried, is answerable");
+  }
+
+  const answering: Answering = offered;
+
+  const replying = (events: readonly ComposerEvent[] = []) =>
+    fold([{ _tag: "ReplyChosen", answering, timeline: channel }, ...events]);
+
+  it("is offered only where the Session carries tags and the Message has an id it can send", () => {
+    const activity = Schema.decodeSync(TimelineItem)({
+      ...Schema.encodeSync(TimelineItem)(item()),
+      content: {
+        _tag: "Activity",
+        activity: { _tag: "Joined", channel: "#iirc", nick: "alice" },
+        at: { _tag: "Unknown" },
+        id: known("msg-2"),
+        live: true,
+      },
+    });
+
+    expect({
+      activity: replyOf(activity, true),
+      noId: replyOf(item({ id: { _tag: "Unknown" } }), true),
+      noTags: replyOf(item(), false),
+      offered: replyOf(item(), true),
+      ours: replyOf(
+        item({
+          id: { _tag: "Unknown" },
+          ours: {
+            delivery: {
+              _tag: "Confirmed",
+              at: { _tag: "Unknown" },
+              id: known("msg-3"),
+              text: "ok!",
+            },
+            intent: "web-1",
+          },
+          text: "ok",
+        }),
+        true
+      ),
+      unsendable: replyOf(item({ id: known("has space") }), true),
+    }).toStrictEqual({
+      activity: undefined,
+      noId: undefined,
+      noTags: undefined,
+      offered: {
+        id: "msg-1",
+        message: { kind: "Privmsg", position: item().position, sender: "alice", text: "is it on?" },
+      },
+      ours: {
+        id: "msg-3",
+        message: { kind: "Privmsg", position: item().position, sender: "alice", text: "ok!" },
+      },
+      unsendable: undefined,
+    });
+  });
+
+  it("is held by its Timeline's draft until dropped, through edits and turning away", () => {
+    const held = replying([edited("yes"), { _tag: "Left", timeline: channel }]);
+    const dropped = fold([{ _tag: "ReplyDropped", timeline: channel }], held);
+
+    expect({
+      dropped: [draftOf(dropped, channel).answering, draftOf(dropped, channel).text],
+      elsewhere: draftOf(held, other).answering,
+      held: draftOf(held, channel).answering,
+    }).toStrictEqual({ dropped: [undefined, "yes"], elsewhere: undefined, held: answering });
+  });
+
+  it("answers on the first Say of a draft only, and is let go of once it is sent", () => {
+    const { intents, state } = submit(replying([edited("yes\nit is")]), channel, context);
+
+    expect({ answering: draftOf(state, channel).answering, intents }).toStrictEqual({
+      answering: undefined,
+      intents: [{ ...say("yes"), answers: "msg-1" }, say("it is")],
+    });
+  });
+
+  it("answers on the first Say to its Timeline, not one to another Target", () => {
+    const { intents } = submit(replying([edited("/msg bob hi\nyes")]), channel, context);
+
+    expect(intents.map((one) => (one._tag === "Say" ? one.answers : "none"))).toStrictEqual([
+      undefined,
+      "msg-1",
+    ]);
+  });
+
+  it("is kept when nothing is sent, and sent once lines waiting are confirmed", () => {
+    const refused = submit(replying([edited("/frob")]), channel, context);
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
+    const asked = submit(replying([edited(lines.join("\n"))]), channel, context);
+    const confirmed = confirm(asked.state, channel);
+
+    expect({
+      asked: draftOf(asked.state, channel).answering,
+      confirmed: [
+        confirmed.intents.map((one) => (one._tag === "Say" ? (one.answers ?? "none") : "no Say")),
+        draftOf(confirmed.state, channel).answering,
+      ],
+      refused: draftOf(refused.state, channel).answering,
+    }).toStrictEqual({
+      asked: answering,
+      confirmed: [["msg-1", ...lines.slice(1).map(() => "none")], undefined],
+      refused: answering,
+    });
   });
 });

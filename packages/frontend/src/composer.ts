@@ -9,12 +9,16 @@
  */
 import type {
   ActionRequest,
+  Answered,
   CallerIntent,
   NetworkId,
+  SayRequest,
   StepRefusal,
   Timeline,
   TimelineId,
+  TimelineItem,
 } from "@iirc/api";
+import { Option, Schema } from "effect";
 
 import { levelOf, markLatest } from "./activity.ts";
 import { channelIn, initialChannels } from "./channel.ts";
@@ -131,9 +135,20 @@ export interface Confirming {
   readonly intents: readonly Intent[];
 }
 
+/**
+ * The Message a draft answers: its id, as a Line can carry it in a `+reply` tag, and the
+ * Message as it was when chosen, which a view shows above the draft.
+ */
+export interface Answering {
+  readonly id: AnswersId;
+  readonly message: Answered;
+}
+
 /** One Timeline's composer. */
 export interface Draft {
   readonly text: string;
+  /** The Message its first Say answers, until it is sent or dropped. */
+  readonly answering: Answering | undefined;
   /** What was sent from this Timeline, newest first. */
   readonly history: readonly string[];
   /** Which of `history` is shown while recalling, or none while at the draft. */
@@ -197,6 +212,9 @@ export type SayFailure =
  * - `Failed`: a Say or an Act failed; `intents` are it and those after it, none carried out after it.
  * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
+ * - `ReplyChosen`: the Owner chose to answer a Message, which the draft holds until it is
+ *   sent or dropped, through edits and turning away.
+ * - `ReplyDropped`: the Owner chose not to answer it after all. The text stays.
  * - `Carried`: a draft came to show its Timeline, so what was typed under it, unsent, goes
  *   to the Timeline's composer, unless that holds text of its own, with its notice unless
  *   that holds one, and what is said later of a Say sent from the draft is said there. A
@@ -219,6 +237,8 @@ export type ComposerEvent =
       readonly intents: readonly Intent[];
     }
   | { readonly _tag: "Noticed"; readonly timeline: Place; readonly message: string }
+  | { readonly _tag: "ReplyChosen"; readonly timeline: Place; readonly answering: Answering }
+  | { readonly _tag: "ReplyDropped"; readonly timeline: Place }
   | { readonly _tag: "Carried"; readonly from: Place; readonly to: Place };
 
 /** A composer's next state, and the intents it asks the runtime to carry out. */
@@ -232,6 +252,7 @@ export const initialComposers: Composers = { carried: new Map(), drafts: new Map
 
 /** A composer never touched. */
 export const emptyDraft: Draft = {
+  answering: undefined,
   confirming: undefined,
   history: [],
   kept: "",
@@ -385,6 +406,80 @@ export const linesOf = (text: string): readonly string[] =>
 const afterSubmit = (notice: Notice | undefined): Notice | undefined =>
   notice?._tag === "Offering" ? notice : undefined;
 
+/** The id of a Message a Say answers, as `say` takes it. */
+type AnswersId = NonNullable<SayRequest["answers"]>;
+
+/**
+ * Reads a Message's id as `say` takes it to answer: 1 to 256 characters, none a space or a
+ * control character, as a `+reply` tag can carry. The core takes the API's types alone, so
+ * this mirrors its rule, and the type says the two agree.
+ */
+const sendableId: (id: string) => Option.Option<AnswersId> = Schema.decodeUnknownOption(
+  Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
+    // Neither a space, nor a control character from NUL to US, nor DEL.
+    Schema.isPattern(/^[!-~\u0080-\u{10FFFF}]+$/u)
+  ).pipe(Schema.brand("MessageId"))
+);
+
+/**
+ * What answering a Message would answer, if it can be answered: a Message with an id a
+ * `+reply` tag can carry, the Ircd's own for one of ours it confirmed, on a Network whose
+ * Session carries tags. Anywhere else, nothing is offered.
+ * @param item - The item.
+ * @param tags - Whether its Network's Session carries tags.
+ * @returns What a draft would answer, or nothing.
+ */
+export const replyOf = (item: TimelineItem, tags: boolean): Answering | undefined => {
+  const { content } = item;
+
+  if (!tags || content._tag !== "Message") {
+    return undefined;
+  }
+
+  const delivery = content.ours?.delivery;
+  const confirmed = delivery?._tag === "Confirmed" ? delivery : undefined;
+  const fact = content.id._tag === "Known" ? content.id : confirmed?.id;
+  const id = fact?._tag === "Known" ? sendableId(fact.value) : Option.none();
+
+  return Option.isSome(id)
+    ? {
+        id: id.value,
+        message: {
+          kind: content.kind,
+          position: item.position,
+          sender: content.sender,
+          text: confirmed?.text ?? content.text,
+        },
+      }
+    : undefined;
+};
+
+/**
+ * Puts what a draft answers on the first Say of its intents to the Timeline it is under,
+ * and on none after it, so a reply too long for one Line is tagged on its first.
+ * @param intents - The intents read from the draft.
+ * @param answering - What the draft answers, if anything.
+ * @param focus - The Timeline it is under, as commands see it.
+ * @returns The intents.
+ */
+const answered = (
+  intents: readonly Intent[],
+  answering: Answering | undefined,
+  focus: Focus | undefined
+): readonly Intent[] => {
+  const first = intents.findIndex(
+    (one) => one._tag === "Say" && one.network === focus?.network && one.target === focus.name
+  );
+
+  const intent = intents[first];
+
+  return answering === undefined || intent?._tag !== "Say"
+    ? intents
+    : intents.with(first, { ...intent, answers: answering.id });
+};
+
 /**
  * The composer once its text was sent: cleared, and its text the newest in its history,
  * unless it is already. An offer made of an earlier Say or Act stays.
@@ -463,18 +558,24 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
     intents.push(...read.value);
   }
 
+  const replies = answered(
+    intents,
+    draft.answering,
+    context.focus?.timeline === timeline ? context.focus : undefined
+  );
+
   if (lines.length > confirmAbove) {
     return {
       intents: [],
       state: withDraft(state, timeline, (one) => ({
         ...one,
-        confirming: { intents, lines: lines.length },
+        confirming: { intents: replies, lines: lines.length },
         notice: afterSubmit(one.notice),
       })),
     };
   }
 
-  return { intents, state: withDraft(state, timeline, sent) };
+  return { intents: replies, state: withDraft(state, timeline, sent) };
 };
 
 /**
@@ -744,6 +845,17 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
 
     case "Noticed": {
       return noticed(state, event.timeline, outcome(event.message));
+    }
+
+    case "ReplyChosen": {
+      return withDraft(state, event.timeline, (draft) => ({
+        ...draft,
+        answering: event.answering,
+      }));
+    }
+
+    case "ReplyDropped": {
+      return withDraft(state, event.timeline, (draft) => ({ ...draft, answering: undefined }));
     }
 
     default: {

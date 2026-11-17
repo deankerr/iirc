@@ -94,13 +94,20 @@ interface StatusLoad extends Load {
  *
  * - `Unknown`: not yet read.
  * - `Connecting`: dialling or registering, as `known` said.
- * - `Connected`: in a Session, since it began, with Self's nick when a `SessionBegan` said it.
+ * - `Connected`: in a Session, since it began, with Self's nick when a `SessionBegan` said it,
+ *   and whether it carries tags, by `message-tags`, as `known` said: `undefined` from a
+ *   `SessionBegan`, which does not say, until `known` is read again.
  * - `Offline`: no Session, since when and why, when an item said so.
  */
 export type Connection =
   | { readonly _tag: "Unknown" }
   | { readonly _tag: "Connecting"; readonly since: number }
-  | { readonly _tag: "Connected"; readonly since: number; readonly nick: string | undefined }
+  | {
+      readonly _tag: "Connected";
+      readonly since: number;
+      readonly nick: string | undefined;
+      readonly tags: boolean | undefined;
+    }
   | {
       readonly _tag: "Offline";
       readonly since: number | undefined;
@@ -674,6 +681,25 @@ export const isRemoved = (network: NetworkView): boolean =>
   network.kept || [...network.timelines.values()].some((timeline) => timeline.removed);
 
 /**
+ * Whether a Network's Session carries tags, by `message-tags`, so a Message can answer
+ * another there: connected, as `known` said, and neither stopped nor removed.
+ * @param state - The Timelines.
+ * @param id - The Network.
+ * @returns Whether it does.
+ */
+export const carriesTags = (state: Timelines, id: NetworkId): boolean => {
+  const network = state.networks.get(id);
+
+  return (
+    network !== undefined &&
+    !isRemoved(network) &&
+    network.running?._tag !== "Stopped" &&
+    network.connection._tag === "Connected" &&
+    network.connection.tags === true
+  );
+};
+
+/**
  * A copy of a map with one entry set.
  * @param map - The map.
  * @param key - The key.
@@ -1130,7 +1156,7 @@ const connectionOf = (session: SessionKnowledge): Connection => {
     }
 
     case "Registered": {
-      return { _tag: "Connected", nick: undefined, since: session.since };
+      return { _tag: "Connected", nick: undefined, since: session.since, tags: session.tags };
     }
 
     case "Offline": {
@@ -1153,7 +1179,7 @@ const connectionFromItem = (item: TimelineItem): Connection | undefined => {
 
   switch (content._tag) {
     case "SessionBegan": {
-      return { _tag: "Connected", nick: content.nick, since: content.at };
+      return { _tag: "Connected", nick: content.nick, since: content.at, tags: undefined };
     }
 
     case "SessionEnded":
@@ -1233,6 +1259,15 @@ const awayOfConnection = (connection: Connection): SelfAway => {
 };
 
 /**
+ * Whether a connection is in a Session that has not said whether it carries tags, which a
+ * `SessionBegan` does not, so `known` is read again.
+ * @param connection - The connection.
+ * @returns Whether it is.
+ */
+const tagsUnknown = (connection: Connection): boolean =>
+  connection._tag === "Connected" && connection.tags === undefined;
+
+/**
  * Brings a Network's connection up to date with the Session items of one step, when they
  * are later than what set it and of the life held: an item of a Timeline of an older life,
  * as the step names it or as one let go of when that life ended, says nothing of it.
@@ -1283,7 +1318,8 @@ const changeConnection = (
           connectionAt,
         };
 
-  return awayAt === network.awayAt
+  // Whether the Session carries tags, and Self's away, are `known`'s to say.
+  return awayAt === network.awayAt && !tagsUnknown(connected.connection)
     ? connected
     : { ...connected, awayAt, status: { ...connected.status, fresh: false } };
 };
@@ -2156,15 +2192,23 @@ const statusRead = (
     };
   }
 
+  const connection = newer ? network.connection : connectionOf(session);
+
   return {
     ...state,
     networks: setIn(state.networks, id, {
       ...network,
       away: newer ? network.away : awayOfKnown(session, self),
-      connection: newer ? network.connection : connectionOf(session),
+      connection,
       connectionAt: Math.max(network.connectionAt, from),
-      // An away change after the read began may not be in it, so it is read again.
-      status: { ...network.status, attempt: 0, fresh: network.awayAt <= from, reading: false },
+      // An away change after the read began may not be in it, nor whether a Session that
+      // began after it carries tags, so it is read again.
+      status: {
+        ...network.status,
+        attempt: 0,
+        fresh: network.awayAt <= from && !tagsUnknown(connection),
+        reading: false,
+      },
     }),
   };
 };

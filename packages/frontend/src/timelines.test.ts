@@ -22,6 +22,7 @@ import { panesOf, single } from "./layout.ts";
 import { parseQuery } from "./search.ts";
 import type { SearchRequest } from "./search.ts";
 import {
+  carriesTags,
   chosenOf,
   elsewhereOf,
   draftsMetBetween,
@@ -592,7 +593,7 @@ const daemonAt = (world: World, through: number, version: number) => {
       decodeSession(
         world.gaps.some((gap) => gap.network === network && gap.to === undefined)
           ? { _tag: "Offline", since: null }
-          : { _tag: "Registered", ircd: "ircd.test", since: 0 }
+          : { _tag: "Registered", ircd: "ircd.test", since: 0, tags: false }
       ),
     life: (network: string) => lifeIn(world, network) ?? 0,
     list: (network: string, after: string | undefined) => {
@@ -2363,7 +2364,7 @@ describe("the Timelines' state", () => {
       life: 1,
       network: alpha,
       self: null,
-      session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
+      session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }),
     });
     const known = state.networks.get(alpha)?.connection;
 
@@ -2398,7 +2399,7 @@ describe("the Timelines' state", () => {
       stale,
     }).toStrictEqual({
       after: { _tag: "Offline", reason: { _tag: "Error" }, since: 70 },
-      known: { _tag: "Connected", nick: undefined, since: 1 },
+      known: { _tag: "Connected", nick: undefined, since: 1, tags: false },
       stale: "Connected",
     });
   });
@@ -2538,6 +2539,101 @@ const folded = (state: Timelines, events: readonly TimelinesEvent[]) => {
 
   return after;
 };
+
+const statusOfAlpha = { _tag: "Status", attempt: 0, network: alpha } as const;
+
+/**
+ * What `known` says of alpha's Session: registered, carrying tags or not.
+ * @param tags - Whether it carries tags.
+ * @returns The event.
+ */
+const knownTags = (tags: boolean): TimelinesEvent => ({
+  _tag: "StatusRead",
+  life: 1,
+  network: alpha,
+  self: null,
+  session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags }),
+});
+
+/**
+ * A step in which alpha's Session began.
+ * @param sequence - The step.
+ * @returns The event.
+ */
+const began = (sequence: number) =>
+  changed(sequence, {
+    items: [
+      {
+        ...Schema.encodeSync(TimelineItem)(message(idOf(1), sequence * 10, sequence)),
+        content: { _tag: "SessionBegan", at: sequence * 10, nick: "me" },
+      },
+    ],
+  });
+
+/**
+ * Whether `known` is to be read.
+ * @param state - The state.
+ * @returns Whether it is.
+ */
+const statusWanted = (state: Timelines) => wanted(state).some((read) => read._tag === "Status");
+
+describe("whether a Session carries tags", () => {
+  it("is what known says, and unknown once a Session begins, until known is read again", () => {
+    const read = folded(following(), [
+      { _tag: "ReadStarted", read: statusOfAlpha },
+      knownTags(true),
+    ]);
+
+    const begun = reduceTimelines(read, began(7));
+    const again = folded(begun, [{ _tag: "ReadStarted", read: statusOfAlpha }, knownTags(false)]);
+
+    expect({
+      again: [carriesTags(again, alpha), statusWanted(again)],
+      begun: [carriesTags(begun, alpha), statusWanted(begun)],
+      read: [carriesTags(read, alpha), statusWanted(read)],
+    }).toStrictEqual({
+      again: [false, false],
+      begun: [false, true],
+      read: [true, false],
+    });
+  });
+
+  it("is read again when a Session began after a read of known that was in flight", () => {
+    const inFlight = reduceTimelines(following(), { _tag: "ReadStarted", read: statusOfAlpha });
+
+    const landed = folded(inFlight, [began(7), knownTags(true)]);
+    const again = folded(landed, [{ _tag: "ReadStarted", read: statusOfAlpha }, knownTags(true)]);
+
+    expect({
+      again: [carriesTags(again, alpha), statusWanted(again)],
+      landed: [carriesTags(landed, alpha), statusWanted(landed)],
+    }).toStrictEqual({ again: [true, false], landed: [false, true] });
+  });
+
+  it("is never carried on a Network that is not connected", () => {
+    const read = folded(following(), [
+      { _tag: "ReadStarted", read: statusOfAlpha },
+      knownTags(true),
+    ]);
+
+    const ended = reduceTimelines(
+      read,
+      changed(7, {
+        items: [
+          {
+            ...Schema.encodeSync(TimelineItem)(message(idOf(1), 70, 7)),
+            content: { _tag: "SessionEnded", at: 70, reason: { _tag: "Error" } },
+          },
+        ],
+      })
+    );
+
+    expect([carriesTags(ended, alpha), carriesTags(read, networkId("beta"))]).toStrictEqual([
+      false,
+      false,
+    ]);
+  });
+});
 
 /**
  * A Pane as a device keeps it, as JSON text.
@@ -3968,7 +4064,7 @@ describe("a draft meets its Timeline", () => {
         life: 1,
         network: alpha,
         self: null,
-        session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
+        session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }),
       },
     ]);
 
@@ -4710,7 +4806,13 @@ describe("removing a Network", () => {
       timelineOf(idOf(3), "Channel", "#a", 4)
     );
 
-    const registered = decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 });
+    const registered = decodeSession({
+      _tag: "Registered",
+      ircd: "ircd.test",
+      since: 1,
+      tags: false,
+    });
+
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
     const status = { _tag: "Status", attempt: 0, network: alpha } as const;
 

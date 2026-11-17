@@ -160,6 +160,18 @@ const decodeUnreadHighlights = Schema.decodeUnknownSync(
   )
 );
 
+/**
+ * Waits until the menu open is placed, which React Aria shows only once it is.
+ * @param on - The page.
+ */
+const placed = async (on: Page) => {
+  await on.waitForFunction(() => {
+    const popover = document.querySelector<HTMLElement>('[role="menu"]')?.parentElement;
+
+    return popover !== null && popover !== undefined && popover.style.opacity === "";
+  });
+};
+
 /** What the end-to-end run reads of an Upload. */
 const UploadRead = Schema.Struct({
   deleted: Schema.optionalKey(Schema.Struct({ why: Schema.String })),
@@ -5627,6 +5639,171 @@ describe("the web frontend on iirc daemon --web", () => {
           unsaid: "querywhoismention",
         });
       } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "replies to a Message from its menu, shows what the Composer answers, tags the first Line of a two-line reply only, and draws Self's reply as one",
+    { timeout: 120_000 },
+    async () => {
+      // Ergo, which offers `message-tags` and gives each Message an id.
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "reply-to"),
+        "#iirc-reply-to",
+        { start: startErgo }
+      );
+
+      const asker = await connectPeer({
+        caps: ["message-tags", "echo-message"],
+        host: ngircd.host,
+        nick: "asker",
+        port: ngircd.plainPort,
+      });
+
+      const asked = "is the build green";
+
+      try {
+        asker.send(`JOIN ${channel}`);
+        await asker.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("asker!") === true,
+          "the asker's own JOIN"
+        );
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        await page.getByRole("row", { exact: true, name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        asker.send(`PRIVMSG ${channel} :${asked}`);
+
+        // The Ircd's id for the Message, as its echo carries it.
+        const echo = await asker.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === asked,
+          "the echo of the asker's Message"
+        );
+
+        const msgid = echo.tags.get("msgid");
+
+        const askedRow = log.locator("[data-index]", { hasText: asked });
+
+        await askedRow.waitFor();
+
+        const more = askedRow.getByRole("button", { name: "More for the message from asker" });
+
+        await askedRow.hover();
+        await more.waitFor();
+        await more.click();
+        await page.getByRole("menuitem", { name: "Reply" }).waitFor();
+        await placed(page);
+        await screenshot(page, "after-menu-desktop.png");
+        await page.getByRole("menuitem", { name: "Reply" }).click();
+
+        const answering = page.getByRole("group", { name: "Replying to asker" });
+
+        await answering.waitFor();
+
+        // What it answers, without the button that drops it.
+        const quotation = await answering.locator("span").first().textContent();
+        const shown = quotation?.replaceAll(/[\u2066-\u2069]/gu, "");
+        const focused = await composer.evaluate((element) => element === document.activeElement);
+
+        await composer.fill("yes\nall of it");
+        await screenshot(page, "after-composer-desktop.png");
+
+        await composer.press("Enter");
+
+        const first = await asker.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "yes",
+          "Self's first Line"
+        );
+
+        const second = await asker.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "all of it",
+          "Self's second Line"
+        );
+
+        const replyRow = log.locator("[data-index]", {
+          has: page.getByText("yes", { exact: true }),
+        });
+
+        const goes = replyRow.getByRole("button", { name: "Go to the message this answers" });
+
+        await goes.waitFor();
+
+        const drawn = await goes.textContent();
+        const quoted = drawn?.replaceAll(/[\u2066-\u2069]/gu, "");
+        const after = await answering.count();
+
+        await screenshot(page, "after-sent-desktop.png");
+
+        // A phone, touched, where every Message that can be answered shows its menu's button.
+        const touch = await browser.newContext({
+          hasTouch: true,
+          isMobile: true,
+          viewport: { height: 844, width: 390 },
+        });
+
+        const phone = await touch.newPage();
+
+        await phone.goto(base);
+        await phone.getByLabel("Key").fill(key);
+        await phone.getByRole("button", { name: "Sign in" }).click();
+        await phone
+          .getByRole("button", { name: /^Networks/u })
+          .first()
+          .tap();
+        await phone.getByRole("row", { exact: true, name: channel }).tap();
+
+        const onPhone = phone.getByRole("log", { name: channel });
+
+        const touched = onPhone
+          .locator("[data-index]", { hasText: asked })
+          .first()
+          .getByRole("button", { name: "More for the message from asker" });
+
+        await onPhone.getByRole("button", { name: "Go to the message this answers" }).waitFor();
+        await screenshot(phone, "after-sent-phone.png");
+        await touched.tap();
+        await phone.getByRole("menuitem", { name: "Reply" }).waitFor();
+        await placed(phone);
+        await screenshot(phone, "after-menu-phone.png");
+        await phone.getByRole("menuitem", { name: "Reply" }).tap();
+        await phone.getByRole("group", { name: "Replying to asker" }).waitFor();
+        await screenshot(phone, "after-composer-phone.png");
+
+        expect({
+          after,
+          first: first.tags.get("+reply"),
+          focused,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          quoted,
+          second: second.tags.has("+reply"),
+          shown,
+        }).toStrictEqual({
+          after: 0,
+          first: msgid,
+          focused: true,
+          problems: [],
+          quoted: `\u21B3 asker: ${asked}`,
+          second: false,
+          shown: `\u21B3 asker: ${asked}`,
+        });
+        expect(msgid).toBeDefined();
+      } finally {
+        asker.close();
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

@@ -1,5 +1,6 @@
 // The class names in line.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly action: string;
   readonly activity: string;
   readonly answered: string;
   readonly context: string;
@@ -11,7 +12,10 @@ declare const styles: {
   readonly highlight: string;
   readonly line: string;
   readonly marker: string;
+  readonly menu: string;
+  readonly menued: string;
   readonly message: string;
+  readonly more: string;
   readonly new: string;
   readonly newText: string;
   readonly nick0: string;
@@ -30,6 +34,7 @@ declare const styles: {
   readonly nick7: string;
   readonly nick8: string;
   readonly nick9: string;
+  readonly popover: string;
   readonly quote: string;
   readonly refused: string;
   readonly repeated: string;
