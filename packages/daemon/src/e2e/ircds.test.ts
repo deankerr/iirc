@@ -994,7 +994,8 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
   }, 90_000);
 
   // Ergo answers a NickServ login with a NOTICE alone, with no `900` and no `+r`, so the
-  // Channel waits out the bound, and Self's account is known only from its own `extended-join`.
+  // Channel waits out the bound, and Self's account is known only from the `ACCOUNT` that
+  // `account-notify` sends of Self.
   it("logs in by telling NickServ, joins after the bound, and never journals the Credential", async () => {
     const password = "a-service-password-only-the-vault-holds";
 
