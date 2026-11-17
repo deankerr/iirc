@@ -1889,7 +1889,15 @@ describe("the web frontend on iirc daemon --web", () => {
         await editor.fill("iirc,iirc_");
         await editor.press("Enter");
         await nicks.getByText("iirc,iirc_", { exact: true }).waitFor();
-        const afterNicks = await configurationOf();
+
+        // The change shows before the Daemon has it, so wait until the Daemon reports it.
+        const nicksInForce = async () => {
+          const inForce = await configurationOf();
+
+          return inForce.configuration.nicks;
+        };
+
+        await expect.poll(nicksInForce, { timeout: 10_000 }).toStrictEqual(["iirc", "iirc_"]);
 
         // Delete asks first, then sets an option back to what a new Network starts with.
         await page.getByRole("searchbox", { name: "Filter options" }).fill("*.realname");
@@ -1927,14 +1935,12 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           channels: afterPart.configuration.channels,
           joined: joined.params[0],
-          nicks: afterNicks.configuration.nicks,
           parted: parted.params[0],
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           violations,
         }).toStrictEqual({
           channels: [],
           joined: "#iirc",
-          nicks: ["iirc", "iirc_"],
           parted: "#iirc",
           problems: [],
           violations: "",
