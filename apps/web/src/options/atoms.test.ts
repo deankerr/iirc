@@ -268,6 +268,26 @@ describe("the options", () => {
     });
   });
 
+  it("ignores and unignores by the casemapping the Daemon reports, saying when a mask is not there", async () => {
+    const { daemon, inForce, notice, type } = await configuring();
+
+    daemon.known.set("libera", { chantypes: "#", declared: "ascii" });
+    await type("/ignore p[a]");
+    await type("/ignore P{A}");
+    const ignored = inForce()?.configuration.ignores;
+
+    await type("/unignore P[A]");
+    const unignored = inForce()?.configuration.ignores;
+
+    await type("/unignore nobody");
+
+    expect({ ignored, missing: notice(), unignored }).toStrictEqual({
+      ignored: ["p[a]!*@*", "P{A}!*@*"],
+      missing: "nobody!*@* is not among network.libera.ignores.",
+      unignored: ["P{A}!*@*"],
+    });
+  });
+
   it("holds the prompt's value, closes the prompt, and wipes the value once the Vault answered", async () => {
     const { daemon, inForce, registry, type } = await configuring();
     const value = Redacted.make("a-channel-key");

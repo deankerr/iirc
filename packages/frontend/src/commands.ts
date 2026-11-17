@@ -17,6 +17,8 @@ import type {
 import type { OwnerOptionName } from "@iirc/api/options";
 import type { PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
 import type { Casemapping } from "@iirc/protocol/casemapping";
+import { IgnoreMask } from "@iirc/protocol/mask";
+import { Schema } from "effect";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
@@ -838,6 +840,41 @@ const closeArguments = (args: string, focus: Focus): Parsed<string> => {
       )
     : parsed(focus.name);
 };
+
+const ignoreUsage = "/ignore [<nick|mask>]";
+const unignoreUsage = "/unignore <nick|mask>";
+
+/**
+ * The mask `/ignore` or `/unignore` was given: a bare nick as `nick!*@*`, or a mask as
+ * written, parsed as the Client parses one.
+ * @param usage - The command's usage.
+ * @returns The parser.
+ */
+const ignoredMask =
+  (usage: string) =>
+  (args: string): Parsed<IgnoreMask> => {
+    const given = args.trim();
+
+    if (given === "" || /\s/u.test(given)) {
+      return invalid(`Give one nick or mask. ${usage}`);
+    }
+
+    const text = given.includes("!") || given.includes("@") ? given : `${given}!*@*`;
+
+    return Schema.is(IgnoreMask)(text)
+      ? parsed(text)
+      : invalid(
+          `${given} is neither a nick nor a mask of nick!user@host, with each part given, at most 255 characters, and no space or comma.`
+        );
+  };
+
+/**
+ * What `/ignore` was given: a mask to ignore, or nothing, which lists those ignored.
+ * @param args - The text after `/ignore`.
+ * @returns The mask, or `undefined` for none.
+ */
+const ignoreArguments = (args: string): Parsed<IgnoreMask | undefined> =>
+  args.trim() === "" ? parsed(undefined) : ignoredMask(ignoreUsage)(args);
 
 /**
  * The Channels `/part` was given, or the one in focus.
@@ -2302,6 +2339,36 @@ export const commands: readonly Command[] = [
     name: "part",
     parse: partArguments,
     usage: "/part [#channel[,#channel…]]",
+    when: live,
+  }),
+  command({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Hide what a User says and does on the open Timeline's Network, by a nick or a nick!user@host mask, or list the masks ignored there.",
+    id: "ignores.ignore",
+    intents: (mask: IgnoreMask | undefined, focus) => [
+      mask === undefined
+        ? { _tag: "OpenOptions", filter: `network.${focus.network}.ignores` }
+        : { _tag: "Configure", edit: { _tag: "Ignore", mask }, network: focus.network },
+    ],
+    name: "ignore",
+    parse: ignoreArguments,
+    usage: ignoreUsage,
+    when: live,
+  }),
+  command({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Show again what a User says and does on the open Timeline's Network, by the nick or mask ignored.",
+    id: "ignores.unignore",
+    intents: (mask: IgnoreMask, focus) => [
+      { _tag: "Configure", edit: { _tag: "Unignore", mask }, network: focus.network },
+    ],
+    name: "unignore",
+    parse: ignoredMask(unignoreUsage),
+    usage: unignoreUsage,
     when: live,
   }),
   command({

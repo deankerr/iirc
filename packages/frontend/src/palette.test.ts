@@ -205,6 +205,8 @@ describe("the palette's entries", () => {
         "command:say.notice",
         "command:channels.join",
         "command:channels.part",
+        "command:ignores.ignore",
+        "command:ignores.unignore",
         "command:timeline.close",
         "command:act.topic",
         "command:act.kick",

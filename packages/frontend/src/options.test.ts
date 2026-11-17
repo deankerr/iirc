@@ -3,6 +3,7 @@ import { OwnerOptions, ownerDefaults, ownerOptionNames } from "@iirc/api/options
 import type { OwnerInForce } from "@iirc/api/options";
 import { FontFamily, UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -640,6 +641,10 @@ const join = (channels: readonly string[], chantypes: string | undefined) => {
     : after.message;
 };
 
+const ignore = (text: string): Edit => ({ _tag: "Ignore", mask: IgnoreMask.make(text) });
+
+const unignore = (text: string): Edit => ({ _tag: "Unignore", mask: IgnoreMask.make(text) });
+
 describe("editing", () => {
   it("sets each option to what it shows and gets the same Configuration back", () => {
     const again = optionsOf(libera, full, undefined).flatMap((option) =>
@@ -835,6 +840,37 @@ describe("editing", () => {
     });
   });
 
+  it("ignores a mask once, and unignores it compared as the Network folds it", () => {
+    const ascii = { casemapping: "ascii", chantypes: "#" } as const;
+    const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
+    const held = valueOf(set(libera, plain, ["ignores"], "p[a]!*@*,*!*@spam.example"));
+
+    expect({
+      added: valueOf(apply(libera, plain, ignore("peer!*@*"), rfc)).ignores,
+      again: valueOf(apply(libera, held, ignore("P{A}!*@*"), rfc)).ignores,
+      apart: valueOf(apply(libera, held, ignore("P{A}!*@*"), ascii)).ignores,
+      folded: valueOf(apply(libera, held, unignore("P{A}!*@*"), rfc)).ignores,
+      missing: apply(libera, held, unignore("nobody!*@*"), rfc),
+      notFolded: apply(libera, held, unignore("p{a}!*@*"), ascii),
+      // Until a Network declares a mapping, masks fold by rfc1459, as the Client folds them.
+      unknown: valueOf(apply(libera, held, unignore("P{A}!*@*"))).ignores,
+    }).toStrictEqual({
+      added: ["peer!*@*"],
+      again: ["p[a]!*@*", "*!*@spam.example"],
+      apart: ["p[a]!*@*", "*!*@spam.example", "P{A}!*@*"],
+      folded: ["*!*@spam.example"],
+      missing: {
+        _tag: "Invalid",
+        message: "nobody!*@* is not among network.libera.ignores.",
+      },
+      notFolded: {
+        _tag: "Invalid",
+        message: "p{a}!*@* is not among network.libera.ignores.",
+      },
+      unknown: ["*!*@spam.example"],
+    });
+  });
+
   it("never merges or parts two Channels an ascii Network tells apart", () => {
     const ascii = { casemapping: "ascii", chantypes: "#" } as const;
     const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
@@ -909,6 +945,16 @@ const setTo = (line: string) => {
 };
 
 const configure = (edit: Edit): readonly Intent[] => [{ _tag: "Configure", edit, network: libera }];
+
+const configureMask = (_tag: "Ignore" | "Unignore", text: string) => ({
+  _tag: "Parsed",
+  value: configure({ _tag, mask: IgnoreMask.make(text) }),
+});
+
+const neither = (text: string) => ({
+  _tag: "Invalid",
+  message: `${text} is neither a nick nor a mask of nick!user@host, with each part given, at most 255 characters, and no space or comma.`,
+});
 
 describe("the commands", () => {
   it("open the options view with /set alone or a pattern, and set or unset an option", () => {
@@ -1065,6 +1111,32 @@ describe("the commands", () => {
         value: configure({ _tag: "PartTimeline", key: "#iirc", name: "#iirc" }),
       },
       partNamed: { _tag: "Parsed", value: configure({ _tag: "Part", channels: ["#b"] }) },
+    });
+  });
+
+  it("ignore a nick as nick!*@*, or a mask, refuse what is neither, and list the ignores", () => {
+    expect({
+      bad: read("/ignore peer!x", inChannel),
+      comma: read("/ignore a,b", inChannel),
+      list: read("/ignore", inChannel),
+      mask: read("/ignore *!*@spam.example", inChannel),
+      nick: read("/ignore Peer", inChannel),
+      nowhere: read("/ignore peer"),
+      two: read("/ignore a b", inChannel),
+      unignore: read("/unignore Peer", inChannel),
+      unignoreBad: read("/unignore @host", inChannel),
+      unignoreMask: read("/unignore *!*@spam.example", inChannel),
+    }).toStrictEqual({
+      bad: neither("peer!x"),
+      comma: neither("a,b"),
+      list: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "network.libera.ignores" }] },
+      mask: configureMask("Ignore", "*!*@spam.example"),
+      nick: configureMask("Ignore", "Peer!*@*"),
+      nowhere: { _tag: "Invalid", message: "Open a Timeline first." },
+      two: { _tag: "Invalid", message: "Give one nick or mask. /ignore [<nick|mask>]" },
+      unignore: configureMask("Unignore", "Peer!*@*"),
+      unignoreBad: neither("@host"),
+      unignoreMask: configureMask("Unignore", "*!*@spam.example"),
     });
   });
 

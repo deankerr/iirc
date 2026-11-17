@@ -418,6 +418,8 @@ describe("reading a line", () => {
       "channels.join": "Required",
       "channels.part": "Optional",
       "composer.focus": "None",
+      "ignores.ignore": "Optional",
+      "ignores.unignore": "Required",
       "lookup.bans": "Optional",
       "lookup.exceptions": "Optional",
       "lookup.invexes": "Optional",
