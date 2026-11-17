@@ -184,33 +184,115 @@ describe("asking who is in a Channel on joining it", () => {
     expect.assertions(0);
   });
 
-  it("asks the next once one goes unanswered for 30 s, and reads nothing late", () => {
-    const two = configured({ channels: [{ name: "#a" }, { name: "#b" }], whoOnJoin: true });
+  it.each([
+    [
+      "WHOX",
+      whox,
+      ">> WHO #a %tcuhnfar,152",
+      ">> WHO #b %tcuhnfar,152",
+      "<< :irc.test 354 iirc 152 #a ~op op.test op G acct :Op",
+    ],
+    [
+      "a plain WHO",
+      floorIsupport,
+      ">> WHO #a",
+      ">> WHO #b",
+      "<< :irc.test 352 iirc #a ~op op.test irc.test op G :0 Op",
+    ],
+  ])(
+    "asks the next once one goes unanswered for 30 s, and still reads the late %s answer",
+    (_name, isupport, first, next, late) => {
+      const two = configured({ channels: [{ name: "#a" }, { name: "#b" }], whoOnJoin: true });
 
-    const played = play(client, {
-      configuration: two,
+      const played = play(client, {
+        configuration: two,
+        transcript: [
+          joining(two, isupport),
+          echo("#a", { mode: [">> MODE #a"], who: [first] }),
+          echo("#b", {}),
+          lines(
+            "<< :irc.test 324 iirc #a +nt",
+            ">> MODE #b",
+            "<< :irc.test 324 iirc #b +nt",
+            "+29999ms",
+            "+1ms",
+            next,
+            late,
+            "<< :irc.test 315 iirc #a :End of WHO list",
+            "?? channel-learned channel:#a"
+          ),
+        ],
+      });
+
+      expect(userOf(played, "op")?.away).toMatchObject({ _tag: "Known", value: { message: "" } });
+      // The query of #b still waits, and #a is never asked again.
+      expect(client.inspect(played.state).states.who).toBe("Asking");
+    }
+  );
+
+  it("leaves an error naming the Channel to the Owner's action, though the WHO was sent first", () => {
+    play(client, {
+      configuration: base,
       transcript: [
-        joining(two),
-        echo("#a", { mode: [">> MODE #a"], who: [">> WHO #a"] }),
-        echo("#b", {}),
+        registered(base),
+        lines("!! configure +#iirc", ">> JOIN #iirc"),
+        echo("#iirc", { mode: [">> MODE #iirc"], who: [">> WHO #iirc"] }),
         lines(
-          "<< :irc.test 324 iirc #a +nt",
-          ">> MODE #b",
-          "<< :irc.test 324 iirc #b +nt",
-          "+29999ms",
-          "+1ms",
-          ">> WHO #b",
-          "<< :irc.test 352 iirc #a ~op op.test irc.test op G :0 Op"
+          "<< :irc.test 324 iirc #iirc +nt",
+          "!! topic #iirc :new",
+          ">> TOPIC #iirc new",
+          "<< :irc.test 482 iirc #iirc :You're not channel operator",
+          "?? refused i1 Rejected 482 topic=#iirc in=channel:#iirc"
         ),
       ],
     });
 
-    expect(userOf(played, "op")?.away).toStrictEqual({ _tag: "Unknown" });
-    expect(client.inspect(played.state).states.who).toBe("Asking");
+    expect.assertions(0);
+  });
+
+  it("leaves an error naming the Channel to the Owner's Lookup, though the WHO was sent first", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        registered(base),
+        lines("!! configure +#iirc", ">> JOIN #iirc"),
+        echo("#iirc", { mode: [">> MODE #iirc"], who: [">> WHO #iirc"] }),
+        lines(
+          "<< :irc.test 324 iirc #iirc +nt",
+          "!! bans #iirc",
+          ">> MODE #iirc +b",
+          "<< :irc.test 442 iirc #iirc :You're not on that channel",
+          "?? looked-up i1 bans=#iirc failed=442"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("still reads its answer after an error that names its Channel, sent for a Say", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: whox }),
+        lines("!! configure +#iirc", ">> JOIN #iirc"),
+        echo("#iirc", { mode: [">> MODE #iirc"], who: [">> WHO #iirc %tcuhnfar,152"] }),
+        lines(
+          "<< :irc.test 324 iirc #iirc +nt",
+          "!! say #iirc :hello",
+          ">> PRIVMSG #iirc hello",
+          "<< :irc.test 404 iirc #iirc :Cannot send to channel",
+          "<< :irc.test 354 iirc 152 #iirc ~op op.test op G acct :Op",
+          "<< :irc.test 315 iirc #iirc :End of WHO list",
+          "?? channel-learned channel:#iirc"
+        ),
+      ],
+    });
+
+    expect(userOf(played, "op")?.account).toMatchObject({ _tag: "Known", value: "acct" });
   });
 
   it.each([
-    ["no such Channel", "<< :irc.test 403 iirc #A :No such channel"],
     ["an unknown command", "<< :irc.test 421 iirc who :Unknown command"],
     ["too few parameters", "<< :irc.test 461 iirc WHO :Not enough parameters"],
     ["a FAIL", "<< :irc.test FAIL WHO TOO_MANY_REQUESTS #a :Slow down"],

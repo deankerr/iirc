@@ -80,9 +80,10 @@ import { onNow, openOf, sessionOf } from "./views.ts";
 import { followSays, named, routeActivity, routeMessage, saidWhere } from "./where.ts";
 import {
   askWho,
-  whoAnswered,
-  whoByCommand,
+  whoEnded,
+  whoNamed,
   whoQueryOver,
+  whoRefused,
   whoReply,
   whoxReply,
 } from "./who-query.ts";
@@ -798,6 +799,7 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
       });
     },
   ],
+  ["315", whoEnded],
   ["352", whoReply],
   ["354", whoxReply],
 ]);
@@ -836,52 +838,32 @@ const rejection = (line: Line): string | undefined => {
   return command === "FAIL" ? (line.params[1] ?? command) : undefined;
 };
 
-/** One of the Client's own queries a numeric answers: when it was sent, and how it ends. */
-interface OwnQuery {
-  readonly order: number;
-  readonly over: (run: Run) => void;
-}
-
-/**
- * The older of the Client's own `MODE` and `WHO` queries that a numeric answers.
- * @param run - The step.
- * @param line - The Line, live, and tied to nothing by label.
- * @returns The query, or `undefined` if it answers neither.
- */
-const ownQuery = (run: Run, line: Line): OwnQuery | undefined => {
-  const modes = queryAnswered(run, line);
-  const who = whoAnswered(run, line);
-
-  if (who !== undefined && (modes === undefined || who.order < modes.order)) {
-    return { order: who.order, over: whoQueryOver };
-  }
-
-  return modes === undefined ? undefined : { order: modes.order, over: modesQueryOver };
-};
-
 /**
  * Gives a numeric tied to nothing by label to the oldest of what waits for it on the
  * floor: a Lookup whose reply it can be part of, an action's Line whose error it names,
- * the Client's own `MODE` or `WHO` query it answers, or the Client's own ask for a nick
- * it refuses, by the order they were sent. The ask settles no intent.
+ * the Client's own `MODE` query it answers, or the Client's own ask for a nick it refuses,
+ * by the order they were sent. The ask settles no intent. A `421` or `461` naming `WHO`
+ * that none of them takes refuses the Client's own `WHO` query, which waits among none.
  * @param run - The step.
  * @param line - The Line, live, outside any batch, and with no label.
  */
 const floor = (run: Run, line: Line): void => {
   const looking = floorLookup(run, line);
   const tied = tiedAction(run, line);
-  const query = ownQuery(run, line);
+  const query = queryAnswered(run, line);
   const asked = reclaimRefused(run, line);
   const first = Math.min(looking?.order ?? Infinity, tied?.order ?? Infinity);
 
   if (asked !== undefined && asked.order < Math.min(first, query?.order ?? Infinity)) {
     reclaimOver(run);
   } else if (query !== undefined && query.order < first) {
-    query.over(run);
+    modesQueryOver(run);
   } else if (looking !== undefined && (tied === undefined || looking.order < tied.order)) {
     collectFloor(run, looking, line);
   } else if (tied !== undefined) {
     tieRejection(run, line, tied);
+  } else if (whoRefused(run, line)) {
+    whoQueryOver(run);
   }
 };
 
@@ -937,28 +919,29 @@ const latestSayWhere = (run: Run, command: string): readonly Where[] | undefined
 };
 
 /**
- * Gives a standard reply on the floor to the Client's own `MODE` or `WHO` query, when it
- * names that command and the query was sent before any Lookup or action it could answer:
- * a `FAIL` ends the query, and the next Channel is asked. The query is News of nothing, so
- * the reply is shown in the Network's own Timeline.
+ * Gives a standard reply on the floor to the Client's own `MODE` query, when it names
+ * `MODE` and the query was sent before any Lookup or action it could answer, or to its
+ * own `WHO` query, when it names `WHO` and no Lookup or action could take it: a `FAIL`
+ * ends the query, and the next Channel is asked. The query is News of nothing, so the
+ * reply is shown in the Network's own Timeline.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
  * @param reply - The standard reply.
  * @returns Whether the query took it.
  */
 const toQuery = (run: Run, arrival: Arrival, reply: StandardReply): boolean => {
-  const modes = queryByCommand(run, reply.command);
-  const query = modes ?? whoByCommand(run, reply.command);
+  const query = queryByCommand(run, reply.command);
   const looking = lookupByCommand(run, reply);
   const acting = actionByCommand(run, reply.command);
   const first = Math.min(looking?.order ?? Infinity, acting?.order ?? Infinity);
+  const who = first === Infinity && whoNamed(run, reply.command);
 
-  if (query === undefined || query.order > first) {
+  if (!who && (query === undefined || query.order > first)) {
     return false;
   }
 
   if (reply.kind === "FAIL") {
-    if (modes === undefined) {
+    if (who) {
       whoQueryOver(run);
     } else {
       modesQueryOver(run);

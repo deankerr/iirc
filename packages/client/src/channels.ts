@@ -752,7 +752,7 @@ const refold = (run: Run): void => {
   updateOpen(run, (open) => ({
     ...open,
     users: usersFrom(once(usersOf(open.users).map(([, seen]) => [fold(seen.nick), seen] as const))),
-    whoAsked: once([...open.whoAsked.values()].map((name) => [fold(name), name] as const)),
+    whoAsked: once([...open.whoAsked.values()].map((asked) => [fold(asked.name), asked] as const)),
   }));
 };
 

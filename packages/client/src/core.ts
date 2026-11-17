@@ -81,7 +81,7 @@ import {
   sessionOf,
 } from "./views.ts";
 import { routeOurs } from "./where.ts";
-import { whoQueryOver, whoUnsent } from "./who-query.ts";
+import { whoQueryExpired, whoUnsent } from "./who-query.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
 const lagToken = "iirc";
@@ -663,7 +663,7 @@ const fire = (run: Run, purpose: Purpose): void => {
     }
 
     case "WhoQuery": {
-      whoQueryOver(run);
+      whoQueryExpired(run);
       break;
     }
 
