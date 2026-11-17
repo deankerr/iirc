@@ -73,7 +73,7 @@ The core decides and this package draws and does the I/O.
   | Loop | Does |
   | --- | --- |
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
-  | `uiSync` | Follows the options under `ui` |
+  | `uiSync` | Follows the options under `ui`, which the shell waits on after each sign-in, and forgets them on signing out |
   | `ownerSync` | Follows the options under `store`, `uploads`, and `previews` while the options or the Uploads show |
   | `uploadsSync` | Reads the Uploads' first page while a Pane shows the Uploads, again when "Show deleted" is switched, then follows their Changes after it, and after the last one folded in whenever it follows again, and which Uploads' bytes are missing |
   | `channelSync` | Reads the head of each Channel the Sidebar lists, a Pane shows, or whose list a Lookup card is, and the members of each shown, the heads of those no Pane shows two at a time |
