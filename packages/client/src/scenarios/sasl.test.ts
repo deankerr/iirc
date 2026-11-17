@@ -253,7 +253,11 @@ describe("a login that cannot happen", () => {
       ],
     });
 
-    expect(late.steps.at(-1)).toMatchObject({ news: [], outputs: [] });
+    // Its numeric is shown as it came, and nothing else comes of it.
+    expect(late.steps.at(-1)).toMatchObject({
+      news: [{ _tag: "Activity", activity: { _tag: "Numeric", numeric: "906" } }],
+      outputs: [],
+    });
   });
 
   it("aborts when the hold's deadline passes", () => {

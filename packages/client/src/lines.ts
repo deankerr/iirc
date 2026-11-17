@@ -34,7 +34,13 @@ import type { Arrival, Meant } from "./feature.ts";
 import { identified, identify } from "./identify.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
-import { collectFloor, collectLabelled, floorLookup, lookupByCommand } from "./lookups.ts";
+import {
+  collectFloor,
+  collectLabelled,
+  floorLookup,
+  isNumeric,
+  lookupByCommand,
+} from "./lookups.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { askModes, modesQueryOver, queryAnswered, queryByCommand } from "./modes-query.ts";
@@ -42,7 +48,7 @@ import { applyModes, readModes } from "./modes.ts";
 import { isMonitorReply, left, monitorRefused, monitorReply } from "./monitor.ts";
 import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
-import { oper, operAnswered } from "./oper.ts";
+import { answersOper, oper, operAnswered } from "./oper.ts";
 import {
   reclaim,
   reclaimAsked,
@@ -58,6 +64,7 @@ import {
   carryOutRefined,
   nickRefused,
   offered,
+  refusesCap,
   unknownCommand,
   welcomed,
 } from "./registration.ts";
@@ -846,8 +853,9 @@ const rejection = (line: Line): string | undefined => {
  * that none of them takes refuses the Client's own `WHO` query, which waits among none.
  * @param run - The step.
  * @param line - The Line, live, outside any batch, and with no label.
+ * @returns Whether anything took it.
  */
-const floor = (run: Run, line: Line): void => {
+const floor = (run: Run, line: Line): boolean => {
   const looking = floorLookup(run, line);
   const tied = tiedAction(run, line);
   const query = queryAnswered(run, line);
@@ -864,7 +872,68 @@ const floor = (run: Run, line: Line): void => {
     tieRejection(run, line, tied);
   } else if (whoRefused(run, line)) {
     whoQueryOver(run);
+  } else {
+    return false;
   }
+
+  return true;
+};
+
+/**
+ * The numerics never shown as they came, by number alone: those the Client reads into what
+ * it knows with no word to show, those another News already reports, and the message of the
+ * day, which is shown as a whole. A numeric that answers a Lookup or an action is found by
+ * what waits for it, not listed here.
+ *
+ * - `005`: the Ircd's ISUPPORT tokens.
+ * - `305`, `306`: Self is back or away, reported as `AwayChanged`.
+ * - `315`, `352`, `354`: the Client's own `WHO` of a Channel's members.
+ * - `324`, `329`: a Channel's modes and when it was made, the reply to the Client's own `MODE`.
+ * - `331`, `332`, `333`: a Channel's topic, read into the Channel.
+ * - `341`: an invite went out, which settles the Owner's `INVITE`.
+ * - `353`, `366`: a Channel's members, read into the Channel.
+ * - `372`, `375`, `376`: the message of the day.
+ *
+ * What `MONITOR` tells is taken before this always, and what `WATCH` tells while the Client
+ * keeps its list.
+ */
+const unshown: ReadonlySet<string> = new Set([
+  "005",
+  "305",
+  "306",
+  "315",
+  "324",
+  "329",
+  "331",
+  "332",
+  "333",
+  "341",
+  "352",
+  "353",
+  "354",
+  "366",
+  "372",
+  "375",
+  "376",
+]);
+
+/**
+ * Shows a numeric that nothing else reports in the Network's own Timeline, as it came: its
+ * number, and its parameters after the first, which names Self.
+ * @param run - The step.
+ * @param arrival - The numeric, live, and tied to nothing.
+ */
+const reportNumeric = (run: Run, arrival: Arrival): void => {
+  const { command, params } = arrival.line;
+
+  run.news.push({
+    _tag: "Activity",
+    activity: { _tag: "Numeric", numeric: command, params: params.slice(1) },
+    at: arrival.time,
+    id: arrival.id,
+    live: true,
+    where: [{ _tag: "Network" }],
+  });
 };
 
 /**
@@ -1045,6 +1114,54 @@ const standardReply = (run: Run, arrival: Arrival): void => {
 };
 
 /**
+ * Whether a numeric is shown as it came, before it is read: one that answers neither the
+ * `OPER` nor the `CAP LS` the Client sent, and that is not read or reported otherwise.
+ * @param run - The step.
+ * @param line - The Line, live, and taken by nothing on the floor.
+ * @returns Whether it is.
+ */
+const isShown = (run: Run, line: Line): boolean =>
+  isNumeric(line.command) &&
+  !unshown.has(line.command) &&
+  !answersOper(run, line) &&
+  !refusesCap(run, line);
+
+/**
+ * A live protocol Line moves the machines on, and a numeric that nothing takes or reports
+ * is shown as it came.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ * @param raw - Its parameters as bytes, when it is the Line that arrived.
+ * @param taken - Whether it was taken already: collected for a labelled Lookup, or read as
+ * refusing the Client's `MONITOR` or `WATCH`.
+ */
+const liveLine = (
+  run: Run,
+  arrival: Arrival,
+  raw: readonly RawParam[] | undefined,
+  taken: boolean
+): void => {
+  const { line } = arrival;
+
+  // A numeric no label tied goes to whichever was sent first of the Lookup and the
+  // action's Line it names.
+  const shown =
+    !taken &&
+    arrival.answers === undefined &&
+    arrival.batch === undefined &&
+    !line.tags.has("label") &&
+    !floor(run, line) &&
+    isShown(run, line);
+
+  // History is reported, and moves no machine: it says what was, not what is.
+  protocolLine(run, line, raw);
+
+  if (shown) {
+    reportNumeric(run, arrival);
+  }
+};
+
+/**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
@@ -1061,9 +1178,7 @@ export const interpret = (
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
   // A refusal of `MONITOR` or `WATCH` itself turns it off for the Connection, whatever else it answers.
-  if (arrival.live) {
-    monitorRefused(run, line);
-  }
+  const unmonitored = arrival.live && monitorRefused(run, line);
 
   if (arrival.answers !== undefined && reply !== undefined) {
     refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
@@ -1086,18 +1201,6 @@ export const interpret = (
     // What `MONITOR` or `WATCH` tells answers no Lookup or action, whatever nick it names.
     monitorReply(run, arrival);
   } else if (arrival.live) {
-    // A numeric no label tied goes to whichever was sent first of the Lookup and the
-    // action's Line it names.
-    if (
-      !labelled &&
-      arrival.answers === undefined &&
-      arrival.batch === undefined &&
-      !line.tags.has("label")
-    ) {
-      floor(run, line);
-    }
-
-    // History is reported, and moves no machine: it says what was, not what is.
-    protocolLine(run, line, raw);
+    liveLine(run, arrival, raw, labelled || unmonitored);
   }
 };

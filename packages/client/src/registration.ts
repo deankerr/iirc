@@ -859,15 +859,24 @@ export const capLine = (run: Run, line: Line): void => {
 };
 
 /**
+ * Whether a `421` refuses the `CAP LS` registration sent, before it is read.
+ * @param run - The step.
+ * @param line - The `421`.
+ * @returns Whether it does.
+ */
+export const refusesCap = (run: Run, line: Line): boolean =>
+  line.command === "421" &&
+  openOf(run.state)?.caps._tag === "Listing" &&
+  upperCaseAscii(line.params[1] ?? "") === "CAP";
+
+/**
  * The Ircd answered `CAP` with `421`: it has no cap negotiation, and registration goes on
  * with `NICK` and `USER`.
  * @param run - The step.
  * @param line - The `421`.
  */
 export const unknownCommand = (run: Run, line: Line): void => {
-  const open = openOf(run.state);
-
-  if (open?.caps._tag === "Listing" && upperCaseAscii(line.params[1] ?? "") === "CAP") {
+  if (refusesCap(run, line)) {
     setCaps(run, { _tag: "None" });
     absentOff(run);
   }

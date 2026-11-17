@@ -529,6 +529,33 @@ describe("lines", () => {
     ]).toStrictEqual(["-->", "<--", "<--", "<--", "--", "--", "--", "--", undefined, "a Message"]);
   });
 
+  it("marks a numeric by its number, and draws its parameters as said text with links", () => {
+    const numeric = activity({
+      _tag: "Numeric",
+      numeric: "251",
+      params: ["There are 3 users", "\u0002see\u0002 https://example.test/x"],
+    });
+
+    const line = lineOf(numeric);
+
+    expect(line._tag === "Description" && [line.marker, line.tone]).toStrictEqual([
+      "251",
+      "Numeric",
+    ]);
+    expect(line._tag === "Description" && line.parts).toStrictEqual([
+      {
+        _tag: "Said",
+        inlines: formatted("There are 3 users \u0002see\u0002 https://example.test/x"),
+      },
+    ]);
+    expect(
+      line._tag === "Description" &&
+        line.parts.some(
+          (part) => part._tag === "Said" && part.inlines.some((inline) => inline._tag === "Link")
+        )
+    ).toBeTruthy();
+  });
+
   it("describes each Activity in a few words", () => {
     const described = [
       activity({ _tag: "Joined", channel: "#iirc", nick: "peer" }),

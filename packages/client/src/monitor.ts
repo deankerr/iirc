@@ -804,8 +804,9 @@ export const monitorReply = (run: Run, arrival: Arrival): void => {
  * and nothing is known of the nicks it watched.
  * @param run - The step.
  * @param line - The Line.
+ * @returns Whether it refused it.
  */
-export const monitorRefused = (run: Run, line: Line): void => {
+export const monitorRefused = (run: Run, line: Line): boolean => {
   const [first, second] = line.params;
   const named = line.command === "FAIL" ? first : second;
 
@@ -818,13 +819,15 @@ export const monitorRefused = (run: Run, line: Line): void => {
     upperCaseAscii(named) === monitoring.command;
 
   if (!refuses) {
-    return;
+    return false;
   }
 
   const { watched } = monitoring;
 
   changeMonitoring(run, () => ({ ...unmonitored, off: true }));
   pruneUsers(run, [...watched.keys()]);
+
+  return true;
 };
 
 /**

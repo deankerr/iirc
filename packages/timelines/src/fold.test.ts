@@ -413,6 +413,32 @@ describe("an invitation", () => {
   });
 });
 
+const numeric = (live: boolean): News => ({
+  _tag: "Activity",
+  activity: { _tag: "Numeric", numeric: "251", params: ["There are 3 users"] },
+  at: known(t0),
+  id: unknown,
+  live,
+  where: [network],
+});
+
+describe("a numeric", () => {
+  it.each([true, false])(
+    "is an item in the Network's Timeline with no level, so it never counts, live %s",
+    (live) => {
+      const { changes } = fold([happened(1, [numeric(live)])]);
+
+      expect(
+        ofTag(changes, "Added").map(({ content, level, timeline }) => [
+          content._tag === "Activity" && content.activity._tag,
+          timeline,
+          level,
+        ])
+      ).toStrictEqual([["Numeric", timelineIdOf(1, 0, 0), undefined]]);
+    }
+  );
+});
+
 const readMarker = (where: Marked, read: Instant): News => ({
   _tag: "ReadMarker",
   read,

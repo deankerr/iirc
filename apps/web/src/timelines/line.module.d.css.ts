@@ -34,6 +34,7 @@ declare const styles: {
   readonly nick7: string;
   readonly nick8: string;
   readonly nick9: string;
+  readonly numeric: string;
   readonly popover: string;
   readonly quote: string;
   readonly refused: string;

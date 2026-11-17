@@ -86,6 +86,39 @@ const accounts = (page: { readonly members: readonly Member[] }) =>
     ])
   );
 
+// The Network's own Timeline, as the Owner reads it, and its Numeric items in order.
+const networkTimeline = (api: Api) =>
+  Effect.gen(function* () {
+    const listed = yield* api.timelines.list({ params: { network }, query: {} });
+    const timeline = listed.timelines.find((one) => one.kind === "Network");
+
+    if (timeline === undefined) {
+      return yield* Effect.die("the Network's Timeline was not listed");
+    }
+
+    const window = yield* api.timelines.window({ params: { timeline: timeline.id }, query: {} });
+
+    return {
+      items: window.items.flatMap((item) =>
+        item.content._tag === "Activity" && item.content.activity._tag === "Numeric"
+          ? [
+              {
+                level: item.level,
+                numeric: item.content.activity.numeric,
+                params: item.content.activity.params,
+                sequence: item.sequence,
+              },
+            ]
+          : []
+      ),
+      later: window.later,
+      unread: timeline.unread,
+    };
+  });
+
+const numericsOf = (items: readonly { readonly numeric: string }[]) =>
+  items.map(({ numeric }) => numeric);
+
 const joined = (api: Api) =>
   eventually(api.networks.known({ params: { network } }), (known) =>
     known.channels.some((one) => one.name === channel && one.standing === "Joined")
@@ -780,6 +813,69 @@ describe("ngircd, on the floor", () => {
       resumed: true,
       resumedHasOurs: true,
       sessions: 2,
+    });
+  }, 90_000);
+
+  it("shows the numerics nothing else reports in the Network's Timeline, never unread, and the same after a restart", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+
+        const first = yield* startDaemon({ dataDir }, key);
+
+        yield* first.api.networks.configure({ params: { network }, payload: floor(), query: {} });
+        yield* joined(first.api);
+
+        const before = yield* networkTimeline(first.api);
+
+        yield* first.stop;
+
+        const second = yield* startDaemon({ dataDir }, key);
+
+        // The second Session's own numerics come after the first's, so wait for them.
+        yield* joined(second.api);
+
+        const after = yield* eventually(networkTimeline(second.api), (read) =>
+          read.items.some(({ sequence }) => sequence > (before.items.at(-1)?.sequence ?? 0))
+        );
+
+        yield* second.stop;
+
+        return { after, before };
+      })
+    );
+
+    const { after, before } = result;
+    const welcome = before.items.find(({ numeric }) => numeric === "001");
+    const users = before.items.find(({ numeric }) => numeric === "251");
+
+    // What the second Session adds after the restart, which may or may not begin with a
+    // `433`, as the Ircd may still hold the first Session's nick.
+    const added = numericsOf(after.items.slice(before.items.length));
+
+    // A restart refolds the first Session's numerics as they were, and the second Session
+    // adds its own once, so none is doubled.
+    expect({
+      // The welcome and the count of Users, with the params after the one naming Self.
+      counts: users?.params.map((param) => param.includes("users")),
+      doubled: ["001", "251"].map((numeric) => added.filter((each) => each === numeric).length),
+      // Nothing else reports these, and a Channel's names go to the Channel's own Timeline.
+      hidden: ["005", "353", "366"].filter((numeric) => numericsOf(before.items).includes(numeric)),
+      replayed: after.items.slice(0, before.items.length),
+      unread: [
+        before.items.every(({ level }) => level === null),
+        before.unread.messages,
+        before.unread.highlights,
+      ],
+      welcome: welcome?.params.map((param) => param.includes("iirc")),
+    }).toStrictEqual({
+      counts: [true],
+      doubled: [1, 1],
+      hidden: [],
+      replayed: before.items,
+      unread: [true, 0, 0],
+      welcome: [true],
     });
   }, 90_000);
 });
