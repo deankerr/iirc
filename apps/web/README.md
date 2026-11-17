@@ -118,6 +118,14 @@ The core decides and this package draws and does the I/O.
 - **Every button is one of one family.** `Button`, `ToggleButton`, and `IconButton` come in four variants, bordered, primary, quiet, and as text, and two sizes, regular in a form and small in a bar. A button's height is one line of its text, its padding, and its border, never its container's, and its padding is in `em` and `ch`, so it keeps its shape at any text size. Only the topic, which is its own text cut to the line, and the tree's chevron, which is part of its row, are drawn otherwise.
 - **An icon is a glyph in the UI's font,** named in `src/ui/icon.tsx` and drawn centred in a box as wide as two digits, hidden from assistive technology. A button that shows only an icon is named, and has React Aria's tooltip saying what it does and its key, where the keymap binds one.
 
+### Nothing is drawn before it is known
+
+Every view keeps three rules, and a review holds new work to them:
+
+- **What a view needs is held before it can be opened.** What a view draws as it opens comes from what the page already holds, read as the page started or followed since, never from a read that opening it begins. A read as it opens may bring what is held up to date, never fill it for the first time. The page's first frames are a view too.
+- **A change the Owner makes shows at once.** It is drawn as asked the moment it is asked, derived in the core from what is in force and what is on its way, never kept as a second copy in step by hand. Once the Daemon answers, what it holds wins, and a refusal draws what is in force again and says why. A Message is not such a change: it appears when the Daemon folds it.
+- **A wait that cannot be avoided is drawn as a wait.** What is truly not known yet, such as a Lookup's answer or the topic of a Channel just joined, draws as on its way, or as nothing, never as a default, an empty list, "none", or "not connected", which read as the answer. In the core, not known is a case of its own, such as `Unknown` or `undefined`, and the view never draws it as a default.
+
 ### What this device keeps
 
 Each is in `localStorage`, read once as the page starts and written as best it can be, since storage can be refused.
