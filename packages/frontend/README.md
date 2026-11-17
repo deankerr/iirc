@@ -308,15 +308,18 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 
 ## Completion
 
-Tab completion in the composer, as a reducer. It completes the word that ends at the caret, cycles through candidates, and gives back what was typed on Escape.
+What the composer can complete, as a reducer, and the list it shows above the composer, `listOf`. It completes the word that ends at the caret, moves through the candidates, and gives back what was typed on Escape.
 
-- **Tab is taken only when there is a word to complete,** so the composer is no keyboard trap.
-- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after a `CHANTYPES` character, and otherwise a nick.
+- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, or a Channel after `/join` or `/part`. Only the first line opens it, and `//` never does. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
+- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after `/join `, `/part `, or a `CHANTYPES` character, and otherwise a nick.
+- **Nothing is highlighted while the list only follows what is typed.** Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent.
+- **A command is listed with what its usage says it takes and what it does.**
 - **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, never by a Timeline's name.
-- **A nick is asked of the Daemon's members route, not guessed.** An answer is put in only if the composer still holds the exact text it was asked for.
+- **A nick is asked of the Daemon's members route, not guessed,** and only on Tab. An answer is put in only if the composer still holds the exact text it was asked for.
 - **Who spoke latest comes first,** and Self last.
 - **A nick at the start of a line is followed by `ui.suffix`,** `: ` to start, and anything else by a space.
-- **What is shown is announced** for a screen reader, such as `alex, 1 of 3`.
+- **A list belongs to its place and its draft.** Another place, or a draft changed other than by completion, shows none.
+- **How many it lists is announced** as it opens, such as `3 completions`, for a screen reader, which the list itself tells which is highlighted.
 
 ## Rendering
 

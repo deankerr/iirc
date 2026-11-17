@@ -1,7 +1,7 @@
 /**
- * Tab completion, as atoms: the state the core folds, the commands the composer runs for
- * Tab, Escape, and typing, and `completer`, which asks the Daemon's members route for the
- * nicks the core is waiting on. What completion puts in the composer becomes the draft,
+ * Completion, as atoms: the state the core folds, the commands the composer runs for Tab
+ * and the arrows, Escape, typing, and a candidate picked from its list, and `completer`,
+ * which asks the Daemon's members route for the nicks the core is waiting on. What completion puts in the composer becomes the draft,
  * which stays the one copy of what is typed.
  *
  * @packageDocumentation
@@ -29,7 +29,7 @@ import { optionsState, signedOut } from "../options/atoms.ts";
 import { uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
-import { composerState, edit, placeOf, setComposers } from "./atoms.ts";
+import { composerState, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 
@@ -77,7 +77,7 @@ interface Wanted {
  */
 const chantypesAsked = Atom.make<Wanted | undefined>(undefined).pipe(Atom.keepAlive);
 
-/** Tab, or Shift+Tab, in a composer, with its text and caret. */
+/** Tab, or Shift+Tab, in a composer, with its text and caret, or an arrow while its list is open. */
 export const tab = Atom.fnSync(
   (
     input: {
@@ -111,21 +111,40 @@ export const escapeCompletion = Atom.fnSync((place: Place, get) => {
   completing(get.registry, place, { _tag: "Escaped", place });
 }).pipe(Atom.keepAlive);
 
+/** A candidate picked from a composer's list, as by a tap, while it showed `text`. */
+export const pick = Atom.fnSync(
+  (input: { readonly place: Place; readonly text: string; readonly index: number }, get) => {
+    completing(get.registry, input.place, { _tag: "Picked", ...input });
+  }
+).pipe(Atom.keepAlive);
+
 /**
- * The Owner typed: what was being completed is let go of, and the draft is what they typed,
- * where their selection was if the composer knows it.
+ * The Owner typed: the draft is what they typed, where their selection was if the composer
+ * knows it, and completion follows it, listing what a command's line can be completed
+ * with, and letting go of anything else, its caret at `caret`, or the end.
  */
 export const typed = Atom.fnSync(
   (
     {
+      caret,
       text,
       timeline,
       typing,
-    }: { readonly timeline: Place; readonly text: string; readonly typing?: Typing },
+    }: {
+      readonly timeline: Place;
+      readonly text: string;
+      readonly caret?: number;
+      readonly typing?: Typing;
+    },
     get
   ) => {
-    completing(get.registry, timeline, { _tag: "LetGo" });
-    get.registry.set(edit, typing === undefined ? { text, timeline } : { text, timeline, typing });
+    edited(get.registry, typing === undefined ? { text, timeline } : { text, timeline, typing });
+    completing(get.registry, timeline, {
+      _tag: "Typed",
+      caret: caret ?? text.length,
+      place: timeline,
+      text,
+    });
   }
 ).pipe(Atom.keepAlive);
 

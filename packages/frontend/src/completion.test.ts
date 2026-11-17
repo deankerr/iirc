@@ -11,20 +11,21 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { commands } from "./commands.ts";
 import {
   active,
   announced,
   chantypesWanted,
   completes,
-  cycled,
   initialCompletion,
+  listOf,
   nicksWanted,
   orderNicks,
   reduceCompletion,
   sourcesOf,
   spotAt,
 } from "./completion.ts";
-import type { Completion, CompletionEvent, Sources } from "./completion.ts";
+import type { Completion, CompletionEvent, Shown, Sources } from "./completion.ts";
 import { initialTimelines, reduceTimelines } from "./timelines.ts";
 import type { TimelinesEvent } from "./timelines.ts";
 
@@ -74,31 +75,59 @@ const play = (
   text: string,
   events: readonly (
     | { readonly _tag: "Tab"; readonly backwards?: boolean }
-    | Exclude<CompletionEvent, { readonly _tag: "Tabbed" }>
+    | { readonly _tag: "Type"; readonly text: string }
+    | { readonly _tag: "Pick"; readonly index: number }
+    | Exclude<CompletionEvent, { readonly _tag: "Tabbed" | "Typed" | "Picked" }>
   )[],
   given: Sources = sources
 ): Run => {
   let run: Run = { caret: text.length, state: initialCompletion, text };
 
+  /**
+   * The event as the composer says it, from where it stands.
+   * @param event - The step.
+   * @param now - The text and caret shown, after any typing.
+   * @returns The event.
+   */
+  const said = (event: (typeof events)[number], now: Shown): CompletionEvent => {
+    switch (event._tag) {
+      case "Tab": {
+        return { _tag: "Tabbed", backwards: event.backwards ?? false, place: iirc, ...now };
+      }
+
+      case "Type": {
+        return { _tag: "Typed", place: iirc, ...now };
+      }
+
+      case "Pick": {
+        return { _tag: "Picked", index: event.index, place: iirc, text: now.text };
+      }
+
+      case "Escaped":
+      case "LetGo":
+      case "NicksFailed":
+      case "NicksRead": {
+        return event;
+      }
+
+      default: {
+        return event satisfies never;
+      }
+    }
+  };
+
   for (const event of events) {
-    const step = reduceCompletion(
-      run.state,
-      event._tag === "Tab"
-        ? {
-            _tag: "Tabbed",
-            backwards: event.backwards ?? false,
-            caret: run.caret,
-            place: iirc,
-            text: run.text,
-          }
-        : event,
-      given
-    );
+    const now: Shown =
+      event._tag === "Type"
+        ? { caret: event.text.length, text: event.text }
+        : { caret: run.caret, text: run.text };
+
+    const step = reduceCompletion(run.state, said(event, now), given);
 
     run = {
-      caret: step.edit?.caret ?? run.caret,
+      caret: step.edit?.caret ?? now.caret,
       state: step.state,
-      text: step.edit?.text ?? run.text,
+      text: step.edit?.text ?? now.text,
     };
   }
 
@@ -107,7 +136,21 @@ const play = (
 
 const tab = { _tag: "Tab" } as const;
 const back = { _tag: "Tab", backwards: true } as const;
+const type = (text: string) => ({ _tag: "Type", text }) as const;
 const shown = (run: Run) => [run.text, run.caret];
+
+/**
+ * The names the composer lists, and which is highlighted, or none while no list is open.
+ * @param run - Where the composer stands.
+ * @returns The names and the highlighted one's index, or none.
+ */
+const listed = (run: Run) => {
+  const list = listOf(run.state, iirc, run.text);
+
+  return list === undefined
+    ? undefined
+    : { highlighted: list.highlighted, names: list.candidates.map((one) => one.name) };
+};
 
 describe("the word at the caret", () => {
   it("runs back from the caret to the whitespace before it, and keeps what follows", () => {
@@ -193,14 +236,15 @@ describe("completing", () => {
       announced: announced(answered.state, iirc, answered.text),
       asked: wanted,
       asking: shown(asking),
-      cycled: cycled(answered.state, iirc, answered.text),
+      cycled: listed(answered),
       first: shown(answered),
       requests: asking.state.requests,
     }).toStrictEqual({
-      announced: "alex, 1 of 3",
+      // The list names the one highlighted as it moves, so nothing more is said.
+      announced: "",
       asked: { prefix: "al", request: 1, timeline: iirc },
       asking: ["al", 2],
-      cycled: { candidates: ["alex", "alice", "al"], index: 0 },
+      cycled: { highlighted: 0, names: ["alex", "alice", "al"] },
       first: ["alex: ", 6],
       requests: 1,
     });
@@ -421,6 +465,159 @@ describe("completing", () => {
         }
       )
     );
+  });
+});
+
+describe("the list", () => {
+  it("opens as a draft starts with /, listing the commands, and narrows with each key typed", () => {
+    const all = play("", [type("/")]);
+    const narrowed = play("", [type("/"), type("/m"), type("/me")]);
+    const me = commands.find((one) => one.name === "me");
+
+    expect({
+      // An alias takes what its command does.
+      alias: listOf(play("", [type("/act")]).state, iirc, "/act")?.candidates[0],
+      all: listed(all),
+      allText: shown(all),
+      described: listOf(narrowed.state, iirc, narrowed.text)?.candidates[0],
+      m: listed(play("", [type("/"), type("/m")])),
+      narrowed: listed(narrowed),
+      optional: listOf(play("", [type("/membe")]).state, iirc, "/membe")?.candidates[0],
+    }).toStrictEqual({
+      alias: {
+        _tag: "Command",
+        description: me?.description,
+        name: "/action",
+        takes: "<text>",
+      },
+      all: {
+        highlighted: undefined,
+        names: ["/action", "/me", "/members", "/msg", "/set"],
+      },
+      allText: ["/", 1],
+      described: { _tag: "Command", description: me?.description, name: "/me", takes: "<text>" },
+      m: { highlighted: undefined, names: ["/me", "/members", "/msg"] },
+      narrowed: { highlighted: undefined, names: ["/me", "/members"] },
+      optional: {
+        _tag: "Command",
+        description: commands.find((one) => one.name === "members")?.description,
+        name: "/members",
+        takes: "[on|off]",
+      },
+    });
+  });
+
+  it("lists what a command takes where completion knows it: an option after /set, a Channel after /join or /part", () => {
+    expect({
+      join: listed(play("", [type("/join ")])),
+      joinNarrowed: listed(play("", [type("/JOIN #I")])),
+      leave: listed(play("", [type("/leave &")])),
+      part: listed(play("", [type("/part ")])),
+      secondArgument: listed(play("", [type("/set network.libera.nicks x")])),
+      set: listed(play("", [type("/set ")])),
+      setNarrowed: listed(play("", [type("/set network.libera.r")])),
+      // What completion asks the Daemon for opens only on Tab.
+      whois: listed(play("", [type("/whois pe")])),
+    }).toStrictEqual({
+      join: { highlighted: undefined, names: ["#iirc", "#other", "&local"] },
+      joinNarrowed: { highlighted: undefined, names: ["#iirc"] },
+      leave: { highlighted: undefined, names: ["&local"] },
+      part: { highlighted: undefined, names: ["#iirc", "#other", "&local"] },
+      secondArgument: undefined,
+      set: { highlighted: undefined, names: ["network.libera.nicks", "network.libera.realname"] },
+      setNarrowed: { highlighted: undefined, names: ["network.libera.realname"] },
+      whois: undefined,
+    });
+  });
+
+  it("stays shut for a draft that is no command, one past its first line, or one nothing completes", () => {
+    const asking = play("al", [tab]);
+
+    const typedOver = reduceCompletion(
+      asking.state,
+      { _tag: "Typed", caret: 3, place: iirc, text: "alx" },
+      sources
+    );
+
+    expect({
+      doubled: listed(play("", [type("//m")])),
+      letGoOfAsking: [typedOver.state.phase._tag, nicksWanted(typedOver.state)],
+      midLine: listed(play("", [type("say /m")])),
+      nothing: listed(play("", [type("/zz")])),
+      secondLine: listed(play("", [type("hi\n/m")])),
+      text: listed(play("", [type("hello")])),
+    }).toStrictEqual({
+      doubled: undefined,
+      letGoOfAsking: ["Idle", undefined],
+      midLine: undefined,
+      nothing: undefined,
+      secondLine: undefined,
+      text: undefined,
+    });
+  });
+
+  it("moves with Tab and Shift+Tab, writing the one highlighted into the draft, and Escape gives back what was typed", () => {
+    const forth = play("", [type("/m"), tab]);
+    const twice = play("", [type("/m"), tab, tab]);
+    const backFirst = play("", [type("/m"), back]);
+    const wrapped = play("", [type("/m"), tab, back]);
+    const escaped = play("", [type("/m"), tab, tab, { _tag: "Escaped", place: iirc }]);
+    const closed = play("", [type("/m"), { _tag: "Escaped", place: iirc }]);
+
+    expect({
+      backFirst: [shown(backFirst), listed(backFirst)?.highlighted],
+      closed: [shown(closed), listed(closed)],
+      escaped: [shown(escaped), listed(escaped)],
+      forth: [shown(forth), listed(forth)],
+      twice: [shown(twice), listed(twice)?.highlighted],
+      wrapped: [shown(wrapped), listed(wrapped)?.highlighted],
+    }).toStrictEqual({
+      backFirst: [["/msg ", 5], 2],
+      closed: [["/m", 2], undefined],
+      escaped: [["/m", 2], undefined],
+      forth: [["/me ", 4], { highlighted: 0, names: ["/me", "/members", "/msg"] }],
+      twice: [["/members ", 9], 1],
+      wrapped: [["/msg ", 5], 2],
+    });
+  });
+
+  it("writes a candidate picked from the list into the draft, highlighted", () => {
+    const picked = play("", [type("/m"), { _tag: "Pick", index: 1 }]);
+    const open = play("", [type("/m")]);
+
+    const stale = reduceCompletion(
+      open.state,
+      { _tag: "Picked", index: 1, place: iirc, text: "/mx" },
+      sources
+    );
+
+    expect({
+      picked: [shown(picked), listed(picked)?.highlighted],
+      // Picked from a list for a draft no longer shown, it is let go of.
+      stale: [stale.edit, stale.state.phase._tag],
+    }).toStrictEqual({ picked: [["/members ", 9], 1], stale: [undefined, "Idle"] });
+  });
+
+  it("belongs to the place it was opened in, and to the draft it lists for", () => {
+    const open = play("", [type("/m")]);
+
+    expect({
+      elsewhere: listOf(open.state, peer, open.text),
+      here: listOf(open.state, iirc, open.text)?.candidates.length,
+      otherText: listOf(open.state, iirc, "/me"),
+    }).toStrictEqual({ elsewhere: undefined, here: 3, otherText: undefined });
+  });
+
+  it("says how many it lists as it opens, and nothing more while one is highlighted", () => {
+    const one = play("", [type("/se")]);
+    const three = play("", [type("/m")]);
+    const moved = play("", [type("/m"), tab]);
+
+    expect([
+      announced(one.state, iirc, one.text),
+      announced(three.state, iirc, three.text),
+      announced(moved.state, iirc, moved.text),
+    ]).toStrictEqual(["1 completion", "3 completions", ""]);
   });
 });
 

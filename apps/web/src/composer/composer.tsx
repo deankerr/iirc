@@ -3,8 +3,10 @@
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
  * Enter sends, or begins a new line, as `ui.enter` says, and the other is Enter with a
  * modifier; where Enter begins a new line a button sends too, as a phone's keyboard has no
- * modifier. Up and Down recall what was sent from the first and last lines, and Tab
- * completes, a nick at the start of a line followed by `ui.suffix`. Spelling is checked as
+ * modifier. Up and Down recall what was sent from the first and last lines. What it can
+ * complete is listed above it, a listbox it owns while the textarea keeps the focus: as a
+ * draft that starts with `/` is typed, or on Tab for anything else, a nick at the start of
+ * a line followed by `ui.suffix`. Tab and the arrows move through it while it is open. Spelling is checked as
  * `ui.spellcheck` says. What a draft answers is shown dim above its line, cut to the line,
  * with a button that drops it. Escape lets go of an error or a confirmation, or, with
  * neither, of what the draft answers, or, with none, closes what stands in front of the focused Pane's Timeline, the options, the
@@ -18,7 +20,8 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
 import type { CommandContext } from "@iirc/frontend/commands";
-import { active, announced, completes, cycled } from "@iirc/frontend/completion";
+import { active, announced, completes, listOf } from "@iirc/frontend/completion";
+import type { List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
 import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
@@ -49,7 +52,7 @@ import {
   takeUp,
 } from "./atoms.ts";
 import { completionState } from "./completion-state.ts";
-import { escapeCompletion, tab, typed } from "./completion.ts";
+import { escapeCompletion, pick, tab, typed } from "./completion.ts";
 import { PendingUploads } from "./pending-uploads.tsx";
 import { caretAsked } from "./uploading-state.ts";
 import { addFiles } from "./uploading.ts";
@@ -270,6 +273,97 @@ const sayable = (context: CommandContext): Sayable => {
 };
 
 /**
+ * The id of a candidate in a composer's list.
+ * @param list - The list's id.
+ * @param index - The candidate's index.
+ * @returns Its id.
+ */
+const optionId = (list: string, index: number) => `${list}-${index}`;
+
+/**
+ * What the composer can complete, listed above it: each candidate's name, and what a
+ * command takes, as its usage says, and what it does, the one highlighted kept in view. The textarea keeps the focus,
+ * so a press writes a candidate in without taking it.
+ * @param props - The list, its id, and what picking one does.
+ * @returns The listbox.
+ */
+const Completions = ({
+  id,
+  list,
+  onPick,
+}: {
+  readonly id: string;
+  readonly list: List;
+  readonly onPick: (index: number) => void;
+}) => {
+  const element = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (list.highlighted !== undefined) {
+      element.current
+        ?.querySelector(`#${CSS.escape(optionId(id, list.highlighted))}`)
+        ?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [id, list.highlighted]);
+
+  return (
+    <div
+      aria-label="Completions"
+      className={styles.list}
+      id={id}
+      ref={element}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a listbox the textarea controls and keeps the focus from, which neither a select nor a datalist is.
+      role="listbox"
+    >
+      {list.candidates.map((candidate, index) => (
+        // The textarea takes the keys, and keeps the focus through a press.
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
+        <div
+          aria-selected={index === list.highlighted}
+          className={styles.option}
+          id={optionId(id, index)}
+          // A candidate's place in the list is what tells two apart.
+          // oxlint-disable-next-line react/no-array-index-key
+          key={index}
+          onClick={() => {
+            onPick(index);
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
+          role="option"
+          // Pressed, never focused: the textarea keeps the focus.
+          tabIndex={-1}
+        >
+          <bdi className={styles.candidate}>{candidate.name}</bdi>
+          {candidate._tag === "Command" ? (
+            <>
+              <span className={styles.usage}>{candidate.takes}</span>
+              <span className={styles.description}>{candidate.description}</span>
+            </>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/**
+ * What the textarea says of the list it controls, while one is open: its id, and the
+ * candidate highlighted, which a screen reader names as it moves.
+ * @param list - The list, if open.
+ * @param id - Its id.
+ * @returns The attributes.
+ */
+const controlling = (list: List | undefined, id: string) => ({
+  "aria-activedescendant":
+    list?.highlighted === undefined ? undefined : optionId(id, list.highlighted),
+  "aria-autocomplete": "list" as const,
+  "aria-controls": list === undefined ? undefined : id,
+});
+
+/**
  * What describes the textarea: the ids of what is shown above it.
  * @param shown - Each part, whether it is shown, and its id.
  * @returns The ids, or nothing.
@@ -302,6 +396,7 @@ const Composer = ({
   const setText = useAtomSet(typed);
   const complete = useAtomSet(tab);
   const restore = useAtomSet(escapeCompletion);
+  const pickNow = useAtomSet(pick);
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
   const dropNow = useAtomSet(dropReply);
@@ -333,8 +428,9 @@ const Composer = ({
   const noticeId = `${id}-notice`;
   const hintId = `${id}-hint`;
   const answeringId = `${id}-answering`;
+  const listId = `${id}-list`;
   const { answering, confirming, notice } = draft;
-  const candidates = cycled(completion, timeline, draft.text);
+  const list = listOf(completion, timeline, draft.text);
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
   // end of its draft, which may have just been replaced.
@@ -436,9 +532,10 @@ const Composer = ({
   const { offline, placeholder } = sayable(context);
 
   /**
-   * Tab completes the word at the caret, Shift+Tab backwards, and Escape gives back what
-   * was typed while completing. With no word there, and nothing being completed, Tab moves
-   * focus on, as it does anywhere.
+   * Tab completes the word at the caret, Shift+Tab backwards, and while the list is open,
+   * Down and Up move through it as they do. Escape gives back what was typed while
+   * completing. With no word there, and nothing being completed, Tab moves focus on, as it
+   * does anywhere.
    * @param event - The key.
    * @returns Whether completion took it.
    */
@@ -446,6 +543,20 @@ const Composer = ({
     const { selectionEnd, selectionStart, value } = event.currentTarget;
     const completing = active(completion, timeline, { caret: selectionStart, text: value });
     const bare = !event.altKey && !event.ctrlKey && !event.metaKey;
+    const arrow = event.key === "ArrowDown" || event.key === "ArrowUp";
+
+    // An arrow with a modifier stays the keymap's.
+    if (arrow && bare && !event.shiftKey && completing && list !== undefined) {
+      event.preventDefault();
+      complete({
+        backwards: event.key === "ArrowUp",
+        caret: selectionStart,
+        place: timeline,
+        text: value,
+      });
+
+      return true;
+    }
 
     if (
       event.key === "Tab" &&
@@ -647,19 +758,14 @@ const Composer = ({
           {offline}
         </p>
       )}
-      {candidates === undefined ? null : (
-        <p aria-hidden className={styles.candidates}>
-          {candidates.candidates.map((candidate, index) => (
-            <bdi
-              className={index === candidates.index ? styles.chosen : styles.candidate}
-              // A candidate's place in the list is what tells two apart, and it never moves.
-              // oxlint-disable-next-line react/no-array-index-key
-              key={index}
-            >
-              {candidate}
-            </bdi>
-          ))}
-        </p>
+      {list === undefined ? null : (
+        <Completions
+          id={listId}
+          list={list}
+          onPick={(index) => {
+            pickNow({ index, place: timeline, text: draft.text });
+          }}
+        />
       )}
       {answering === undefined ? null : (
         <AnsweringLine
@@ -671,7 +777,7 @@ const Composer = ({
           }}
         />
       )}
-      {/* A status, polite, present while the composer is, so each candidate is announced. */}
+      {/* A status, polite, present while the composer is, so what the list holds is announced. */}
       <output aria-live="polite" className={styles.status}>
         {announced(completion, timeline, draft.text)}
       </output>
@@ -684,6 +790,7 @@ const Composer = ({
           <span aria-hidden="true">&gt;</span>
         </label>
         <textarea
+          {...controlling(list, listId)}
           // Among several Panes, the number shown is said with what it is.
           aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
           aria-describedby={describedBy}
@@ -700,8 +807,13 @@ const Composer = ({
             selectedFrom.current = undefined;
             setText(
               from === undefined
-                ? { text: value, timeline }
-                : { text: value, timeline, typing: { caret: selectionStart, from } }
+                ? { caret: selectionStart, text: value, timeline }
+                : {
+                    caret: selectionStart,
+                    text: value,
+                    timeline,
+                    typing: { caret: selectionStart, from },
+                  }
             );
           }}
           onKeyDown={onKeyDown}

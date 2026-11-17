@@ -1,9 +1,11 @@
 /**
- * Tab completion in the composer, as a reducer: the word at the caret, completed from
- * what it can be, a command after `/` at the start of a line, an option after `/set `, a
- * Channel's name, or a nick, and cycled through with Tab and Shift+Tab. Escape gives back
- * what was typed. A nick in a Channel comes from the Daemon's members route, which the
- * runtime asks while this waits; everything else is at hand.
+ * Completion in the composer, as a reducer: the word at the caret, completed from what it
+ * can be, a command after `/` at the start of a line, an option after `/set `, a Channel's
+ * name, or a nick, listed above the composer. A draft that starts with a command opens the
+ * list as it is typed, and anything else opens it on Tab. Tab, Shift+Tab, and the arrows
+ * move through it, writing the one highlighted into the draft, and Escape gives back what
+ * was typed. A nick in a Channel comes from the Daemon's members route, which the runtime
+ * asks while this waits; everything else is at hand.
  *
  * @packageDocumentation
  */
@@ -12,6 +14,7 @@ import { uiDefaults } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
 import { commands } from "./commands.ts";
+import type { Command } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
 import { fields, optionName } from "./options.ts";
@@ -62,13 +65,18 @@ export interface Spot {
   readonly after: string;
 }
 
+/** What a list holds: commands, options, Channels' names, or nicks. */
+export type Listing = "Commands" | "Options" | "Channels" | "Nicks";
+
 /**
  * Where completion stands.
  *
  * - `Idle`: nothing is being completed.
  * - `Asking`: a nick in a Channel, while the runtime asks the members route for those that
  *   start with `prefix`, under `request`.
- * - `Cycling`: a candidate is shown in place of the word, and Tab moves on.
+ * - `Listed`: the candidates for the word are listed, and `index`, if any, is highlighted
+ *   and shown in place of the word. None is highlighted while the list only follows what
+ *   is typed.
  * - `Unmatched`: nothing completes the word.
  */
 export type Phase =
@@ -84,11 +92,12 @@ export type Phase =
       readonly backwards: boolean;
     }
   | {
-      readonly _tag: "Cycling";
+      readonly _tag: "Listed";
       readonly place: Place;
       readonly spot: Spot;
+      readonly listing: Listing;
       readonly candidates: readonly string[];
-      readonly index: number;
+      readonly index: number | undefined;
       readonly suffix: string;
       readonly shown: Shown;
     }
@@ -113,15 +122,32 @@ export interface Completion {
 /**
  * What happened.
  *
- * - `Tabbed`: Tab, or Shift+Tab `backwards`, with the composer's text and caret.
+ * - `Typed`: the Owner changed the draft, which is now `text` with the caret at `caret`.
+ *   One that starts with a command opens the list, and anything else lets go.
+ * - `Tabbed`: Tab, or Shift+Tab `backwards`, with the composer's text and caret, which the
+ *   arrows also say while the list is open.
+ * - `Picked`: a candidate was picked from the list by its index, as by a tap, while the
+ *   composer showed `text`.
  * - `NicksRead`: the members route answered a request, with their nicks in its order, and
  *   the composer under the main view as it is now: its place and its draft's text.
  * - `NicksFailed`: it did not.
  * - `Escaped`: Escape, which gives back what was typed.
- * - `LetGo`: the draft was changed or replaced other than by completion, as by typing,
- *   recalling, sending, or the palette, so what was being completed is let go of.
+ * - `LetGo`: the draft was replaced other than by completion or typing, as by recalling,
+ *   sending, or the palette, so what was being completed is let go of.
  */
 export type CompletionEvent =
+  | {
+      readonly _tag: "Typed";
+      readonly place: Place;
+      readonly text: string;
+      readonly caret: number;
+    }
+  | {
+      readonly _tag: "Picked";
+      readonly place: Place;
+      readonly text: string;
+      readonly index: number;
+    }
   | {
       readonly _tag: "Tabbed";
       readonly place: Place;
@@ -199,7 +225,7 @@ export const active = (state: Completion, place: Place, shown: Shown): boolean =
   const { phase } = state;
 
   return (
-    (phase._tag === "Cycling" || phase._tag === "Asking") &&
+    (phase._tag === "Listed" || phase._tag === "Asking") &&
     phase.place === place &&
     phase.shown.text === shown.text &&
     phase.shown.caret === shown.caret
@@ -291,27 +317,41 @@ const placed = (spot: Spot, candidate: string, suffix: string): Shown => {
 };
 
 /**
- * Cycling through candidates, with the first, or the last going backwards, shown.
+ * The text and caret as they were typed, the word back in place.
+ * @param spot - The word, and what surrounds it.
+ * @returns The text and caret.
+ */
+const typedOf = (spot: Spot): Shown => ({
+  caret: spot.before.length + spot.word.length,
+  text: `${spot.before}${spot.word}${spot.after}`,
+});
+
+/** Candidates for a word, what they are, and what follows each. */
+interface Found {
+  readonly listing: Listing;
+  readonly candidates: readonly string[];
+  readonly suffix: string;
+}
+
+/**
+ * The list for a word, with the one at `index` highlighted and shown in place of it, or
+ * none highlighted and the word left as typed. With no candidates, nothing completes it.
  * @param state - The state.
  * @param place - The composer's place.
  * @param spot - The word.
- * @param candidates - The candidates.
- * @param suffix - What follows each.
- * @param backwards - Whether Shift+Tab began it.
+ * @param found - The candidates.
+ * @param index - Which to highlight, if any.
  * @returns The state, and the edit.
  */
-const cycling = (
+const listing = (
   state: Completion,
   place: Place,
   spot: Spot,
-  candidates: readonly string[],
-  suffix: string,
-  backwards: boolean
+  found: Found,
+  index: number | undefined
 ): Completed => {
-  const original = {
-    caret: spot.before.length + spot.word.length,
-    text: `${spot.before}${spot.word}${spot.after}`,
-  };
+  const { candidates, suffix } = found;
+  const original = typedOf(spot);
 
   if (candidates.length === 0) {
     return {
@@ -320,18 +360,114 @@ const cycling = (
     };
   }
 
-  const index = backwards ? candidates.length - 1 : 0;
-  const shown = placed(spot, candidates[index] ?? spot.word, suffix);
+  const shown =
+    index === undefined ? original : placed(spot, candidates[index] ?? spot.word, suffix);
+
+  const phase: Phase = { _tag: "Listed", ...found, index, place, shown, spot };
+
+  if (index === undefined) {
+    return { edit: undefined, state: { ...state, phase } };
+  }
 
   return {
     edit: { ...shown, place },
-    state: {
-      ...state,
-      applied: state.applied + 1,
-      caret: shown.caret,
-      phase: { _tag: "Cycling", candidates, index, place, shown, spot, suffix },
-    },
+    state: { ...state, applied: state.applied + 1, caret: shown.caret, phase },
   };
+};
+
+/** The commands whose argument completion lists as it is typed, and what it lists. */
+const arguments_: ReadonlyMap<string, Exclude<Listing, "Commands" | "Nicks">> = new Map([
+  ["set", "Options"],
+  ["join", "Channels"],
+  ["part", "Channels"],
+]);
+
+/**
+ * A command by its name or an alias, as typed after `/`, in any case.
+ * @param typed - What was typed.
+ * @returns The command, or none.
+ */
+const commandNamed = (typed: string): Command | undefined => {
+  const name = asciiLower(typed);
+
+  return commands.find((one) => one.name === name || one.aliases.includes(name));
+};
+
+/**
+ * What a word in a command's line is completed from, at hand: a command's name, as the
+ * first word of a line, or the first argument of a command whose argument is listed, an
+ * option after `/set`, or a Channel's name after `/join` or `/part`.
+ * @param spot - The word.
+ * @param sources - The sources.
+ * @returns The candidates, or none where the word is no such thing.
+ */
+const inCommand = (spot: Spot, sources: Sources): Found | undefined => {
+  const { before, word } = spot;
+  const line = before.slice(before.lastIndexOf("\n") + 1);
+
+  if (atLineStart(before) && word.startsWith("/") && !word.startsWith("//")) {
+    const typed = word.slice(1);
+
+    const candidates = sources.commands
+      .filter((name) => startsAscii(name, typed))
+      .toSorted(byCodeUnits)
+      .map((name) => `/${name}`);
+
+    return { candidates, listing: "Commands", suffix: " " };
+  }
+
+  const head = /^\/(?<name>\S+) +$/u.exec(line)?.groups?.name;
+  const command = head === undefined ? undefined : commandNamed(head);
+  const listing = command === undefined ? undefined : arguments_.get(command.name);
+
+  switch (listing) {
+    case "Options": {
+      return {
+        candidates: sources.options.filter((name) => startsAscii(name, word)),
+        listing,
+        suffix: " ",
+      };
+    }
+
+    case "Channels": {
+      return {
+        candidates: sources.channels.filter((name) => startsFolded(name, word)),
+        listing,
+        suffix: " ",
+      };
+    }
+
+    case undefined: {
+      return undefined;
+    }
+
+    default: {
+      return listing satisfies never;
+    }
+  }
+};
+
+/**
+ * The list a draft opens as it is typed: one whose first line starts with a command, with
+ * the caret in that line, in the command's name or a listed argument, and something to list.
+ * @param state - The state.
+ * @param event - What was typed.
+ * @param sources - The sources.
+ * @returns The state, and no edit.
+ */
+const typedIn = (
+  state: Completion,
+  event: Extract<CompletionEvent, { readonly _tag: "Typed" }>,
+  sources: Sources
+): Completed => {
+  const spot = spotAt(event.text, event.caret);
+  const found = spot.before.includes("\n") ? undefined : inCommand(spot, sources);
+
+  if (found === undefined || found.candidates.length === 0) {
+    return { edit: undefined, state: { ...state, phase: idle } };
+  }
+
+  return listing(state, event.place, spot, found, undefined);
 };
 
 /** What a Channel's name starts with while a Network's `CHANTYPES` is unknown: RFC 2811's. */
@@ -357,31 +493,26 @@ const begin = (
     return { edit: undefined, state: { ...state, phase: idle } };
   }
 
-  const lineStart = atLineStart(before);
-  const line = before.slice(before.lastIndexOf("\n") + 1);
+  const first = (count: number) => (backwards ? count - 1 : 0);
+  const found = inCommand(spot, sources);
 
-  if (lineStart && word.startsWith("/") && !word.startsWith("//")) {
-    const typed = word.slice(1);
-
-    const names = sources.commands
-      .filter((name) => startsAscii(name, typed))
-      .toSorted(byCodeUnits)
-      .map((name) => `/${name}`);
-
-    return cycling(state, place, spot, names, " ", backwards);
-  }
-
-  if (/^\/set +$/iu.test(line)) {
-    const names = sources.options.filter((name) => startsAscii(name, word));
-
-    return cycling(state, place, spot, names, " ", backwards);
+  if (found !== undefined) {
+    return listing(state, place, spot, found, first(found.candidates.length));
   }
 
   if ((sources.chantypes ?? rfc2811Chantypes).includes(word[0] ?? " ")) {
-    const names = sources.channels.filter((name) => startsFolded(name, word));
+    const candidates = sources.channels.filter((name) => startsFolded(name, word));
 
-    return cycling(state, place, spot, names, " ", backwards);
+    return listing(
+      state,
+      place,
+      spot,
+      { candidates, listing: "Channels", suffix: " " },
+      first(candidates.length)
+    );
   }
+
+  const lineStart = atLineStart(before);
 
   const suffix = lineStart ? sources.suffix : " ";
 
@@ -412,7 +543,117 @@ const begin = (
     sources
   );
 
-  return cycling(state, place, spot, nicks, suffix, backwards);
+  return listing(
+    state,
+    place,
+    spot,
+    { candidates: nicks, listing: "Nicks", suffix },
+    first(nicks.length)
+  );
+};
+
+/**
+ * The list with another candidate highlighted, and shown in place of the word.
+ * @param state - The state.
+ * @param phase - The list.
+ * @param index - The candidate's index.
+ * @returns The state, and the edit.
+ */
+const highlight = (
+  state: Completion,
+  phase: Extract<Phase, { readonly _tag: "Listed" }>,
+  index: number
+): Completed => {
+  const next = placed(phase.spot, phase.candidates[index] ?? phase.spot.word, phase.suffix);
+
+  return {
+    edit: { ...next, place: phase.place },
+    state: {
+      ...state,
+      applied: state.applied + 1,
+      caret: next.caret,
+      phase: { ...phase, index, shown: next },
+    },
+  };
+};
+
+/**
+ * Tab, or an arrow while the list is open: begins completing the word at the caret, or
+ * moves through the list under way, or waits for the answer asked for.
+ * @param state - The state.
+ * @param event - The Tab.
+ * @param sources - The sources.
+ * @returns The state, and the edit.
+ */
+const tabbed = (
+  state: Completion,
+  event: Extract<CompletionEvent, { readonly _tag: "Tabbed" }>,
+  sources: Sources
+): Completed => {
+  const { phase } = state;
+
+  if (!active(state, event.place, { caret: event.caret, text: event.text })) {
+    return begin(state, event, sources);
+  }
+
+  // Asked already: another Tab waits for the same answer.
+  if (phase._tag !== "Listed") {
+    return { edit: undefined, state };
+  }
+
+  const count = phase.candidates.length;
+  const step = event.backwards ? count - 1 : 1;
+  // From none highlighted, forwards is the first and backwards the last.
+  const first = event.backwards ? count - 1 : 0;
+  const index = phase.index === undefined ? first : (phase.index + step) % count;
+
+  return highlight(state, phase, index);
+};
+
+/**
+ * A candidate picked from the list, written in only if it is listed for the draft shown.
+ * @param state - The state.
+ * @param event - The pick.
+ * @returns The state, and the edit.
+ */
+const picked = (
+  state: Completion,
+  event: Extract<CompletionEvent, { readonly _tag: "Picked" }>
+): Completed => {
+  const { phase } = state;
+
+  return phase._tag === "Listed" &&
+    phase.place === event.place &&
+    phase.shown.text === event.text &&
+    event.index >= 0 &&
+    event.index < phase.candidates.length
+    ? highlight(state, phase, event.index)
+    : { edit: undefined, state: { ...state, phase: idle } };
+};
+
+/**
+ * Escape: gives back what was typed in place of the candidate highlighted, if any, and
+ * closes the list.
+ * @param state - The state.
+ * @param event - The Escape.
+ * @returns The state, and the edit.
+ */
+const escaped = (
+  state: Completion,
+  event: Extract<CompletionEvent, { readonly _tag: "Escaped" }>
+): Completed => {
+  const { phase } = state;
+
+  if (phase._tag === "Listed" && phase.place === event.place && phase.index !== undefined) {
+    const restored = typedOf(phase.spot);
+
+    return {
+      edit: { ...restored, place: phase.place },
+      state: { ...state, applied: state.applied + 1, caret: restored.caret, phase: idle },
+    };
+  }
+
+  return { edit: undefined, state: { ...state, phase: idle } };
 };
 
 /**
@@ -431,31 +672,16 @@ export const reduceCompletion = (
   const unchanged: Completed = { edit: undefined, state };
 
   switch (event._tag) {
+    case "Typed": {
+      return typedIn(state, event, sources);
+    }
+
     case "Tabbed": {
-      const shown = { caret: event.caret, text: event.text };
+      return tabbed(state, event, sources);
+    }
 
-      if (!active(state, event.place, shown)) {
-        return begin(state, event, sources);
-      }
-
-      // Asked already: another Tab waits for the same answer.
-      if (phase._tag !== "Cycling") {
-        return unchanged;
-      }
-
-      const count = phase.candidates.length;
-      const index = (phase.index + (event.backwards ? count - 1 : 1)) % count;
-      const next = placed(phase.spot, phase.candidates[index] ?? phase.spot.word, phase.suffix);
-
-      return {
-        edit: { ...next, place: phase.place },
-        state: {
-          ...state,
-          applied: state.applied + 1,
-          caret: next.caret,
-          phase: { ...phase, index, shown: next },
-        },
-      };
+    case "Picked": {
+      return picked(state, event);
     }
 
     case "NicksRead": {
@@ -470,14 +696,14 @@ export const reduceCompletion = (
       }
 
       const suffix = atLineStart(phase.spot.before) ? sources.suffix : " ";
+      const nicks = orderNicks(event.nicks, sources);
 
-      return cycling(
+      return listing(
         state,
         phase.place,
         phase.spot,
-        orderNicks(event.nicks, sources),
-        suffix,
-        phase.backwards
+        { candidates: nicks, listing: "Nicks", suffix },
+        phase.backwards ? nicks.length - 1 : 0
       );
     }
 
@@ -499,21 +725,7 @@ export const reduceCompletion = (
     }
 
     case "Escaped": {
-      if (phase._tag === "Cycling" && phase.place === event.place) {
-        const { spot } = phase;
-
-        const restored = {
-          caret: spot.before.length + spot.word.length,
-          text: `${spot.before}${spot.word}${spot.after}`,
-        };
-
-        return {
-          edit: { ...restored, place: phase.place },
-          state: { ...state, applied: state.applied + 1, caret: restored.caret, phase: idle },
-        };
-      }
-
-      return { edit: undefined, state: { ...state, phase: idle } };
+      return escaped(state, event);
     }
 
     case "LetGo": {
@@ -553,29 +765,71 @@ export const nicksWanted = (
     : undefined;
 
 /**
- * The candidates shown in a composer, while completion is under way there, and which is
- * in place of the word.
+ * One candidate as the list shows it: a command, with what its usage says it takes after
+ * its name and what it does, or a word.
+ */
+export type Candidate =
+  | {
+      readonly _tag: "Command";
+      readonly name: string;
+      readonly takes: string;
+      readonly description: string;
+    }
+  | { readonly _tag: "Word"; readonly name: string };
+
+/** The list shown above a composer, and which candidate, if any, is highlighted. */
+export interface List {
+  readonly candidates: readonly Candidate[];
+  readonly highlighted: number | undefined;
+}
+
+/**
+ * What a command's usage says it takes after its name, which the usage begins with.
+ * @param command - The command.
+ * @returns What it takes, or nothing.
+ */
+const takesOf = (command: Command) => {
+  const space = command.usage.indexOf(" ");
+
+  return space === -1 ? "" : command.usage.slice(space + 1);
+};
+
+/**
+ * A candidate as the list shows it.
+ * @param listing - What the list holds.
+ * @param name - The candidate.
+ * @returns It, a command with what it takes and its description.
+ */
+const candidateOf = (listing: Listing, name: string): Candidate => {
+  const command = listing === "Commands" ? commandNamed(name.slice(1)) : undefined;
+
+  return command === undefined
+    ? { _tag: "Word", name }
+    : { _tag: "Command", description: command.description, name, takes: takesOf(command) };
+};
+
+/**
+ * The list shown above a composer, while one is open there for what it shows.
  * @param state - The state.
  * @param place - The composer's place.
  * @param text - What the composer shows.
- * @returns The candidates and the one shown, or none.
+ * @returns The list, or none.
  */
-export const cycled = (
-  state: Completion,
-  place: Place,
-  text: string
-): { readonly candidates: readonly string[]; readonly index: number } | undefined => {
+export const listOf = (state: Completion, place: Place, text: string): List | undefined => {
   const { phase } = state;
 
-  return phase._tag === "Cycling" && phase.place === place && phase.shown.text === text
-    ? { candidates: phase.candidates, index: phase.index }
+  return phase._tag === "Listed" && phase.place === place && phase.shown.text === text
+    ? {
+        candidates: phase.candidates.map((name) => candidateOf(phase.listing, name)),
+        highlighted: phase.index,
+      }
     : undefined;
 };
 
 /**
- * What a screen reader is told, politely, about a composer: the candidate shown and where
- * it stands among them, or that nothing completes the word, while the composer still
- * shows what completion left it with.
+ * What a screen reader is told, politely, about a composer: how many the list holds as it
+ * opens, or that nothing completes the word, while the composer still shows what
+ * completion left it with. The list itself names the candidate highlighted.
  * @param state - The state.
  * @param place - The composer's place.
  * @param text - What the composer shows.
@@ -589,8 +843,12 @@ export const announced = (state: Completion, place: Place, text: string): string
   }
 
   switch (phase._tag) {
-    case "Cycling": {
-      return `${phase.candidates[phase.index] ?? ""}, ${phase.index + 1} of ${phase.candidates.length}`;
+    case "Listed": {
+      const count = phase.candidates.length;
+
+      return phase.index === undefined
+        ? `${count} ${count === 1 ? "completion" : "completions"}`
+        : "";
     }
 
     case "Unmatched": {

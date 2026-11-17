@@ -6,9 +6,8 @@ declare const styles: {
   readonly away: string;
   readonly camera: string;
   readonly candidate: string;
-  readonly candidates: string;
-  readonly chosen: string;
   readonly composer: string;
+  readonly description: string;
   readonly dropping: string;
   readonly failure: string;
   readonly fileIcon: string;
@@ -18,9 +17,11 @@ declare const styles: {
   readonly input: string;
   readonly line: string;
   readonly link: string;
+  readonly list: string;
   readonly name: string;
   readonly note: string;
   readonly notice: string;
+  readonly option: string;
   readonly palette: string;
   readonly pane: string;
   readonly progress: string;
@@ -30,6 +31,7 @@ declare const styles: {
   readonly thumbnail: string;
   readonly upload: string;
   readonly uploads: string;
+  readonly usage: string;
 };
 
 export default styles;

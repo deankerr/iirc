@@ -490,3 +490,197 @@ describe("the Composer's habits", () => {
     ]);
   });
 });
+
+/**
+ * The list above the composer, as a screen reader is given it: its options' names, usage,
+ * and description, which is highlighted, and what the textarea says of it.
+ * @param container - The page.
+ * @returns What it lists, or none while it is closed.
+ */
+const listIn = (container: HTMLElement) => {
+  const listbox = container.querySelector('[role="listbox"][aria-label="Completions"]');
+  const composer = composerOf(container);
+
+  if (listbox === null) {
+    return { controls: composer.getAttribute("aria-controls"), list: undefined };
+  }
+
+  const options = [...listbox.querySelectorAll('[role="option"]')];
+  const highlighted = options.findIndex((one) => one.getAttribute("aria-selected") === "true");
+
+  return {
+    active:
+      highlighted === -1
+        ? composer.getAttribute("aria-activedescendant") === null
+        : composer.getAttribute("aria-activedescendant") === options[highlighted]?.id,
+    controls: composer.getAttribute("aria-controls") === listbox.id,
+    highlighted,
+    names: options.map((one) => one.querySelector("bdi")?.textContent ?? ""),
+    texts: options.map((one) => one.textContent),
+  };
+};
+
+describe("the Composer's list", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("opens as a draft starts with /, each command with its usage and description, and narrows as keys are typed", async () => {
+    const { container } = await signedIn();
+    const closed = listIn(container);
+
+    await typeIn(container, "/");
+    const all = listIn(container);
+
+    await typeIn(container, "/jo");
+    const narrowed = listIn(container);
+
+    await typeIn(container, "/join #ii");
+    const channels = listIn(container);
+
+    expect({
+      all: [all.names?.includes("/join"), all.names?.includes("/set"), all.highlighted],
+      channels: channels.names,
+      closed,
+      hidden: container.querySelector("[aria-hidden] bdi"),
+      // Its name, what it takes, and what it does.
+      joinText: /^\/join<#channel>.*Join/su.test(narrowed.texts?.[0] ?? ""),
+      narrowed: { ...narrowed, texts: undefined },
+    }).toStrictEqual({
+      all: [true, true, -1],
+      channels: ["#iirc"],
+      closed: { controls: null, list: undefined },
+      hidden: null,
+      joinText: true,
+      narrowed: {
+        active: true,
+        controls: true,
+        highlighted: -1,
+        names: ["/join"],
+        texts: undefined,
+      },
+    });
+  });
+
+  it("moves with Tab and the arrows, writing the one highlighted into the draft, and Escape gives back what was typed", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "/m");
+    const names = listIn(container).names ?? [];
+    const down = await pressIn(container, "ArrowDown");
+    const { texts: _texts, ...seen } = listIn(container);
+    const first = [composerOf(container).value, seen];
+
+    await pressIn(container, "Tab");
+    const second = [composerOf(container).value, listIn(container).highlighted];
+
+    await pressIn(container, "ArrowUp");
+    await pressIn(container, "ArrowUp");
+    const wrapped = [composerOf(container).value, listIn(container).highlighted];
+
+    const escape = await pressIn(container, "Escape");
+
+    expect({
+      down,
+      escape,
+      escaped: [composerOf(container).value, listIn(container).list],
+      first,
+      second,
+      wrapped,
+    }).toStrictEqual({
+      down: false,
+      escape: false,
+      escaped: ["/m", undefined],
+      first: [`${names[0]} `, { active: true, controls: true, highlighted: 0, names }],
+      second: [`${names[1]} `, 1],
+      wrapped: [`${names.at(-1)} `, names.length - 1],
+    });
+  });
+
+  it("sends on Enter what the draft says, never a candidate it does not show", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "/m");
+    await pressIn(container, "Enter");
+    await settled(() => container.querySelector('[role="alert"]') !== null);
+
+    const refused = {
+      list: listIn(container).list,
+      said: daemon.says.length,
+      value: composerOf(container).value,
+    };
+
+    await typeIn(container, "/me");
+    await pressIn(container, "ArrowDown");
+    const highlighted = composerOf(container).value;
+
+    await typeIn(container, `${highlighted}waves`);
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      highlighted,
+      refused,
+      said: daemon.says.map((one) => [one.kind, one.text]),
+    }).toStrictEqual({
+      highlighted: "/me ",
+      refused: { list: undefined, said: 0, value: "/m" },
+      said: [["Action", "waves"]],
+    });
+  });
+
+  it("leaves the arrows to recall what was sent while it is closed", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "/me waves");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+    await pressIn(container, "ArrowUp");
+
+    expect([composerOf(container).value, listIn(container).list]).toStrictEqual([
+      "/me waves",
+      undefined,
+    ]);
+  });
+
+  it("opens on Tab for a nick, asked of the members, the first written in", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "hi pe");
+    await pressIn(container, "Tab");
+    await settled(() => composerOf(container).value === "hi peer ");
+
+    expect(listIn(container)).toStrictEqual({
+      active: true,
+      controls: true,
+      highlighted: 0,
+      names: ["peer"],
+      texts: ["peer"],
+    });
+  });
+
+  it("writes in a candidate tapped, keeping the focus in the composer", async () => {
+    const { container } = await signedIn();
+
+    composerOf(container).focus();
+    await typeIn(container, "/set ");
+
+    const [, option] = container.querySelectorAll<HTMLElement>('[role="option"]');
+    const name = option?.querySelector("bdi")?.textContent;
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+
+    await act(async () => {
+      option?.dispatchEvent(down);
+      option?.click();
+      await Promise.resolve();
+    });
+
+    expect({
+      focused: document.activeElement === composerOf(container),
+      kept: down.defaultPrevented,
+      value: composerOf(container).value,
+    }).toStrictEqual({ focused: true, kept: true, value: `/set ${name ?? ""} ` });
+  });
+});
