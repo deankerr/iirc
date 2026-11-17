@@ -118,13 +118,13 @@ export const waitListening = async (
       return;
     }
 
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
       // oxlint-disable-next-line no-await-in-loop -- once, on the way out
       const held = await Promise.all(ports.map(async (port) => await socketsOn(port)));
       const error = held.some((sockets) => sockets.length > 0) ? PortTakenError : Error;
 
       throw new error(
-        `${what} exited with ${child.exitCode} before listening on ${ports.join(", ")}`
+        `${what} exited with ${child.exitCode ?? child.signalCode} before listening on ${ports.join(", ")}`
       );
     }
 

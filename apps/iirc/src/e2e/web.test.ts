@@ -55,15 +55,13 @@ const decodeStanding = Schema.decodeUnknownSync(
   )
 );
 
-/** What the end-to-end run reads of a Configuration: its Channels and nicks. */
+/** What the end-to-end run reads of a Configuration: its Channels. */
 const decodeInForce = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
       configuration: Schema.Struct({
         channels: Schema.Array(Schema.Struct({ name: Schema.String })),
-        nicks: Schema.Array(Schema.String),
       }),
-      sequence: Schema.Finite,
     })
   )
 );
@@ -592,6 +590,7 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         // The Network goes offline while the Runtime backs off, then comes back, as its row says.
+        // The row is offline only for the Runtime's first wait before it dials again, 2 s.
         await page.getByRole("row", { name: /^private, .*offline/u }).waitFor();
         await page.getByRole("row", { name: /^private, .*connected$/u }).waitFor({
           timeout: 20_000,
