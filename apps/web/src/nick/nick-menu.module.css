@@ -51,6 +51,19 @@
   white-space: nowrap;
 }
 
+/* The wait where more entries will go, dim, never marked, and as tall as the entries that
+   may come, its words in the first of their rows. */
+.entry[data-disabled] {
+  align-items: flex-start;
+  min-height: calc(var(--coming) * 1lh);
+  color: var(--color-muted);
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+}
+
 .entry[data-hovered],
 .entry[data-focused] {
   background: var(--color-surface);
@@ -60,6 +73,14 @@
 
 @media (pointer: coarse) {
   .entry {
+    min-height: var(--target-size);
+  }
+
+  .entry[data-disabled] {
+    min-height: calc(var(--coming) * var(--target-size));
+  }
+
+  .waiting {
     min-height: var(--target-size);
   }
 }

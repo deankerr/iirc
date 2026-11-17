@@ -77,7 +77,10 @@ const inChannel = (held: Held): CommandContext => ({
 const here = (prefixes: readonly string[] | undefined): Presence => ({ _tag: "Here", prefixes });
 
 const ids = (context: CommandContext, presence: Presence = here([])) =>
-  nickEntries("peer", timeline, presence, context).map((entry) => entry.id);
+  nickEntries("peer", timeline, presence, context).entries.map((entry) => entry.id);
+
+const coming = (context: CommandContext, presence: Presence = here([])) =>
+  nickEntries("peer", timeline, presence, context).coming;
 
 const knownSet = (value: readonly string[]) =>
   Schema.decodeSync(Member.fields.prefixes)({
@@ -93,7 +96,7 @@ const operator = [...everyone, "ban", "op", "deop", "voice", "devoice", "kick"];
 describe("the menu on a nick", () => {
   it("runs the command the Composer would for each entry, and starts the Composer to mention", () => {
     const context = inChannel(known(["o"]));
-    const entries = nickEntries("peer", timeline, here([]), context);
+    const { entries } = nickEntries("peer", timeline, here([]), context);
 
     const composed = (line: string) => {
       const read = interpret(line, context);
@@ -223,6 +226,37 @@ describe("the menu on a nick", () => {
     }).toStrictEqual({ elsewhere: [], otherHead: everyone });
   });
 
+  it("says how many entries may come while the head, the Session, or an operator's User is read, and none once known", () => {
+    const op = inChannel(known(["o"]));
+    const unread: CommandContext = { ...op, head: undefined };
+
+    expect({
+      direct: coming({ ...around, focus: focus("Direct", "peer"), head: undefined }),
+      elsewhere: coming({ ...op, open: other }),
+      found: coming(op),
+      gone: coming(op, { _tag: "Gone" }),
+      headUnread: coming(unread),
+      headUnreadOffline: coming({ ...unread, session: false }),
+      notOperator: coming(inChannel(known([])), { _tag: "Reading" }),
+      notOperatorSessionUnknown: coming({ ...inChannel(known([])), session: undefined }),
+      otherHead: coming({ ...op, head: { ...headOf(known(["o"])), timeline: other } }),
+      presenceReading: coming(op, { _tag: "Reading" }),
+      sessionUnknown: coming({ ...op, session: undefined }),
+    }).toStrictEqual({
+      direct: 0,
+      elsewhere: 0,
+      found: 0,
+      gone: 0,
+      headUnread: 6,
+      headUnreadOffline: 0,
+      notOperator: 0,
+      notOperatorSessionUnknown: 0,
+      otherHead: 6,
+      presenceReading: 5,
+      sessionUnknown: 6,
+    });
+  });
+
   it("offers only what runs without a Session, where nothing can be sent", () => {
     expect(ids({ ...inChannel(known(["o"])), session: false })).toStrictEqual([
       "query",
@@ -296,7 +330,7 @@ describe("whether the User of a nick menu is in its Channel", () => {
       folded: here(["o"]),
       gone: { _tag: "Gone" },
       longer: { _tag: "Unknown" },
-      unanswered: { _tag: "Unknown" },
+      unanswered: { _tag: "Reading" },
     });
   });
 
@@ -317,7 +351,7 @@ describe("whether the User of a nick menu is in its Channel", () => {
       wanted: presenceWanted(reopened),
     }).toStrictEqual({
       closed: undefined,
-      reopened: { _tag: "Unknown" },
+      reopened: { _tag: "Reading" },
       wanted: { prefix: "Peer", request: 2, timeline },
     });
   });
