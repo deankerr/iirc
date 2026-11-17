@@ -275,6 +275,10 @@ const apply = (configuration: NetworkConfiguration, change: Change): NetworkConf
       return { ...configuration, highlights: change.words };
     }
 
+    case "Ignores": {
+      return { ...configuration, ignores: change.masks };
+    }
+
     default: {
       return change satisfies never;
     }

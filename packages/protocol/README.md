@@ -12,6 +12,7 @@ Each subpath is its own module, and there is no root export.
 | `@iirc/protocol/ctcp` | CTCP read out of a Message's text, and CTCP text and Lines to send |
 | `@iirc/protocol/format` | mIRC formatting codes as spans of text and style, or stripped |
 | `@iirc/protocol/links` | The links a Message holds, in order, and the first three that may be previewed |
+| `@iirc/protocol/mask` | A `nick!user@host` mask with wildcards, and whether it matches a User |
 
 ## Features, from the floor up
 
@@ -27,7 +28,8 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 8. **Links.** `linksOf` finds the links in a Message's text, and `previewableLinksOf` the first three distinct `http` or `https` ones, so the Daemon and every Frontend agree on which they are.
 9. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
 10. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
-11. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
+11. **Masks.** `IgnoreMask` is a `nick!user@host` mask that can always be matched, and `matches` says whether it matches a User under a casemapping, so the Client and every Frontend agree on who a mask names.
+12. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
 
 ## `@iirc/protocol/line`
 
@@ -150,6 +152,16 @@ previewLimit: 3
 ```
 
 A link starts at `http://`, `https://`, `irc://`, or `ircs://`, in any case, and its `href` is as the URL parser wrote it. It ends at whitespace, a control, or a bidirectional formatting character, and loses the stops, commas, and quotes that end a sentence and any closing bracket it did not open. Anything else with a scheme, `javascript:` and `data:` included, is text. `linksOf` searches each span of one style on its own, so a link that formatting splits is found only up to the split. `linksInRun` takes text with no formatting codes, and gives where each link starts and how it was written, for a Frontend that draws them. `previewableLinksOf` never gives an `irc` or `ircs` link, and counts a link once however often it repeats, so the three are distinct and a later link takes the place of a repeat.
+
+## `@iirc/protocol/mask`
+
+```ts
+IgnoreMask: Schema<IgnoreMask>   // a branded string, checked on decoding
+canonicalMask(casemapping: Casemapping, mask: IgnoreMask): IgnoreMask
+matches(casemapping: Casemapping, mask: IgnoreMask, who: { nick, user?, host? }): boolean
+```
+
+A mask is a non-empty nick, user, and host, joined by exactly one `!` and then exactly one `@`, of at most 255 characters, with no space, comma, or control character. `*` stands for any run of characters, none included, and `?` for any one character, and either may cross the `!` and the `@`. `matches` folds the mask and `nick!user@host` by the casemapping and compares them whole, with a missing user or host as empty. It uses no regular expression and never takes more than the mask's length times the text's. `canonicalMask` is the form two spellings of one mask share.
 
 ## Invariants
 

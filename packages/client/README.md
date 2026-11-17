@@ -98,15 +98,16 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, or Self's, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered when the tag was sent, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
+| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, or Self's, the Owner's masks its sender `ignored`, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered when the tag was sent, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
 | `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
-| `Activity` | Something that changed, with its time, id, whether it is `live`, and `where` it belongs. |
+| `Activity` | Something that changed, with its time, id, whether it is `live`, the masks the User behind it `ignored`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration: why, the Ircd dialled, and whether it had opened. |
 | `Refolded` | An Ircd declared another casemapping, so keys in `where` fold by it from here on. |
 | `NetworkRemoved` | The Owner removed the Network, and `keep` is whether its Timelines stay readable. |
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it: whether a Timeline is still closed is the projection's to derive. |
+| `Unignored` | The Owner took masks out of the Configuration's `ignores`, each given as every casemapping folds it. |
 | `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
 | `PartnerLearned` | Whether a Direct Message partner is on the Network, as `Knowledge.partners` says, changed with no Activity saying so: the first status `MONITOR` gave, their joining or leaving a Channel Self shares, or the Session ending. It says which partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
@@ -261,6 +262,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
 - **Closing a Timeline** (`close.test.ts`). A `CloseTimeline` names a Channel or a Direct Message partner as a `Read` does, never the Network's own, and is reported unless Self is in that Channel now. It needs no Session.
 - **Highlights** (`highlight.test.ts`). A live Message from another User is a Highlight when it holds Self's nick, or one of the Configuration's `highlights`, as a whole word. Word boundaries use Unicode 17.0, pinned in `src/word-characters.ts`, so a Journal gives the same Highlights on every runtime. The search is linear in the text, however hostile.
+- **Ignoring by mask** (`ignore.test.ts`). The Configuration's `ignores` are `nick!user@host` masks, at most 64. A Message or an Activity from a User one of them matches, by its source, carries those masks as `ignored`, folded by the casemapping the Network last declared and each once, in the Configuration's order, and one that matches none carries nothing. The one who joined, quit, or set a mode is the User, and so is the one who kicked, not the one kicked. History is stamped as live is, and a Message from the Ircd or another server never is. Self is never ignored, whatever the masks. The Client drops nothing and counts nothing: a projection hides what is stamped, and shows it again on `Unignored`, which a Configuration that no longer holds a mask gives, with the mask as every casemapping folds it, less any fold a mask still held shares, so a stamp made under another mapping is found. An ignored User's Direct Message opens no partner to monitor. A mask respelt in another case is the same mask. A CTCP request from an ignored User is stamped, and is still answered.
 - **What is ignored** (`ignored.test.ts`). Nothing unreadable ends the Connection.
 
 ### Acting

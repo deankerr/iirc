@@ -67,7 +67,8 @@ const describeNews = (happened: readonly Happened[]) =>
         case "ReadMarker":
         case "Refolded":
         case "Refused":
-        case "TimelineClosed": {
+        case "TimelineClosed":
+        case "Unignored": {
           return [];
         }
 

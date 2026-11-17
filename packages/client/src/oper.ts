@@ -94,16 +94,20 @@ export const operAnswered = (run: Run, line: Line): void => {
   }
 
   run.news.push(
-    routeActivity(run, {
-      _tag: "Activity",
-      activity:
-        answer === "Granted"
-          ? { _tag: "OperGranted", nick: session.nick }
-          : { _tag: "OperRefused", nick: session.nick, reply: answer },
-      at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
-      id: { _tag: "Unknown" },
-      live: true,
-    })
+    routeActivity(
+      run,
+      {
+        _tag: "Activity",
+        activity:
+          answer === "Granted"
+            ? { _tag: "OperGranted", nick: session.nick }
+            : { _tag: "OperRefused", nick: session.nick, reply: answer },
+        at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      undefined
+    )
   );
   awaiting(run, false);
 };

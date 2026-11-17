@@ -1,7 +1,8 @@
 /**
  * The Timeline store port: where the fold's changes are kept, and what Frontends read
  * Timelines from. It is derived, so it can be emptied and rebuilt from the Journal at any
- * time.
+ * time. An item an ignore mask hides is kept, and no read gives it or counts it until
+ * `Unignored` takes its last mask off.
  *
  * @packageDocumentation
  */
@@ -64,7 +65,7 @@ export const noneUnread: Unread = { activity: 0, direct: 0, highlights: 0, messa
  * stands after it, when its head last changed, and the last sequence that changed it.
  */
 export interface Summary extends Descriptor {
-  /** The position of its last item, or `undefined` while it has none. */
+  /** The position of its last item shown, or `undefined` while it has none. */
   readonly latest: Position | undefined;
   /** How far the Owner has read it, or `undefined` before any Read Marker. */
   readonly read: Instant | undefined;
@@ -78,8 +79,8 @@ export interface Summary extends Descriptor {
   /** Whether its Network was removed, and its Timelines kept: it is read, and never said to. */
   readonly removed: boolean;
   /**
-   * Whether the Owner closed it and nothing has been added to it since: no item stands in it
-   * from a later step than the last `Closed`.
+   * Whether the Owner closed it and nothing has been added to it since: no item shown stands
+   * in it from a later step than the last `Closed`, nor shown again since it.
    */
   readonly closed: boolean;
   /** The last sequence that changed it, its Read Marker, its head, whether it is closed, or any of its items. */
@@ -306,8 +307,9 @@ export interface TimelineStoreService {
   /** The directory as of the last step folded, to restore the fold without folding again. */
   readonly directory: Effect.Effect<Directory, TimelineStoreFailed>;
   /**
-   * A Network's Timelines, merged ones aside, in the order they were opened, which is by id:
-   * those after `after`, up to `limit` of them, or every one without a page.
+   * A Network's Timelines, merged ones aside, and a Direct Message Timeline that shows no
+   * item, in the order they were opened, which is by id: those after `after`, up to `limit`
+   * of them, or every one without a page.
    */
   readonly timelines: (
     network: string,

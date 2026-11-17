@@ -5,6 +5,7 @@
 import { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Closable, Marked, News, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import { describe, expect, it } from "vitest";
 
 import { answering, delivered } from "./change.ts";
@@ -51,7 +52,7 @@ const message = (
     readonly context?: string;
     readonly live?: boolean;
   } = {}
-): News => ({
+): Extract<News, { readonly _tag: "Message" }> => ({
   _tag: "Message",
   answers: options.answers === undefined ? undefined : MessageId.make(options.answers),
   at: options.at ?? known(t0),
@@ -72,7 +73,7 @@ const message = (
   where,
 });
 
-const nickChanged = (where: readonly Where[]): News => ({
+const nickChanged = (where: readonly Where[]): Extract<News, { readonly _tag: "Activity" }> => ({
   _tag: "Activity",
   activity: { _tag: "NickChanged", from: "peer", to: "Peer2" },
   at: known(t0),
@@ -764,6 +765,7 @@ describe("our actions' refusals", () => {
           intent: "a1",
           reason: { _tag: "Rejected", reply: "482" },
         },
+        ignored: [],
         intent: undefined,
         level: undefined,
         messageId: undefined,
@@ -781,6 +783,7 @@ describe("our actions' refusals", () => {
           intent: "a2",
           reason: { _tag: "Unsent" },
         },
+        ignored: [],
         intent: undefined,
         level: undefined,
         messageId: undefined,
@@ -1128,5 +1131,53 @@ describe("a Network removed", () => {
       [3, timelineIdOf(3, 0, 1), 3],
     ]);
     expect(ofTag(changes, "Removed").map(({ life }) => life)).toStrictEqual([1]);
+  });
+});
+
+describe("ignore masks", () => {
+  const spam = IgnoreMask.make("spam!*@*");
+  const bots = IgnoreMask.make("*!*@bots.example");
+
+  it("carries the masks a Message or Activity matched onto every item it places", () => {
+    const { changes } = fold([
+      happened(1, [
+        { ...message([channel("#iirc"), direct("spam")]), ignored: [spam, bots] },
+        { ...nickChanged([channel("#iirc")]), ignored: [bots] },
+        message([channel("#iirc")]),
+      ]),
+    ]);
+
+    expect(
+      ofTag(changes, "Added").map(({ ignored, position }) => [position.n, ignored])
+    ).toStrictEqual([
+      [0, [spam, bots]],
+      [0, [spam, bots]],
+      [1, [bots]],
+      [2, []],
+    ]);
+  });
+
+  it("opens the Timelines an ignored Message names, as any other does", () => {
+    const { changes, directory } = fold([
+      happened(1, [{ ...message([direct("spam")]), ignored: [spam] }]),
+    ]);
+
+    expect(net(directory).directs.has("spam")).toBeTruthy();
+    expect(ofTag(changes, "Described").map(({ timeline }) => timeline.kind)).toStrictEqual([
+      "Network",
+      "Direct",
+    ]);
+  });
+
+  it("tells a store which masks no longer hide anything, on the Network", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [{ _tag: "Unignored", masks: [spam, bots] }]),
+      happened(3, [{ _tag: "Unignored", masks: [] }]),
+    ]);
+
+    expect(changes.filter((change) => change.sequence > 1)).toStrictEqual([
+      { _tag: "Unignored", masks: [spam, bots], network: "libera", sequence: 2 },
+    ]);
   });
 });

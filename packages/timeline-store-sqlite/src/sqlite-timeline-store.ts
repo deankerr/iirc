@@ -41,6 +41,7 @@ import type {
   Content,
   DeliveryChange,
   Directory,
+  IgnoreMask,
   Level,
   Position,
   Searchable,
@@ -62,6 +63,8 @@ import {
   FoldedRow,
   DroppedRow,
   GapRow,
+  HiddenRow,
+  IgnoredText,
   ItemRow,
   OursRow,
   RemovalRow,
@@ -73,7 +76,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 9;
+const layoutVersion = 10;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -148,15 +151,23 @@ const layout = [
     level TEXT,
     sender TEXT,
     answers TEXT,
+    ignored TEXT,
     UNIQUE (timeline, cursor)
   ) STRICT`,
   "CREATE UNIQUE INDEX items_by_message_id ON items (timeline, message_id) WHERE message_id IS NOT NULL",
   "CREATE INDEX items_by_intent ON items (network, intent) WHERE intent IS NOT NULL",
   "CREATE INDEX items_by_step ON items (network, step, cursor, timeline)",
-  "CREATE INDEX items_by_changed ON items (changed, timeline, cursor)",
-  "CREATE INDEX items_by_level ON items (timeline, level, cursor) WHERE level IS NOT NULL",
-  // Whether anything was added to a Timeline after it was closed, by the step that added it.
-  "CREATE INDEX items_by_arrival ON items (timeline, step)",
+  // An item an ignore mask hides, `ignored` not null, is in no index a read is served by but
+  // the unique ones, which keep it holding its position and message id, and the step's.
+  // Each partial index ends in `ignored`, always null there, so SQLite checks the condition
+  // from the index alone, and a count or a seek stays covered.
+  "CREATE INDEX items_by_changed ON items (changed, timeline, cursor, ignored) WHERE ignored IS NULL",
+  "CREATE INDEX items_by_level ON items (timeline, level, cursor, ignored) WHERE level IS NOT NULL AND ignored IS NULL",
+  "CREATE INDEX items_shown ON items (timeline, cursor, ignored) WHERE ignored IS NULL",
+  // What `Unignored` reads: a Network's hidden items, and nothing shown.
+  "CREATE INDEX items_hidden ON items (network) WHERE ignored IS NOT NULL",
+  // Whether anything shown was added to a Timeline after it was closed, by the step that added it.
+  "CREATE INDEX items_by_arrival ON items (timeline, step, ignored) WHERE ignored IS NULL",
   // Each Message's text, folded, by its item's id: an index of its runs of three characters,
   // which holds no copy of the text. The store folds it, so SQLite compares it as it is.
   `CREATE VIRTUAL TABLE search USING fts5(
@@ -244,6 +255,7 @@ const columns = [
   "items.level TEXT",
   "items.sender TEXT",
   "items.answers TEXT",
+  "items.ignored TEXT",
   "removals.network TEXT",
   "removals.keep INTEGER",
   "removals.changed INTEGER",
@@ -357,6 +369,8 @@ type Prepared =
       readonly change: Extract<Change, { readonly _tag: "Added" }>;
       readonly content: string;
       readonly searchable: Searchable | undefined;
+      /** The masks that hide it, encoded, or `null` when it is shown. */
+      readonly ignored: string | null;
     };
 
 const textOrNull = (value: string | undefined) => value ?? null;
@@ -449,6 +463,7 @@ const decodeHead = Schema.decodeUnknownExit(
 const decodeInto = Schema.decodeUnknownExit(Schema.Struct({ into: Schema.NullOr(TimelineId) }));
 
 const decodeRows = decodeAll(Schema.Struct({ id: Schema.Int }), "an item's row");
+const decodeHidden = decodeAll(HiddenRow, "a hidden item");
 const decodeContents = decodeAll(ContentRow, "an item");
 const decodeFolding = decodeAll(Schema.Struct({ folding: Schema.String }), "the folding");
 
@@ -649,18 +664,30 @@ const query = <A>(what: string, rows: Effect.Effect<A, SqlError | TimelineStoreF
     Effect.catchTag("SqlError", (error) => Effect.fail(failed(`cannot read ${what}`)(error)))
   );
 
+const encodeIgnored = (masks: readonly IgnoreMask[]) =>
+  masks.length === 0
+    ? Effect.succeed(null)
+    : Schema.encodeEffect(IgnoredText)(masks).pipe(
+        Effect.mapError(failed("cannot encode an item's ignore masks"))
+      );
+
 const prepare = (changes: readonly Change[]) =>
   // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
   Effect.forEach(changes, (change) =>
     change._tag === "Added"
-      ? Schema.encodeEffect(ContentText)(change.content).pipe(
-          Effect.map((content): Prepared => ({
+      ? Effect.all({
+          content: Schema.encodeEffect(ContentText)(change.content).pipe(
+            Effect.mapError(failed("cannot encode an item"))
+          ),
+          ignored: encodeIgnored(change.ignored),
+        }).pipe(
+          Effect.map(({ content, ignored }): Prepared => ({
             _tag: "Added",
             change,
             content,
+            ignored,
             searchable: searchableOf(change.content),
-          })),
-          Effect.mapError(failed("cannot encode an item"))
+          }))
         )
       : Effect.succeed<Prepared>({ _tag: "Other", change })
   );
@@ -765,20 +792,31 @@ export const makeSqliteTimelineStore = (
       )
     );
 
-    // Whether a Timeline is closed: it was, and no item stands in it from a later step,
-    // which `items_by_arrival` finds with one seek.
+    // Whether a Timeline is closed: it was, and no item shown stands in it from a later
+    // step, which `items_by_arrival` finds with one seek.
     const isClosed = sql`
       (timelines.closed IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM items WHERE items.timeline = timelines.id AND items.step > timelines.closed
+          AND items.ignored IS NULL
       ))
     `;
 
-    // Timelines, each with the position of its last item, which the primary key finds.
+    // Whether a Timeline is listed: a Direct Message Timeline opens on an item, so one with
+    // none shown holds only what is hidden, and is listed once something in it is shown,
+    // which `items_shown` finds with one seek.
+    const isListed = sql`
+      (timelines.kind <> 'Direct' OR EXISTS (
+        SELECT 1 FROM items WHERE items.timeline = timelines.id AND items.ignored IS NULL
+      ))
+    `;
+
+    // Timelines, each with the position of its last item shown, which `items_shown` finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
       SELECT id, network, kind, name, key, changed, read, head, removed, life,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
-        (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest,
+        (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id
+          AND items.ignored IS NULL) AS latest,
         ${isClosed} AS closed
       FROM timelines ${where} ${order}
     `;
@@ -790,7 +828,8 @@ export const makeSqliteTimelineStore = (
 
       const answeredBy = (column: string) => sql`
         (SELECT ${sql(`answered.${column}`)} FROM items AS answered
-          WHERE answered.timeline = ${of("timeline")} AND answered.message_id = ${of("answers")})
+          WHERE answered.timeline = ${of("timeline")} AND answered.message_id = ${of("answers")}
+            AND answered.ignored IS NULL)
       `;
 
       return sql`${of("timeline")} AS timeline, ${of("cursor")} AS position,
@@ -810,7 +849,7 @@ export const makeSqliteTimelineStore = (
     // nothing after it, and no instant after it is ever made.
     const counted = (timeline: TimelineId, level: Level, read: Instant | null) => sql`
       (SELECT count(*) FROM (
-        SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level}
+        SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level} AND ignored IS NULL
           ${read === null ? sql`` : sql`AND cursor > ${cursorsAfter(read)}`}
         LIMIT ${unreadCap + 1}
       ))
@@ -886,7 +925,8 @@ export const makeSqliteTimelineStore = (
     const added = (
       change: Extract<Change, { readonly _tag: "Added" }>,
       content: string,
-      searchable: Searchable | undefined
+      searchable: Searchable | undefined,
+      ignored: string | null
     ) =>
       Effect.gen(function* () {
         const answers = change.content._tag === "Message" ? change.content.answers : undefined;
@@ -904,11 +944,12 @@ export const makeSqliteTimelineStore = (
 
         const [kept] = yield* sql`
           INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
-            level, sender, answers)
+            level, sender, answers, ignored)
           VALUES (${change.timeline}, ${cursorOf(change.position)}, ${change.network},
             ${change.position.sequence}, ${textOrNull(change.messageId)},
             ${textOrNull(change.intent)}, ${content}, ${change.sequence},
-            ${textOrNull(level)}, ${textOrNull(searchable?.sender)}, ${textOrNull(answers)})
+            ${textOrNull(level)}, ${textOrNull(searchable?.sender)}, ${textOrNull(answers)},
+            ${ignored})
           ON CONFLICT DO NOTHING
           RETURNING id
         `.pipe(Effect.flatMap(decodeRows));
@@ -917,8 +958,14 @@ export const makeSqliteTimelineStore = (
           return;
         }
 
+        // A hidden Message is indexed too, so it is found once it is shown.
         if (searchable !== undefined) {
           yield* sql`INSERT INTO search (rowid, text) VALUES (${kept.id}, ${searchable.text})`;
+        }
+
+        // A hidden item changes nothing a read gives, so it touches and counts nothing.
+        if (ignored !== null) {
+          return;
         }
 
         yield* touch(change.timeline, change.sequence);
@@ -934,10 +981,56 @@ export const makeSqliteTimelineStore = (
         }
       });
 
+    // Takes the masks off each of the Network's hidden items, read by `items_hidden` alone.
+    // One left with none is shown where it stood, changed now. Each Timeline it is shown in
+    // is closed as of now when it was closed before, so what is shown again reopens nothing,
+    // then touched, and counted again from its Read Marker.
+    const unignore = (change: Extract<Change, { readonly _tag: "Unignored" }>) =>
+      Effect.gen(function* () {
+        const dropped = new Set(change.masks);
+
+        const rows = yield* sql`
+          SELECT id, ignored, timeline FROM items
+          WHERE network = ${change.network} AND ignored IS NOT NULL
+        `.pipe(Effect.flatMap(decodeHidden));
+
+        const kept = rows.flatMap((row) => {
+          const ignored = row.ignored.filter((mask) => !dropped.has(mask));
+
+          return ignored.length < row.ignored.length ? [{ ...row, ignored }] : [];
+        });
+
+        const shown = [
+          ...new Set(
+            kept.flatMap(({ ignored, timeline }) => (ignored.length === 0 ? [timeline] : []))
+          ),
+        ].toSorted();
+
+        for (const timeline of shown) {
+          yield* sql`
+            UPDATE timelines SET closed = ${change.sequence} WHERE id = ${timeline} AND ${isClosed}
+          `;
+        }
+
+        for (const row of kept) {
+          yield* row.ignored.length === 0
+            ? sql`UPDATE items SET ignored = NULL, changed = ${change.sequence} WHERE id = ${row.id}`
+            : Effect.flatMap(
+                encodeIgnored(row.ignored),
+                (ignored) => sql`UPDATE items SET ignored = ${ignored} WHERE id = ${row.id}`
+              );
+        }
+
+        for (const timeline of shown) {
+          yield* touch(timeline, change.sequence);
+          yield* recount(timeline);
+        }
+      });
+
     const applyOne = (prepared: Prepared) =>
       Effect.gen(function* () {
         if (prepared._tag === "Added") {
-          yield* added(prepared.change, prepared.content, prepared.searchable);
+          yield* added(prepared.change, prepared.content, prepared.searchable, prepared.ignored);
 
           return;
         }
@@ -1088,6 +1181,11 @@ export const makeSqliteTimelineStore = (
             break;
           }
 
+          case "Unignored": {
+            yield* unignore(change);
+            break;
+          }
+
           case "Gap": {
             yield* sql`
               INSERT INTO gaps (network, from_cursor, to_cursor, changed)
@@ -1111,8 +1209,9 @@ export const makeSqliteTimelineStore = (
     const nextSequence = (since: number) =>
       sql<{ readonly next: number | null }>`
         SELECT min(next) AS next FROM (
-          SELECT min(changed) AS next FROM timelines WHERE changed > ${since}
-          UNION ALL SELECT min(changed) FROM items WHERE changed > ${since}
+          SELECT (SELECT changed FROM timelines WHERE changed > ${since} AND ${isListed}
+            ORDER BY changed LIMIT 1) AS next
+          UNION ALL SELECT min(changed) FROM items WHERE changed > ${since} AND ignored IS NULL
           UNION ALL SELECT min(changed) FROM tombstones WHERE changed > ${since}
           UNION ALL SELECT min(changed) FROM dropped WHERE changed > ${since}
           UNION ALL SELECT min(changed) FROM removals WHERE changed > ${since}
@@ -1125,8 +1224,12 @@ export const makeSqliteTimelineStore = (
     const countAt = (sequence: number, cap: number) =>
       sql<{ readonly count: number }>`
         SELECT
-          (SELECT count(*) FROM (SELECT 1 FROM timelines WHERE changed = ${sequence} LIMIT ${cap}))
-          + (SELECT count(*) FROM (SELECT 1 FROM items WHERE changed = ${sequence} LIMIT ${cap}))
+          (SELECT count(*) FROM (
+            SELECT 1 FROM timelines WHERE changed = ${sequence} AND ${isListed} LIMIT ${cap}
+          ))
+          + (SELECT count(*) FROM (
+            SELECT 1 FROM items WHERE changed = ${sequence} AND ignored IS NULL LIMIT ${cap}
+          ))
           + (SELECT count(*) FROM (SELECT 1 FROM tombstones WHERE changed = ${sequence} LIMIT ${cap}))
           + (SELECT count(*) FROM (SELECT 1 FROM dropped WHERE changed = ${sequence} LIMIT ${cap}))
           + (SELECT count(*) FROM (SELECT 1 FROM removals WHERE changed = ${sequence} LIMIT ${cap}))
@@ -1137,8 +1240,9 @@ export const makeSqliteTimelineStore = (
     const lastChanged = (since: number) =>
       sql<{ readonly last: number | null }>`
         SELECT max(last) AS last FROM (
-          SELECT max(changed) AS last FROM timelines WHERE changed > ${since}
-          UNION ALL SELECT max(changed) FROM items WHERE changed > ${since}
+          SELECT (SELECT changed FROM timelines WHERE changed > ${since} AND ${isListed}
+            ORDER BY changed DESC LIMIT 1) AS last
+          UNION ALL SELECT max(changed) FROM items WHERE changed > ${since} AND ignored IS NULL
           UNION ALL SELECT max(changed) FROM tombstones WHERE changed > ${since}
           UNION ALL SELECT max(changed) FROM dropped WHERE changed > ${since}
           UNION ALL SELECT max(changed) FROM removals WHERE changed > ${since}
@@ -1183,7 +1287,8 @@ export const makeSqliteTimelineStore = (
         const ids = new Set<TimelineId>();
 
         const listed = yield* sql`
-          SELECT id FROM timelines WHERE changed = ${sequence} ORDER BY id LIMIT ${limit + 1}
+          SELECT id FROM timelines WHERE changed = ${sequence} AND ${isListed}
+          ORDER BY id LIMIT ${limit + 1}
         `.pipe(Effect.flatMap(decodeIds));
 
         const merged = yield* sql`
@@ -1205,7 +1310,8 @@ export const makeSqliteTimelineStore = (
 
         while (ids.size <= limit) {
           const [found] = yield* sql`
-            SELECT timeline AS id FROM items WHERE changed = ${sequence} AND timeline > ${after}
+            SELECT timeline AS id FROM items
+            WHERE changed = ${sequence} AND timeline > ${after} AND ignored IS NULL
             ORDER BY timeline LIMIT 1
           `.pipe(Effect.flatMap(decodeIds));
 
@@ -1241,12 +1347,13 @@ export const makeSqliteTimelineStore = (
             : undefined;
 
         const timelines = yield* summaries(
-          sql`WHERE changed > ${since} AND changed <= ${upTo}`,
+          sql`WHERE changed > ${since} AND changed <= ${upTo} AND ${isListed}`,
           sql`ORDER BY changed, id`
         ).pipe(Effect.flatMap(decodeSummaries));
 
         const items = yield* sql`
-          SELECT ${itemColumns} FROM items WHERE changed > ${since} AND changed <= ${upTo}
+          SELECT ${itemColumns} FROM items
+          WHERE changed > ${since} AND changed <= ${upTo} AND ignored IS NULL
           ORDER BY changed, timeline, cursor
         `.pipe(Effect.flatMap(decodeItems));
 
@@ -1412,7 +1519,7 @@ export const makeSqliteTimelineStore = (
     const side = (name: string, timeline: TimelineId, each: Side) => sql`
       UNION ALL SELECT * FROM (
         SELECT ${name}, 0, ${itemColumns} FROM items
-        WHERE timeline = ${timeline} ${bound(each.bound)}
+        WHERE timeline = ${timeline} AND ignored IS NULL ${bound(each.bound)}
         ORDER BY cursor ${each.descending ? sql`DESC` : sql`ASC`} LIMIT ${each.limit}
       )
     `;
@@ -1423,7 +1530,9 @@ export const makeSqliteTimelineStore = (
     const windowRows = (timeline: TimelineId, plan: Plan) => {
       const other =
         plan._tag === "OneSide" && plan.other !== undefined
-          ? sql`EXISTS (SELECT 1 FROM items WHERE timeline = ${timeline} ${bound(plan.other)})`
+          ? sql`EXISTS (
+              SELECT 1 FROM items WHERE timeline = ${timeline} AND ignored IS NULL ${bound(plan.other)}
+            )`
           : sql`0`;
 
       const sides =
@@ -1523,7 +1632,7 @@ export const makeSqliteTimelineStore = (
       return sql`
         SELECT ${columnsOf("page")} FROM (
         SELECT items.* FROM search CROSS JOIN items ON items.id = search.rowid
-        WHERE search MATCH ${phraseOf(foldForSearch(each.text))}
+        WHERE search MATCH ${phraseOf(foldForSearch(each.text))} AND items.ignored IS NULL
           ${each.network === undefined ? sql`` : sql`AND items.network = ${each.network}`}
           ${
             each.timeline === undefined
@@ -1626,7 +1735,8 @@ export const makeSqliteTimelineStore = (
         query(
           "a step's items",
           sql`
-          SELECT ${itemColumns} FROM items WHERE network = ${network} AND step = ${sequence}
+          SELECT ${itemColumns} FROM items
+          WHERE network = ${network} AND step = ${sequence} AND ignored IS NULL
             ${
               page.after === undefined
                 ? sql``
@@ -1668,8 +1778,8 @@ export const makeSqliteTimelineStore = (
           "the Timelines",
           summaries(
             page.after === undefined
-              ? sql`WHERE network = ${network}`
-              : sql`WHERE network = ${network} AND id > ${page.after}`,
+              ? sql`WHERE network = ${network} AND ${isListed}`
+              : sql`WHERE network = ${network} AND id > ${page.after} AND ${isListed}`,
             page.limit === undefined
               ? sql`ORDER BY id`
               : sql`ORDER BY id LIMIT ${Math.max(0, Math.floor(page.limit))}`

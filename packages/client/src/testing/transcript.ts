@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import { CredentialName, SecretLine } from "@iirc/protocol/line";
+import { IgnoreMask } from "@iirc/protocol/mask";
 import { Result, Schema } from "effect";
 
 import { Login, Oper } from "../configuration.ts";
@@ -45,7 +46,9 @@ export type Change =
   /** `nicks=one,two`: the nicks registration offers, in order. */
   | { readonly _tag: "Nicks"; readonly nicks: readonly [string, ...string[]] }
   /** `highlights=one,two`: the words that make a Message a Highlight, or none with `highlights=`. */
-  | { readonly _tag: "Highlights"; readonly words: readonly string[] };
+  | { readonly _tag: "Highlights"; readonly words: readonly string[] }
+  /** `ignores=a!*@*,b!*@*`: the masks of the Users to ignore, or none with `ignores=`. */
+  | { readonly _tag: "Ignores"; readonly masks: readonly IgnoreMask[] };
 
 /** What the Owner does, written after `!!`. */
 export type Owner =
@@ -467,6 +470,8 @@ const readLogin = (text: string): Login | undefined => {
 
 const decodeOper = Schema.decodeUnknownResult(Oper);
 
+const decodeMasks = Schema.decodeUnknownResult(Schema.Array(IgnoreMask));
+
 // `none`, or `<name>,<credential>`, as the Oper schema accepts it.
 const readOper = (text: string): Oper | undefined => {
   if (text === "none") {
@@ -479,6 +484,24 @@ const readOper = (text: string): Oper | undefined => {
   return [name, credential].every(present) && rest.length === 0 && Result.isSuccess(decoded)
     ? decoded.success
     : undefined;
+};
+
+// `highlights=` or `ignores=`, each a list after it, or none for nothing. A mask the schema
+// would refuse is a transcript error.
+const readList = (token: string): Change | undefined => {
+  if (token.startsWith("highlights=")) {
+    const words = token.slice(11);
+
+    return { _tag: "Highlights", words: words === "" ? [] : words.split(",") };
+  }
+
+  if (!token.startsWith("ignores=")) {
+    return undefined;
+  }
+
+  const masks = decodeMasks(token.length === 8 ? [] : token.slice(8).split(","));
+
+  return Result.isSuccess(masks) ? { _tag: "Ignores", masks: masks.success } : undefined;
 };
 
 // A change that is a setting rather than a Channel: `enable`, `disable`, `decline=`,
@@ -500,10 +523,10 @@ const readSetting = (token: string): Change | undefined => {
     return { _tag: "Realname", realname: token.slice(9) };
   }
 
-  if (token.startsWith("highlights=")) {
-    const words = token.slice(11);
+  const listed = readList(token);
 
-    return { _tag: "Highlights", words: words === "" ? [] : words.split(",") };
+  if (listed !== undefined) {
+    return listed;
   }
 
   const [first, ...rest] = token.startsWith("nicks=") ? token.slice(6).split(",") : [];
@@ -592,6 +615,10 @@ const writeChange = (change: Change): string => {
 
     case "Highlights": {
       return `highlights=${change.words.join(",")}`;
+    }
+
+    case "Ignores": {
+      return `ignores=${change.masks.join(",")}`;
     }
 
     case "Login": {
@@ -967,6 +994,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["session-began", "SessionBegan"],
   ["session-ended", "SessionEnded"],
   ["timeline-closed", "TimelineClosed"],
+  ["unignored", "Unignored"],
 ]);
 
 const readExpect = (text: string): Result.Result<Item, string> => {
