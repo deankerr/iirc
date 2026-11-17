@@ -9,7 +9,14 @@ import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { fetchRelease, freePort, loopback, supervise, waitListening } from "./children.ts";
+import {
+  fetchRelease,
+  freePort,
+  loopback,
+  onFreePorts,
+  supervise,
+  waitListening,
+} from "./children.ts";
 
 // MinIO itself no longer publishes binaries: its download site answers 410, and its
 // repository is archived with none attached. pgsty/minio, which calls its build "silo", is a
@@ -77,48 +84,52 @@ export const startMinio = async (): Promise<Minio> => {
     url: `https://github.com/pgsty/minio/releases/download/${minioRelease}`,
   });
 
-  const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-minio-"));
-  const data = path.join(directory, "data");
-  await mkdir(data);
-  const port = freePort();
-  const consolePort = freePort();
+  const { data, endpoint, stop } = await onFreePorts(async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-minio-"));
+    const data = path.join(directory, "data");
+    await mkdir(data);
+    const port = freePort();
+    const consolePort = freePort();
 
-  const child = Bun.spawn(
-    [
-      binary,
-      "server",
-      data,
-      "--address",
-      `${loopback}:${port}`,
-      "--console-address",
-      `${loopback}:${consolePort}`,
-      "--certs-dir",
-      path.join(directory, "certs"),
-      "--quiet",
-    ],
-    {
-      cwd: directory,
-      env: {
-        MINIO_ROOT_PASSWORD: secretAccessKey,
-        MINIO_ROOT_USER: accessKeyId,
-        PATH: process.env.PATH,
-      },
-      stderr: "inherit",
-      stdin: "ignore",
-      stdout: "ignore",
+    const child = Bun.spawn(
+      [
+        binary,
+        "server",
+        data,
+        "--address",
+        `${loopback}:${port}`,
+        "--console-address",
+        `${loopback}:${consolePort}`,
+        "--certs-dir",
+        path.join(directory, "certs"),
+        "--quiet",
+      ],
+      {
+        cwd: directory,
+        env: {
+          MINIO_ROOT_PASSWORD: secretAccessKey,
+          MINIO_ROOT_USER: accessKeyId,
+          PATH: process.env.PATH,
+        },
+        stderr: "inherit",
+        stdin: "ignore",
+        stdout: "ignore",
+      }
+    );
+
+    const stop = supervise(child, directory);
+    const endpoint = `http://${loopback}:${port}`;
+
+    try {
+      await waitListening(child, [port, consolePort], "minio");
+      await waitReady(endpoint);
+    } catch (error) {
+      await stop();
+      throw error;
     }
-  );
 
-  const stop = supervise(child, directory);
-  const endpoint = `http://${loopback}:${port}`;
-
-  try {
-    await waitListening(child, port, "minio");
-    await waitReady(endpoint);
-  } catch (error) {
-    await stop();
-    throw error;
-  }
+    return { data, endpoint, stop };
+  });
 
   let buckets = 0;
 

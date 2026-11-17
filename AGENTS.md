@@ -6,7 +6,9 @@
 
 Formatting is automatic: a commit fixes and re-stages its own files. A push runs `bun run check`, `bun run knip`, and `bun run test`, and CI runs them again on the pull request.
 
-One test file runs from the root, as `bun --bun vitest run packages/outbox/src/outbox.test.ts`. An end-to-end file runs only from inside its package, as `cd packages/daemon && bun --bun vitest run src/e2e/uploads.test.ts`, and `apps/iirc`'s need `bun run build:web`, at the root, first. `bun run e2e` runs them all. End-to-end tests run in neither the hooks nor CI, so whoever changes behaviour one covers runs it.
+One test file runs from the root, as `bun --bun vitest run packages/outbox/src/outbox.test.ts`. An end-to-end file runs only from inside its package, as `cd packages/daemon && bun --bun vitest run src/e2e/uploads.test.ts`, and `apps/iirc`'s need `bun run build:web`, at the root, first. `bun run e2e` runs them all. End-to-end tests run in neither the hooks nor CI. A change to the Transport, the Runtime, pacing, or the Daemon runs them, and gives the run as evidence. A Frontend change gives failing-first fake-Daemon tests and screenshots instead.
+
+A flaky end-to-end test is quarantined, never rerun until it passes: fix its cause, or file a `bug` issue for it and skip it with a comment linking that issue.
 
 # Determinism
 

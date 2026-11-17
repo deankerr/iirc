@@ -984,6 +984,22 @@ describe("the shell", () => {
     });
   });
 
+  it("gives the focus to the composer when the sidebar is hidden while the focus is in it", async () => {
+    await signedIn();
+    const row = document.querySelector<HTMLElement>('nav [role="row"]');
+
+    row?.focus();
+    const before = document.activeElement === row;
+
+    await press(row ?? document.body, { altKey: true, code: "KeyN", key: "n" });
+
+    expect({
+      before,
+      composer: document.activeElement === composer(),
+      nav: document.querySelector("nav") === null,
+    }).toStrictEqual({ before: true, composer: true, nav: true });
+  });
+
   it("says, and moves from, the width drawn where the window is narrower than twice the width kept", async () => {
     await signedIn();
     const separator = edge();

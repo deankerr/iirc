@@ -282,6 +282,51 @@ describe("the options view, under store, uploads, and previews", () => {
     });
   });
 
+  it("asks before unsetting one on Delete, and on Enter unsets it, sending it and showing its default", async () => {
+    const fake = signedIn();
+    const { container, registry, type } = await page(fake);
+
+    await type("/set store");
+    await readAt(registry, 0);
+    await type("/set store.s3.bucket my-bucket");
+    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "my-bucket");
+
+    const row = container.querySelector<HTMLElement>('[data-key="store.s3.bucket"]');
+
+    if (row === null) {
+      throw new Error("no row");
+    }
+
+    await press(row, "Delete");
+
+    const question = container.querySelector('[role="alertdialog"]')?.textContent;
+
+    const button = [...container.querySelectorAll('[role="alertdialog"] button')].find(
+      (one) => one.textContent === "Unset"
+    );
+
+    if (button === undefined) {
+      throw new Error("no Unset button");
+    }
+
+    // A press by keyboard is its key going down and up.
+    await press(button, "Enter");
+    await doing(() => {
+      button.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
+    });
+    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "unset");
+
+    expect({
+      changes: fake.daemon.ownerChanges.map((one) => one.route),
+      question,
+      row: rowOf(container, "store.s3.bucket")?.[1],
+    }).toStrictEqual({
+      changes: ["PUT store.s3.bucket", "DELETE store.s3.bucket"],
+      question: "Unset store.s3.bucket?UnsetKeep",
+      row: "unset",
+    });
+  });
+
   it("edits one in place, and says why a value its Schema refuses was not sent", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);

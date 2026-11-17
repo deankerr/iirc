@@ -11,7 +11,15 @@ import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
-import { fetchRelease, freePort, loopback, run, supervise, waitListening } from "./children.ts";
+import {
+  fetchRelease,
+  freePort,
+  loopback,
+  onFreePorts,
+  run,
+  supervise,
+  waitListening,
+} from "./children.ts";
 
 /** The Ergo release recorded against, and the SHA-256 its checksums file gave on 2026-11-09. */
 const ergoVersion = "2.19.1";
@@ -196,98 +204,100 @@ export const startErgo = async (): Promise<Ircd> => {
     url: ergoRelease,
   });
 
-  const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-ergo-"));
-  const name = "ergo.test";
-  const plainPort = freePort();
-  const tlsPort = freePort();
-  const ca = await selfSigned(directory, name);
-  await Bun.write(path.join(directory, "ergo.motd"), "iirc end-to-end\n");
-  await Bun.write(path.join(directory, "ircd.yaml"), ergoConfig(name, plainPort, tlsPort));
-  await run([binary, "initdb", "--conf", "ircd.yaml", "--quiet"], directory);
+  return await onFreePorts(async (): Promise<Ircd> => {
+    const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-ergo-"));
+    const name = "ergo.test";
+    const plainPort = freePort();
+    const tlsPort = freePort();
+    const ca = await selfSigned(directory, name);
+    await Bun.write(path.join(directory, "ergo.motd"), "iirc end-to-end\n");
+    await Bun.write(path.join(directory, "ircd.yaml"), ergoConfig(name, plainPort, tlsPort));
+    await run([binary, "initdb", "--conf", "ircd.yaml", "--quiet"], directory);
 
-  const child = Bun.spawn([binary, "run", "--conf", "ircd.yaml"], {
-    cwd: directory,
-    stderr: "inherit",
-    stdin: "ignore",
-    stdout: "inherit",
+    const child = Bun.spawn([binary, "run", "--conf", "ircd.yaml"], {
+      cwd: directory,
+      stderr: "inherit",
+      stdin: "ignore",
+      stdout: "inherit",
+    });
+
+    const stop = supervise(child, directory);
+
+    try {
+      await waitListening(child, [plainPort, tlsPort], "ergo");
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+
+    return { ca, host: loopback, kind: "ergo", name, plainPort, stop, tlsPort };
   });
-
-  const stop = supervise(child, directory);
-
-  try {
-    await waitListening(child, plainPort, "ergo");
-    await waitListening(child, tlsPort, "ergo");
-  } catch (error) {
-    await stop();
-    throw error;
-  }
-
-  return { ca, host: loopback, kind: "ergo", name, plainPort, stop, tlsPort };
 };
 
 /**
  * Starts a private ngircd with a plaintext listener on loopback.
  * @returns The running ngircd.
  */
-export const startNgircd = async (): Promise<Ircd> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-ngircd-"));
-  const name = "ngircd.test";
-  const plainPort = freePort();
+export const startNgircd = async (): Promise<Ircd> =>
+  await onFreePorts(async (): Promise<Ircd> => {
+    const directory = await mkdtemp(path.join(tmpdir(), "iirc-e2e-ngircd-"));
+    const name = "ngircd.test";
+    const plainPort = freePort();
 
-  const config = path.join(directory, "ngircd.conf");
-  await Bun.write(
-    config,
-    [
-      "[Global]",
-      `Name = ${name}`,
-      "Info = iirc end-to-end",
-      `Listen = ${loopback}`,
-      `Ports = ${plainPort}`,
-      "AdminInfo1 = iirc end-to-end",
-      "AdminInfo2 = loopback only",
-      "AdminEMail = nobody@ngircd.test",
-      `MotdFile = ${path.join(directory, "ngircd.motd")}`,
-      `PidFile = ${path.join(directory, "ngircd.pid")}`,
-      "[Limits]",
-      "MaxConnectionsIP = 0",
-      "PingTimeout = 10",
-      "PongTimeout = 20",
-      "[Options]",
-      "DNS = no",
-      "Ident = no",
-      "PAM = no",
-      "[Operator]",
-      `Name = ${ngircdOperName}`,
-      `Password = ${ngircdOperPassword}`,
-      "",
-    ].join("\n")
-  );
-  await Bun.write(path.join(directory, "ngircd.motd"), "iirc end-to-end\n");
-  await run([ngircdBinary, "--configtest", "--config", config], directory);
+    const config = path.join(directory, "ngircd.conf");
+    await Bun.write(
+      config,
+      [
+        "[Global]",
+        `Name = ${name}`,
+        "Info = iirc end-to-end",
+        `Listen = ${loopback}`,
+        `Ports = ${plainPort}`,
+        "AdminInfo1 = iirc end-to-end",
+        "AdminInfo2 = loopback only",
+        "AdminEMail = nobody@ngircd.test",
+        `MotdFile = ${path.join(directory, "ngircd.motd")}`,
+        `PidFile = ${path.join(directory, "ngircd.pid")}`,
+        "[Limits]",
+        "MaxConnectionsIP = 0",
+        "PingTimeout = 10",
+        "PongTimeout = 20",
+        "[Options]",
+        "DNS = no",
+        "Ident = no",
+        "PAM = no",
+        "[Operator]",
+        `Name = ${ngircdOperName}`,
+        `Password = ${ngircdOperPassword}`,
+        "",
+      ].join("\n")
+    );
+    await Bun.write(path.join(directory, "ngircd.motd"), "iirc end-to-end\n");
+    await run([ngircdBinary, "--configtest", "--config", config], directory);
 
-  const child = Bun.spawn([ngircdBinary, "--nodaemon", "--config", config], {
-    cwd: directory,
-    stderr: "ignore",
-    stdin: "ignore",
-    stdout: "ignore",
+    const child = Bun.spawn([ngircdBinary, "--nodaemon", "--config", config], {
+      cwd: directory,
+      stderr: "ignore",
+      stdin: "ignore",
+      stdout: "ignore",
+    });
+
+    const stop = supervise(child, directory);
+
+    try {
+      await waitListening(child, [plainPort], "ngircd");
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+
+    return {
+      ca: undefined,
+      host: loopback,
+      kind: "ngircd",
+      name,
+      plainPort,
+      stop,
+      tlsPort: undefined,
+    };
   });
-
-  const stop = supervise(child, directory);
-
-  try {
-    await waitListening(child, plainPort, "ngircd");
-  } catch (error) {
-    await stop();
-    throw error;
-  }
-
-  return {
-    ca: undefined,
-    host: loopback,
-    kind: "ngircd",
-    name,
-    plainPort,
-    stop,
-    tlsPort: undefined,
-  };
-};

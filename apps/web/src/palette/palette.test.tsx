@@ -334,6 +334,35 @@ describe("the palette and the keys", () => {
     });
   });
 
+  it("leaves a key typed into a field inside a shadow root to that field, not the composer", async () => {
+    const { container } = await signedIn();
+    const composer = composerOf(container);
+    const host = document.createElement("div");
+    const field = document.createElement("input");
+
+    host.attachShadow({ mode: "open" }).append(field);
+    document.body.append(host);
+
+    // A browser retargets a key from a shadow root to its host at the document, and says
+    // where it really was only in its path, which happy-dom's events do not do alone.
+    await act(async () => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: "KeyI",
+        composed: true,
+        key: "i",
+      });
+
+      event.composedPath = () => [field, host, document.body, document.documentElement, document];
+      host.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    host.remove();
+
+    expect(document.activeElement).not.toBe(composer);
+  });
+
   it("does not give Space, Enter, or a key with Ctrl held to the composer", async () => {
     const { container } = await signedIn();
     const composer = composerOf(container);
