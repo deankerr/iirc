@@ -6108,4 +6108,126 @@ describe("the web frontend on iirc daemon --web", () => {
       }
     }
   );
+
+  it(
+    "lists what the Composer can complete above it: commands as / is typed, a nick on Tab, and on a phone",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "composer-list"),
+        "#iirc-list"
+      );
+
+      const pebble = await connectPeer({
+        host: ngircd.host,
+        nick: "pebble",
+        port: ngircd.plainPort,
+      });
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { exact: true, name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+        const list = page.getByRole("listbox", { name: "Completions" });
+        const options = list.getByRole("option");
+
+        pebble.send(`JOIN ${channel}`);
+        await log
+          .getByText(/pebble/u)
+          .first()
+          .waitFor();
+
+        await composer.click();
+        await page.keyboard.type("/");
+        await list.waitFor();
+        await screenshot(page, "191-after-slash-wide.png");
+
+        const opened = {
+          controls:
+            (await composer.getAttribute("aria-controls")) === (await list.getAttribute("id")),
+          many: (await options.count()) > 10,
+        };
+
+        await page.keyboard.type("jo");
+        await expect.poll(async () => await options.allTextContents()).toHaveLength(1);
+        await page.keyboard.press("ArrowDown");
+
+        const highlighted = {
+          active:
+            (await composer.getAttribute("aria-activedescendant")) ===
+            (await options.first().getAttribute("id")),
+          value: await composer.inputValue(),
+        };
+
+        await page.keyboard.press("Escape");
+
+        const escaped = { list: await list.count(), value: await composer.inputValue() };
+
+        await composer.fill("pe");
+        await page.keyboard.press("Tab");
+        await expect.poll(async () => await options.count()).toBe(2);
+        await screenshot(page, "191-after-nick-tab.png");
+
+        const nicks = {
+          names: await options.allTextContents(),
+          value: await composer.inputValue(),
+        };
+
+        await page.keyboard.press("Escape");
+        await composer.fill("");
+
+        // A phone with its keyboard up leaves a short window: the list stays above the
+        // composer, bounded so the composer stays in view.
+        await page.setViewportSize({ height: 460, width: 390 });
+        await composer.focus();
+        await page.keyboard.type("/");
+        await list.waitFor();
+        await screenshot(page, "191-after-phone.png");
+
+        const listBox = await list.boundingBox();
+        const composerBox = await composer.boundingBox();
+
+        const phone = {
+          composerInView:
+            composerBox !== null && composerBox.y + composerBox.height <= 460 && composerBox.y > 0,
+          listAbove:
+            listBox !== null &&
+            composerBox !== null &&
+            listBox.y >= 0 &&
+            listBox.y + listBox.height <= composerBox.y,
+          scrolls: await list.evaluate((one) => one.scrollHeight > one.clientHeight),
+        };
+
+        expect({
+          escaped,
+          highlighted,
+          nicks,
+          opened,
+          phone,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+        }).toStrictEqual({
+          escaped: { list: 0, value: "/jo" },
+          highlighted: { active: true, value: "/join " },
+          nicks: { names: ["peer", "pebble"], value: "peer: " },
+          opened: { controls: true, many: true },
+          phone: { composerInView: true, listAbove: true, scrolls: true },
+          problems: [],
+        });
+      } finally {
+        pebble.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
 });

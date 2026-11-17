@@ -27,7 +27,7 @@ A reducer over what the Frontend asked and what the API answered. The state is `
 
 Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News: the Daemon does that, and this keeps what was read up to date.
 
-For each Network it holds its Timelines, its connection, whether Self is away, and which Direct Message partners are on it. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows: its items, its Gaps, the "new" divider, and, given a time zone, a Day where the day changes.
+For each Network it holds its Timelines, its connection, whether Self is away, and which Direct Message partners are on it. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows: its items, its Gaps, the "new" divider, and, given a time zone, a Day where the day changes, with each Message that continues a run marked.
 
 ### Reading and following
 
@@ -51,6 +51,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
 - **A Day is derived as a window is read,** from the items either side of it, and never stored. It stands before each item drawn on a different day from the one drawn before it, and before the first drawn, so a window that begins mid-day says which day it is. A day begins at midnight in the zone `rowsOf` is given, which is the offset from UTC at an instant, since the core reads no zone itself, and an item the zone cannot place starts no day. With no zone there are no Days.
+- **A run is derived as a window is read,** from the rows either side, and never stored. A Message continues one when it is plain speech, from the User who said the row drawn just before it, by the nick as its colour folds it, with no more than five minutes between the two items' own times. Anything drawn between ends a run, an action or a notice is in none, and an item a view hides ends nothing. The first row continues nothing, so a window that starts mid-run heads it with its first Message.
 - **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows
@@ -308,15 +309,18 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 
 ## Completion
 
-Tab completion in the composer, as a reducer. It completes the word that ends at the caret, cycles through candidates, and gives back what was typed on Escape.
+What the composer can complete, as a reducer, and the list it shows above the composer, `listOf`. It completes the word that ends at the caret, moves through the candidates, and gives back what was typed on Escape.
 
-- **Tab is taken only when there is a word to complete,** so the composer is no keyboard trap.
-- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after a `CHANTYPES` character, and otherwise a nick.
+- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, or a Channel after `/join` or `/part`. Only the first line opens it, and `//` never does. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
+- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after `/join `, `/part `, or a `CHANTYPES` character, and otherwise a nick.
+- **Nothing is highlighted while the list only follows what is typed,** and that list is derived from the draft and the sources as they are now. Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent, and the list then holds its order while it is moved through.
+- **A command is listed with what its usage says it takes and what it does.**
 - **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, never by a Timeline's name.
-- **A nick is asked of the Daemon's members route, not guessed.** An answer is put in only if the composer still holds the exact text it was asked for.
+- **A nick is asked of the Daemon's members route, not guessed,** and only on Tab. An answer is put in only if the composer still holds the exact text it was asked for.
 - **Who spoke latest comes first,** and Self last.
 - **A nick at the start of a line is followed by `ui.suffix`,** `: ` to start, and anything else by a space.
-- **What is shown is announced** for a screen reader, such as `alex, 1 of 3`.
+- **A list belongs to its place, its draft, and its caret.** Another place, a draft changed other than by completion, or the caret moved without typing shows none. `owns` says whether completion takes Tab, the arrows, Escape, and a press, which is exactly while `listOf` shows a list, or while a nick is asked for.
+- **How many it lists is announced** as it opens, such as `3 completions`, for a screen reader, which the list itself tells which is highlighted.
 
 ## Rendering
 

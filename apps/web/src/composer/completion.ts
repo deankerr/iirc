@@ -1,20 +1,23 @@
 /**
- * Tab completion, as atoms: the state the core folds, the commands the composer runs for
- * Tab, Escape, and typing, and `completer`, which asks the Daemon's members route for the
- * nicks the core is waiting on. What completion puts in the composer becomes the draft,
+ * Completion, as atoms: the state the core folds, the commands the composer runs for Tab
+ * and the arrows, Escape, typing, and a candidate picked from its list, and `completer`,
+ * which asks the Daemon's members route for the nicks the core is waiting on. What completion puts in the composer becomes the draft,
  * which stays the one copy of what is typed.
  *
  * @packageDocumentation
  */
 import type { NetworkId } from "@iirc/api";
 import {
+  announced,
   chantypesWanted,
+  listOf,
   nicksLimit,
   nicksWanted,
+  owns,
   reduceCompletion,
   sourcesOf,
 } from "@iirc/frontend/completion";
-import type { Completed, CompletionEvent } from "@iirc/frontend/completion";
+import type { Completed, CompletionEvent, List, Sources } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { listed } from "@iirc/frontend/options";
@@ -29,9 +32,54 @@ import { optionsState, signedOut } from "../options/atoms.ts";
 import { uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
-import { composerState, edit, placeOf, setComposers } from "./atoms.ts";
+import { composerState, draft, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
+
+/** What a word typed at a place can be completed from, as things are now. */
+const sourcesAt = Atom.family((place: Place) =>
+  Atom.make((get): Sources =>
+    sourcesOf(
+      get(timelinesState),
+      place,
+      listed(get(optionsState), ""),
+      get(chantypesState),
+      get(uiInEffect).suffix
+    )
+  )
+);
+
+/** What a composer shows of completion: the list, whether completion owns the keys, and what a screen reader is told. */
+export interface CompletionShown {
+  readonly list: List | undefined;
+  readonly owned: boolean;
+  readonly said: string;
+}
+
+const nothingShown: CompletionShown = { list: undefined, owned: false, said: "" };
+
+/**
+ * What a composer shows of completion, read from the sources only while completion is
+ * under way, so a Message arriving with nothing being completed re-renders nothing.
+ */
+export const completionShown = Atom.family((place: Place) =>
+  Atom.make((get): CompletionShown => {
+    const state = get(completionState);
+
+    if (state.phase._tag === "Idle") {
+      return nothingShown;
+    }
+
+    const { text } = get(draft(place));
+    const sources = get(sourcesAt(place));
+
+    return {
+      list: listOf(state, place, text, sources),
+      owned: owns(state, place, text, sources),
+      said: announced(state, place, text, sources),
+    };
+  })
+);
 
 /**
  * Folds one event into completion, from what a word can be completed from at the place it
@@ -41,14 +89,7 @@ import { completionState } from "./completion-state.ts";
  * @param event - What happened.
  */
 const completing = (registry: AtomRegistry.AtomRegistry, place: Place, event: CompletionEvent) => {
-  const sources = sourcesOf(
-    registry.get(timelinesState),
-    place,
-    listed(registry.get(optionsState), ""),
-    registry.get(chantypesState),
-    registry.get(uiInEffect).suffix
-  );
-
+  const sources = registry.get(sourcesAt(place));
   const step: Completed = reduceCompletion(registry.get(completionState), event, sources);
 
   registry.set(completionState, step.state);
@@ -77,7 +118,7 @@ interface Wanted {
  */
 const chantypesAsked = Atom.make<Wanted | undefined>(undefined).pipe(Atom.keepAlive);
 
-/** Tab, or Shift+Tab, in a composer, with its text and caret. */
+/** Tab, or Shift+Tab, in a composer, with its text and caret, or an arrow while its list is open. */
 export const tab = Atom.fnSync(
   (
     input: {
@@ -111,21 +152,55 @@ export const escapeCompletion = Atom.fnSync((place: Place, get) => {
   completing(get.registry, place, { _tag: "Escaped", place });
 }).pipe(Atom.keepAlive);
 
+/** The selection in a composer moved without its text changing, from `start` to `end`. */
+export const moved = Atom.fnSync(
+  (
+    input: {
+      readonly place: Place;
+      readonly text: string;
+      readonly start: number;
+      readonly end: number;
+    },
+    get
+  ) => {
+    completing(get.registry, input.place, { _tag: "Moved", ...input });
+  }
+).pipe(Atom.keepAlive);
+
+/** A candidate picked from a composer's list, as by a tap, while it showed `text`. */
+export const pick = Atom.fnSync(
+  (input: { readonly place: Place; readonly text: string; readonly index: number }, get) => {
+    completing(get.registry, input.place, { _tag: "Picked", ...input });
+  }
+).pipe(Atom.keepAlive);
+
 /**
- * The Owner typed: what was being completed is let go of, and the draft is what they typed,
- * where their selection was if the composer knows it.
+ * The Owner typed: the draft is what they typed, where their selection was if the composer
+ * knows it, and completion follows it, listing what a command's line can be completed
+ * with, and letting go of anything else, its caret at `caret`, or the end.
  */
 export const typed = Atom.fnSync(
   (
     {
+      caret,
       text,
       timeline,
       typing,
-    }: { readonly timeline: Place; readonly text: string; readonly typing?: Typing },
+    }: {
+      readonly timeline: Place;
+      readonly text: string;
+      readonly caret?: number;
+      readonly typing?: Typing;
+    },
     get
   ) => {
-    completing(get.registry, timeline, { _tag: "LetGo" });
-    get.registry.set(edit, typing === undefined ? { text, timeline } : { text, timeline, typing });
+    edited(get.registry, typing === undefined ? { text, timeline } : { text, timeline, typing });
+    completing(get.registry, timeline, {
+      _tag: "Typed",
+      caret: caret ?? text.length,
+      place: timeline,
+      text,
+    });
   }
 ).pipe(Atom.keepAlive);
 

@@ -455,7 +455,7 @@ describe("completing a nick", () => {
     registry.set(tab, { backwards: false, caret: 1, place, text: "p" });
     registry.set(tab, { backwards: false, caret: 1, place, text: "p" });
 
-    await until(registry, completionState, (state) => state.phase._tag === "Cycling");
+    await until(registry, completionState, (state) => state.phase._tag === "Listed");
 
     const first = draftOf(registry.get(composerState), place).text;
     const asked = daemon.membersRead.map((query) => new URLSearchParams(query).get("prefix"));
@@ -480,7 +480,7 @@ describe("completing a nick", () => {
     registry.set(typed, { text: "z", timeline: place });
     registry.set(tab, { backwards: false, caret: 1, place, text: "z" });
 
-    await until(registry, completionState, (state) => state.phase._tag === "Cycling");
+    await until(registry, completionState, (state) => state.phase._tag === "Listed");
     await wait(50);
 
     expect({
@@ -726,7 +726,7 @@ describe("completing by the Network's CHANTYPES", () => {
 
     registry.set(typed, { text: "[b", timeline: place });
     registry.set(tab, { backwards: false, caret: 2, place, text: "[b" });
-    await until(registry, completionState, (state) => state.phase._tag === "Cycling");
+    await until(registry, completionState, (state) => state.phase._tag === "Listed");
 
     expect(draftOf(registry.get(composerState), place).text).toBe("[bob]: ");
   });

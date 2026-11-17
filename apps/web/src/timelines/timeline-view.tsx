@@ -795,8 +795,9 @@ const Lines = ({
     <div
       aria-label={label}
       className={styles.scroller}
-      // The rows' CSS reads this, so every row is one run of text, as a narrow Pane draws it.
-      data-line={line === "inline" ? line : undefined}
+      // The rows' CSS reads this, so every row is one run of text, as a narrow Pane draws
+      // it, and under stacked, a run's Messages are drawn under one nick.
+      data-line={line === "columns" ? undefined : line}
       onScroll={(event) => {
         const element = event.currentTarget;
 
