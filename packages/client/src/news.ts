@@ -61,6 +61,8 @@ export type CtcpAnswer =
  * sent as its Session began, by the numeric alone: Self, by `nick`, is now an IRC
  * operator, or the Ircd refused with `reply`. An `Invited` is an `INVITE` that names Self: `by`
  * is who invited, and `channel` where to, as said, which Self has not joined and may.
+ * `CameOnline` and `WentOffline` are a monitored Direct Message partner coming onto the
+ * Network or leaving it, as `MONITOR` tells, by the nick monitored.
  */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }
@@ -99,6 +101,8 @@ export type Activity =
   /** A User logged in to `account`, or out of theirs with `null`, as an `ACCOUNT` Line says. */
   | { readonly _tag: "AccountChanged"; readonly nick: string; readonly account: string | null }
   | { readonly _tag: "Invited"; readonly channel: string; readonly by: string }
+  | { readonly _tag: "CameOnline"; readonly nick: string }
+  | { readonly _tag: "WentOffline"; readonly nick: string }
   | { readonly _tag: "OperGranted"; readonly nick: string }
   | { readonly _tag: "OperRefused"; readonly nick: string; readonly reply: OperRefusal }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
@@ -124,6 +128,26 @@ export type NetworkOnly = Extract<
  */
 export const isNetworkOnly = (activity: Activity): activity is NetworkOnly =>
   activity._tag === "OperGranted" || activity._tag === "OperRefused" || activity._tag === "Invited";
+
+/** A monitored partner coming onto the Network or leaving it, which changes no Channel. */
+export type PresenceChange = Extract<Activity, { readonly _tag: "CameOnline" | "WentOffline" }>;
+
+/**
+ * Whether an Activity is a {@link PresenceChange}.
+ * @param activity - The Activity.
+ * @returns Whether it is.
+ */
+export const isPresenceChange = (activity: Activity): activity is PresenceChange =>
+  activity._tag === "CameOnline" || activity._tag === "WentOffline";
+
+/**
+ * Whether an Activity changes no Channel and answers nothing Self sent: one that is
+ * {@link NetworkOnly}, or a {@link PresenceChange}.
+ * @param activity - The Activity.
+ * @returns Whether it does.
+ */
+export const changesNothingHere = (activity: Activity): activity is NetworkOnly | PresenceChange =>
+  isNetworkOnly(activity) || isPresenceChange(activity);
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

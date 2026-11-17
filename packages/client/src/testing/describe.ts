@@ -20,10 +20,12 @@ import type {
   Named,
   News,
   Ours,
+  PresenceChange,
   RefusedAction,
   RefusedReason,
   Where,
 } from "../news.ts";
+import { isPresenceChange } from "../news.ts";
 import type { Output } from "../output.ts";
 import { printItem, writeInstant } from "./transcript.ts";
 
@@ -352,8 +354,8 @@ const writeTopic = (
       };
 };
 
-// An Activity's positional fields and trailing text, before and after its attributes.
-const writeActivity = (activity: Activity): ActivityParts => {
+// The positional fields and trailing text of an Activity other than a presence change.
+const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts => {
   switch (activity._tag) {
     case "Joined": {
       return { head: [atom(activity.channel), atom(activity.nick)], tail: [] };
@@ -451,6 +453,10 @@ const writeActivity = (activity: Activity): ActivityParts => {
     }
   }
 };
+
+// An Activity's positional fields and trailing text, before and after its attributes.
+const writeActivity = (activity: Activity): ActivityParts =>
+  isPresenceChange(activity) ? { head: [atom(activity.nick)], tail: [] } : writeChange(activity);
 
 const words = (parts: readonly string[]): string => parts.join(" ");
 

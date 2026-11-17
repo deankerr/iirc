@@ -15,8 +15,8 @@ import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
-import { isNetworkOnly } from "./news.ts";
-import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
+import { isNetworkOnly, isPresenceChange } from "./news.ts";
+import type { Activity, Marked, Named, News, PresenceChange, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
 import { sessionOf } from "./views.ts";
@@ -234,7 +234,7 @@ const nickChangedWhere = (
 const activityTimelines = (
   run: Run,
   naming: Naming,
-  activity: Activity,
+  activity: Exclude<Activity, PresenceChange>,
   live: boolean
 ): readonly Where[] => {
   // An answer to Self's `OPER` is the Network's, and so is an invitation, which is to a
@@ -296,14 +296,22 @@ const activityTimelines = (
 };
 
 /**
- * Where an Activity belongs.
+ * Where an Activity belongs. A partner coming or going is told where Self and they
+ * talked, and only there.
  * @param run - The step, before the Activity is folded in.
  * @param activity - The Activity.
  * @param live - Whether it is happening now, rather than read from history.
  * @returns The Timelines.
  */
-const activityWhere = (run: Run, activity: Activity, live: boolean): readonly Where[] =>
-  placed(activityTimelines(run, namingNow(run), activity, live));
+const activityWhere = (run: Run, activity: Activity, live: boolean): readonly Where[] => {
+  const naming = namingNow(run);
+
+  return placed(
+    isPresenceChange(activity)
+      ? theirs(run, naming, activity.nick)
+      : activityTimelines(run, naming, activity, live)
+  );
+};
 
 /**
  * A Message read from a Line, with where it belongs.

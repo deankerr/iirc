@@ -12,6 +12,7 @@ import { batch } from "./features/batch.ts";
 import { capNotify } from "./features/cap-notify.ts";
 import { echo } from "./features/echo.ts";
 import { extendedJoin } from "./features/extended-join.ts";
+import { extendedMonitor } from "./features/extended-monitor.ts";
 import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
 import { saslPlain } from "./features/sasl.ts";
@@ -52,6 +53,7 @@ export const registry: readonly Registered[] = [
   register(accountTag),
   register(accountNotify),
   register(extendedJoin),
+  register(extendedMonitor),
   register(utf8Only),
   register(standardReplies),
 ];

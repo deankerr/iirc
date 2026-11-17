@@ -23,12 +23,13 @@ import {
 } from "./members.ts";
 import type { Listed, ModeRules } from "./modes.ts";
 import { applyModes, changePrefix } from "./modes.ts";
-import { isNetworkOnly } from "./news.ts";
+import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
 import type { Channel, Joined, Member, Seen, State } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
+import { keptWatched } from "./watched.ts";
 
 const setChannel = (run: Run, key: string, channel: Channel): void => {
   run.state = { ...run.state, channels: new Map(run.state.channels).set(key, channel) };
@@ -45,8 +46,13 @@ const changeChannel = (run: Run, key: string, change: (channel: Channel) => Chan
 const retryAt = (run: Run, channel: Channel): Instant =>
   Instant.make(run.at + backoff(channel.attempt));
 
-// Whether a User shares a Channel with Self, counting a listing still being read.
-const shares = (state: State, folded: string): boolean =>
+/**
+ * Whether a User shares a Channel with Self, counting a listing still being read.
+ * @param state - The State.
+ * @param folded - The User's nick, folded by the Connection's casemapping.
+ * @returns Whether they do.
+ */
+export const shares = (state: State, folded: string): boolean =>
   [...state.channels.values()].some(
     ({ phase }) =>
       phase._tag === "Joined" &&
@@ -55,14 +61,15 @@ const shares = (state: State, folded: string): boolean =>
   );
 
 /**
- * Forgets what was seen of every User who no longer shares a Channel with Self, so the
- * Users kept are never more than the members kept. It runs wherever membership is
- * replaced or removed.
+ * Forgets what was seen of every User who no longer shares a Channel with Self, unless
+ * a Feature keeps them while `MONITOR` says they are online, so the Users kept are never
+ * more than the members and the monitored kept. It runs wherever membership or the
+ * monitor list is replaced or removed.
  * @param run - The step.
  * @param left - The only Users who may have left, by folded nick, when it is known, such
  * as the one who parted. Left out, every User seen.
  */
-const pruneUsers = (run: Run, left?: readonly string[]): void => {
+export const pruneUsers = (run: Run, left?: readonly string[]): void => {
   const users = openOf(run.state)?.users;
 
   if (users === undefined || users.size === 0) {
@@ -70,7 +77,9 @@ const pruneUsers = (run: Run, left?: readonly string[]): void => {
   }
 
   const gone = new Set(
-    (left ?? [...users.keys()]).filter((folded) => users.has(folded) && !shares(run.state, folded))
+    (left ?? [...users.keys()]).filter(
+      (folded) => users.has(folded) && !shares(run.state, folded) && !keptWatched(run, folded)
+    )
   );
 
   if (gone.size === 0) {
@@ -290,8 +299,9 @@ const isSelf = (run: Run, nick: string): boolean => {
 };
 
 /**
- * Records what a Line showed of another User, while they share a Channel with Self, so
- * what is kept is bounded by the members kept.
+ * Records what a Line showed of another User, while they share a Channel with Self, or a
+ * Feature keeps them while `MONITOR` says they are online, so what is kept is bounded by
+ * the members and the monitored kept.
  * @param run - The step.
  * @param nick - The User.
  * @param change - What it showed.
@@ -303,7 +313,7 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
     ({ phase }) => phase._tag === "Joined" && phase.members.has(folded)
   );
 
-  if (!shared || isSelf(run, nick)) {
+  if ((!shared && !keptWatched(run, folded)) || isSelf(run, nick)) {
     return;
   }
 
@@ -499,8 +509,8 @@ export const foldActivity = (
 ): void => {
   const fold = folder(run.state);
 
-  // An invitation and an answer to `OPER` change no Channel.
-  if (isNetworkOnly(activity)) {
+  // An invitation, an answer to `OPER`, and what `MONITOR` tells change no Channel.
+  if (changesNothingHere(activity)) {
     return;
   }
 

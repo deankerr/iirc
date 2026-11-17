@@ -986,6 +986,19 @@ export const whowas = (name: string): OutboundLine | Rejected =>
   isOne(name) && !notInNicks.test(name) ? outbound("WHOWAS", [name]) : rejected("InvalidTarget");
 
 /**
+ * `MONITOR + nicks` or `MONITOR - nicks`: add nicks to the list the Ircd tells of as they
+ * come and go, or take them off it. Which nicks share a Line, so that each fits, is the
+ * caller's to choose.
+ * @param modifier - `+` to add, `-` to remove.
+ * @param nicks - The nicks, one or more, each as {@link nick} takes one.
+ * @returns The Line, or why it cannot be sent, such as too many nicks to fit.
+ */
+export const monitor = (modifier: "+" | "-", nicks: readonly string[]): OutboundLine | Rejected =>
+  nicks.length > 0 && nicks.every((one) => isOne(one) && !notInNicks.test(one))
+    ? outbound("MONITOR", [modifier, nicks.join(",")])
+    : rejected("InvalidTarget");
+
+/**
  * `AWAY`, with a reason to be away, or none to come back.
  * @param reason - Why, or `undefined` to come back.
  * @returns The Line, or why it cannot be sent.

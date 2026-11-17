@@ -16,29 +16,45 @@ import type { Line } from "@iirc/protocol/line";
 import { online } from "./acts.ts";
 import type { Run } from "./run.ts";
 import { folder, send, updateOpen } from "./run.ts";
-import type { Reclaiming } from "./state.ts";
+import type { Reclaiming, State } from "./state.ts";
 import { maxReclaims } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
 
 /**
- * A User was seen to leave a nick, by quitting or by renaming. When that nick is the
- * first the Configuration lists, and Self holds another it settled for, Self asks for it.
- * One leave seen is one ask, and a refusal waits for the next. A nick the Owner chose in
- * this Session is theirs, and never changed.
+ * The nick Self wants back: the first the Configuration lists, while Self holds another
+ * it settled for in a Session, and the Owner has not chosen a nick in it.
+ * @param state - The State.
+ * @returns The nick, or `undefined` when Self wants none back.
+ */
+export const wantedBack = (state: State): string | undefined => {
+  const session = sessionOf(state);
+  const [preferred] = state.configuration?.nicks ?? [];
+
+  if (session === undefined || preferred === undefined || session.chosen) {
+    return undefined;
+  }
+
+  const fold = folder(state);
+
+  return fold(session.nick) === fold(preferred) ? undefined : preferred;
+};
+
+/**
+ * A User was seen to leave a nick, by quitting or by renaming, or `MONITOR` said its
+ * holder went offline. When that nick is the one Self wants back, Self asks for it. One
+ * leave seen is one ask, and a refusal waits for the next. A nick the Owner chose in this
+ * Session is theirs, and never changed.
  * @param run - The step.
  * @param left - The nick the User left.
  */
 export const reclaim = (run: Run, left: string): void => {
-  const session = sessionOf(run.state);
-  const [preferred] = run.state.configuration?.nicks ?? [];
+  const preferred = wantedBack(run.state);
 
-  if (session === undefined || preferred === undefined || session.chosen || !online(run)) {
-    return;
-  }
-
-  const fold = folder(run.state);
-
-  if (fold(left) !== fold(preferred) || fold(session.nick) === fold(preferred)) {
+  if (
+    preferred === undefined ||
+    !online(run) ||
+    folder(run.state)(left) !== folder(run.state)(preferred)
+  ) {
     return;
   }
 

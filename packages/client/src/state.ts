@@ -183,7 +183,38 @@ type LinkPhase =
       readonly pings: readonly Pinged[];
       /** How many `PING`s the Owner has sent on this Connection, which numbers their tokens. */
       readonly pingsSent: number;
+      /** What `MONITOR` has asked of the Ircd on this Connection, and what it told. */
+      readonly monitoring: Monitoring;
     };
+
+/**
+ * What a Connection asked of `MONITOR`, and what it heard. The list asked for is derived
+ * from the State, and this is only what was sent, so the next step sends the difference.
+ */
+export interface Monitoring {
+  /** Whether the Ircd refused the command itself, so nothing more is sent on this Connection. */
+  readonly off: boolean;
+  /**
+   * Each nick sent with `MONITOR +` and not since taken off, keyed by folded nick, oldest
+   * first, with whether the Ircd says it is online. Bounded by the list derived.
+   */
+  readonly watched: ReadonlyMap<string, Watched>;
+  /**
+   * The nicks a `734` refused, by folded nick, which are never sent again on this
+   * Connection. Only a nick that was watched can be refused, so they are bounded too.
+   */
+  readonly refused: ReadonlySet<string>;
+}
+
+/** A nick on the monitor list: as it was sent, and whether its holder is online. */
+export interface Watched {
+  readonly nick: string;
+  /** Unknown until the Ircd first tells of it on this Connection. */
+  readonly here: Fact<boolean>;
+}
+
+/** Nothing asked of `MONITOR` yet. */
+export const unmonitored: Monitoring = { off: false, refused: new Set(), watched: new Map() };
 
 /** A CTCP `PING` the Owner sent: who to, as said, its token, and the instant it was sent. */
 export interface Pinged {
@@ -483,7 +514,17 @@ export interface State {
    * `Unsent` of one reports it there. They outlive Connections, as an `Unsent` can.
    */
   readonly answering: ReadonlyMap<number, string | null>;
+  /**
+   * The open Direct Message partners, by the key `where` gives their Timeline, least
+   * recently messaged first, at most {@link maxPartners}: each nick as their Timeline is
+   * named. They are folded from the Client's own News, as a projection folds Timelines,
+   * so they outlive Connections and replaying the Journal rebuilds them.
+   */
+  readonly partners: ReadonlyMap<string, string>;
 }
+
+/** How many open Direct Message partners the Client keeps, dropping the least recently messaged. */
+export const maxPartners = 256;
 
 /**
  * How many of the Owner's actions, labelled `Say`s, and CTCP answers the Client remembers,
@@ -506,6 +547,7 @@ export const initialState: State = {
   dialled: 0,
   markers: { channels: new Map(), directs: new Map(), network: undefined },
   network: { _tag: "Unconfigured" },
+  partners: new Map(),
   policies: new Map(),
   rotation: 0,
   said: new Map(),

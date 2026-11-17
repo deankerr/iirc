@@ -13,8 +13,10 @@ import { CapName, ConnectionId } from "./ids.ts";
 import type {
   ChannelKnowledge,
   ChannelView,
+  Fact,
   Knowledge,
   MemberKnowledge,
+  PartnerKnowledge,
   SessionKnowledge,
   Standing,
   UserKnowledge,
@@ -192,6 +194,46 @@ export const knownBeforeOf = (state: State): KnownBefore => ({
 });
 
 /**
+ * Whether each open Direct Message partner is on the Network now: `MONITOR`'s word while
+ * it says online, then sharing a Channel with Self, as of the last Line heard, then
+ * `MONITOR`'s word that they are offline.
+ * @param state - The State.
+ * @param fold - Folds a nick by the casemapping in force.
+ * @returns The partners, as `where` keys them.
+ */
+const partnersOf = (
+  state: State,
+  fold: (name: string) => string
+): ReadonlyMap<string, PartnerKnowledge> => {
+  const open = openOf(state);
+  const session = sessionOf(state);
+
+  const hereOf = (nick: string): Fact<boolean> => {
+    const key = fold(nick);
+    const told = open?.monitoring.watched.get(key)?.here ?? unknown;
+
+    if (session === undefined || (told._tag === "Known" && told.value)) {
+      return session === undefined ? unknown : told;
+    }
+
+    const shared = [...state.channels.values()].some(
+      ({ phase }) => phase._tag === "Joined" && phase.members.has(key)
+    );
+
+    return shared
+      ? { _tag: "Known", at: session.keepalive.heard, from: "ircd", value: true }
+      : told;
+  };
+
+  return new Map(
+    [...state.partners].map(([key, nick]): [string, PartnerKnowledge] => [
+      key,
+      { here: hereOf(nick), nick },
+    ])
+  );
+};
+
+/**
  * What is known, for Views.
  * @param state - The State.
  * @param fold - Folds a nick by the casemapping in force.
@@ -210,6 +252,13 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
     ])
   );
 
+  // A monitored User a Feature keeps, who shares no Channel with Self.
+  for (const [key, seen] of open?.users ?? []) {
+    if (!users.has(key) && open !== undefined) {
+      users.set(key, userOf(seen.nick, open, key));
+    }
+  }
+
   if (self !== undefined) {
     users.set(fold(self.nick), self);
   }
@@ -219,6 +268,7 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
     channels,
     chantypes: session === undefined ? undefined : chantypesOf(open?.isupport.get("CHANTYPES")),
     declared: state.declared,
+    partners: partnersOf(state, fold),
     self,
     session: sessionKnowledge(state.network),
     users,

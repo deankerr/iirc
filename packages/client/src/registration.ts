@@ -31,6 +31,7 @@ import type { Ran } from "./seam.ts";
 import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
 import { markStale } from "./stale.ts";
 import type { Asking, Caps, Negotiated, Open } from "./state.ts";
+import { unmonitored } from "./state.ts";
 import { readSts } from "./sts.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
@@ -156,6 +157,7 @@ export const begin = (run: Run): void => {
     loggedIn: false,
     lookups: [],
     modesQuery: undefined,
+    monitoring: unmonitored,
     opened: run.at,
     pings: [],
     pingsSent: 0,
