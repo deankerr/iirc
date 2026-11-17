@@ -1380,14 +1380,15 @@ describe("what the view says it shows", () => {
         one.querySelector("time")?.getAttribute("tabindex") ?? null,
         // A tap focuses a later Message's row, which shows its time where nothing can be hovered.
         one.querySelector(":scope > div > div")?.getAttribute("tabindex") ?? null,
-        plain(one.textContent),
+        // The time is the device's zone's, so only where it stands is compared.
+        plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T"),
       ]),
     }).toStrictEqual({
       line: "stacked",
       rows: [
-        ["peer", null, null, "peer 10:00 line 1"],
-        ["line 2", "0", "-1", "10:00 line 2"],
-        ["peer", null, null, "peer 10:00 line 4"],
+        ["peer", null, null, "peer T line 1"],
+        ["line 2", "0", "-1", "T line 2"],
+        ["peer", null, null, "peer T line 4"],
       ],
     });
   });
@@ -1420,9 +1421,12 @@ describe("what the view says it shows", () => {
       one.textContent?.includes("line ")
     );
 
-    expect(rows.map((one) => plain(one.textContent))).toStrictEqual([
-      "peer 10:00 \u21B3 alice: the first thing line 2",
-      "\u21B3 alice: the first thing 10:00 line 3",
+    // The time is the device's zone's, so only where it stands is compared.
+    expect(
+      rows.map((one) => plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T"))
+    ).toStrictEqual([
+      "peer T \u21B3 alice: the first thing line 2",
+      "\u21B3 alice: the first thing T line 3",
     ]);
   });
 
