@@ -41,7 +41,7 @@ import { named } from "./where.ts";
  * The Client's own WHOX token, which marks a `354` as the answer to its query. The spec
  * allows at most three digits.
  */
-export const whoToken = "152";
+const whoToken = "152";
 
 /**
  * The WHOX fields asked for: token, Channel, username, host, nick, flags, account, and

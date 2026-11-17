@@ -320,7 +320,7 @@ export interface ModesQuery {
  * The `WHO` query that holds the slot: the next Channel waits until its answer ends or its
  * deadline passes. It answers only by structure, so it waits among no other Lines.
  */
-export interface WhoQuery {
+interface WhoQuery {
   /** The Channel, as it was sent. */
   readonly channel: string;
   /** When it frees the slot, and the next Channel is asked. Its answer is still read after. */
