@@ -156,6 +156,11 @@
   color: var(--color-muted);
 }
 
+/* An emoji says nothing more, so its name takes the whole row. */
+.whole {
+  grid-column: 1 / -1;
+}
+
 /* What a Timeline, theme, font, or Network is takes the room a command's usage and description do. */
 .detail {
   grid-column: 2 / 4;

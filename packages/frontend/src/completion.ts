@@ -33,7 +33,7 @@ import {
   timelineEntry,
 } from "./palette.ts";
 import type { Entry } from "./palette.ts";
-import { queryOf, ranked } from "./ranking.ts";
+import { queryOf, ranked, tiers, wordStart } from "./ranking.ts";
 import type { ListedTheme, ThemeOption } from "./theme.ts";
 import { resolve, sidebar } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
@@ -58,6 +58,12 @@ export interface NetworkListed {
   readonly removed: boolean;
 }
 
+/** An emoji, as completion lists it: the character itself and the names it goes by, best first. */
+export interface Emoji {
+  readonly emoji: string;
+  readonly names: readonly string[];
+}
+
 /** What a word can be completed from, for the composer at one place. */
 export interface Sources {
   /** Every command, each listed once, by its name. */
@@ -68,6 +74,8 @@ export interface Sources {
   readonly ran: readonly string[];
   /** Every option. */
   readonly options: readonly OptionListed[];
+  /** Every emoji, by the names its `:name:` is written as, or none while they are not loaded. */
+  readonly emoji: readonly Emoji[] | undefined;
   /** The Network the composer is on, if any, which `/go` names a Timeline from. */
   readonly network: NetworkId | undefined;
   /** Every Timeline by name, as `namedIn` lists them. */
@@ -693,11 +701,62 @@ const optionCandidates = (typed: string, sources: Sources): readonly Candidate[]
   return listed.map((one) => asWord(one.name));
 };
 
-/** A word, its candidates, and what follows each. */
+/**
+ * A word, its candidates, and what follows each. It is `pending` while they wait on names
+ * that are not loaded yet.
+ */
 interface Listed {
   readonly spot: Spot;
   readonly found: Found;
+  readonly pending?: true;
 }
+
+/** The characters an emoji's name is made of, as the names in use are, in either case. */
+const emojiWord = /^:(?<name>[A-Za-z0-9_+-]{2,})$/u;
+
+/**
+ * The emoji whose names a query matches: those a name starts with, then those a word of a
+ * name starts with, each once, under the name that matched first.
+ * @param query - What follows the colon, folded.
+ * @param emoji - Every emoji.
+ * @returns The candidates.
+ */
+const emojiCandidates = (query: string, emoji: readonly Emoji[]): readonly Candidate[] =>
+  ranked(query, emoji, (one) => ({ description: "", names: one.names })).flatMap(
+    ({ item, score }) => {
+      const name = item.names.find((one) => one.startsWith(query) || wordStart(one, query) !== -1);
+
+      return score.tier >= tiers.WordStart && name !== undefined
+        ? [{ _tag: "Emoji", emoji: item.emoji, name: `:${name}:`, text: item.emoji }]
+        : [];
+    }
+  );
+
+/**
+ * What the word at the caret is completed from when it is `:` and two or more characters
+ * of a name: the emoji whose names it matches, or, while those are not loaded, nothing yet.
+ * @param text - The text.
+ * @param caret - Where the caret is.
+ * @param sources - The sources.
+ * @returns The word and its candidates, or none where the word is no such thing.
+ */
+const emojiIn = (text: string, caret: number, sources: Sources): Listed | undefined => {
+  const spot = spotAt(text, caret);
+  const name = emojiWord.exec(spot.word)?.groups?.name;
+
+  if (name === undefined) {
+    return undefined;
+  }
+
+  if (sources.emoji === undefined) {
+    return { found: { candidates: [], suffix: " " }, pending: true, spot };
+  }
+
+  return {
+    found: { candidates: emojiCandidates(queryOf(name), sources.emoji), suffix: " " },
+    spot,
+  };
+};
 
 /**
  * What a word in a command's line is completed from, at hand: a command's name, as the
@@ -760,17 +819,28 @@ const inCommand = (text: string, caret: number, sources: Sources): Listed | unde
 };
 
 /**
+ * What a word at the caret is completed from, at hand: what a command's line lists, else an
+ * emoji.
+ * @param text - The text.
+ * @param caret - Where the caret is.
+ * @param sources - The sources.
+ * @returns The word and its candidates, or none where nothing completes it.
+ */
+const inWord = (text: string, caret: number, sources: Sources): Listed | undefined =>
+  inCommand(text, caret, sources) ?? emojiIn(text, caret, sources);
+
+/**
  * What a draft lists as it is typed, from the sources as they are now: one whose first
  * line starts with a command, with the caret in that line, in the command's name or a
- * listed argument.
+ * listed argument, and an emoji's `:name`, on any line.
  * @param shown - The draft, and the caret.
  * @param sources - The sources.
  * @returns The word and its candidates, or none for a draft that lists nothing.
  */
 const followed = (shown: Shown, sources: Sources): Listed | undefined =>
   shown.text.slice(0, shown.caret).includes("\n")
-    ? undefined
-    : inCommand(shown.text, shown.caret, sources);
+    ? emojiIn(shown.text, shown.caret, sources)
+    : inWord(shown.text, shown.caret, sources);
 
 /**
  * A draft typed: one that lists something as it is typed is followed, and anything else
@@ -823,7 +893,15 @@ const begin = (
   }
 
   const first = (count: number) => (backwards ? count - 1 : 0);
-  const listed = inCommand(text, caret, sources);
+  const listed = inWord(text, caret, sources);
+
+  if (listed?.pending === true) {
+    // The names are on their way: the list follows what is typed once they are here.
+    return {
+      edit: undefined,
+      state: { ...state, phase: { _tag: "Following", place, shown: { caret, text } } },
+    };
+  }
 
   if (listed !== undefined) {
     return listing(state, place, listed.spot, listed.found, first(listed.found.candidates.length));
@@ -926,6 +1004,10 @@ const tabbed = (
 
   if (phase._tag === "Following") {
     const list = followed(phase.shown, sources);
+
+    if (list?.pending === true) {
+      return { edit: undefined, state };
+    }
 
     return list === undefined
       ? begin(state, event, sources)
@@ -1131,6 +1213,17 @@ export const nicksWanted = (
     : undefined;
 
 /**
+ * Whether completion is on an emoji word whose names are not loaded yet, so a Frontend
+ * loads them now: a word of `:` and two or more characters of a name, which nothing else
+ * completes, and none held.
+ * @param state - The state.
+ * @param sources - What a word can be completed from there.
+ * @returns Whether it is.
+ */
+export const emojiWanted = (state: Completion, sources: Sources): boolean =>
+  state.phase._tag === "Following" && followed(state.phase.shown, sources)?.pending === true;
+
+/**
  * One candidate as the list shows it, with the `text` it writes into the draft, in place of
  * the word or the whole argument, and `name`, what it shows.
  *
@@ -1144,6 +1237,8 @@ export const nicksWanted = (
  * - `Network`: a Network after `/network remove`, by its id, and whether it was removed with
  *   its Timelines kept.
  * - `Word`: an option's name, a Channel's name, or a nick.
+ * - `Emoji`: an emoji after `:`, by the `:name:` its query matched, with the emoji itself,
+ *   which is what it writes.
  */
 export type Candidate =
   | {
@@ -1180,7 +1275,13 @@ export type Candidate =
       readonly text: string;
       readonly removed: boolean;
     }
-  | { readonly _tag: "Word"; readonly name: string; readonly text: string };
+  | { readonly _tag: "Word"; readonly name: string; readonly text: string }
+  | {
+      readonly _tag: "Emoji";
+      readonly name: string;
+      readonly emoji: string;
+      readonly text: string;
+    };
 
 /** The list shown above a composer, and which candidate, if any, is highlighted. */
 export interface List {
@@ -1249,6 +1350,7 @@ export const previewOf = (state: Completion, place: Place, text: string): Previe
     case "Timeline":
     case "Network":
     case "Word":
+    case "Emoji":
     case undefined: {
       return undefined;
     }
@@ -1412,7 +1514,8 @@ const chantypesNow = (
  * What completion lists from beyond the Timelines, as a Frontend holds it: the options
  * read, each Network's `CHANTYPES`, `ui.suffix` in effect, the keymap, the keys the palette
  * remembers as chosen or run recently, every theme, the one each theme option names on this
- * device, and the font in effect on it, as the palette's `Listing` has them.
+ * device, and the font in effect on it, as the palette's `Listing` has them, and every emoji
+ * once loaded.
  */
 export interface Held {
   readonly options: readonly Option[];
@@ -1423,6 +1526,7 @@ export interface Held {
   readonly themes: readonly ListedTheme[];
   readonly chosen: Readonly<Record<ThemeOption, string>>;
   readonly font: FontShown;
+  readonly emoji: readonly Emoji[] | undefined;
 }
 
 /**
@@ -1444,6 +1548,7 @@ export const sourcesOf = (state: Timelines, place: Place, held: Held): Sources =
   const at = {
     chosen: held.chosen,
     commands,
+    emoji: held.emoji,
     font: held.font,
     keymap: held.keymap,
     networks: networks.map((one) => ({ network: one.network, removed: one.removed })),

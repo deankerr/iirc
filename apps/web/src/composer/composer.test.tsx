@@ -17,7 +17,7 @@ import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake
 import { drawnTheme, watchTheme } from "../theme/atoms.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { placeOf } from "./atoms.ts";
-import { completer } from "./completion.ts";
+import { completer, emojiLoader, emojiState } from "./completion.ts";
 import { composerState } from "./composer-state.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -1022,6 +1022,118 @@ describe("the Composer's list of everything the palette lists", () => {
     expect({ after, before }).toStrictEqual({
       after: ["/me", "/away", "/back"],
       before: ["/away", "/back", "/ban"],
+    });
+  });
+});
+
+/**
+ * A signed-in browser, with the loader of the emoji names mounted as the page mounts it.
+ * @returns The page, as `signedIn` gives it.
+ */
+const withEmoji = async () => {
+  const page = await signedIn();
+
+  page.registry.mount(emojiLoader);
+
+  return page;
+};
+
+describe("the Composer's emoji", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("loads no names until an emoji word is typed, and then lists the emoji that match, each with its name", async () => {
+    const { container, registry } = await withEmoji();
+
+    await typeIn(container, "hello 12:30 foo:smi");
+    await typeIn(container, "/m");
+
+    const before = registry.get(emojiState);
+
+    await typeIn(container, "hi :smi");
+    await settled(() => registry.get(emojiState) !== undefined);
+    await settled(() => listIn(container).names !== undefined);
+
+    const { names, texts } = listIn(container);
+
+    expect({
+      before,
+      first: [names?.[0], texts?.[0]],
+      smile: names?.includes("\u{1F604} :smile:"),
+    }).toStrictEqual({
+      before: undefined,
+      first: ["\u{1F604} :smile:", "\u{1F604} :smile:"],
+      smile: true,
+    });
+  });
+
+  it("writes the emoji into the draft on Tab, and gives back what was typed on Escape", async () => {
+    const { container } = await withEmoji();
+
+    await typeIn(container, "hi :smile");
+    await settled(() => listIn(container).names !== undefined);
+    await pressIn(container, "Tab");
+
+    const tabbed = composerOf(container).value;
+
+    await pressIn(container, "Escape");
+
+    expect([tabbed, composerOf(container).value]).toStrictEqual(["hi \u{1F604} ", "hi :smile"]);
+  });
+
+  it("writes the emoji of the one pressed, and Enter sends the draft as it stands", async () => {
+    const { container, daemon } = await withEmoji();
+
+    await typeIn(container, ":smile");
+    await settled(() => listIn(container).names !== undefined);
+
+    const option = container.querySelector('[role="option"]');
+
+    if (option === null) {
+      throw new Error("no option");
+    }
+
+    await act(async () => {
+      option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const pressed = composerOf(container).value;
+
+    await typeIn(container, ":smile");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({ pressed, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      pressed: "\u{1F604} ",
+      said: [":smile"],
+    });
+  });
+
+  it("lists nothing for a time, a word with a colon in it, or one colon and a letter", async () => {
+    const { container, registry } = await withEmoji();
+
+    await typeIn(container, "12:30");
+    const time = listIn(container).list;
+
+    await typeIn(container, "foo:smile");
+    const inside = listIn(container).list;
+
+    await typeIn(container, ":s");
+    const one = listIn(container).list;
+
+    await typeIn(container, "https://example.org:8080");
+    const address = listIn(container).list;
+
+    expect({ address, inside, loaded: registry.get(emojiState), one, time }).toStrictEqual({
+      address: undefined,
+      inside: undefined,
+      loaded: undefined,
+      one: undefined,
+      time: undefined,
     });
   });
 });

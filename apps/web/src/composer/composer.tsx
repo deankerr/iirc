@@ -292,7 +292,7 @@ const kinds = { Channel: "Channel", Direct: "Direct Message", Network: "Network"
  * What a candidate says beyond its name, dim, as the palette's row does: a command's usage,
  * what it does, and the keys bound to it; a Timeline's kind and Network; whether a theme
  * is built in or imported and in effect; whether a font is in effect; and what choosing a
- * Network removes or drops. A word says nothing more.
+ * Network removes or drops. A word or an emoji says nothing more.
  * @param props - The candidate.
  * @returns Its cells, after its name.
  */
@@ -344,7 +344,8 @@ const About = ({ candidate }: { readonly candidate: Candidate }) => {
       return <span className={styles.detail}>{networkDescription(candidate)}</span>;
     }
 
-    case "Word": {
+    case "Word":
+    case "Emoji": {
       return null;
     }
 
@@ -410,7 +411,13 @@ const Completions = ({
           // Pressed, never focused: the textarea keeps the focus.
           tabIndex={-1}
         >
-          <bdi className={styles.candidate}>{candidate.name}</bdi>
+          {candidate._tag === "Emoji" ? (
+            <bdi className={`${styles.candidate} ${styles.whole}`}>
+              {candidate.emoji} {candidate.name}
+            </bdi>
+          ) : (
+            <bdi className={styles.candidate}>{candidate.name}</bdi>
+          )}
           <About candidate={candidate} />
         </div>
       ))}
