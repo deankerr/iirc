@@ -450,7 +450,7 @@ const removedRefusal = (network: NetworkId) =>
 
 /**
  * Why nothing is said on a Network with no Session, in words: that it is not connected, or,
- * while that is not known yet, that it is not.
+ * while that is not known yet, that it is not known.
  * @param network - The Network, or what stands for it.
  * @param session - `false` once it is known to have none, `undefined` while not known.
  * @returns The words.

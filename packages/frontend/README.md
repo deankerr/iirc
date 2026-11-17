@@ -95,7 +95,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session, and what is unread.
+The one registry of commands, `commands`, as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, and what is unread.
 
 | For | Commands |
 | --- | --- |
@@ -112,7 +112,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 - **A line is read one way.** Plain text is `/say` to the open Timeline, `//text` says `/text`, and `/name args` runs the command named. An unknown command sends nothing.
 - **Arguments are parsed into typed values,** or the command says why not, naming its usage. The text after a Target is kept exactly.
-- **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, a removed Network, whose Timelines are only read, or one Pane with nothing to close.
+- **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, or not knowing yet whether there is one, a removed Network, whose Timelines are only read, or one Pane with nothing to close.
 - **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/ignore`, `/unignore`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
 - **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, and a mask that does not parse is refused saying why. Masks are compared under the Network's casemapping, and `/ignore` alone opens the options on the Network's `ignores`.

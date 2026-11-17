@@ -246,8 +246,8 @@ interface Sayable {
 
 /**
  * Why nothing can be said where the composer is, if it cannot: its Network is not
- * connected, said above it once that is known, or was removed, said in it before anything is typed, while
- * commands still run there.
+ * connected, said above it once that is known, or was removed, said in it before anything
+ * is typed, while commands still run there.
  * @param context - The context commands are judged in.
  * @returns What is said above it, and in it.
  */
