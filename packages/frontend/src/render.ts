@@ -217,7 +217,11 @@ export type Line =
     }
   | {
       readonly _tag: "Description";
-      readonly tone: "Activity" | "Session" | "Refused";
+      /**
+       * How it reads: `Activity`, a Session, or a refusal, each dim, or `Numeric`, an
+       * Ircd's own words, as plain as a Message's beside its dim number.
+       */
+      readonly tone: "Activity" | "Session" | "Refused" | "Numeric";
       /**
        * What stands in the senders' column, where a Message's nick does, so the words line
        * up with a Message's text: `-->` for one who arrived, `<--` for one who left, `--`
@@ -948,6 +952,24 @@ export const quotedOf = (answered: Answered): Quoted => ({
 });
 
 /**
+ * How an Activity reads: a refusal as one, a numeric as the Ircd's own words, and the rest
+ * as Activity.
+ * @param activity - The Activity.
+ * @returns Its tone.
+ */
+const toneOf = (activity: Activity): "Activity" | "Refused" | "Numeric" => {
+  if (activity._tag === "Numeric") {
+    return "Numeric";
+  }
+
+  return (activity._tag === "StandardReply" && activity.kind === "FAIL") ||
+    activity._tag === "CtcpUnsent" ||
+    activity._tag === "OperRefused"
+    ? "Refused"
+    : "Activity";
+};
+
+/**
  * An item as a line.
  * @param content - What the item shows.
  * @param network - The Network it belongs to, which a command it suggests names.
@@ -980,12 +1002,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
         _tag: "Description",
         marker: markerOf(activity),
         parts: describeActivity(activity, network),
-        tone:
-          (activity._tag === "StandardReply" && activity.kind === "FAIL") ||
-          activity._tag === "CtcpUnsent" ||
-          activity._tag === "OperRefused"
-            ? "Refused"
-            : "Activity",
+        tone: toneOf(activity),
       };
     }
 

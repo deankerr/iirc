@@ -298,6 +298,8 @@ const RepeatedWords = ({
 /** Each description's tone, as its class: a refused action of ours is dim, like Activity. */
 const toneClass = {
   Activity: styles.activity,
+  // An Ircd's own words read as plainly as a Message's, beside their dim number.
+  Numeric: undefined,
   Refused: styles.refused,
   Session: styles.session,
 } as const;
@@ -490,8 +492,8 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 
     return (
       <div className={toneClass[line.tone]}>
-        {time}{" "}
-        <span aria-hidden className={styles.marker}>
+        {time} {/* An arrow says nothing a reader needs, but a numeric's number is its name. */}
+        <span aria-hidden={line.tone !== "Numeric"} className={styles.marker}>
           {line.marker ?? ""}
         </span>{" "}
         <span className={styles.text}>

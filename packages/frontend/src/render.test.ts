@@ -540,7 +540,7 @@ describe("lines", () => {
 
     expect(line._tag === "Description" && [line.marker, line.tone]).toStrictEqual([
       "251",
-      "Activity",
+      "Numeric",
     ]);
     expect(line._tag === "Description" && line.parts).toStrictEqual([
       {

@@ -850,12 +850,16 @@ describe("ngircd, on the floor", () => {
     const welcome = before.items.find(({ numeric }) => numeric === "001");
     const users = before.items.find(({ numeric }) => numeric === "251");
 
+    // What the second Session adds after the restart, which may or may not begin with a
+    // `433`, as the Ircd may still hold the first Session's nick.
+    const added = numericsOf(after.items.slice(before.items.length));
+
     // A restart refolds the first Session's numerics as they were, and the second Session
     // adds its own once, so none is doubled.
     expect({
       // The welcome and the count of Users, with the params after the one naming Self.
       counts: users?.params.map((param) => param.includes("users")),
-      doubled: numericsOf(after.items),
+      doubled: ["001", "251"].map((numeric) => added.filter((each) => each === numeric).length),
       // Nothing else reports these, and a Channel's names go to the Channel's own Timeline.
       hidden: ["005", "353", "366"].filter((numeric) => numericsOf(before.items).includes(numeric)),
       replayed: after.items.slice(0, before.items.length),
@@ -867,7 +871,7 @@ describe("ngircd, on the floor", () => {
       welcome: welcome?.params.map((param) => param.includes("iirc")),
     }).toStrictEqual({
       counts: [true],
-      doubled: [...numericsOf(before.items), ...numericsOf(before.items)],
+      doubled: [1, 1],
       hidden: [],
       replayed: before.items,
       unread: [true, 0, 0],

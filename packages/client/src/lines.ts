@@ -893,8 +893,8 @@ const floor = (run: Run, line: Line): boolean => {
  * - `341`: an invite went out, which settles the Owner's `INVITE`.
  * - `353`, `366`: a Channel's members, read into the Channel.
  * - `372`, `375`, `376`: the message of the day.
- * - `600` to `605`, and `730` to `734`: what `WATCH` and `MONITOR` tell, reported as
- *   `CameOnline` and `WentOffline`.
+ *
+ * What `MONITOR` and `WATCH` tell is taken before this, while the Client keeps its list.
  */
 const unshown: ReadonlySet<string> = new Set([
   "005",
@@ -914,17 +914,6 @@ const unshown: ReadonlySet<string> = new Set([
   "372",
   "375",
   "376",
-  "600",
-  "601",
-  "602",
-  "603",
-  "604",
-  "605",
-  "730",
-  "731",
-  "732",
-  "733",
-  "734",
 ]);
 
 /**
@@ -1142,20 +1131,21 @@ const isShown = (run: Run, line: Line): boolean =>
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
  * @param raw - Its parameters as bytes, when it is the Line that arrived.
- * @param labelled - Whether a labelled Lookup collected it.
+ * @param taken - Whether it was taken already: collected for a labelled Lookup, or read as
+ * refusing the Client's `MONITOR` or `WATCH`.
  */
 const liveLine = (
   run: Run,
   arrival: Arrival,
   raw: readonly RawParam[] | undefined,
-  labelled: boolean
+  taken: boolean
 ): void => {
   const { line } = arrival;
 
   // A numeric no label tied goes to whichever was sent first of the Lookup and the
   // action's Line it names.
   const shown =
-    !labelled &&
+    !taken &&
     arrival.answers === undefined &&
     arrival.batch === undefined &&
     !line.tags.has("label") &&
@@ -1187,9 +1177,7 @@ export const interpret = (
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
   // A refusal of `MONITOR` or `WATCH` itself turns it off for the Connection, whatever else it answers.
-  if (arrival.live) {
-    monitorRefused(run, line);
-  }
+  const unmonitored = arrival.live && monitorRefused(run, line);
 
   if (arrival.answers !== undefined && reply !== undefined) {
     refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
@@ -1212,6 +1200,6 @@ export const interpret = (
     // What `MONITOR` or `WATCH` tells answers no Lookup or action, whatever nick it names.
     monitorReply(run, arrival);
   } else if (arrival.live) {
-    liveLine(run, arrival, raw, labelled);
+    liveLine(run, arrival, raw, labelled || unmonitored);
   }
 };

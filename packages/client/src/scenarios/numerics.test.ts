@@ -201,6 +201,21 @@ describe("a numeric shown once", () => {
     expect(numericsOf(played)).toStrictEqual(["001", "002", "003", "004"]);
   });
 
+  it("shows a WATCH numeric when the Client keeps no WATCH list, as another Ircd may mean it", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base),
+        lines(
+          "<< :irc.test 600 iirc peer u h 1767225600 :logged online",
+          "?? activity Numeric 600 peer u h 1767225600 in=network :logged online"
+        ),
+      ],
+    });
+
+    expect(numericsOf(played).slice(4)).toStrictEqual(["600"]);
+  });
+
   it("shows an error no action awaits", () => {
     const played = play(client, {
       configuration: base,
