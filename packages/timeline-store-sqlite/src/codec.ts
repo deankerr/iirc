@@ -123,6 +123,7 @@ const Activity = Schema.TaggedUnion({
   },
   ModeChanged: { by: Schema.String, changes: Schema.Array(ModeChange), target: Schema.String },
   NickChanged: { from: Schema.String, to: Schema.String },
+  Numeric: { numeric: Schema.String, params: Schema.Array(Schema.String) },
   OperGranted: { nick: Schema.String },
   OperRefused: { nick: Schema.String, reply: Schema.Literals(["461", "464", "491"]) },
   Parted: {

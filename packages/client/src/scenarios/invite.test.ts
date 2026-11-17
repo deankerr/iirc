@@ -49,7 +49,7 @@ describe("an INVITE", () => {
     });
 
     const activities = played.steps.flatMap((step) =>
-      step.news.filter((news) => news._tag === "Activity")
+      step.news.filter((news) => news._tag === "Activity" && news.activity._tag !== "Numeric")
     );
 
     expect(activities).toStrictEqual([]);

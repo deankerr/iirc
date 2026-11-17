@@ -486,6 +486,11 @@ const CtcpAnswer = Schema.TaggedUnion({
   },
 });
 
+/** A numeric reply's number: three digits, as an Ircd sends it. */
+const NumericReply = Schema.String.check(
+  Schema.isPattern(/^\d{3}$/u, { message: "must be three digits" })
+);
+
 /**
  * Something that changed on a Network, rather than something said. A `StandardReply` is
  * what the Network said of something sent, shown where that belongs, or of nothing, shown
@@ -502,7 +507,10 @@ const CtcpAnswer = Schema.TaggedUnion({
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
  * `channel`, which it may join. An `AccountChanged` is a User logging in to `account`, or
  * out of theirs with `null`. `CameOnline` and `WentOffline` are a monitored Direct Message
- * partner coming onto the Network or leaving it, in their Direct Message Timeline.
+ * partner coming onto the Network or leaving it, in their Direct Message Timeline. A
+ * `Numeric` is a numeric the Ircd sent that nothing else reports, such as its welcome or its
+ * counts of Users, in the Network's own Timeline: its three digits, and its `params` after
+ * the one that names Self, in order, as they came. It never counts as unread.
  */
 export const Activity = Schema.TaggedUnion({
   AccountChanged: { account: Schema.NullOr(Untrusted), nick: Untrusted },
@@ -520,6 +528,7 @@ export const Activity = Schema.TaggedUnion({
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },
   NickChanged: { from: Untrusted, to: Untrusted },
+  Numeric: { numeric: NumericReply, params: Schema.Array(Untrusted) },
   OperGranted: { nick: Untrusted },
   OperRefused: { nick: Untrusted, reply: Schema.Literals(["461", "464", "491"]) },
   Parted: { channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },

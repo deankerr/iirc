@@ -21,12 +21,13 @@ import type {
   Named,
   News,
   Ours,
+  NetworkOnly,
   PresenceChange,
   RefusedAction,
   RefusedReason,
   Where,
 } from "../news.ts";
-import { isPresenceChange } from "../news.ts";
+import { isNetworkOnly, isPresenceChange } from "../news.ts";
 import type { Output } from "../output.ts";
 import { printItem, writeInstant } from "./transcript.ts";
 
@@ -290,6 +291,15 @@ interface ActivityParts {
   readonly tail: readonly string[];
 }
 
+// A numeric's parameters but the last as atoms, and the last as trailing text, whether or
+// not the Ircd sent it so.
+const writeNumeric = (
+  activity: Extract<Activity, { readonly _tag: "Numeric" }>
+): ActivityParts => ({
+  head: [activity.numeric, ...activity.params.slice(0, -1).map(atom)],
+  tail: trailing(activity.params.at(-1)),
+});
+
 type CtcpActivity = Extract<Activity, { readonly _tag: `Ctcp${string}` }>;
 
 // A CTCP Activity's positional fields, attributes, and trailing text.
@@ -360,8 +370,37 @@ const writeTopic = (
       };
 };
 
+// The positional fields and trailing text of an Activity that is the Network's alone.
+const writeNetworkOnly = (activity: NetworkOnly): ActivityParts => {
+  switch (activity._tag) {
+    case "Invited": {
+      return { head: [atom(activity.channel), `by=${atom(activity.by)}`], tail: [] };
+    }
+
+    case "OperGranted": {
+      return { head: [atom(activity.nick)], tail: [] };
+    }
+
+    case "OperRefused": {
+      return { head: [atom(activity.nick), `reply=${activity.reply}`], tail: [] };
+    }
+
+    case "Numeric": {
+      return writeNumeric(activity);
+    }
+
+    default: {
+      return activity satisfies never;
+    }
+  }
+};
+
 // The positional fields and trailing text of an Activity other than a presence change.
 const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts => {
+  if (isNetworkOnly(activity)) {
+    return writeNetworkOnly(activity);
+  }
+
   switch (activity._tag) {
     case "Joined": {
       return { head: [atom(activity.channel), atom(activity.nick)], tail: [] };
@@ -433,18 +472,6 @@ const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts
         ],
         tail: trailing(activity.description),
       };
-    }
-
-    case "Invited": {
-      return { head: [atom(activity.channel), `by=${atom(activity.by)}`], tail: [] };
-    }
-
-    case "OperGranted": {
-      return { head: [atom(activity.nick)], tail: [] };
-    }
-
-    case "OperRefused": {
-      return { head: [atom(activity.nick), `reply=${activity.reply}`], tail: [] };
     }
 
     case "CtcpUnsent":

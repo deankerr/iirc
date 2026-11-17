@@ -437,6 +437,17 @@ describe("MONITOR", () => {
     );
 
     expect(sent(run, "MONITOR")).toStrictEqual(["MONITOR + iirc", "MONITOR + iirc,alice"]);
+    // The refusal is read, so it is not shown as it came.
+    expect(
+      run.steps.some((step) =>
+        step.news.some(
+          (news) =>
+            news._tag === "Activity" &&
+            news.activity._tag === "Numeric" &&
+            news.activity.numeric === "421"
+        )
+      )
+    ).toBeFalsy();
   });
 
   it("turns monitoring off for the Connection on a FAIL naming MONITOR", () => {

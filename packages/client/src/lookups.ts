@@ -100,7 +100,12 @@ const readElsewhere: ReadonlySet<string> = new Set(["341", "353"]);
 /** Error numerics that answer a Lookup by naming its nick, or naming nothing, as `431` does. */
 const errors: ReadonlySet<string> = new Set(["401", "402", "406", "431"]);
 
-const isNumeric = (command: string): boolean => /^\d{3}$/u.test(command);
+/**
+ * Whether a command is a numeric: three digits.
+ * @param command - The command.
+ * @returns Whether it is.
+ */
+export const isNumeric = (command: string): boolean => /^\d{3}$/u.test(command);
 
 const isError = (command: string): boolean => /^[45]\d\d$/u.test(command);
 

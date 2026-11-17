@@ -354,6 +354,16 @@ const activity = (source: Activity): WireActivity => {
       return wire;
     }
 
+    case "Numeric": {
+      const wire: Case<Activity, WireActivity, "Numeric"> = {
+        _tag: "Numeric",
+        numeric: source.numeric,
+        params: source.params,
+      };
+
+      return wire;
+    }
+
     case "OperGranted": {
       const wire: Case<Activity, WireActivity, "OperGranted"> = {
         _tag: "OperGranted",
