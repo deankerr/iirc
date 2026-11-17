@@ -5542,7 +5542,9 @@ describe("the web frontend on iirc daemon --web", () => {
         const quotation = await goes.textContent();
 
         const shown = {
-          plain: await plainRow.getByRole("button").count(),
+          plain: await plainRow
+            .getByRole("button", { name: "Go to the message this answers" })
+            .count(),
           plainText: plainWords?.replace(/^\S+ /u, ""),
           quoted: quotation?.replaceAll(/[\u2066-\u2069]/gu, ""),
         };
