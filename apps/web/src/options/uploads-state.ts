@@ -9,7 +9,7 @@
 import type { TimelineItem } from "@iirc/api";
 import { initialUploads, reduceUploads, saidIn } from "@iirc/frontend/uploads";
 import type { UploadsEvent } from "@iirc/frontend/uploads";
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -31,10 +31,14 @@ export const uploadsHappened = (registry: AtomRegistry.AtomRegistry, event: Uplo
   }
 };
 
+// The reads take turns, in the order the changes came, so an older answer never lands
+// after a newer one.
+const oneAtATime = Semaphore.makeUnsafe(1);
+
 /**
  * Reads again each Upload held whose link a Message of ours among a change's items holds,
- * and folds in where it was said, as the Daemon now answers. A read that fails changes
- * nothing: the next change, or the next page, says it again.
+ * and folds in where it was said, as the Daemon now answers, and nothing else of it. A
+ * read that fails changes nothing: the next change, or the next page, says it again.
  * @param registry - The registry.
  * @param items - The items the change gave.
  * @returns Once each was read.
@@ -47,13 +51,13 @@ export const saidChanged = (registry: AtomRegistry.AtomRegistry, items: readonly
       saidIn(registry.get(uploadsState), items),
       (id) =>
         client.uploads.read({ params: { id } }).pipe(
-          Effect.flatMap((upload) =>
+          Effect.flatMap(({ said }) =>
             Effect.sync(() => {
-              uploadsHappened(registry, { _tag: "Answered", upload });
+              uploadsHappened(registry, { _tag: "Said", id, said });
             })
           ),
           Effect.ignore
         ),
       { discard: true }
-    );
+    ).pipe(oneAtATime.withPermits(1));
   });

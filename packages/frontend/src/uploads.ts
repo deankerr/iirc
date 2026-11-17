@@ -58,8 +58,11 @@ export interface UploadsPage {
  *
  * - `Paged`: a page was read, from just after `after`, or the first page when none.
  * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
- * - `Answered`: the Daemon answered a rename, a delete, or a read with the Upload as it is
- *   now, ahead of any Change the stream gives for it.
+ * - `Answered`: the Daemon answered a rename or a delete with the Upload as it is now,
+ *   ahead of the Change the stream gives for it.
+ * - `Said`: a read of an Upload, made because a Message of ours may have said it, gave
+ *   where it was said, which replaces only that, so a read that lands late never undoes a
+ *   Change folded since.
  * - `Missing`: the stream gave the ids of every Upload whose bytes are gone, whole, which
  *   replaces those held.
  * - `DeletedShown`: the Owner chose whether the deleted Uploads show, which starts the list
@@ -70,6 +73,7 @@ export type UploadsEvent =
   | { readonly _tag: "Paged"; readonly after: UploadId | undefined; readonly page: UploadsPage }
   | { readonly _tag: "Changed"; readonly sequence: number; readonly upload: Upload }
   | { readonly _tag: "Answered"; readonly upload: Upload }
+  | { readonly _tag: "Said"; readonly id: UploadId; readonly said: Upload["said"] }
   | { readonly _tag: "Missing"; readonly ids: readonly UploadId[] }
   | { readonly _tag: "DeletedShown"; readonly shown: boolean }
   | { readonly _tag: "Forgotten" };
@@ -202,6 +206,15 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       return state.uploads.some((one) => one.id === upload.id)
         ? { ...state, uploads: replaced(state, upload) }
         : state;
+    }
+
+    case "Said": {
+      const { id, said } = event;
+
+      return {
+        ...state,
+        uploads: state.uploads.map((one) => (one.id === id ? { ...one, said } : one)),
+      };
     }
 
     case "Missing": {

@@ -597,6 +597,26 @@ describe("where an Upload was said", () => {
     ).toStrictEqual([a.id, b.id]);
   });
 
+  it("learnt late changes only where it was said, never a rename a Change gave since", () => {
+    const place = message(`see https://up.example/${a.id}/a.png`);
+
+    const events: readonly UploadsEvent[] = [
+      { _tag: "Paged", after: undefined, page: { next: null, through: 1, uploads: [a] } },
+      { _tag: "Changed", sequence: 2, upload: { ...a, name: "renamed.png" } },
+      { _tag: "Said", id: a.id, said: [place] },
+      { _tag: "Said", id: d.id, said: [place] },
+    ];
+
+    let state = initialUploads;
+
+    for (const event of events) {
+      state = reduceUploads(state, event);
+    }
+
+    expect(state.uploads).toStrictEqual([{ ...a, name: "renamed.png", said: [place] }]);
+    expect(state.through).toBe(2);
+  });
+
   it("is not learnt anew from a Message that only names an id without its slashes", () => {
     const state = reduceUploads(initialUploads, {
       _tag: "Paged",
