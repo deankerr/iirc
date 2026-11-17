@@ -80,6 +80,7 @@ import type {
   Topic,
   UserKnowledge,
 } from "@iirc/client/known";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 import type { Happened, Known, LookOutcome, NetworkInspection, NetworkStatus } from "@iirc/runtime";
 import type {
   CollapsedGap,
@@ -947,6 +948,10 @@ const closable = (source: Closable): WireClosable => {
   }
 };
 
+// The masks a Message or an Activity's sender matched, none when it matched none.
+const stampOf = (ignored: readonly IgnoreMask[] | undefined): readonly IgnoreMask[] =>
+  ignored ?? [];
+
 /**
  * One piece of News, as the contract says it.
  * @param source - The Client's News.
@@ -960,7 +965,7 @@ const news = (source: News): WireNews => {
         activity: activity(source.activity),
         at: fact(source.at, same),
         id: fact(source.id, same),
-        ignored: source.ignored ?? [],
+        ignored: stampOf(source.ignored),
         live: source.live,
         where: source.where.map(where),
       };
@@ -1037,7 +1042,7 @@ const news = (source: News): WireNews => {
         context: orNull(source.context),
         highlight: source.highlight,
         id: fact(source.id, same),
-        ignored: source.ignored ?? [],
+        ignored: stampOf(source.ignored),
         kind: source.kind,
         live: source.live,
         ours:
