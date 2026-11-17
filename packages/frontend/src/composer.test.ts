@@ -20,6 +20,7 @@ import {
   submit,
 } from "./composer.ts";
 import type { Answering, ComposerEvent, Composers, Notice, Place } from "./composer.ts";
+import { initialPalette, reducePalette } from "./palette.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timelineId = Schema.decodeSync(TimelineId);
@@ -40,6 +41,7 @@ const context: CommandContext = {
     timeline: channel,
   },
   head: undefined,
+  named: [],
   open: channel,
   panes: 1,
   session: true,
@@ -105,6 +107,55 @@ const say = (text: string): Intent => ({
   text,
 });
 
+describe("what a draft ran", () => {
+  it("is the key of each command its lines run, in order, as the palette remembers it, and none for plain text", () => {
+    const sent = submit(
+      fold([edited("/SET ui.theme dark\nhello\n//me too\n/me waves")]),
+      channel,
+      context
+    );
+
+    const refused = submit(fold([edited("/me waves\n/frob")]), channel, context);
+
+    expect({
+      plain: submit(fold([edited("hello")]), channel, context).ran,
+      refused: refused.ran,
+      sent: sent.ran,
+    }).toStrictEqual({
+      plain: [],
+      refused: [],
+      sent: ["command:options.set", "command:say.action"],
+    });
+  });
+
+  it("is said once the lines waiting to be confirmed are sent, and not before", () => {
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) =>
+      index === 0 ? "/next" : `line ${index}`
+    );
+
+    const asked = submit(fold([edited(lines.join("\n"))]), channel, context);
+
+    expect([asked.ran, confirm(asked.state, channel).ran]).toStrictEqual([
+      [],
+      ["command:timeline.next"],
+    ]);
+  });
+
+  it("is remembered as the palette remembers what was chosen, the last run the newest", () => {
+    const chosen = reducePalette(initialPalette, { _tag: "Chosen", key: "command:say.to" });
+
+    const ran = reducePalette(chosen, {
+      _tag: "Ran",
+      keys: ["command:options.set", "command:say.action", "command:options.set"],
+    });
+
+    expect([ran.recent, ran.open]).toStrictEqual([
+      ["command:options.set", "command:say.action", "command:say.to"],
+      false,
+    ]);
+  });
+});
+
 describe("submitting", () => {
   it("refuses a raw PASS, AUTHENTICATE, or OPER by either name, in any case, and keeps none of it", () => {
     const before = sendAll(["hello"]);
@@ -159,7 +210,7 @@ describe("submitting", () => {
   it("sends nothing for whitespace", () => {
     const before = fold([edited("  \n ")]);
 
-    expect(submit(before, channel, context)).toStrictEqual({ intents: [], state: before });
+    expect(submit(before, channel, context)).toStrictEqual({ intents: [], ran: [], state: before });
   });
 
   it("refuses text with a NUL, and any line that cannot be sent, sending nothing", () => {

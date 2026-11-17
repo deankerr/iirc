@@ -59,6 +59,7 @@ const known = (value: readonly string[]): Held => ({
 const around = {
   behind: false,
   draft: undefined,
+  named: [],
   open: timeline,
   panes: 1,
   session: true,

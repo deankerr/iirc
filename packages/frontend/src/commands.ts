@@ -16,6 +16,7 @@ import type {
 } from "@iirc/api";
 import type { OwnerOptionName } from "@iirc/api/options";
 import type { PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
+import { casefold } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 import { IgnoreMask } from "@iirc/protocol/mask";
 import { Schema } from "effect";
@@ -52,7 +53,7 @@ import {
 import type { Asked, Configuration, Edit, Json } from "./options.ts";
 import { parseThemeName, systemTheme } from "./theme.ts";
 import type { ThemeOption, ThemesEdit } from "./theme.ts";
-import type { PaneChange } from "./timelines.ts";
+import type { PaneChange, SidebarNetwork } from "./timelines.ts";
 import { isOverridable } from "./ui.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
@@ -78,6 +79,30 @@ export interface DraftTo {
   readonly nick: string;
 }
 
+/** A Timeline as `/go` finds it: by its name, on its Network. */
+export interface NamedTimeline {
+  readonly timeline: TimelineId;
+  readonly network: NetworkId;
+  readonly kind: "Network" | "Channel" | "Direct";
+  readonly name: string;
+}
+
+/**
+ * Every Timeline by name: Network by Network in the sidebar's order, each Network's listed
+ * Timelines, then those closed, which the sidebar leaves out.
+ * @param networks - The sidebar.
+ * @returns The Timelines.
+ */
+export const namedIn = (networks: readonly SidebarNetwork[]): readonly NamedTimeline[] =>
+  networks.flatMap((network) =>
+    [...network.timelines, ...network.closed].map((timeline) => ({
+      kind: timeline.kind,
+      name: timeline.name,
+      network: network.network,
+      timeline: timeline.id,
+    }))
+  );
+
 /** What a command's `when` and its arguments are judged against. */
 export interface CommandContext {
   /** The Timeline in focus, if any. */
@@ -99,6 +124,8 @@ export interface CommandContext {
   readonly session: boolean | undefined;
   /** Every Timeline, in the sidebar's order. */
   readonly timelines: readonly TimelineId[];
+  /** Every Timeline by name, those closed too, as `namedIn` lists them, which `/go` finds one in. */
+  readonly named: readonly NamedTimeline[];
   /**
    * The Timeline open in the focused Pane, as a merge resolves it, even while it is still
    * read, and while something stands in front of it.
@@ -941,6 +968,71 @@ const stepped =
     return parsed(to === open ? undefined : to);
   };
 
+const goUsage = "/go [network] <name>";
+
+/**
+ * Whether two Timelines' names are the same, folded as RFC 1459 does, which only chooses
+ * among the Timelines the Daemon already keeps, never names a Target.
+ * @param left - One name.
+ * @param right - The other.
+ * @returns Whether they are.
+ */
+const sameName = (left: string, right: string) =>
+  casefold("rfc1459", left) === casefold("rfc1459", right);
+
+/**
+ * The Timeline `/go` was given: a name, on the Network the composer is on if one there has
+ * it, else on the one Network that has it, or a Network's id and a name. Of several on one
+ * Network, the first listed, an open one before one closed, is taken.
+ * @param named - Every Timeline by name.
+ * @param here - The Network the composer is on, if any.
+ * @param args - The text after `/go`.
+ * @returns The Timeline, or why there is none.
+ */
+export const timelineNamed = (
+  named: readonly NamedTimeline[],
+  here: NetworkId | undefined,
+  args: string
+): Parsed<TimelineId> => {
+  const [first, second, ...rest] = args
+    .trim()
+    .split(/\s+/u)
+    .filter((one) => one !== "");
+
+  if (first === undefined) {
+    return invalid(`Name a Timeline. Usage: ${goUsage}`);
+  }
+
+  if (rest.length > 0) {
+    return invalid(`Give a name, or a Network's id and a name. Usage: ${goUsage}`);
+  }
+
+  if (second !== undefined) {
+    const network = first.toLowerCase();
+    const found = named.find((one) => one.network === network && sameName(one.name, second));
+
+    return found === undefined
+      ? invalid(`There is no Timeline ${second} on ${network}. Usage: ${goUsage}`)
+      : parsed(found.timeline);
+  }
+
+  const all = named.filter((one) => sameName(one.name, first));
+  const networks = [...new Set(all.map((one) => one.network))];
+
+  const found =
+    all.find((one) => one.network === here) ?? (networks.length === 1 ? all[0] : undefined);
+
+  if (found !== undefined) {
+    return parsed(found.timeline);
+  }
+
+  return networks.length === 0
+    ? invalid(`There is no Timeline named ${first}. Usage: ${goUsage}`)
+    : invalid(
+        `${first} is on ${networks.join(", ")}. Name its Network, as in /go ${networks[0] ?? ""} ${first}. Usage: ${goUsage}`
+      );
+};
+
 const themeUsage =
   "/theme [[-device] [-light | -dark] <name> | -light | -dark | import | remove <name>]";
 
@@ -956,7 +1048,7 @@ const schemeFlags: ReadonlyMap<string, ThemeOption> = new Map([
  * @param words - The words after `/theme`, lower-cased.
  * @returns The flags, and how many words they took, or none for a flag given twice.
  */
-const themeFlags = (
+export const themeFlags = (
   words: readonly string[]
 ):
   | { readonly device: boolean; readonly option: ThemeOption; readonly taken: number }
@@ -2511,6 +2603,19 @@ export const commands: readonly Command[] = [
     name: "next-unread",
     parse: nextUnread,
     usage: "/next-unread",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Open a Timeline by its name in the focused Pane, on the Network of the one in focus unless another is named.",
+    id: "timeline.go",
+    intents: (to: TimelineId) => [{ _tag: "Open", timeline: to }],
+    name: "go",
+    parse: (args, context) =>
+      timelineNamed(context.named, context.focus?.network ?? context.draft?.network, args),
+    usage: goUsage,
     when: [],
   }),
   unfocused({

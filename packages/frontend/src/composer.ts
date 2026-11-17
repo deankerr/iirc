@@ -23,9 +23,10 @@ import { Option, Schema } from "effect";
 import { levelOf, markLatest } from "./activity.ts";
 import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
-import { credentialRefusal, interpret } from "./commands.ts";
+import { commandNamed, credentialRefusal, interpret, namedIn } from "./commands.ts";
 import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
 import { panesOf } from "./layout.ts";
+import { commandKey } from "./palette.ts";
 import { attemptedText, contained, requested } from "./render.ts";
 import { isRemoved, mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
@@ -242,10 +243,14 @@ export type ComposerEvent =
   | { readonly _tag: "ReplyDropped"; readonly timeline: Place }
   | { readonly _tag: "Carried"; readonly from: Place; readonly to: Place };
 
-/** A composer's next state, and the intents it asks the runtime to carry out. */
+/**
+ * A composer's next state, the intents it asks the runtime to carry out, and the keys of the
+ * commands those run, in order, as the palette remembers them, none for plain text.
+ */
 export interface Submitted {
   readonly state: Composers;
   readonly intents: readonly Intent[];
+  readonly ran: readonly string[];
 }
 
 /** No composer touched yet. */
@@ -325,8 +330,9 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
 
 /**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
- * it, whether that Network has a Session, every Timeline in the sidebar's order, those open
- * in any Pane, those with something unread, and the head of the Channel in focus, as read.
+ * it, whether that Network has a Session, every Timeline in the sidebar's order, and by
+ * name, those closed too, those open in any Pane, those with something unread, and the head
+ * of the Channel in focus, as read.
  * @param timelines - The Timelines.
  * @param channels - The Channels the Panes show, as read.
  * @returns The context.
@@ -352,6 +358,7 @@ export const contextOf = (
   // `/next-unread` may go to it, which shows it.
   const around = {
     behind: main._tag !== "Timeline",
+    named: namedIn(networks),
     open: open === undefined ? undefined : resolve(timelines, open),
     panes: panesOf(timelines.layout.root).length,
     shown: panesOf(timelines.layout.root).flatMap((pane) =>
@@ -414,6 +421,20 @@ export const contextOf = (
  */
 export const linesOf = (text: string): readonly string[] =>
   text.split(/\r\n|\r|\n/u).filter((line) => line.trim() !== "");
+
+/**
+ * The keys of the commands lines run, in order, as the palette remembers them: a line that
+ * starts with `/`, but not `//`, and names a command. Plain text runs none.
+ * @param lines - The lines, each read already.
+ * @returns The keys.
+ */
+const ranBy = (lines: readonly string[]): readonly string[] =>
+  lines.flatMap((line) => {
+    const name = /^\/(?<name>[^\s/]\S*)/u.exec(line)?.groups?.name;
+    const found = name === undefined ? undefined : commandNamed(name);
+
+    return found === undefined ? [] : [commandKey(found.id)];
+  });
 
 /**
  * A notice once the Owner submits: an offer stays, since it can still be taken, and anything
@@ -530,6 +551,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   if (lines.length === 0) {
     return {
       intents: [],
+      ran: [],
       state:
         draft.notice?._tag === "Outcome"
           ? withDraft(state, timeline, (one) => ({ ...one, notice: undefined }))
@@ -539,6 +561,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
 
   const refuse = (message: string): Submitted => ({
     intents: [],
+    ran: [],
     state: noticed(state, timeline, aboutText(message)),
   });
 
@@ -551,6 +574,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   if (credential !== undefined) {
     return {
       intents: [],
+      ran: [],
       state: withDraft(state, timeline, (one) => ({
         ...emptyDraft,
         history: one.history,
@@ -584,6 +608,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   if (lines.length > confirmAbove) {
     return {
       intents: [],
+      ran: [],
       state: withDraft(state, timeline, (one) => ({
         ...one,
         confirming: { intents: replies, lines: lines.length },
@@ -592,7 +617,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
     };
   }
 
-  return { intents: replies, state: withDraft(state, timeline, sent) };
+  return { intents: replies, ran: ranBy(lines), state: withDraft(state, timeline, sent) };
 };
 
 /**
@@ -602,12 +627,14 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
  * @returns The state after, and the intents to carry out.
  */
 export const confirm = (state: Composers, timeline: Place): Submitted => {
-  const { confirming } = draftOf(state, timeline);
+  const { confirming, text } = draftOf(state, timeline);
 
+  // What waits was read from the text shown, which an edit lets go of it.
   return confirming === undefined
-    ? { intents: [], state }
+    ? { intents: [], ran: [], state }
     : {
         intents: confirming.intents,
+        ran: ranBy(linesOf(text)),
         state: withDraft(state, timeline, sent),
       };
 };

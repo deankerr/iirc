@@ -23,6 +23,7 @@ const around = {
   behind: false,
   draft: undefined,
   head: undefined,
+  named: [],
   open: undefined,
   panes: 1,
   shown: [],
@@ -482,6 +483,7 @@ describe("reading a line", () => {
       "sidebar.toggle": "Optional",
       "theme.set": "Optional",
       "timeline.close": "Optional",
+      "timeline.go": "Required",
       "timeline.latest": "None",
       "timeline.next": "None",
       "timeline.previous": "None",
@@ -512,6 +514,84 @@ const outcome = (line: string, context: CommandContext) => {
 
   return read._tag === "Parsed" ? read.value : read.message;
 };
+
+/**
+ * A Timeline's id, by its sequence.
+ * @param sequence - Its sequence.
+ * @returns The id.
+ */
+const idAt = (sequence: number) =>
+  Schema.decodeSync(TimelineId)(`${sequence.toString(16).padStart(14, "0")}-00000000-00000000`);
+
+/**
+ * What opening a Timeline gives.
+ * @param timeline - The Timeline.
+ * @returns The intents.
+ */
+const opens = (timeline: TimelineId) => [{ _tag: "Open", timeline }];
+
+describe("going to a Timeline by name", () => {
+  const oftc = Schema.decodeSync(NetworkId)("oftc");
+  const id = idAt;
+
+  const named = [
+    { kind: "Network", name: "libera", network, timeline: id(1) },
+    { kind: "Channel", name: "#iirc", network, timeline: id(2) },
+    { kind: "Direct", name: "Peer", network, timeline: id(3) },
+    { kind: "Channel", name: "#iirc", network: oftc, timeline: id(4) },
+    { kind: "Channel", name: "#debian", network: oftc, timeline: id(5) },
+  ] as const;
+
+  it("opens the one on the Network in focus, the one Network that has it, or the one on the Network named", () => {
+    const here: CommandContext = { ...inChannel, named };
+
+    expect({
+      folded: chosen("/go peer", here),
+      here: chosen("/go #IIRC", here),
+      named: chosen("/go oftc #iirc", here),
+      namedLoud: chosen("/go OFTC   #iirc ", here),
+      network: chosen("/go libera", here),
+      only: chosen("/go #debian", here),
+    }).toStrictEqual({
+      folded: opens(id(3)),
+      here: opens(id(2)),
+      named: opens(id(4)),
+      namedLoud: opens(id(4)),
+      network: opens(id(1)),
+      only: opens(id(5)),
+    });
+  });
+
+  it("refuses a name no Timeline has, or one on several Networks with none in focus, in words with the usage", () => {
+    const away: CommandContext = { ...nowhere, named };
+
+    expect({
+      ambiguous: chosen("/go #iirc", away),
+      empty: chosen("/go", away),
+      tooMany: chosen("/go libera #iirc more", away),
+      unknown: chosen("/go #nowhere", away),
+      unknownOnNetwork: chosen("/go oftc peer", away),
+    }).toStrictEqual({
+      ambiguous:
+        "#iirc is on libera, oftc. Name its Network, as in /go libera #iirc. Usage: /go [network] <name>",
+      empty: "Name a Timeline. Usage: /go [network] <name>",
+      tooMany: "Give a name, or a Network's id and a name. Usage: /go [network] <name>",
+      unknown: "There is no Timeline named #nowhere. Usage: /go [network] <name>",
+      unknownOnNetwork: "There is no Timeline peer on oftc. Usage: /go [network] <name>",
+    });
+  });
+
+  it("goes from a Direct Message not yet begun on its Network", () => {
+    const drafting: CommandContext = {
+      ...nowhere,
+      draft: { network: oftc, nick: "someone" },
+      named,
+      session: true,
+    };
+
+    expect(chosen("/go #iirc", drafting)).toStrictEqual(opens(id(4)));
+  });
+});
 
 describe("themes", () => {
   it("lists, imports, draws in, and removes themes by /theme", () => {
