@@ -159,6 +159,7 @@ export const offerOf = (channel: string, network: NetworkId) => ({
  */
 export interface AskedClose {
   readonly ask: number;
+  readonly network: NetworkId;
   readonly timeline: TimelineId;
   readonly closedAt: number | undefined;
 }
@@ -183,7 +184,7 @@ export interface Closing {
  *   or the close is over, refused, failed, or already said, as none.
  */
 export type ClosingEvent =
-  | { readonly _tag: "Asked"; readonly timeline: TimelineId }
+  | { readonly _tag: "Asked"; readonly network: NetworkId; readonly timeline: TimelineId }
   | { readonly _tag: "Answered"; readonly ask: number; readonly closedAt: number | undefined };
 
 /** No close on its way. */
@@ -199,7 +200,15 @@ export const reduceClosing = (state: Closing, event: ClosingEvent): Closing => {
   switch (event._tag) {
     case "Asked": {
       return {
-        asked: [...state.asked, { ask: state.next, closedAt: undefined, timeline: event.timeline }],
+        asked: [
+          ...state.asked,
+          {
+            ask: state.next,
+            closedAt: undefined,
+            network: event.network,
+            timeline: event.timeline,
+          },
+        ],
         next: state.next + 1,
       };
     }
@@ -243,21 +252,17 @@ export const closedBy = (held: Held, close: CloseTimeline): TimelineId | undefin
  * @param held - The Timelines held.
  * @returns Their ids.
  */
-export const closingShown = (state: Closing, held: Held): ReadonlySet<TimelineId> => {
-  const changedOf = (id: TimelineId) =>
-    [...held.values()].find((network) => network.timelines.has(id))?.timelines.get(id)?.changed;
-
-  return new Set(
+export const closingShown = (state: Closing, held: Held): ReadonlySet<TimelineId> =>
+  new Set(
     state.asked
       .filter((one) => {
         if (one.closedAt === undefined) {
           return true;
         }
 
-        const changed = changedOf(one.timeline);
+        const changed = held.get(one.network)?.timelines.get(one.timeline)?.changed;
 
         return changed !== undefined && changed < one.closedAt;
       })
       .map((one) => one.timeline)
   );
-};

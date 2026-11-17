@@ -87,7 +87,7 @@ const onItsWay = <A, E, R>(
         Effect.sync(() => {
           const { next } = registry.get(closingState);
 
-          closingHappened(registry, { _tag: "Asked", timeline });
+          closingHappened(registry, { _tag: "Asked", network: close.network, timeline });
 
           return next;
         }),
@@ -131,8 +131,8 @@ const refusedWith = (close: CloseTimeline, tag: string): Outcome => {
 
 /**
  * Asks the Daemon to close a Timeline, which shows at once, and offers to leave a Channel it
- * refused to close because Self is in it. An answer that lands once the page signed out, or signed in again,
- * offers nothing, since its offer would outlive the sign-in it was asked in.
+ * refused to close because Self is in it. An answer that lands once the page signed out, or
+ * signed in again, offers nothing, since its offer would outlive the sign-in it was asked in.
  * @param registry - The registry.
  * @param close - The close.
  * @returns What it came to, in words when it was not done.

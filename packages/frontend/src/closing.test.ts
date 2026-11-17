@@ -212,7 +212,7 @@ describe("a close on its way", () => {
   });
 
   it("shows its Timeline closed from when it is asked until the stream says it is, once answered closed", () => {
-    const asked = closes([{ _tag: "Asked", timeline: channel.id }]);
+    const asked = closes([{ _tag: "Asked", network: libera, timeline: channel.id }]);
     const answered = reduceClosing(asked, { _tag: "Answered", ask: 0, closedAt: 5 });
 
     expect({
@@ -229,7 +229,7 @@ describe("a close on its way", () => {
 
   it("shows its Timeline again once it is refused or failed", () => {
     const refused = closes([
-      { _tag: "Asked", timeline: channel.id },
+      { _tag: "Asked", network: libera, timeline: channel.id },
       { _tag: "Answered", ask: 0, closedAt: undefined },
     ]);
 
