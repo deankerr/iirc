@@ -5494,7 +5494,21 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await goes.waitFor();
 
-        const plainWords = await plainRow.textContent();
+        // What the row says, without its menu's hidden button.
+        const plainWords = await plainRow.evaluate((row) => {
+          const copy = row.cloneNode(true);
+
+          if (!(copy instanceof Element)) {
+            return null;
+          }
+
+          for (const button of copy.querySelectorAll("button")) {
+            button.remove();
+          }
+
+          return copy.textContent;
+        });
+
         const quotation = await goes.textContent();
 
         const shown = {

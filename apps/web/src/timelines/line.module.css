@@ -176,6 +176,7 @@
   color: var(--color-muted);
   font: inherit;
   visibility: hidden;
+  user-select: none;
 }
 
 .menued:hover .more,
