@@ -454,9 +454,9 @@ describe("a Pane's members", () => {
       peer: await menuOf("peer"),
       quiet: await menuOf("quiet"),
     }).toStrictEqual({
-      op: "account opperquerywhoismention",
-      peer: "logged outquerywhoismention",
-      quiet: "querywhoismention",
+      op: "account opperquerywhoismentionignore",
+      peer: "logged outquerywhoismentionignore",
+      quiet: "querywhoismentionignore",
     });
   });
 });

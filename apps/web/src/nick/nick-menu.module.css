@@ -1,0 +1,65 @@
+/*
+ * A nick that opens its menu: as the nick is drawn, inline, so it wraps and is cut with the
+ * line around it, and marked only while hovered, focused, or its menu is open.
+ */
+.nick {
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nick:hover > bdi,
+.nick[data-open] > bdi {
+  text-decoration: underline;
+}
+
+.nick:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+/* A long press opens the menu, never the browser's callout or a selection of the nick. */
+@media (pointer: coarse) {
+  .nick {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
+/* The menu, under the nick, as dense as the Timeline. Its width is its own, never the
+   nick's, which on a phone would widen the page it is placed in. */
+.popover {
+  min-width: 16ch;
+  max-width: calc(100vw - 2 * var(--space-4));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-4) var(--color-shadow);
+  outline: none;
+}
+
+.menu {
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.entry[data-hovered],
+.entry[data-focused] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  color: var(--color-accent);
+}
+
+@media (pointer: coarse) {
+  .entry {
+    min-height: var(--target-size);
+  }
+}

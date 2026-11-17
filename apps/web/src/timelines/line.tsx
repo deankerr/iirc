@@ -9,13 +9,14 @@
  * answered has a menu, opened by a button shown while its row is hovered or focused, and
  * always where the pointer is coarse, or by the context menu, as a right-click, the menu
  * key, or Shift+F10 opens it, which offers to reply. A Message's Previews, if it has any,
- * are under its text. Every name and every text a Network sent sits in its
- * own isolate, as a text node.
+ * are under its text. A sender's nick, and a nick in an Activity's words, opens the menu on
+ * that nick, whose context menu is its own. Every name and every text a Network sent sits
+ * in its own isolate, as a text node.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import type { TimelineItem } from "@iirc/api";
+import type { TimelineId, TimelineItem } from "@iirc/api";
 import { replyOf } from "@iirc/frontend/composer";
 import type { Answering } from "@iirc/frontend/composer";
 import { lineOf, quotedOf } from "@iirc/frontend/render";
@@ -26,6 +27,7 @@ import type { MouseEvent, RefObject } from "react";
 import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
 
 import { chooseReply, perform } from "../composer/atoms.ts";
+import { NickButton } from "../nick/nick-menu.tsx";
 import { dayShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
@@ -176,18 +178,22 @@ const JoinOffer = ({
 };
 
 /**
- * A piece of a description.
- * @param props - The piece.
+ * A piece of a description, a nick opening the menu on it.
+ * @param props - The piece, and the Timeline it is shown in.
  * @returns It, as text.
  */
-const Piece = ({ part }: { readonly part: Part }) => {
+const Piece = ({ part, timeline }: { readonly part: Part; readonly timeline: TimelineId }) => {
   switch (part._tag) {
     case "Words": {
       return part.text;
     }
 
     case "Nick": {
-      return <Nick colour={part.colour} nick={part.nick} />;
+      return (
+        <NickButton nick={part.nick} timeline={timeline}>
+          <Nick colour={part.colour} nick={part.nick} />
+        </NickButton>
+      );
     }
 
     case "Name": {
@@ -367,7 +373,13 @@ const MessageLine = ({
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const delivery = line.delivered;
-  const nick = <Nick colour={line.colour} nick={line.nick} />;
+
+  const nick = (
+    <NickButton nick={line.nick} timeline={item.timeline}>
+      <Nick colour={line.colour} nick={line.nick} />
+    </NickButton>
+  );
+
   let tone = item.level === "Highlight" ? styles.highlight : styles.message;
 
   if (line.delivery !== undefined && failed.has(line.delivery)) {
@@ -486,7 +498,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
           {line.parts.map((part, index) => (
             // A description's pieces never move, so their order is their identity.
             // oxlint-disable-next-line react/no-array-index-key
-            <Piece key={index} part={part} />
+            <Piece key={index} part={part} timeline={row.item.timeline} />
           ))}
           {repeated === undefined ? null : (
             <RepeatedWords count={repeated.count} from={repeated.from} to={row.item.position.at} />

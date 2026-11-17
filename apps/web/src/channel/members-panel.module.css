@@ -148,24 +148,7 @@
   color: var(--color-muted);
 }
 
-/* A member's menu, under their row, as dense as the list. Its width is its own, never the
-   row's, which on a phone would widen the page it is placed in. */
-.popover {
-  min-width: 16ch;
-  max-width: calc(100vw - 2 * var(--space-4));
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-background);
-  box-shadow: 0 0 var(--space-4) var(--color-shadow);
-  outline: none;
-}
-
-.menu {
-  padding: var(--space-1) 0;
-  outline: none;
-}
-
-/* Who the member is logged in as, above what can be done with them: dim, and cut with an
+/* Who the member is logged in as, above the menu on their nick: dim, and cut with an
    ellipsis where an account is longer than the menu. */
 .account {
   margin: 0;
@@ -178,22 +161,6 @@
 
 .account > bdi {
   min-width: 0;
-}
-
-.action {
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-3);
-  outline: none;
-  cursor: default;
-  white-space: nowrap;
-}
-
-.action[data-hovered],
-.action[data-focused] {
-  background: var(--color-surface);
-  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
-  color: var(--color-accent);
 }
 
 /* On a compact screen: the page dimmed behind a sheet of the members, from the bottom. */
@@ -223,8 +190,7 @@
 }
 
 @media (pointer: coarse) {
-  .item,
-  .action {
+  .item {
     min-height: var(--target-size);
   }
 

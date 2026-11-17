@@ -30,6 +30,32 @@ import type { Connection, NetworkView, Timelines } from "./timelines.ts";
 /** Where Self stands with a Channel the Client holds. */
 export type Standing = NonNullable<ChannelHeader["standing"]>;
 
+/**
+ * Whether Self may operate in a Channel, by the prefixes Self holds there, as far as they
+ * are known: operator, `o`, or a rank above it in `PREFIX`. A half-operator is not offered
+ * it: what one may do differs by Ircd, and nothing in ISUPPORT says. The Network decides
+ * in the end, and a refusal shows in the Channel's Timeline.
+ * @param head - The Channel's head.
+ * @returns Whether Self may.
+ */
+export const mayOperate = (head: ChannelHeader): boolean => {
+  const { held } = head;
+  const operator = head.ranks.findIndex((one) => one.mode === "o");
+
+  let modes: readonly string[] = [];
+
+  if (held?._tag === "Known") {
+    modes = held.value;
+  } else if (held?._tag === "Partial") {
+    modes = held.atLeast;
+  }
+
+  return (
+    operator !== -1 &&
+    head.ranks.some((one, index) => index <= operator && modes.includes(one.mode))
+  );
+};
+
 /** How many members a page asks for, and the most a read again asks for at once. */
 export const membersPage = 100;
 const largestMembersPage = 500;
