@@ -114,6 +114,7 @@ const uploadOf = (key: string, link: string | null, name = `${key}.png`) =>
     link,
     name,
     safeName: name,
+    said: [],
     size: 10,
     type: "image/png",
   });

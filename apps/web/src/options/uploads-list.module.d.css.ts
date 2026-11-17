@@ -15,7 +15,9 @@ declare const styles: {
   readonly more: string;
   readonly muted: string;
   readonly name: string;
+  readonly place: string;
   readonly row: string;
+  readonly said: string;
   readonly thumbnail: string;
   readonly view: string;
 };

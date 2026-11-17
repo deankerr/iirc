@@ -93,6 +93,20 @@ const UploadRead = Schema.Struct({
 
 const decodeUpload = Schema.decodeUnknownSync(Schema.fromJsonString(UploadRead));
 
+/** Where the end-to-end run reads an Upload was said: each Message's Network and Target. */
+const decodeSaid = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      said: Schema.Array(
+        Schema.Struct({
+          content: Schema.Struct({ target: Schema.String, text: Schema.String }),
+          network: Schema.String,
+        })
+      ),
+    })
+  )
+);
+
 /** What the end-to-end run reads of a page of Uploads. */
 const decodeUploads = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ uploads: Schema.Array(UploadRead) }))
@@ -5047,6 +5061,116 @@ describe("the web frontend on iirc daemon --web", () => {
             problems: [],
             storeHolds: false,
           });
+        } finally {
+          peer.close();
+          child.kill("SIGTERM");
+          await child.exited;
+          await ngircd.stop();
+        }
+      } finally {
+        await minio.stop();
+      }
+    }
+  );
+
+  it(
+    "says in the Uploads list where an Upload was said from the composer, and goes to the Message from there",
+    { timeout: 120_000 },
+    async () => {
+      const minio: Minio = await startMinio();
+
+      // MinIO goes with the run, however far its setup got.
+      try {
+        const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+          path.join(directory, "upload-said"),
+          "#iirc-said"
+        );
+
+        try {
+          const listen = freePort();
+
+          await api("PUT", "/credentials/minio-key", JSON.stringify({ value: minio.accessKeyId }));
+          await api(
+            "PUT",
+            "/credentials/minio-secret",
+            JSON.stringify({ value: minio.secretAccessKey })
+          );
+
+          const options = {
+            "store.s3.accessKeyId": "minio-key",
+            "store.s3.bucket": minio.bucket,
+            "store.s3.endpoint": minio.endpoint,
+            "store.s3.region": minio.region,
+            "store.s3.secretAccessKey": "minio-secret",
+            "uploads.listen": `${loopback}:${listen}`,
+            "uploads.publicUrl": `http://${loopback}:${listen}`,
+          };
+
+          for (const [option, value] of Object.entries(options)) {
+            // oxlint-disable-next-line no-await-in-loop -- set in order
+            await api("PUT", `/options/${option}`, JSON.stringify({ value }));
+          }
+
+          const kept = await fetch(`${base}/api/uploads?name=cat.png`, {
+            body: solidPng(8, [208, 96, 40]),
+            headers: { authorization: `Bearer ${key}` },
+            method: "POST",
+          });
+
+          const upload = decodeUpload(await kept.text());
+          const text = `look ${upload.link ?? ""}`;
+          const { page, problems } = await watchedPage(browser);
+
+          await page.goto(base);
+          await page.getByLabel("Key").fill(key);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await networkRow(page);
+          await page.getByRole("button", { exact: true, name: "Options" }).click();
+
+          const row = page
+            .getByRole("region", { name: "Uploads" })
+            .getByRole("listitem")
+            .filter({ hasText: "cat.png" });
+
+          await row.waitFor();
+
+          // Said in the Channel, while the list shows, which learns of it without a reload.
+          await page.getByRole("row", { exact: true, name: channel }).click();
+
+          const composer = page.getByRole("textbox", { name: channel });
+
+          await composer.fill(text);
+          await composer.press("Enter");
+          await peer.waitFor(
+            (line) => line.command === "PRIVMSG" && line.params[1] === text,
+            "the Message"
+          );
+          await page.getByRole("button", { exact: true, name: "Options" }).click();
+
+          const place = row.getByRole("button", {
+            name: `Go to where cat.png was said in private ${channel}`,
+          });
+
+          await place.waitFor();
+          await screenshot(page, "110-after.png");
+          await place.click();
+
+          const message = page
+            .getByRole("log", { name: channel })
+            .locator("[data-index]", { hasText: "look " });
+
+          await message.waitFor();
+
+          const read = await api("GET", `/uploads/${upload.id}`);
+
+          expect({
+            problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+            said: decodeSaid(await read.text()).said.map((item) => [
+              item.network,
+              item.content.target,
+              item.content.text,
+            ]),
+          }).toStrictEqual({ problems: [], said: [["private", channel, text]] });
         } finally {
           peer.close();
           child.kill("SIGTERM");

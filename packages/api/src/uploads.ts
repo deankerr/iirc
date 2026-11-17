@@ -8,7 +8,7 @@ import { Instant } from "@iirc/client";
 import { Schema } from "effect";
 
 import { ByteCount, OwnerOptionName } from "./options.ts";
-import { After, Limit } from "./schemas.ts";
+import { After, Limit, TimelineItem } from "./schemas.ts";
 
 /**
  * An Upload's id: 16 lower-case characters of Crockford's base32, 80 random bits, which
@@ -60,7 +60,9 @@ export const UploadDeleted = Schema.Struct({ at: Instant, why: UploadDeletedWhy 
  * was uploaded, when it was last renamed, if it was, when and why it was deleted, if it was,
  * `missing` once a read of the store confirmed a live Upload's bytes are gone from it, and
  * its link, `<uploads.publicUrl>/<id>/<safeName>` from the public URL in force, or `null`
- * while none is set or once it is deleted.
+ * while none is set or once it is deleted, and where it was said: each Message of ours, on
+ * any Network, whose text holds `/<id>/`, newest first, read from the Timelines as they are
+ * when the Upload is given. A Message the Ircd refused was never said, and is not one.
  */
 export const Upload = Schema.Struct({
   at: Instant,
@@ -72,6 +74,7 @@ export const Upload = Schema.Struct({
   name: Schema.optionalKey(Schema.String),
   renamedAt: Schema.optionalKey(Instant),
   safeName: Schema.String,
+  said: Schema.Array(TimelineItem),
   size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   type: Schema.String,
 });

@@ -1,4 +1,4 @@
-import { Upload } from "@iirc/api";
+import { TimelineItem, Upload } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -11,6 +11,8 @@ import {
   nameOf,
   reduceUploadEdits,
   reduceUploads,
+  saidIn,
+  saidPlace,
   shownName,
   sizeText,
   thumbnailed,
@@ -31,6 +33,7 @@ const upload = (letter: string, name?: string, at = 1_700_000_000_000) => {
     id: letter.repeat(16),
     link: null,
     safeName: `${letter}.png`,
+    said: [],
     size: 10,
     type: "image/png",
   };
@@ -514,5 +517,113 @@ describe("why a rename or a delete did not go as asked, in words", () => {
       "The Daemon did not answer, so whether cat.png was renamed is unknown.",
       "The Daemon answered in a way the Frontend could not read, so whether cat.png was deleted is unknown.",
     ]);
+  });
+});
+
+const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
+
+/**
+ * A Message, as the wire carries it.
+ * @param text - What it says.
+ * @param fields - Whose it is, where, and, for ours, the text the Ircd confirmed.
+ * @returns The item.
+ */
+const message = (
+  text: string,
+  fields: {
+    readonly ours?: boolean;
+    readonly confirmed?: string;
+    readonly network?: string;
+    readonly target?: string;
+  } = {}
+) => {
+  const { confirmed, network = "libera", ours = true, target = "#iirc" } = fields;
+
+  const delivery =
+    confirmed === undefined
+      ? { _tag: "Unconfirmed" as const }
+      : {
+          _tag: "Confirmed" as const,
+          at: { _tag: "Unknown" as const },
+          id: { _tag: "Unknown" as const },
+          text: confirmed,
+        };
+
+  return Schema.decodeSync(TimelineItem)({
+    changed: 1,
+    content: {
+      _tag: "Message",
+      at: { _tag: "Unknown" },
+      id: { _tag: "Unknown" },
+      kind: "Privmsg",
+      live: true,
+      ours: ours ? { delivery, intent: "web-1" } : null,
+      sender: ours ? "iirc" : "peer",
+      tags: [],
+      target,
+      text,
+    },
+    level: ours ? null : "Message",
+    network,
+    position: `${hex(2n ** 53n + 1000n, 14)}-${hex(1n, 14)}-${hex(0n, 8)}`,
+    sequence: 1,
+    timeline: "00000000000002-00000000-00000000",
+  });
+};
+
+describe("where an Upload was said", () => {
+  it("is the Network and the Target, its direction marks closed", () => {
+    expect([
+      saidPlace(message("look", { network: "libera", target: "#iirc" })),
+      saidPlace(message("look", { network: "oftc", target: "fri\u2067end" })),
+    ]).toStrictEqual(["libera #iirc", "oftc fri\u2067end\u2069"]);
+  });
+
+  it("is learnt anew for each Upload held whose link a Message of ours holds", () => {
+    const state = reduceUploads(initialUploads, {
+      _tag: "Paged",
+      after: undefined,
+      page: { next: null, through: 1, uploads: [a, b, c] },
+    });
+
+    expect(
+      saidIn(state, [
+        message(`see https://up.example/${a.id}/a.png`),
+        message("on its way", { confirmed: `there https://up.example/${b.id}/b.png` }),
+        message(`theirs https://up.example/${c.id}/c.png`, { ours: false }),
+        message(`not held https://up.example/${d.id}/d.png`),
+        message(`again https://up.example/${a.id}/a.png`),
+      ])
+    ).toStrictEqual([a.id, b.id]);
+  });
+
+  it("learnt late changes only where it was said, never a rename a Change gave since", () => {
+    const place = message(`see https://up.example/${a.id}/a.png`);
+
+    const events: readonly UploadsEvent[] = [
+      { _tag: "Paged", after: undefined, page: { next: null, through: 1, uploads: [a] } },
+      { _tag: "Changed", sequence: 2, upload: { ...a, name: "renamed.png" } },
+      { _tag: "Said", id: a.id, said: [place] },
+      { _tag: "Said", id: d.id, said: [place] },
+    ];
+
+    let state = initialUploads;
+
+    for (const event of events) {
+      state = reduceUploads(state, event);
+    }
+
+    expect(state.uploads).toStrictEqual([{ ...a, name: "renamed.png", said: [place] }]);
+    expect(state.through).toBe(2);
+  });
+
+  it("is not learnt anew from a Message that only names an id without its slashes", () => {
+    const state = reduceUploads(initialUploads, {
+      _tag: "Paged",
+      after: undefined,
+      page: { next: null, through: 1, uploads: [a] },
+    });
+
+    expect(saidIn(state, [message(`the id is ${a.id}`)])).toStrictEqual([]);
   });
 });

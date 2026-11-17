@@ -13,14 +13,8 @@
  * @packageDocumentation
  */
 import type { Upload, UploadId, UploadsQuery } from "@iirc/api";
-import {
-  initialUploadEdits,
-  initialUploads,
-  linkOf,
-  reduceUploadEdits,
-  reduceUploads,
-} from "@iirc/frontend/uploads";
-import type { EditFailure, UploadEditsEvent, UploadsEvent } from "@iirc/frontend/uploads";
+import { initialUploadEdits, linkOf, reduceUploadEdits } from "@iirc/frontend/uploads";
+import type { EditFailure, UploadEditsEvent } from "@iirc/frontend/uploads";
 import { Effect, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -30,9 +24,7 @@ import { runtime } from "../app/runtime.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, Waits } from "../timelines/atoms.ts";
 import { optionsShown, optionsState, signedOut, told } from "./atoms.ts";
-
-/** The Uploads held, newest first, as the core folds them. */
-export const uploadsState = Atom.make(initialUploads).pipe(Atom.keepAlive);
+import { uploadsHappened, uploadsState } from "./uploads-state.ts";
 
 /**
  * Whether the deleted Uploads show, which the Uploads held say, so it lives in one place.
@@ -59,18 +51,6 @@ export const publicUrl = Atom.make(
 
 /** The link last copied, which the list says was, while it is still that Upload's link. */
 export const copiedLink = Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive);
-
-/**
- * Folds one event into the Uploads held, unless the page is signed out, so what signing
- * out forgot stays forgotten whatever lands after it.
- * @param registry - The registry.
- * @param event - What happened.
- */
-const happened = (registry: AtomRegistry.AtomRegistry, event: UploadsEvent) => {
-  if (event._tag === "Forgotten" || registry.get(signedIn)) {
-    registry.set(uploadsState, reduceUploads(registry.get(uploadsState), event));
-  }
-};
 
 /**
  * Folds one event into what the Owner asked of the Uploads listed.
@@ -145,9 +125,12 @@ export const sendEdit = (registry: AtomRegistry.AtomRegistry, id: UploadId, edit
             });
           }
 
+          // A rename or a delete done, whose Upload's Timelines could not be read, is as
+          // unknown as an answer that could not be.
           case "CrossOrigin":
           case "InvalidRequest":
-          case "SchemaError": {
+          case "SchemaError":
+          case "TimelinesFailed": {
             return failed({ _tag: "Unexpected" });
           }
 
@@ -159,7 +142,7 @@ export const sendEdit = (registry: AtomRegistry.AtomRegistry, id: UploadId, edit
     );
 
     if (answer._tag === "Done") {
-      happened(registry, { _tag: "Answered", upload: answer.upload });
+      uploadsHappened(registry, { _tag: "Answered", upload: answer.upload });
     }
 
     if (answer._tag === "SignedOut") {
@@ -202,7 +185,7 @@ export const renameUpload = runtime
 
 /** Chooses whether the deleted Uploads show, which reads the list again from its first page. */
 export const showDeleted = Atom.fnSync((shown: boolean, get) => {
-  happened(get.registry, { _tag: "DeletedShown", shown });
+  uploadsHappened(get.registry, { _tag: "DeletedShown", shown });
 }).pipe(Atom.keepAlive);
 
 /** Asks the Owner to confirm deleting an Upload, which sends nothing yet. */
@@ -269,7 +252,7 @@ const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefin
     );
 
     if (stayed && registry.get(deletedShown) === deleted) {
-      happened(registry, { _tag: "Paged", after, page });
+      uploadsHappened(registry, { _tag: "Paged", after, page });
     }
   });
 
@@ -289,7 +272,7 @@ export const uploadsSync = runtime
       const { registry } = get;
 
       if (!get(signedIn)) {
-        happened(registry, { _tag: "Forgotten" });
+        uploadsHappened(registry, { _tag: "Forgotten" });
         edited(registry, { _tag: "Forgotten" });
         registry.set(copiedLink, undefined);
 
@@ -331,11 +314,15 @@ export const uploadsSync = runtime
           Stream.runForEach((event) =>
             Effect.sync(() => {
               if (event.event === "changed") {
-                happened(registry, { _tag: "Changed", sequence: event.id, upload: event.data });
+                uploadsHappened(registry, {
+                  _tag: "Changed",
+                  sequence: event.id,
+                  upload: event.data,
+                });
               }
 
               if (event.event === "missing") {
-                happened(registry, { _tag: "Missing", ids: event.data.uploads });
+                uploadsHappened(registry, { _tag: "Missing", ids: event.data.uploads });
               }
             })
           )

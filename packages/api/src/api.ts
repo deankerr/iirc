@@ -394,15 +394,22 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
       query: UploadQuery,
       success: Upload,
     }),
-    HttpApiEndpoint.get("list", "/uploads", { query: UploadsQuery, success: UploadPage }),
+    HttpApiEndpoint.get("list", "/uploads", {
+      error: TimelinesFailed,
+      query: UploadsQuery,
+      success: UploadPage,
+    }),
     HttpApiEndpoint.get("status", "/uploads/status", { success: UploadsStatus }),
     HttpApiEndpoint.get("changes", "/uploads/changes", {
       headers: { "last-event-id": Schema.optionalKey(After) },
       query: { after: Schema.optionalKey(After) },
-      success: HttpApiSchema.StreamSse({ error: JournalFailed, events: UploadsEvent }),
+      success: HttpApiSchema.StreamSse({
+        error: Schema.Union([JournalFailed, TimelinesFailed]),
+        events: UploadsEvent,
+      }),
     }),
     HttpApiEndpoint.get("read", "/uploads/:id", {
-      error: UnknownUpload,
+      error: [UnknownUpload, TimelinesFailed],
       params: { id: UploadId },
       success: Upload,
     }),
@@ -412,13 +419,13 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
       success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
     }),
     HttpApiEndpoint.patch("rename", "/uploads/:id", {
-      error: [UnknownUpload, JournalFailed],
+      error: [UnknownUpload, JournalFailed, TimelinesFailed],
       params: { id: UploadId },
       payload: UploadRename,
       success: Upload,
     }),
     HttpApiEndpoint.delete("delete", "/uploads/:id", {
-      error: [UnknownUpload, JournalFailed],
+      error: [UnknownUpload, JournalFailed, TimelinesFailed],
       params: { id: UploadId },
       success: Upload,
     })

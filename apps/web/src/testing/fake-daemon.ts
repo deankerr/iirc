@@ -1557,6 +1557,7 @@ export const fakeDaemon = () => {
       id,
       link: publicUrl === undefined ? null : `${publicUrl}/${id}/${safeName}`,
       safeName,
+      said: [],
       size,
       type: "image/png",
     };
@@ -1622,6 +1623,26 @@ export const fakeDaemon = () => {
     changedUpload(now);
 
     return Response.json(now);
+  };
+
+  /**
+   * One Upload, as held, or 404 for an id none has, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const uploadRoute = (url: URL, init: RequestInit): Response | undefined => {
+    const id = /^\/api\/uploads\/(?<id>[0-9a-z]{16})$/u.exec(url.pathname)?.groups?.id;
+
+    if ((init.method ?? "GET") !== "GET" || id === undefined) {
+      return undefined;
+    }
+
+    return signedInOnly(() => {
+      const held = uploads.find((each) => each.id === id);
+
+      return held === undefined ? json(404, { _tag: "UnknownUpload", id }) : Response.json(held);
+    });
   };
 
   /**
@@ -1957,6 +1978,7 @@ export const fakeDaemon = () => {
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await ownerRoute(url, init)) ??
+    uploadRoute(url, init) ??
     (await uploadsRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??

@@ -13,7 +13,8 @@ import { shownName } from "@iirc/frontend/uploads";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
-import { closeDelete, confirmDelete, uploadEditsState, uploadsState } from "./uploads.ts";
+import { uploadsState } from "./uploads-state.ts";
+import { closeDelete, confirmDelete, uploadEditsState } from "./uploads.ts";
 
 import styles from "./remove-dialog.module.css";
 
