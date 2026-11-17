@@ -490,9 +490,10 @@ const RowLine = ({ row }: { readonly row: Row }) => {
   if (line._tag === "Description") {
     const { repeated } = row;
 
+    // An arrow says nothing a reader needs, but a numeric's number is its name.
     return (
       <div className={toneClass[line.tone]}>
-        {time} {/* An arrow says nothing a reader needs, but a numeric's number is its name. */}
+        {time}{" "}
         <span aria-hidden={line.tone !== "Numeric"} className={styles.marker}>
           {line.marker ?? ""}
         </span>{" "}
