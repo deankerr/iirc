@@ -96,6 +96,8 @@ export type Activity =
       readonly nick: string;
       readonly away: { readonly message: string } | null;
     }
+  /** A User logged in to `account`, or out of theirs with `null`, as an `ACCOUNT` Line says. */
+  | { readonly _tag: "AccountChanged"; readonly nick: string; readonly account: string | null }
   | { readonly _tag: "Invited"; readonly channel: string; readonly by: string }
   | { readonly _tag: "OperGranted"; readonly nick: string }
   | { readonly _tag: "OperRefused"; readonly nick: string; readonly reply: OperRefusal }

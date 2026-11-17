@@ -51,7 +51,16 @@ const listed = (
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
-const member = (nick: string, prefixes: readonly string[] = []): typeof Member.Encoded => ({
+const unknownAccount = { _tag: "Unknown" } as const;
+
+const known = (value: string | null) => ({ _tag: "Known", at: 1, from: "ircd", value }) as const;
+
+const member = (
+  nick: string,
+  prefixes: readonly string[] = [],
+  account: typeof Member.Encoded.account = unknownAccount
+): typeof Member.Encoded => ({
+  account,
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
@@ -67,9 +76,13 @@ const settled = async (holds: () => boolean) => {
  * A browser signed in to a Daemon with `#iirc` open, its topic hostile and set by `op`,
  * its members `op` and `peer`, the page drawn.
  * @param setAt - When the topic was set, if known.
+ * @param people - Its members, `op` and `peer` unless given.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async (setAt: number | null = null) => {
+const signedIn = async (
+  setAt: number | null = null,
+  people: readonly (typeof Member.Encoded)[] = [member("op", ["o"]), member("peer")]
+) => {
   const fake = fakeDaemon();
 
   fake.daemon.signedIn = true;
@@ -100,7 +113,7 @@ const signedIn = async (setAt: number | null = null) => {
         value: { setAt, setBy: "op", text: hostileTopic },
       },
     },
-    members: [member("op", ["o"]), member("peer")],
+    members: [...people],
   });
 
   const registry = registryFor(fake.fetch);
@@ -404,5 +417,46 @@ describe("a Pane's members", () => {
     await settled(() => container.querySelector('[role="log"]') === null);
 
     expect({ first, members: members() }).toStrictEqual({ first: "Query peer", members: null });
+  });
+
+  it("says in a member's menu which account they are logged in to, or that they are logged out, and nothing when it is not known", async () => {
+    const { registry } = await signedIn(null, [
+      member("op", ["o"], known("opper")),
+      member("peer", [], known(null)),
+      member("quiet"),
+    ]);
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 400);
+    await press(toggle());
+    await settled(() => members()?.querySelector('[data-key="quiet"]') !== null);
+
+    const menuOf = async (nick: string) => {
+      const row = members()?.querySelector<HTMLElement>(`[data-key="${nick}"]`);
+
+      await act(async () => {
+        row?.focus();
+        await Promise.resolve();
+      });
+      await key(row, "Enter");
+      await settled(() => document.querySelector('[role="menu"]') !== null);
+
+      const popover = document.querySelector('[role="menu"]')?.parentElement?.textContent;
+
+      await key(document.querySelector('[role="menu"]'), "Escape");
+      await settled(() => document.querySelector('[role="menu"]') === null);
+
+      return popover;
+    };
+
+    expect({
+      op: await menuOf("op"),
+      peer: await menuOf("peer"),
+      quiet: await menuOf("quiet"),
+    }).toStrictEqual({
+      op: "account opperquerywhoismention",
+      peer: "logged outquerywhoismention",
+      quiet: "querywhoismention",
+    });
   });
 });

@@ -496,9 +496,11 @@ const CtcpAnswer = Schema.TaggedUnion({
  * the Network's own Timeline: Self, by its nick, is an IRC operator now, or the Ircd refused
  * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`. An
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
- * `channel`, which it may join.
+ * `channel`, which it may join. An `AccountChanged` is a User logging in to `account`, or
+ * out of theirs with `null`.
  */
 export const Activity = Schema.TaggedUnion({
+  AccountChanged: { account: Schema.NullOr(Untrusted), nick: Untrusted },
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
   CtcpReply: {
     ...ctcp,
@@ -1670,9 +1672,11 @@ export type ChannelHeader = typeof ChannelHeader.Type;
 
 /**
  * A member of a Channel: their nick, the prefix modes they hold, such as `o` and `v`,
- * listed in the order of `PREFIX`, and whether they are away, as their User is known.
+ * listed in the order of `PREFIX`, and their User's account, or `null` for logged out, and
+ * whether they are away, as their User is known.
  */
 export const Member = Schema.Struct({
+  account: Fact(Schema.NullOr(Untrusted)),
   away: Fact(Schema.NullOr(Schema.Struct({ message: Untrusted }))),
   nick: Untrusted,
   prefixes: SetFact(Schema.Array(Untrusted)),

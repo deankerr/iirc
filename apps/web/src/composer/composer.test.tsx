@@ -52,6 +52,7 @@ const listed = (
 });
 
 const member = (nick: string): typeof Member.Encoded => ({
+  account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [] },

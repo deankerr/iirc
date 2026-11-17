@@ -18,8 +18,16 @@ import type { EndReason, Unrouted } from "./news.ts";
 /** Facts a Feature keeps up to date. When it turns off, the core marks each one stale. */
 export type Kept =
   | "user.away"
+  /** Every User's account, as logins and logouts are told. */
   | "user.account"
+  /**
+   * A User's account as their own Lines say it, and as their join says it. Each is kept
+   * apart, so that taking one away makes what it said stale, though another is still on.
+   */
+  | "user.account.tagged"
+  | "user.account.joined"
   | "user.mask"
+  /** Another User's realname, as their join says it. */
   | "user.realname"
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
   | "member.prefixes";
@@ -126,6 +134,17 @@ export type Meant =
       readonly _tag: "Listed";
       readonly channel: string;
       readonly members: readonly MemberKnowledge[];
+    }
+  | {
+      /**
+       * What a Line said of a User: their account, `null` for logged out, and their
+       * realname. Only the model sees it. It is folded only from a live Line, and only for
+       * a User who shares a Channel with Self.
+       */
+      readonly _tag: "Described";
+      readonly nick: string;
+      readonly account?: string | null;
+      readonly realname?: string;
     };
 
 /** A Line `egress` will not let leave, which the core does not send. */

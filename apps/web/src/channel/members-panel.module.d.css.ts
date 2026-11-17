@@ -1,5 +1,6 @@
 // The class names in members-panel.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly account: string;
   readonly action: string;
   readonly away: string;
   readonly close: string;

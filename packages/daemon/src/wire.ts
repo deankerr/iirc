@@ -211,16 +211,34 @@ const ctcp = (source: Ctcp): Ctcp => ({
   target: source.target,
 });
 
+// What a User's presence changed to, as an Away or an account.
+const presence = (
+  source: Extract<Activity, { readonly _tag: "AccountChanged" | "AwayChanged" }>
+): WireActivity => {
+  if (source._tag === "AccountChanged") {
+    const wire: Case<Activity, WireActivity, "AccountChanged"> = {
+      _tag: "AccountChanged",
+      account: source.account,
+      nick: source.nick,
+    };
+
+    return wire;
+  }
+
+  const wire: Case<Activity, WireActivity, "AwayChanged"> = {
+    _tag: "AwayChanged",
+    away: source.away === null ? null : { message: source.away.message },
+    nick: source.nick,
+  };
+
+  return wire;
+};
+
 const activity = (source: Activity): WireActivity => {
   switch (source._tag) {
+    case "AccountChanged":
     case "AwayChanged": {
-      const wire: Case<Activity, WireActivity, "AwayChanged"> = {
-        _tag: "AwayChanged",
-        away: source.away === null ? null : { message: source.away.message },
-        nick: source.nick,
-      };
-
-      return wire;
+      return presence(source);
     }
 
     case "Joined": {
@@ -1216,14 +1234,15 @@ export const channelHeader = (
 /**
  * A member, as the contract says it, with the prefix modes they hold in the order of
  * `PREFIX`.
- * @param placed - The member, and whether their User is away.
+ * @param placed - The member, and their User's account and whether they are away.
  * @param order - Each prefix mode's index in `PREFIX`.
  * @returns Its wire form.
  */
 export const member = (
   placed: Placed,
   order: ReadonlyMap<string, number>
-): Fields<MemberKnowledge, WireMember, "away"> => ({
+): Fields<MemberKnowledge, WireMember, "account" | "away"> => ({
+  account: fact(placed.account, same),
   away: fact(placed.away, (away) => (away === null ? null : { message: away.message })),
   nick: placed.member.nick,
   prefixes: setFact(placed.member.prefixes, (held) => inRankOrder(held, order)),

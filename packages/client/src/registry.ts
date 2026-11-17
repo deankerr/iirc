@@ -5,10 +5,13 @@
  * @packageDocumentation
  */
 import type { Feature } from "./feature.ts";
+import { accountNotify } from "./features/account-notify.ts";
+import { accountTag } from "./features/account-tag.ts";
 import { awayNotify } from "./features/away-notify.ts";
 import { batch } from "./features/batch.ts";
 import { capNotify } from "./features/cap-notify.ts";
 import { echo } from "./features/echo.ts";
+import { extendedJoin } from "./features/extended-join.ts";
 import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
 import { saslPlain } from "./features/sasl.ts";
@@ -46,6 +49,9 @@ export const registry: readonly Registered[] = [
   register(echo),
   register(multiPrefix),
   register(awayNotify),
+  register(accountTag),
+  register(accountNotify),
+  register(extendedJoin),
   register(utf8Only),
   register(standardReplies),
 ];

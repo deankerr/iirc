@@ -321,6 +321,9 @@ export interface Seen {
   readonly nick: string;
   readonly mask: Fact<{ readonly user: string; readonly host: string }>;
   readonly away: Fact<{ readonly message: string } | null>;
+  /** The account they are logged in to, or `null` when known to be logged out. */
+  readonly account: Fact<string | null>;
+  readonly realname: Fact<string>;
 }
 
 /** The Network: whether it is wanted, and the Connection or the wait for one. */

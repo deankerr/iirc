@@ -174,6 +174,8 @@ const asked = (sequence: number): readonly Change[] =>
         target: "iirc",
       },
       { _tag: "Invited", by: "peer", channel: "#elsewhere" },
+      { _tag: "AccountChanged", account: "peerly", nick: "peer" },
+      { _tag: "AccountChanged", account: null, nick: "peer" },
     ] as const
   ).map((activity, index) => ({
     _tag: "Added",
@@ -325,6 +327,7 @@ describe("reopening the file", () => {
             "CtcpUnsent",
             "CtcpSent",
             "Invited",
+            "AccountChanged",
           ].map((tag) =>
             before.changed.items.some(
               (item) => item.content._tag === "Activity" && item.content.activity._tag === tag
@@ -336,7 +339,7 @@ describe("reopening the file", () => {
               : []
           ),
         }).toStrictEqual({
-          kept: [true, true, true, true, true, true],
+          kept: [true, true, true, true, true, true, true],
           roundTrips: [null, 250],
         });
         expect(after).toStrictEqual(before);

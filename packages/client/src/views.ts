@@ -121,11 +121,11 @@ const userOf = (nick: string, open: Open, key: string): UserKnowledge => {
   const seen = open.users.get(key);
 
   return {
-    account: unknown,
+    account: seen?.account ?? unknown,
     away: seen?.away ?? unknown,
     mask: seen?.mask ?? unknown,
     nick,
-    realname: unknown,
+    realname: seen?.realname ?? unknown,
   };
 };
 

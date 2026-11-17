@@ -4,7 +4,7 @@
  * never in `bun run test`.
  */
 import { CallerIntent, CredentialPathName, NetworkId } from "@iirc/api";
-import type { ActionRequest, Happened, LookupRequest, TimelineItem } from "@iirc/api";
+import type { ActionRequest, Happened, LookupRequest, Member, TimelineItem } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ngircdOperName, ngircdOperPassword, startErgo, startNgircd } from "../testing/ircd.ts";
 import type { Ircd } from "../testing/ircd.ts";
 import { connectPeer, registerAccount } from "../testing/peer.ts";
-import type { Parsed } from "../testing/peer.ts";
+import type { Parsed, Peer } from "../testing/peer.ts";
 import { eventually, followChanges, followNews, startDaemon } from "../testing/running.ts";
 import type { Api } from "../testing/running.ts";
 import { makeKey, temporaryDirectory } from "../testing/world.ts";
@@ -38,6 +38,23 @@ const sequences = (happened: readonly Happened[]) => happened.map((one) => one.s
 
 const sent = (item: TimelineItem, sender: string, text: string) =>
   item.content._tag === "Message" && item.content.sender === sender && item.content.text === text;
+
+// Registering an account logs a Peer's Connection in to it, named as its nick is.
+const register = (peer: Peer) =>
+  Effect.promise(async () => {
+    peer.send("REGISTER * * a-password-nobody-reads");
+    await peer.waitFor((line) => line.command === "REGISTER", "REGISTER's reply");
+  });
+
+// Each member's account, as the members route gives it: the account, `null` for logged out,
+// or the fact's tag.
+const accounts = (page: { readonly members: readonly Member[] }) =>
+  Object.fromEntries(
+    page.members.map(({ account, nick }) => [
+      nick,
+      account._tag === "Known" ? account.value : account._tag,
+    ])
+  );
 
 const joined = (api: Api) =>
   eventually(api.networks.known({ params: { network } }), (known) =>
@@ -977,7 +994,8 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
   }, 90_000);
 
   // Ergo answers a NickServ login with a NOTICE alone, with no `900` and no `+r`, so the
-  // Channel waits out the bound, and Self's account stays unknown to the Session.
+  // Channel waits out the bound, and Self's account is known only from the `ACCOUNT` that
+  // `account-notify` sends of Self.
   it("logs in by telling NickServ, joins after the bound, and never journals the Credential", async () => {
     const password = "a-service-password-only-the-vault-holds";
 
@@ -1078,12 +1096,101 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       })
     );
 
-    expect(result).toStrictEqual({
-      account: { _tag: "Unknown" },
+    expect(result).toMatchObject({
+      account: { _tag: "Known", from: "ircd", value: "svcacct" },
       joinedAs: "svcacct",
       looked: "svcacct",
       shown: false,
       stored: false,
+    });
+  }, 120_000);
+
+  // Ergo has no command that logs a connection out and leaves it connected, so a User logged
+  // out is one that joined with `*` for an account, and the account of one logged in later
+  // arrives with `ACCOUNT`.
+  it("gives each member's account, from how they joined or logged in after, in the members and a Whois", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
+            nicks: ["iirc"],
+          }),
+          query: {},
+        });
+        yield* joined(api);
+
+        const connect = (nick: string) =>
+          Effect.promise(
+            async () =>
+              await connectPeer({
+                caps: ["draft/account-registration"],
+                host: ergo.host,
+                nick,
+                port: ergo.plainPort,
+              })
+          );
+
+        const anon = yield* connect("anon");
+        const member = yield* connect("member");
+        const late = yield* connect("late");
+
+        yield* register(member);
+        anon.send(`JOIN ${channel}`);
+        member.send(`JOIN ${channel}`);
+        late.send(`JOIN ${channel}`);
+
+        const listed = yield* api.timelines.list({ params: { network }, query: {} });
+        const timeline = listed.timelines.find((one) => one.name === channel)?.id;
+
+        if (timeline === undefined) {
+          return yield* Effect.die("the Channel's Timeline was not listed");
+        }
+
+        const members = api.timelines.members({ params: { timeline }, query: {} });
+
+        // Each joined as `extended-join` says: with an account, or with none.
+        const onJoining = yield* eventually(members, (page) =>
+          ["anon", "member", "late"].every((nick) => nick in accounts(page))
+        );
+
+        yield* register(late);
+
+        const afterLogin = yield* eventually(members, (page) => accounts(page).late === "late");
+
+        const whois = yield* api.networks.look({
+          params: { network },
+          payload: { lookup: { _tag: "Whois", nick: "member" } },
+        });
+
+        for (const peer of [anon, member, late]) {
+          peer.close();
+        }
+
+        yield* daemon.stop;
+
+        return {
+          afterLogin: accounts(afterLogin),
+          onJoining: accounts(onJoining),
+          whois:
+            whois._tag === "LookedUp" && whois.result._tag === "Found"
+              ? whois.result.profiles.map((one) => [one.nick, one.account])
+              : whois,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      afterLogin: { anon: null, iirc: "Unknown", late: "late", member: "member" },
+      onJoining: { anon: null, iirc: "Unknown", late: null, member: "member" },
+      whois: [["member", "member"]],
     });
   }, 120_000);
 

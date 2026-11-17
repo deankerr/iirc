@@ -330,6 +330,28 @@ const writeCtcp = (activity: CtcpActivity): ActivityParts => {
   }
 };
 
+const writeTopic = (
+  activity: Extract<Activity, { readonly _tag: "TopicChanged" }>
+): ActivityParts => {
+  const { topic } = activity;
+
+  return topic === null
+    ? { head: [atom(activity.channel), `by=${atom(activity.by)}`, "cleared"], tail: [] }
+    : {
+        head: [
+          atom(activity.channel),
+          `by=${atom(activity.by)}`,
+          ...optional("setBy", topic.setBy),
+          ...optional(
+            "setAt",
+            topic.setAt === undefined ? undefined : writeInstant(topic.setAt),
+            true
+          ),
+        ],
+        tail: trailing(topic.text),
+      };
+};
+
 // An Activity's positional fields and trailing text, before and after its attributes.
 const writeActivity = (activity: Activity): ActivityParts => {
   switch (activity._tag) {
@@ -374,29 +396,23 @@ const writeActivity = (activity: Activity): ActivityParts => {
     }
 
     case "TopicChanged": {
-      const { topic } = activity;
-
-      return topic === null
-        ? { head: [atom(activity.channel), `by=${atom(activity.by)}`, "cleared"], tail: [] }
-        : {
-            head: [
-              atom(activity.channel),
-              `by=${atom(activity.by)}`,
-              ...optional("setBy", topic.setBy),
-              ...optional(
-                "setAt",
-                topic.setAt === undefined ? undefined : writeInstant(topic.setAt),
-                true
-              ),
-            ],
-            tail: trailing(topic.text),
-          };
+      return writeTopic(activity);
     }
 
     case "AwayChanged": {
       return activity.away === null
         ? { head: [atom(activity.nick), "back"], tail: [] }
         : { head: [atom(activity.nick)], tail: trailing(activity.away.message) };
+    }
+
+    case "AccountChanged": {
+      return {
+        head: [
+          atom(activity.nick),
+          activity.account === null ? "logged-out" : `account=${atom(activity.account)}`,
+        ],
+        tail: [],
+      };
     }
 
     case "StandardReply": {

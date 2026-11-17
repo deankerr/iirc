@@ -88,6 +88,7 @@ const ctcp = {
 };
 
 const Activity = Schema.TaggedUnion({
+  AccountChanged: { account: Schema.NullOr(Schema.String), nick: Schema.String },
   AwayChanged: {
     away: Schema.NullOr(Schema.Struct({ message: Schema.String })),
     nick: Schema.String,
