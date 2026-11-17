@@ -26,13 +26,14 @@ import type { Line } from "@iirc/protocol/line";
 import { online } from "./acts.ts";
 import { pruneUsers, see } from "./channels.ts";
 import type { Arrival } from "./feature.ts";
+import type { Fact } from "./known.ts";
 import type { Closable, News, Where } from "./news.ts";
 import { reclaim, wantedBack } from "./reclaim.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Monitoring, State, Watched } from "./state.ts";
 import { maxPartners, unmonitored } from "./state.ts";
-import { openOf, sessionOf } from "./views.ts";
+import { openOf, partnersOf, sessionOf } from "./views.ts";
 import { named, routeActivity } from "./where.ts";
 
 // Partners
@@ -339,13 +340,51 @@ const mayChange = (before: State, after: State): boolean => {
   );
 };
 
+// Whether two facts of whether a partner is here say the same, the time they were known aside.
+const sameHere = (left: Fact<boolean>, right: Fact<boolean>): boolean =>
+  left._tag === right._tag &&
+  (left._tag !== "Known" || (right._tag === "Known" && left.value === right.value));
+
 /**
- * After a step, follows the partners from its News, and when the list may have changed,
- * sends the difference. Without `MONITOR` in ISUPPORT, nothing is sent.
+ * Tells of each partner who was one before the step and whether they are here changed in
+ * it, unless the step's News already says so in their Timeline: an Activity there. Nothing
+ * else tells a Frontend, as the first status `MONITOR` gives is learned silently.
+ * @param run - The step, with its partners followed.
+ */
+const partnersLearned = (run: Run): void => {
+  if (run.before.partners.size === 0 || run.state.partners.size === 0) {
+    return;
+  }
+
+  const was = partnersOf(run.before, folder(run.before));
+  const now = partnersOf(run.state, folder(run.state));
+
+  const reported = new Set(
+    run.news.flatMap((one) =>
+      one._tag === "Activity"
+        ? one.where.flatMap((where) => (where._tag === "Direct" ? [where.key] : []))
+        : []
+    )
+  );
+
+  for (const [key, partner] of now) {
+    const before = was.get(key);
+
+    if (before !== undefined && !reported.has(key) && !sameHere(before.here, partner.here)) {
+      run.news.push({ _tag: "PartnerLearned", partner: { key, name: partner.nick } });
+    }
+  }
+};
+
+/**
+ * After a step, follows the partners from its News, tells of those whose presence changed
+ * with nothing else saying so, and when the list may have changed, sends the difference.
+ * Without `MONITOR` in ISUPPORT, nothing is sent.
  * @param run - The step, with its News gathered.
  */
 export const monitorAfter = (run: Run): void => {
   followPartners(run);
+  partnersLearned(run);
 
   if (!mayChange(run.before, run.state)) {
     return;

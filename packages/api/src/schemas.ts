@@ -869,6 +869,11 @@ export const News = Schema.TaggedUnion({
    */
   NetworkRemoved: { keep: Schema.Boolean },
   /**
+   * Whether a Direct Message partner is on the Network, as `known` says, changed in a way no
+   * Activity reports, keyed as `where` keys their Timeline. Read `known` again to see it.
+   */
+  PartnerLearned: { partner: Named },
+  /**
    * The Owner's Read Marker of a Timeline moved forward, to `read`: the Network's own, a
    * Channel's, or a Direct Message partner's, keyed as `where` keys it.
    */
@@ -1300,8 +1305,9 @@ export type Unread = typeof Unread.Type;
  * detached one, which keeps its items and receives nothing more. `latest` is where its
  * last item stands, `read` its Read Marker, `null` before any, `unread` how much stands
  * after it, by level, `head` the last step that changed what the Client knows of its
- * Channel in a way no item says, `null` before any, so a Frontend following the changes
- * reads the Channel's head again, `removed` whether its Network was removed with its
+ * Channel, or of whether its partner is on the Network, in a way no item says, `null`
+ * before any, so a Frontend following the changes reads the Channel's head, or `known`,
+ * again, `removed` whether its Network was removed with its
  * Timelines kept, so it is read and never said to, `closed` whether the Owner closed it
  * and nothing has arrived in it since, so a Frontend leaves it out of the Sidebar until
  * something does, and `changed` the last step that changed it, its Read Marker, its head,

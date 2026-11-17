@@ -885,8 +885,37 @@ describe("a Direct Message's partner", () => {
         place: { sequence: 11, version: 1 },
       });
 
+    // What `MONITOR` first says of a partner is no item, only their Timeline's `head`.
+    const learned = (timeline: string, head: number | null) =>
+      reduceTimelines(quiet, {
+        _tag: "Changed",
+        change: decodeChange({
+          dropped: [],
+          gaps: [],
+          items: [],
+          merged: [],
+          removals: [],
+          sequence: 11,
+          timelines: [
+            {
+              ...described(
+                timeline,
+                timeline === peer ? "peer" : "#iirc",
+                timeline === peer ? "Direct" : "Channel"
+              ),
+              changed: 11,
+              head,
+            },
+          ],
+        }),
+        place: { sequence: 11, version: 1 },
+      });
+
     expect({
       came: statusWanted(arrived({ _tag: "CameOnline", nick: "peer" }, peer)).length,
+      channelHead: statusWanted(learned(iirc, 11)).length,
+      directHead: statusWanted(learned(peer, 11)).length,
+      directNoHead: statusWanted(learned(peer, null)).length,
       gone: statusWanted(arrived({ _tag: "WentOffline", nick: "peer" }, peer)).length,
       joined: statusWanted(arrived({ _tag: "Joined", channel: "#iirc", nick: "peer" }, iirc))
         .length,
@@ -901,6 +930,9 @@ describe("a Direct Message's partner", () => {
         .length,
     }).toStrictEqual({
       came: 1,
+      channelHead: 0,
+      directHead: 1,
+      directNoHead: 0,
       gone: 1,
       joined: 0,
       opened: 1,

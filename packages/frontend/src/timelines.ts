@@ -156,7 +156,8 @@ export interface NetworkView {
   /**
    * The sequence of the last step `known` is read again for: an `AwayChanged` in the
    * Network's own Timeline, or a partner coming, going, quitting, or changing nick in a
-   * Direct Message Timeline.
+   * Direct Message Timeline, or what is learned of whether they are there, which moves its
+   * `head`.
    */
   readonly statusAt: number;
   readonly timelines: ReadonlyMap<TimelineId, Timeline>;
@@ -1293,6 +1294,26 @@ const tagsUnknown = (connection: Connection): boolean =>
   connection._tag === "Connected" && connection.tags === undefined;
 
 /**
+ * The sequence of the last step that learned whether a partner is there, which no item
+ * says, as a change moves their Direct Message Timeline's `head`.
+ * @param network - The Network.
+ * @param change - The step's changes.
+ * @returns The sequence, or 0 when none did.
+ */
+const partnerLearnedAt = (network: NetworkView, change: TimelineChange): number =>
+  Math.max(
+    0,
+    ...change.timelines.flatMap((timeline) =>
+      timeline.network === network.network &&
+      timeline.life === network.life &&
+      timeline.kind === "Direct" &&
+      timeline.head !== null
+        ? [timeline.head]
+        : []
+    )
+  );
+
+/**
  * Brings a Network's connection up to date with the Session items of one step, when they
  * are later than what set it and of the life held: an item of a Timeline of an older life,
  * as the step names it or as one let go of when that life ended, says nothing of it.
@@ -1337,6 +1358,8 @@ const changeConnection = (
       }
     }
   }
+
+  statusAt = Math.max(statusAt, partnerLearnedAt(network, change));
 
   const connected =
     connectionAt === network.connectionAt

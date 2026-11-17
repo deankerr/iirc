@@ -1060,6 +1060,15 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
+    case "PartnerLearned": {
+      const wire: Case<News, WireNews, "PartnerLearned"> = {
+        _tag: "PartnerLearned",
+        partner: { key: source.partner.key, name: source.partner.name },
+      };
+
+      return wire;
+    }
+
     case "ReadMarker": {
       const wire: Case<News, WireNews, "ReadMarker"> = {
         _tag: "ReadMarker",

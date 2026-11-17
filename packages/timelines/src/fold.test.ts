@@ -436,6 +436,24 @@ describe("a Channel's head", () => {
   });
 });
 
+const learnedOf = (name: string): News => ({
+  _tag: "PartnerLearned",
+  partner: { key: name.toLowerCase(), name },
+});
+
+describe("a Direct Message partner's presence", () => {
+  it("is to be read again when the Client learns it, for a Timeline that exists, and adds nothing", () => {
+    const { changes } = fold([
+      happened(1, [message([direct("peer")])]),
+      happened(2, [learnedOf("Peer"), learnedOf("stranger")]),
+    ]);
+
+    expect(changes.filter(({ sequence }) => sequence === 2)).toStrictEqual([
+      { _tag: "HeadChanged", network: "libera", sequence: 2, timeline: timelineIdOf(1, 0, 1) },
+    ]);
+  });
+});
+
 describe("Read Markers", () => {
   it("move a Timeline's forward, and only forward, whatever the News says", () => {
     const { changes, directory } = fold([

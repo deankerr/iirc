@@ -512,6 +512,66 @@ const writeLookResult = (result: LookResult): string =>
 const sessionAt = (at: Instant, now: Instant): readonly string[] =>
   at === now ? [] : [`at=${writeInstant(at)}`];
 
+/** The News that is about the Network or a Timeline, rather than something said. */
+type TimelineNews = Extract<
+  News,
+  {
+    readonly _tag:
+      | "Refolded"
+      | "NetworkRemoved"
+      | "ReadMarker"
+      | "TimelineClosed"
+      | "ChannelLearned"
+      | "PartnerLearned";
+  }
+>;
+
+const isTimelineNews = (news: News): news is TimelineNews =>
+  news._tag === "Refolded" ||
+  news._tag === "NetworkRemoved" ||
+  news._tag === "ReadMarker" ||
+  news._tag === "TimelineClosed" ||
+  news._tag === "ChannelLearned" ||
+  news._tag === "PartnerLearned";
+
+/**
+ * Writes the News that is about the Network or a Timeline, rather than something said, as a
+ * `??` expectation's text.
+ * @param news - The News.
+ * @returns Its text.
+ */
+const describeTimelineNews = (news: TimelineNews): string => {
+  switch (news._tag) {
+    case "Refolded": {
+      return `refolded ${news.casemapping}`;
+    }
+
+    case "NetworkRemoved": {
+      return words(["network-removed", ...(news.keep ? ["keep"] : [])]);
+    }
+
+    case "ReadMarker": {
+      return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
+    }
+
+    case "TimelineClosed": {
+      return words(["timeline-closed", ...writeWhere([news.where])]);
+    }
+
+    case "ChannelLearned": {
+      return words(["channel-learned", `channel:${writeNamed(news.channel)}`]);
+    }
+
+    case "PartnerLearned": {
+      return words(["partner-learned", `partner:${writeNamed(news.partner)}`]);
+    }
+
+    default: {
+      return news satisfies never;
+    }
+  }
+};
+
 /**
  * Writes a News as a `??` expectation's text. Instants read against the transcript's
  * clock, as `t+13s`.
@@ -520,6 +580,10 @@ const sessionAt = (at: Instant, now: Instant): readonly string[] =>
  * @returns Its text, such as `ignored Malformed MODE` or `message Privmsg peer #iirc :hi`.
  */
 export const describeNews = (news: News, now: Instant): string => {
+  if (isTimelineNews(news)) {
+    return describeTimelineNews(news);
+  }
+
   switch (news._tag) {
     case "Ignored": {
       return `ignored ${writeIgnored(news.reason)}`;
@@ -544,26 +608,6 @@ export const describeNews = (news: News, now: Instant): string => {
 
     case "ConnectionFailed": {
       return words(["connection-failed", writeEnd(news.reason), ...sessionAt(news.at, now)]);
-    }
-
-    case "Refolded": {
-      return `refolded ${news.casemapping}`;
-    }
-
-    case "NetworkRemoved": {
-      return words(["network-removed", ...(news.keep ? ["keep"] : [])]);
-    }
-
-    case "ReadMarker": {
-      return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
-    }
-
-    case "TimelineClosed": {
-      return words(["timeline-closed", ...writeWhere([news.where])]);
-    }
-
-    case "ChannelLearned": {
-      return words(["channel-learned", `channel:${writeNamed(news.channel)}`]);
     }
 
     case "Message": {

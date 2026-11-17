@@ -71,8 +71,8 @@ export interface Summary extends Descriptor {
   /** How many items of each level stand after `read`, capped. */
   readonly unread: Unread;
   /**
-   * The last sequence that changed what the Client knows of its Channel in a way no item
-   * says, as `HeadChanged` reports, or `undefined` while none has.
+   * The last sequence that changed what the Client knows of its Channel, or of whether its
+   * partner is on the Network, in a way no item says, as `HeadChanged` reports, or `undefined` while none has.
    */
   readonly head: number | undefined;
   /** Whether its Network was removed, and its Timelines kept: it is read, and never said to. */

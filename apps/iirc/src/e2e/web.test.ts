@@ -5936,13 +5936,6 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await log.getByText("are you there").waitFor();
         await expect.poll(hereOf, { interval: 100, timeout: 20_000 }).toBe("here");
-        // What `MONITOR` first says of a partner is silent, so no step tells a Pane that was
-        // already open; opening the Timeline again reads `known` afresh.
-        await page
-          .getByRole("row", { name: /^private/u })
-          .first()
-          .click();
-        await page.getByRole("row", { name: /^peer/u }).click();
         await online.waitFor();
         await screenshot(page, "73-after-here-desktop.png");
         await page.setViewportSize({ height: 844, width: 390 });

@@ -470,6 +470,88 @@ describe("whether a partner is here", () => {
   });
 });
 
+// The partners News says changed, in order, by key.
+const learned = (run: Played<State>) =>
+  news(run).flatMap((each) => (each._tag === "PartnerLearned" ? [each.partner.key] : []));
+
+describe("telling that a partner's presence changed", () => {
+  it("tells of the first status after MONITOR +, which no Activity reports, and of no repeat", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(
+        ">> MONITOR + iirc",
+        "<< :alice!u@h PRIVMSG other :hi",
+        ">> MONITOR + alice",
+        "<< :irc.test 730 other :alice!u@alice.host",
+        "?? partner-learned partner:alice",
+        "<< :irc.test 730 other :alice!u@alice.host",
+        "<< :bob!u@h PRIVMSG other :hi",
+        ">> MONITOR + bob",
+        "<< :irc.test 731 other :bob",
+        "?? partner-learned partner:bob"
+      )
+    );
+
+    expect(learned(run)).toStrictEqual(["alice", "bob"]);
+  });
+
+  it("leaves a change an Activity reports to that Activity", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(
+        ">> MONITOR + iirc",
+        "<< :alice!u@h PRIVMSG other :hi",
+        ">> MONITOR + alice",
+        "<< :irc.test 730 other :alice!u@h",
+        "<< :irc.test 731 other :alice",
+        "<< :irc.test 730 other :alice!u@h"
+      )
+    );
+
+    expect(presence(run)).toStrictEqual(["WentOffline alice", "CameOnline alice"]);
+    expect(learned(run)).toStrictEqual(["alice"]);
+  });
+
+  it("tells of a partner who shares a Channel with Self from then, and of one gone from it", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(">> MONITOR + iirc", "<< :alice!u@h PRIVMSG other :hi", ">> MONITOR + alice"),
+      joined(base, "#iirc", ["alice"], { nick: "other" })
+    );
+
+    expect(learned(run)).toStrictEqual(["alice"]);
+  });
+
+  it("tells of each partner when the Session ends and they are no longer known to be here", () => {
+    const run = played(
+      settled("MONITOR"),
+      lines(
+        ">> MONITOR + iirc",
+        "<< :alice!u@h PRIVMSG other :hi",
+        ">> MONITOR + alice",
+        "<< :irc.test 730 other :alice!u@h",
+        "== closed Reset"
+      )
+    );
+
+    expect(learned(run)).toStrictEqual(["alice", "alice"]);
+  });
+
+  it("tells of nothing for a nick that is not a partner's, or with no MONITOR", () => {
+    const monitored = played(
+      settled("MONITOR"),
+      lines(">> MONITOR + iirc", "<< :irc.test 730 other :stranger!u@h")
+    );
+
+    const without = played(
+      settled("NETWORK=iirc-test"),
+      lines("<< :alice!u@h PRIVMSG other :hi", "<< :irc.test 730 other :alice!u@h")
+    );
+
+    expect([learned(monitored), learned(without)]).toStrictEqual([[], []]);
+  });
+});
+
 describe("extended-monitor", () => {
   const solo = configured();
   const caps = ["away-notify", "account-notify", "extended-monitor"];

@@ -567,14 +567,15 @@ const refused = (draft: Draft, news: Extract<News, { readonly _tag: "Refused" }>
 };
 
 /**
- * What the Client learned of a Channel shows in no item, only in its head, which a
- * Frontend reads again. A Channel with no Timeline yet has nothing to read again, so it
- * opens none.
+ * What the Client learned of a Channel, or of whether a Direct Message partner is there,
+ * shows in no item, only in what a Frontend reads again. A Timeline not yet opened has
+ * nothing to read again, so it opens none.
  * @param draft - The step.
- * @param key - The Channel's key.
+ * @param kind - Whether it is a Channel or a Direct Message partner.
+ * @param key - Its key.
  */
-const learned = (draft: Draft, key: string) => {
-  const id = draft.maps.channels.get(key);
+const learned = (draft: Draft, kind: "Channel" | "Direct", key: string) => {
+  const id = (kind === "Channel" ? draft.maps.channels : draft.maps.directs).get(key);
 
   if (id !== undefined && draft.maps.keyed.has(id)) {
     draft.changes.push({
@@ -586,6 +587,57 @@ const learned = (draft: Draft, key: string) => {
   }
 };
 
+/** The News that changes no item: a Read Marker, a Timeline closed, or what a Frontend reads again. */
+type Aside = Extract<
+  News,
+  { readonly _tag: "ReadMarker" | "TimelineClosed" | "ChannelLearned" | "PartnerLearned" }
+>;
+
+const isAside = (news: News): news is Aside =>
+  news._tag === "ReadMarker" ||
+  news._tag === "TimelineClosed" ||
+  news._tag === "ChannelLearned" ||
+  news._tag === "PartnerLearned";
+
+/**
+ * Folds the News that changes no item: a Read Marker, a Timeline closed, or what a Frontend
+ * is told to read again.
+ * @param draft - The step.
+ * @param news - The News.
+ */
+const foldAside = (draft: Draft, news: Aside) => {
+  switch (news._tag) {
+    case "ReadMarker": {
+      mark(draft, news.where, news.read);
+
+      break;
+    }
+
+    case "TimelineClosed": {
+      close(draft, news.where);
+
+      break;
+    }
+
+    case "ChannelLearned": {
+      learned(draft, "Channel", news.channel.key);
+
+      break;
+    }
+
+    case "PartnerLearned": {
+      learned(draft, "Direct", news.partner.key);
+
+      break;
+    }
+
+    default: {
+      news satisfies never;
+      break;
+    }
+  }
+};
+
 /**
  * Folds one News.
  * @param draft - The step.
@@ -593,6 +645,12 @@ const learned = (draft: Draft, key: string) => {
  * @param n - Its index in the step.
  */
 const foldNews = (draft: Draft, news: News, n: number) => {
+  if (isAside(news)) {
+    foldAside(draft, news);
+
+    return;
+  }
+
   switch (news._tag) {
     case "Message":
     case "Activity": {
@@ -678,24 +736,6 @@ const foldNews = (draft: Draft, news: News, n: number) => {
 
     case "Refolded": {
       refold(draft, news.casemapping);
-
-      break;
-    }
-
-    case "ReadMarker": {
-      mark(draft, news.where, news.read);
-
-      break;
-    }
-
-    case "TimelineClosed": {
-      close(draft, news.where);
-
-      break;
-    }
-
-    case "ChannelLearned": {
-      learned(draft, news.channel.key);
 
       break;
     }

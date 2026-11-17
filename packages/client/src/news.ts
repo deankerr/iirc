@@ -543,6 +543,13 @@ export type News =
    */
   | { readonly _tag: "ChannelLearned"; readonly channel: Named }
   /**
+   * Whether a Direct Message partner is on the Network, as `Knowledge.partners` says, changed
+   * in a way no Activity reports: the first status `MONITOR` gave, their joining or leaving
+   * a Channel Self shares, or the Session ending. A projection tells a Frontend to read
+   * again. `partner` is keyed as a Direct Message's `where` is.
+   */
+  | { readonly _tag: "PartnerLearned"; readonly partner: Named }
+  /**
    * A Lookup the Owner asked for, under its intent, is over, and this is all it found.
    * Exactly one comes for each `Look`.
    */

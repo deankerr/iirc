@@ -108,6 +108,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it: whether a Timeline is still closed is the projection's to derive. |
 | `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
+| `PartnerLearned` | Whether a Direct Message partner is on the Network, as `Knowledge.partners` says, changed with no Activity saying so: the first status `MONITOR` gave, their joining or leaving a Channel Self shares, or the Session ending. It says which partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
 | `Ignored` | An input that changed nothing, and why. |

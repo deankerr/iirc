@@ -201,7 +201,7 @@ export const knownBeforeOf = (state: State): KnownBefore => ({
  * @param fold - Folds a nick by the casemapping in force.
  * @returns The partners, as `where` keys them.
  */
-const partnersOf = (
+export const partnersOf = (
   state: State,
   fold: (name: string) => string
 ): ReadonlyMap<string, PartnerKnowledge> => {
