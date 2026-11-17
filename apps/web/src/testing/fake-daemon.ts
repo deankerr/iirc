@@ -520,6 +520,7 @@ export const fakeDaemon = () => {
   const searchesRead: string[] = [];
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
+  const listsHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
   const removals: { readonly network: string; readonly keep: boolean }[] = [];
   const reads: (typeof ReadBody.Type)[] = [];
@@ -620,6 +621,8 @@ export const fakeDaemon = () => {
     holdCloses: false,
     /** Whether each read of `known` waits until released. */
     holdKnown: false,
+    /** Whether each read of a Network's Timelines waits until released. */
+    holdLists: false,
     /** Whether each `at/{sequence}` read waits until released. */
     holdLocates: false,
     /** Whether each `GET` of a Lookup by its intent waits until released. */
@@ -667,6 +670,8 @@ export const fakeDaemon = () => {
     knownDown: false,
     /** Says whose request got no answer, journaled only after the next `said`. */
     late,
+    /** Releases each read of a Network's Timelines held, in the order they came. */
+    listsHeld,
     /** Each Network's life, the step that began it: 1 unless it was added again. */
     lives: new Map<string, number>(),
     /** How many of the next `at/{sequence}` reads get no answer. */
@@ -2217,6 +2222,19 @@ export const fakeDaemon = () => {
       const { promise, resolve } = Promise.withResolvers<undefined>();
 
       daemon.networksHeld.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+
+      return await answer(url, init);
+    }
+
+    // A Daemon that holds each read of a Network's Timelines until a test releases it, and
+    // then answers with the Timelines it holds by then.
+    if (daemon.holdLists && /^\/api\/networks\/[^/]+\/timelines$/u.test(url.pathname)) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      daemon.listsHeld.push(() => {
         resolve(undefined);
       });
       await promise;

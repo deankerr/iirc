@@ -56,7 +56,7 @@ import { signOut } from "../sign-in/atoms.ts";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
-import { open, sidebarNetworks, timelinesState } from "./atoms.ts";
+import { listedNetworks, open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
 
@@ -76,6 +76,9 @@ const elsewhere = Atom.make((get) => elsewhereOf(get(timelinesState)));
 // A Network with no Timeline of its own yet has a row with an id no Timeline's can have,
 // since a Timeline's is hex and `-`.
 const networkKey = (network: string) => `network:${network}`;
+
+// The wait under a Network whose Timelines are not known yet, which no Timeline's id can be.
+const readingKey = (network: string) => `reading:${network}`;
 
 /**
  * How a Network's connection stands: a symbol whose shape differs by standing as well as
@@ -618,7 +621,12 @@ const NetworkTrees = ({
         aria-label={label}
         className={styles.tree}
         disabledBehavior="selection"
-        disabledKeys={trees.filter((one) => one.tree.own === undefined).map(rowKey)}
+        disabledKeys={[
+          ...trees.filter((one) => one.tree.own === undefined).map(rowKey),
+          ...trees
+            .filter((one) => !one.network.listed)
+            .map((one) => readingKey(one.network.network)),
+        ]}
         expandedKeys={trees.filter((one) => !hidden.includes(one.network.network)).map(rowKey)}
         onExpandedChange={onExpandedChange}
         onSelectionChange={onSelectionChange}
@@ -658,6 +666,19 @@ const NetworkTrees = ({
                   />
                 )}
               </TreeItemContent>
+              {/* Until its Timelines are read, having none says nothing, so a wait is drawn. */}
+              {network.listed ? null : (
+                <TreeItem
+                  className={styles.item}
+                  id={readingKey(network.network)}
+                  textValue="Reading…"
+                >
+                  <TreeItemContent>
+                    <span aria-hidden className={styles.gutter} />
+                    <span className={styles.reading}>Reading…</span>
+                  </TreeItemContent>
+                </TreeItem>
+              )}
               {tree.children.map((timeline) => (
                 <TimelineItem
                   key={timeline.id}
@@ -694,6 +715,7 @@ const NetworkTrees = ({
  */
 export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
   const networks = useAtomValue(sidebarNetworks);
+  const listed = useAtomValue(listedNetworks);
   const chosen = useAtomValue(selected);
   const live = networks.filter((network) => !network.removed);
   const removed = networks.filter((network) => network.removed);
@@ -702,10 +724,11 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
     <nav aria-label="Networks" className={styles.sidebar}>
       <div className={styles.scroll}>
         <h2 className={styles.heading}>Networks</h2>
-        {live.length === 0 ? (
-          <p className={styles.muted}>No Networks are configured yet.</p>
-        ) : (
+        {live.length > 0 ? (
           <NetworkTrees label="Networks and their Timelines" networks={live} />
+        ) : (
+          // Until the list is read, having none says nothing, so a wait is drawn.
+          <p className={styles.muted}>{listed ? "No Networks are configured yet." : "Reading…"}</p>
         )}
         {removed.length === 0 ? null : (
           <>

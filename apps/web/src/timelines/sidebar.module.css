@@ -129,6 +129,11 @@
   color: var(--color-muted);
 }
 
+/* The wait under a Network whose Timelines are not read yet. */
+.reading {
+  color: var(--color-muted);
+}
+
 /* The options, signing out, and hiding the sidebar, at its foot. */
 .footer {
   display: flex;
