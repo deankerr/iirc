@@ -17,6 +17,7 @@ import type {
 } from "@iirc/client";
 import type { Casemapping, Fact } from "@iirc/client/known";
 import { casefold } from "@iirc/protocol/casemapping";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import type { Change } from "./change.ts";
 import type { Content, Level } from "./content.ts";
@@ -416,6 +417,7 @@ const add = (
   draft.changes.push({
     _tag: "Added",
     content,
+    ignored: [...(routed?.ignored ?? [])],
     intent: routed?._tag === "Message" ? routed.ours?.intent : undefined,
     level,
     messageId: routed === undefined ? undefined : idOf(routed.id),
@@ -638,12 +640,28 @@ const foldAside = (draft: Draft, news: Aside) => {
   }
 };
 
+/**
+ * What masks the Owner no longer ignores hid stays where it was placed, so the store shows
+ * it again there. No mask dropped changes nothing.
+ * @param draft - The step.
+ * @param masks - The masks dropped, in canonical form.
+ */
+const unignore = (draft: Draft, masks: readonly IgnoreMask[]) => {
+  if (masks.length > 0) {
+    draft.changes.push({
+      _tag: "Unignored",
+      masks: [...masks],
+      network: draft.network,
+      sequence: draft.sequence,
+    });
+  }
+};
+
 // News that places nothing. A Lookup's result is the Owner's answer, read from the API.
-// `Unignored` does not yet: showing again what only those masks hid is #46's next slice.
 const placesNothing = (
   news: News
-): news is Extract<News, { readonly _tag: "Ignored" | "LookedUp" | "Unignored" }> =>
-  news._tag === "Ignored" || news._tag === "LookedUp" || news._tag === "Unignored";
+): news is Extract<News, { readonly _tag: "Ignored" | "LookedUp" }> =>
+  news._tag === "Ignored" || news._tag === "LookedUp";
 
 /**
  * Folds one News.
@@ -747,6 +765,12 @@ const foldNews = (draft: Draft, news: News, n: number) => {
 
     case "Refolded": {
       refold(draft, news.casemapping);
+
+      break;
+    }
+
+    case "Unignored": {
+      unignore(draft, news.masks);
 
       break;
     }

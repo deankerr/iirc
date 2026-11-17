@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 import { CloseReason, Instant, IntentId, IrcdAddress, MessageId, SayKind } from "@iirc/client";
-import { TimelineId, cursorOf, levels, parseCursor } from "@iirc/timelines";
+import { IgnoreMask, TimelineId, cursorOf, levels, parseCursor } from "@iirc/timelines";
 import type { Content, Directory, Position } from "@iirc/timelines";
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 
@@ -340,6 +340,14 @@ export const AnsweredRow = Schema.toCodecJson(
 
 /** An item's row and its content, as folding the search again reads it. */
 export const ContentRow = Schema.toCodecJson(Schema.Struct({ content: ContentText, id: Int }));
+
+/** The ignore masks that hide an item, as the JSON text of their array. */
+export const IgnoredText = Schema.fromJsonString(Schema.Array(IgnoreMask));
+
+/** A hidden item's row, its Timeline, and the masks that hide it, as `Unignored` reads it. */
+export const HiddenRow = Schema.toCodecJson(
+  Schema.Struct({ id: Int, ignored: IgnoredText, timeline: TimelineId })
+);
 
 /** One of ours, as a delivery update reads it. */
 export const OursRow = Schema.toCodecJson(

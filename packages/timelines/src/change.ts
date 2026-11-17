@@ -6,6 +6,7 @@
  */
 import type { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import type { Content, Delivery, Level } from "./content.ts";
 import type { Position } from "./position.ts";
@@ -19,7 +20,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   The store holds `timeline` as given.
  * - `Added`: an item, at `position` in `timeline`. A Timeline keeps one item per message
  *   id: when `messageId` is already there, or an item already stands at `position`, the
- *   first is kept and this one dropped. An item with no `messageId` is always kept.
+ *   first is kept and this one dropped. An item with no `messageId` is always kept. One
+ *   with `ignored` is kept, still holding its id and position, and hidden from every read.
  * - `Confirmed`: the Ircd echoed the Message for `intent`. Its items in `network` are
  *   confirmed in place, with the Ircd's time, id, and text, and never move.
  * - `Unsent`: the Message for `intent` never left. Its items in `network` are marked so,
@@ -37,6 +39,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  * - `HeadChanged`: what the Client knows of the Channel or Direct Message partner `timeline`
  *   is of changed in a way no item says, such as a Channel's modes becoming known or
  *   whether the partner is on the Network, so a Frontend reads it again.
+ * - `Unignored`: the Owner no longer ignores `masks` on `network`. Each is taken off every
+ *   item of the Network, and one left with none is shown, where it always stood.
  * - `Removed`: the Owner removed `network`. With `keep`, its Timelines stay readable and
  *   are marked as a removed Network's. Without it, they are dropped, with their items and
  *   Gaps, and only their ids are kept, to say they are gone.
@@ -56,6 +60,8 @@ export type Change =
       readonly intent: IntentId | undefined;
       /** How much it calls for the Owner in this Timeline, or `undefined` for one Self said. */
       readonly level: Level | undefined;
+      /** The ignore masks its sender matched, in canonical form, each once: empty when none did. */
+      readonly ignored: readonly IgnoreMask[];
     }
   | {
       readonly _tag: "Confirmed";
@@ -113,6 +119,13 @@ export type Change =
       readonly sequence: number;
       readonly network: string;
       readonly timeline: TimelineId;
+    }
+  | {
+      readonly _tag: "Unignored";
+      readonly sequence: number;
+      readonly network: string;
+      /** The masks dropped, in canonical form. Never empty. */
+      readonly masks: readonly IgnoreMask[];
     }
   | {
       readonly _tag: "Removed";

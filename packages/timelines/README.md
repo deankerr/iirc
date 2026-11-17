@@ -8,13 +8,14 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, life, sequence, at, news }  // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 14
+projectionVersion: number                         // 15
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
 cursorsFrom(at): string                           // at or below every cursor at or after `at`, above the rest
 parseCursor(text): Position | undefined
 TimelineId                                         // a branded Schema
+IgnoreMask                                         // a branded Schema: what `Added` and `Unignored` carry
 Level = "Highlight" | "Direct" | "Message" | "Activity"
 levels: readonly Level[]                           // from the one that calls for the Owner most
 unreadCap: number                                  // 999
@@ -68,11 +69,12 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `TimelineClosed` | `Closed` for the Timeline its `where` names, when one has that key. Closing opens nothing. Whether it stays closed is the store's to derive, from what is added to it after. |
 | `ChannelLearned` | `HeadChanged` for the Channel's Timeline, when one exists, so a Frontend reads the Channel's head again. It opens no Timeline and adds no item. |
 | `PartnerLearned` | `HeadChanged` for the partner's Direct Message Timeline, when one exists, so a Frontend reads whether they are there again. It opens no Timeline and adds no item. |
+| `Unignored` | `Unignored` for the Network, with the masks the Owner no longer ignores. It places nothing. |
 | `NetworkRemoved` | `Removed` for the Network, with `keep`. The Network leaves the directory, so an id given to a Network again opens its Timelines anew, and a removal of a Network the directory no longer holds, to drop what it kept, opens nothing. |
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |
 | `Ignored` | Nothing. |
 
-An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, the id it `answers` by `+reply`, the Channel a Direct Message names as its `context` by `+channel-context`, `live`, and its `at` and `id` facts, for an Activity the Activity itself, and for an `ActionRefused` what the action tried, never its text or a mode's parameter, its intent, and the reason, `Rejected` with the `reply` or `Unsent`. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, and its **level** in that Timeline, below. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
+An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, the id it `answers` by `+reply`, the Channel a Direct Message names as its `context` by `+channel-context`, `live`, and its `at` and `id` facts, for an Activity the Activity itself, and for an `ActionRefused` what the action tried, never its text or a mode's parameter, its intent, and the reason, `Rejected` with the `reply` or `Unsent`. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, its **level** in that Timeline, below, and `ignored`, the canonical ignore masks the News's sender matched, empty when none did. An ignored item is placed, opening Timelines and taking its position, as any other is, and the store hides it until an `Unignored` takes its last mask off. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
 
 A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed`, while the Network is not already in one, and ends at the next `SessionBegan`. Each is reported as `Gap { from, to }`, once with `to` left out when it begins, and again with `to` when it ends. A Session that a restart ended began its Gap at the last step folded for the Network before it, since the Daemon may have been gone since then and the fold cannot tell.
 

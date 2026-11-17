@@ -10,6 +10,7 @@ import type { Fact } from "@iirc/client/known";
 import { LawBroken } from "@iirc/runtime/testing";
 import type { Law } from "@iirc/runtime/testing";
 import {
+  IgnoreMask,
   SearchText,
   comparePositions,
   cursorOf,
@@ -86,6 +87,9 @@ const channel = timelineIdOf(1, 0, 1);
 const other = timelineIdOf(1, 0, 2);
 const third = timelineIdOf(1, 0, 3);
 const oftcNetwork = timelineIdOf(1, 0, 4);
+const direct = timelineIdOf(1, 0, 5);
+const spam = IgnoreMask.make("spam!*@*");
+const bots = IgnoreMask.make("*!*@bots.example");
 
 const described = (
   sequence: number,
@@ -172,6 +176,7 @@ const added = (
 ): Extract<Change, { readonly _tag: "Added" }> => ({
   _tag: "Added",
   content,
+  ignored: [],
   intent: content._tag === "Message" ? content.ours?.intent : undefined,
   level,
   messageId: messageId === undefined ? undefined : MessageId.make(messageId),
@@ -861,6 +866,56 @@ const marking: Interruption = {
   ],
 };
 
+// What an ignored User says is kept, hidden by the masks they matched, until those are dropped.
+const hiding = (
+  change: Extract<Change, { readonly _tag: "Added" }>,
+  ...masks: readonly IgnoreMask[]
+): Change => ({ ...change, ignored: masks });
+
+const unignored = (sequence: number, masks: readonly IgnoreMask[], on = libera): Change => ({
+  _tag: "Unignored",
+  masks,
+  network: on,
+  sequence,
+});
+
+// A step that drops a mask, showing again each item it alone hid, and leaving hidden those
+// another mask still hides, so a recount or a restore half done is seen. Every step before
+// it since the last applied was a seed, since a step interrupted is seeded over again.
+const unignoring: Interruption = {
+  edit: (before, sequence) => {
+    const last = Math.max(1, ...before.items.map(({ changed }) => changed));
+
+    return {
+      ...before,
+      items: [
+        ...before.items,
+        ...Array.from({ length: sequence - 1 - last }, (_, index): Item => ({
+          answered: undefined,
+          changed: sequence,
+          content: said("hidden"),
+          level: "Message",
+          network: libera,
+          position: position((last + 1 + index) * 10, last + 1 + index),
+          timeline: channel,
+        })),
+      ],
+      timelines: before.timelines.map((each) =>
+        each.id === channel ? { ...each, changed: sequence } : each
+      ),
+    };
+  },
+  seed: (sequence) => [
+    hiding(added(sequence, channel, position(sequence * 10, sequence), said("hidden")), spam),
+    hiding(
+      added(sequence, channel, position(sequence * 10 + 1, sequence, 1), said("hidden")),
+      spam,
+      bots
+    ),
+  ],
+  step: (sequence) => [unignored(sequence, [spam])],
+};
+
 // Park and Miller's generator, exact in a double, so a law that walks random steps walks
 // the same ones on every adapter and every run.
 const modulus = 2_147_483_647;
@@ -877,8 +932,9 @@ const random = (seed: number) => {
 
 /**
  * Random steps over a Network's Timelines: items of every level, at any time, some sharing
- * a message id or a position with one already there, Read Markers moved either way, Messages
- * of ours confirmed or marked Unsent, and merges, each as the fold would send them: nothing
+ * a message id or a position with one already there, some hidden by ignore masks that are
+ * later dropped, Read Markers moved either way, Messages of ours confirmed or marked Unsent,
+ * and merges, each as the fold would send them: nothing
  * is told of a Timeline once it has been merged.
  * @param seed - Which steps.
  * @returns Each step's changes, from sequence 2.
@@ -895,12 +951,14 @@ const randomSteps = (seed: number): readonly (readonly Change[])[] => {
 
     for (let n = 0; n < count; n += 1) {
       const timeline = open[pick(open.length)] ?? channel;
-      const roll = pick(10);
+      const roll = pick(11);
 
       if (roll < 6) {
         const level = [...levels, undefined][pick(levels.length + 1)];
         const ours = level === undefined && pick(2) === 0;
         const messageId = pick(3) === 0 ? `m${pick(4)}` : undefined;
+
+        const ignored = pick(4) === 0 ? [[spam], [bots], [spam, bots]][pick(3)] : undefined;
 
         // The level is set as chosen: with none and not ours, a Message Self said elsewhere.
         changes.push({
@@ -911,6 +969,7 @@ const randomSteps = (seed: number): readonly (readonly Change[])[] => {
             said(`r${sequence}.${n}`, ours ? "Pending" : undefined),
             messageId
           ),
+          ignored: ours ? [] : (ignored ?? []),
           level,
         });
       } else if (roll < 8) {
@@ -935,6 +994,13 @@ const randomSteps = (seed: number): readonly (readonly Change[])[] => {
                 text: "confirmed",
               }
         );
+      } else if (roll === 10) {
+        changes.push({
+          _tag: "Unignored",
+          masks: [[spam], [bots]][pick(2)] ?? [spam],
+          network: libera,
+          sequence,
+        });
       } else {
         const from = open.findLast((each) => each !== channel && each !== network);
 
@@ -994,6 +1060,200 @@ const pagesOf = (store: TimelineStoreService, search: Searching, limit: number) 
       after = { position: last.position, timeline: last.timeline };
     }
   });
+
+// A step of a Channel's Messages, some from ignored Users, a reply to one, and a Direct
+// Message Timeline that holds only what an ignored User said.
+const ignoredStep = (sequence: number): readonly Change[] => [
+  ...opened(sequence),
+  described(sequence, direct, "Direct", "spam", "spam"),
+  added(sequence, channel, position(10, sequence, 0), said("hello"), "m1"),
+  hiding(added(sequence, channel, position(11, sequence, 1), said("spam one"), "m2"), spam),
+  hiding(
+    added(
+      sequence,
+      channel,
+      position(12, sequence, 2),
+      said("spam two"),
+      undefined,
+      libera,
+      "Highlight"
+    ),
+    spam,
+    bots
+  ),
+  added(sequence, channel, position(13, sequence, 3), reply("to spam", "m2")),
+  hiding(
+    added(
+      sequence,
+      direct,
+      position(14, sequence, 4),
+      said("spam dm"),
+      undefined,
+      libera,
+      "Direct"
+    ),
+    spam
+  ),
+];
+
+const ignoreLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, ignoredStep(2));
+
+        const listed = yield* store.timelines(libera);
+        const summary = listed.find(({ id }) => id === channel);
+
+        yield* same("the window", yield* texts(store, channel, all), "| hello to spam |");
+        yield* same(
+          "the Timelines, without the Direct Message's",
+          listed.map(({ id }) => id),
+          [network, channel, other]
+        );
+        yield* same("its counts and latest", summary && [summary.unread, summary.latest], [
+          { ...noneUnread, messages: 2 },
+          position(13, 2, 3),
+        ]);
+        yield* same("the step's items", (yield* store.locate(libera, 2)).map(textOf), [
+          "hello",
+          "to spam",
+        ]);
+        yield* same("a search", yield* searchFor(store, { text: "spam" }), ["to spam"]);
+        yield* same(
+          "what the reply answers",
+          answeredOf(
+            yield* store
+              .window(channel, all, 10)
+              .pipe(
+                Effect.map((found) =>
+                  Option.match(found, { onNone: () => [], onSome: ({ items }) => items })
+                )
+              )
+          ),
+          [undefined]
+        );
+
+        const changed = yield* store.changedAfter(undefined);
+
+        yield* same(
+          "what changed",
+          [changed.items.map(textOf), changed.timelines.map(({ id }) => id)],
+          [
+            ["hello", "to spam"],
+            [network, channel, other],
+          ]
+        );
+
+        // A hidden item still holds its id and its position.
+        yield* apply(store, 3, [
+          added(3, channel, position(20, 3), said("again"), "m2"),
+          added(3, channel, position(11, 2, 1), said("there")),
+          hiding(added(3, channel, position(30, 3, 2), said("spam later")), spam),
+        ]);
+
+        const after = yield* store.changedAfter(2);
+
+        yield* same(
+          "nothing a reader sees changed",
+          [after.items, after.timelines, after.through],
+          [[], [], 3]
+        );
+        yield* same("the window again", yield* texts(store, channel, all), "| hello to spam |");
+      }),
+    name: "hides an ignored item from every read, counts it nowhere, and lists no Direct Message of only those",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, ignoredStep(2));
+        yield* apply(store, 3, [marker(3, channel, at(11))]);
+        yield* apply(store, 4, [unignored(4, [spam]), unignored(4, [spam], oftc)]);
+
+        const listed = yield* store.timelines(libera);
+        const summary = listed.find(({ id }) => id === channel);
+        const dm = listed.find(({ id }) => id === direct);
+
+        yield* same(
+          "the window, shown where it stood, but what another mask still hides",
+          yield* texts(store, channel, all),
+          "| hello spam one to spam |"
+        );
+        yield* same(
+          "counted from the Read Marker again",
+          summary && [summary.unread, summary.changed],
+          [{ ...noneUnread, messages: 1 }, 4]
+        );
+        yield* same("the Direct Message, listed", dm && [dm.latest, dm.unread, dm.changed], [
+          position(14, 2, 4),
+          { ...noneUnread, direct: 1 },
+          4,
+        ]);
+
+        const changed = yield* store.changedAfter(3);
+
+        yield* same(
+          "what changed: each shown again where it stood, made when it was",
+          changed.items.map((item) => [textOf(item), item.changed, item.position.sequence]),
+          [
+            ["spam one", 4, 2],
+            ["spam dm", 4, 2],
+          ]
+        );
+        yield* same(
+          "the Timelines it changed",
+          changed.timelines.map(({ id }) => id),
+          [channel, direct]
+        );
+        yield* same("a search", yield* searchFor(store, { text: "spam" }), [
+          "spam dm",
+          "to spam",
+          "spam one",
+        ]);
+        yield* same(
+          "what the reply answers",
+          (yield* store.locate(libera, 2)).flatMap((item) =>
+            item.answered === undefined ? [] : [item.answered.text]
+          ),
+          ["spam one"]
+        );
+
+        yield* apply(store, 5, [unignored(5, [bots])]);
+        yield* same(
+          "the last mask dropped",
+          yield* texts(store, channel, all),
+          "| hello spam one spam two to spam |"
+        );
+        yield* same(
+          "a Highlight, counted",
+          (yield* store.timelines(libera)).find(({ id }) => id === channel)?.unread,
+          { ...noneUnread, highlights: 1, messages: 1 }
+        );
+      }),
+    name: "shows again where it stood what dropping its masks unhides, counted, and changed then",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const closed = () =>
+          Effect.map(
+            store.timelines(libera),
+            (each) => each.find(({ id }) => id === channel)?.closed
+          );
+
+        yield* apply(store, 2, [...opened(2), added(2, channel, position(1, 2), said("before"))]);
+        yield* apply(store, 3, [closing(3, channel)]);
+        yield* apply(store, 4, [hiding(added(4, channel, position(2, 4), said("hidden")), spam)]);
+        yield* same("hidden, it opens nothing", yield* closed(), true);
+        yield* apply(store, 5, [unignored(5, [spam])]);
+        yield* same("shown again, it opens nothing", yield* closed(), true);
+        yield* same("but is shown", yield* texts(store, channel, all), "| before hidden |");
+        yield* apply(store, 6, [added(6, channel, position(3, 6), said("after"))]);
+        yield* same("what arrives later opens it", yield* closed(), false);
+      }),
+    name: "keeps a closed Timeline closed, whatever is hidden in it or shown again",
+  },
+];
 
 const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
   {
@@ -3568,6 +3828,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
     name: "drops a removed Network's Timelines, items, Gaps, and tombstones, and says which",
   },
   ...searchLaws,
+  ...ignoreLaws,
   {
     check: interrupting(additions),
     name: "applies a step whole, or not at all",
@@ -3591,6 +3852,10 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: interrupting(keeping),
     name: "applies a step that removes a Network and keeps its Timelines whole, or not at all",
+  },
+  {
+    check: interrupting(unignoring),
+    name: "applies a step that shows again what dropped masks hid whole, or not at all",
   },
   {
     check: interrupting(dropping),

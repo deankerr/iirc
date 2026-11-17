@@ -6,6 +6,9 @@
  */
 export { answering, delivered } from "./change.ts";
 
+// The masks an `Added` item and `Unignored` carry, for whoever keeps or makes them.
+export { IgnoreMask } from "@iirc/protocol/mask";
+
 export type { Change, DeliveryChange, Leveled } from "./change.ts";
 
 export { levels, unreadCap } from "./content.ts";
