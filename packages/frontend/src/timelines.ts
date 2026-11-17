@@ -4090,8 +4090,8 @@ export interface SidebarNetwork {
    */
   readonly closed: readonly Timeline[];
   /**
-   * Whether its Timelines are known: read, or held from an earlier read while they are read
-   * again. Until then, having none says nothing.
+   * Whether its Timelines are known: read, or some held from an earlier read while they are
+   * read again. While none are held and they are read, having none says nothing.
    */
   readonly listed: boolean;
   /** It was removed with its Timelines kept, so they are only read. */
