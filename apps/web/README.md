@@ -39,7 +39,8 @@ The core decides and this package draws and does the I/O.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
 - **Looks a User up,** with `/whois` and `/whowas`, and a Channel's bans, exceptions, and invitation masks, with `/bans`, `/exceptions`, and `/invexes`, as a card under the Pane's status bar. While Self is an operator there, each mask has a button that removes it.
 - **Sends a CTCP request to a User,** with `/ctcp <nick> <command> [text]`, or `/ping <nick>`, which shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
-- **Notifies, when the Owner asks,** with `/notify on`: a Highlight or a Direct Message in a Timeline they are not looking at.
+- **Offers to join a Channel Self was invited to,** with a button on the invitation in the Network's Timeline that does what `/join` does. Nothing joins until it is pressed.
+- **Notifies, when the Owner asks,** with `/notify on`: a Highlight, a Direct Message, or an invitation in a Timeline they are not looking at.
 - **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the sidebar's button and the Panes' switcher, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
 
 ## How it is built

@@ -23,6 +23,7 @@ import {
 } from "./members.ts";
 import type { Listed, ModeRules } from "./modes.ts";
 import { applyModes, changePrefix } from "./modes.ts";
+import { isNetworkOnly } from "./news.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
@@ -475,11 +476,13 @@ export const foldActivity = (
 ): void => {
   const fold = folder(run.state);
 
+  // An invitation and an answer to `OPER` change no Channel.
+  if (isNetworkOnly(activity)) {
+    return;
+  }
+
   switch (activity._tag) {
-    // What the Network said of something sent, a CTCP, and an answer to `OPER` change no
-    // Channel.
-    case "OperGranted":
-    case "OperRefused":
+    // What the Network said of something sent, and a CTCP, change no Channel.
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":

@@ -9,13 +9,15 @@
  *
  * @packageDocumentation
  */
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { lineOf } from "@iirc/frontend/render";
 import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
+import { perform } from "../composer/atoms.ts";
 import { dayShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
+import { Button } from "../ui/button.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { dayIso, dayWritten } from "../ui/day.ts";
@@ -94,6 +96,33 @@ export const Nick = ({ colour, nick }: { readonly colour: number; readonly nick:
 const failed: ReadonlySet<Delivery> = new Set(["Unsent", "Rejected"]);
 
 /**
+ * An offer to join a Channel, which does what `/join` does when pressed, and nothing sooner.
+ * @param props - The Channel, and the Network whose Configuration joining changes.
+ * @returns The button.
+ */
+const JoinOffer = ({
+  channel,
+  network,
+}: {
+  readonly channel: string;
+  readonly network: Extract<Part, { readonly _tag: "Join" }>["network"];
+}) => {
+  const run = useAtomSet(perform);
+
+  return (
+    <Button
+      aria-label={`Join ${channel}`}
+      onPress={() => {
+        run([{ _tag: "Configure", edit: { _tag: "Join", channels: [channel] }, network }]);
+      }}
+      size="small"
+    >
+      join
+    </Button>
+  );
+};
+
+/**
  * A piece of a description.
  * @param props - The piece.
  * @returns It, as text.
@@ -126,6 +155,10 @@ const Piece = ({ part }: { readonly part: Part }) => {
           <bdi>{part.text}</bdi>
         </code>
       );
+    }
+
+    case "Join": {
+      return <JoinOffer channel={part.channel} network={part.network} />;
     }
 
     default: {

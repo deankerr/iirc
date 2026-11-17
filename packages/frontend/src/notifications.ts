@@ -1,7 +1,7 @@
 /**
  * Which items the changes stream adds call for a notification, and what it says. Only
- * something said live to the Owner, a Highlight or a Direct Message from someone else,
- * that the Owner is not already looking at and has not read. The runtime shows them, when
+ * something said live to the Owner, a Highlight, a Direct Message from someone else, or an
+ * invitation, that the Owner is not already looking at and has not read. The runtime shows them, when
  * the Owner turned notifications on for the device.
  *
  * @packageDocumentation
@@ -65,9 +65,34 @@ const bodyOf = (content: Extract<TimelineItem["content"], { readonly _tag: "Mess
 };
 
 /**
- * The notification an item calls for, if any: one made by the step the change is of, a
- * Message said live, not ours, a Highlight or a Direct Message, in a Timeline the Owner is
- * not looking at, after its Read Marker.
+ * What an item says, as a notification's body, when it is something said live to the Owner:
+ * a Message not ours, a Highlight or a Direct Message, or an invitation, which is a
+ * Highlight.
+ * @param item - The item.
+ * @returns The body, or none when the item calls for no notification.
+ */
+const saidToOwner = (item: TimelineItem): string | undefined => {
+  const { content } = item;
+
+  if (content._tag === "Message") {
+    return content.live &&
+      content.ours === null &&
+      (item.level === "Highlight" || item.level === "Direct")
+      ? bodyOf(content)
+      : undefined;
+  }
+
+  return content._tag === "Activity" &&
+    content.live &&
+    content.activity._tag === "Invited" &&
+    item.level === "Highlight"
+    ? `${plainText(content.activity.by, 64)} invited you to ${plainText(content.activity.channel, 64)}`
+    : undefined;
+};
+
+/**
+ * The notification an item calls for, if any: one made by the step the change is of, said
+ * live to the Owner, in a Timeline the Owner is not looking at, after its Read Marker.
  * @param after - The state with the change folded.
  * @param change - The change.
  * @param page - The page.
@@ -80,15 +105,12 @@ const notifyOf = (
   page: Page,
   item: TimelineItem
 ): Notify | undefined => {
-  const { content } = item;
+  const body = saidToOwner(item);
   const timeline = timelineOf(after, item);
 
   if (
     item.sequence !== change.sequence ||
-    content._tag !== "Message" ||
-    !content.live ||
-    content.ours !== null ||
-    (item.level !== "Highlight" && item.level !== "Direct") ||
+    body === undefined ||
     timeline === undefined ||
     (timeline.read !== null && item.position.at <= timeline.read) ||
     lookingAt(after, page, timeline.id)
@@ -97,7 +119,7 @@ const notifyOf = (
   }
 
   return {
-    body: bodyOf(content),
+    body,
     network: item.network,
     tag: `iirc:${timeline.id}`,
     timeline: timeline.id,

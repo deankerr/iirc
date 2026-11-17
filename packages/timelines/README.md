@@ -86,7 +86,7 @@ Each `Added` item has a **level**, how much it calls for the Owner in its Timeli
 
 | Level | Items |
 | --- | --- |
-| `Highlight` | A Message whose `highlight` is set, wherever it stands. |
+| `Highlight` | A Message whose `highlight` is set, wherever it stands, and an invitation happening now, since it is addressed to Self. |
 | `Direct` | Any other Message in a Direct Message Timeline. |
 | `Message` | Any other Message in a Channel's Timeline. |
 | `Activity` | An Activity, a Session's start or end, a failed Connection, and a Message in the Network's own Timeline. |

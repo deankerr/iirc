@@ -59,7 +59,8 @@ export type CtcpAnswer =
  * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
  * `FAIL` that refused no intent. `OperGranted` and `OperRefused` answer the `OPER` Self
  * sent as its Session began, by the numeric alone: Self, by `nick`, is now an IRC
- * operator, or the Ircd refused with `reply`.
+ * operator, or the Ircd refused with `reply`. An `Invited` is an `INVITE` that names Self: `by`
+ * is who invited, and `channel` where to, as said, which Self has not joined and may.
  */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }
@@ -95,6 +96,7 @@ export type Activity =
       readonly nick: string;
       readonly away: { readonly message: string } | null;
     }
+  | { readonly _tag: "Invited"; readonly channel: string; readonly by: string }
   | { readonly _tag: "OperGranted"; readonly nick: string }
   | { readonly _tag: "OperRefused"; readonly nick: string; readonly reply: OperRefusal }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
@@ -103,17 +105,23 @@ export type Activity =
   | ({ readonly _tag: "CtcpSent" } & Omit<Ctcp, "target">)
   | ({ readonly _tag: "CtcpUnsent" } & Omit<Ctcp, "args">);
 
-/** An answer to the `OPER` Self sent as its Session began. */
-export type OperAnswer = Extract<Activity, { readonly _tag: "OperGranted" | "OperRefused" }>;
+/**
+ * An Activity that is addressed to Self and belongs to the Network's own Timeline alone: an
+ * answer to the `OPER` Self sent as its Session began, or an invitation. It settles
+ * nothing and changes no Channel.
+ */
+export type NetworkOnly = Extract<
+  Activity,
+  { readonly _tag: "OperGranted" | "OperRefused" | "Invited" }
+>;
 
 /**
- * Whether an Activity answers Self's `OPER`, which always belongs to the Network's own
- * Timeline and settles nothing else.
+ * Whether an Activity is {@link NetworkOnly}.
  * @param activity - The Activity.
- * @returns Whether it does.
+ * @returns Whether it is.
  */
-export const isOperAnswer = (activity: Activity): activity is OperAnswer =>
-  activity._tag === "OperGranted" || activity._tag === "OperRefused";
+export const isNetworkOnly = (activity: Activity): activity is NetworkOnly =>
+  activity._tag === "OperGranted" || activity._tag === "OperRefused" || activity._tag === "Invited";
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

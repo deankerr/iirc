@@ -977,6 +977,16 @@ describe("the contract", () => {
     ]).toStrictEqual([request, refused, reply, pong, unsent, sent, false, false, false]);
   });
 
+  it("carries an invitation as who invited and to which Channel, both Untrusted", () => {
+    const invited = { _tag: "Invited", by: "peer", channel: "#elsewhere" } as const;
+
+    expect([
+      roundTrip(invited),
+      Schema.is(Activity)({ _tag: "Invited", by: "peer" }),
+      Schema.is(Activity)({ _tag: "Invited", channel: "#elsewhere" }),
+    ]).toStrictEqual([invited, false, false]);
+  });
+
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {
     const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
     const head = JSON.stringify(document.paths["/api/timelines/{timeline}/channel"]);

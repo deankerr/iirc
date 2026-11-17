@@ -202,6 +202,26 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
     },
   ],
   [
+    // `INVITE <nick> <channel>`. One naming another User is for `invite-notify`, and not Self's
+    // to report.
+    "INVITE",
+    ({ run, params: [nick, name], source, activity }) => {
+      if (nick === undefined || name === undefined || source === undefined) {
+        return unfit;
+      }
+
+      if (!isSelf(run, nick)) {
+        return [];
+      }
+
+      const channel = channelOf(run, name);
+
+      return channel === undefined
+        ? unfit
+        : [activity({ _tag: "Invited", by: source.nick, channel })];
+    },
+  ],
+  [
     "QUIT",
     ({ params: [reason], source, activity }) =>
       source === undefined ? unfit : [activity({ _tag: "Quit", nick: source.nick, reason })],
