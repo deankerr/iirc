@@ -1,24 +1,32 @@
-/* The Uploads beside the options: a heading, then one dense row each. */
+/* The Uploads, in a Pane: its status bar, the switch that shows the deleted too, and then
+   one dense row each, scrolling on their own. The view is measured by its own width, since
+   a Pane split a few times is narrow on any screen, and at any size of text. */
 .view {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  height: 100%;
   min-width: 0;
-  padding: var(--space-2) var(--space-3);
+  min-height: 0;
 }
 
-/* The heading, and the switch that shows the deleted too. */
 .head {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
 }
 
-.heading {
-  color: var(--color-muted);
-  font: inherit;
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-y: auto;
 }
 
 .muted {
@@ -127,4 +135,23 @@
 
 .more {
   align-self: flex-start;
+}
+
+/* Wide enough for a row on one line: the name, what it is, and where it was said, each in
+   a column of its own, then the buttons. A failure keeps the line under them. */
+@container (min-width: 90ch) {
+  .about {
+    display: grid;
+    grid-template-columns: minmax(12ch, 2fr) minmax(16ch, 2fr) minmax(0, 2fr);
+    gap: var(--space-3);
+    align-items: baseline;
+  }
+
+  .failure {
+    grid-column: 1 / -1;
+  }
+
+  .actions {
+    flex-wrap: nowrap;
+  }
 }

@@ -26,8 +26,8 @@ import {
   editing,
   happened,
   onItsWay,
-  optionsShown,
   optionsState,
+  ownerWanted,
   readHeld,
   signedOut,
   told,
@@ -76,7 +76,7 @@ const readOwner = (registry: AtomRegistry.AtomRegistry) =>
   });
 
 /**
- * While the browser is signed in and the options show, follows the options under `store`
+ * While the browser is signed in and the options or the Uploads show, follows the options under `store`
  * and `uploads`, each event the options whole, from the ones in force, so another device's
  * change shows. Whenever the stream ends, or gives nothing for longer than three
  * heartbeats, it is followed again. A refusal signs the page out, and signed out, the
@@ -93,7 +93,7 @@ export const ownerSync = runtime
         return;
       }
 
-      if (!get(optionsShown)) {
+      if (!get(ownerWanted)) {
         return;
       }
 

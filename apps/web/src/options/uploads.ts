@@ -1,6 +1,6 @@
 /**
- * The Uploads the options list beside them, as atoms: followed from the Daemon while the
- * page is signed in and the options show, so another device's Upload shows without a
+ * The Uploads view's, as atoms: followed from the Daemon while the
+ * page is signed in and a Pane shows the Uploads, so another device's Upload shows without a
  * reload, read a page at a time, and forgotten on signing out. The stream also says which
  * Uploads' bytes the Daemon found gone, whole, and a row asks only whether its own is. The
  * first page says how far it was read, and the stream is followed after that, or after the
@@ -24,7 +24,7 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, Waits } from "../timelines/atoms.ts";
-import { optionsShown, optionsState, signedOut, told } from "./atoms.ts";
+import { optionsState, signedOut, told, uploadsShown } from "./atoms.ts";
 import { uploadsHappened, uploadsState } from "./uploads-state.ts";
 
 /**
@@ -49,6 +49,16 @@ export const uploadEditsState = Atom.make(initialUploadEdits).pipe(Atom.keepAliv
 export const publicUrl = Atom.make(
   (get): string | undefined => ownerShown(get(optionsState))?.options["uploads.publicUrl"]
 );
+
+/**
+ * Whether the options say no public URL is set, which is not what they say before they are
+ * read: then it is not known, and nothing is said of it.
+ */
+export const publicUrlUnset = Atom.make((get): boolean => {
+  const shown = ownerShown(get(optionsState));
+
+  return shown !== undefined && shown.options["uploads.publicUrl"] === undefined;
+});
 
 /** The link last copied, which the list says was, while it is still that Upload's link. */
 export const copiedLink = Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive);
@@ -258,7 +268,7 @@ const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefin
   });
 
 /**
- * While the browser is signed in and the options show, reads the first page, unless one
+ * While the browser is signed in and a Pane shows the Uploads, reads the first page, unless one
  * was, then follows the Uploads' Changes after the last folded in, so another device's
  * Upload shows. Whenever the stream ends, or gives nothing for longer than three
  * heartbeats, it is followed again from there, and what is held stays valid, `next` too,
@@ -280,7 +290,7 @@ export const uploadsSync = runtime
         return;
       }
 
-      if (!get(optionsShown)) {
+      if (!get(uploadsShown)) {
         return;
       }
 

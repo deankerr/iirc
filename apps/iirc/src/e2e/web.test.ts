@@ -368,6 +368,17 @@ const standingLabel = async (page: Page) =>
   (await page.getByRole("row").first().getAttribute("aria-label")) ?? "";
 
 /**
+ * Shows the Uploads in the focused Pane, as `/uploads` typed in the composer does.
+ * @param page - The page.
+ */
+const showUploads = async (page: Page) => {
+  const composer = page.locator("textarea");
+
+  await composer.fill("/uploads");
+  await composer.press("Enter");
+};
+
+/**
  * Whether anything React keeps for the page, its state and its props, holds a secret. It
  * runs in the page, from the root fiber React keeps on `#root`, following every own
  * property, a DOM node only through what React keeps on it, and never into `window`.
@@ -4864,7 +4875,7 @@ describe("the web frontend on iirc daemon --web", () => {
           await page.goto(live.base);
           await page.getByLabel("Key").fill(key);
           await page.getByRole("button", { name: "Sign in" }).click();
-          await page.getByRole("button", { exact: true, name: "Options" }).click();
+          await showUploads(page);
 
           const uploads = page.getByRole("region", { name: "Uploads" });
           const rows = uploads.getByRole("listitem");
@@ -4872,6 +4883,11 @@ describe("the web frontend on iirc daemon --web", () => {
           await rows.filter({ hasText: "a.png" }).waitFor();
           await rows.filter({ hasText: "b.png" }).waitFor();
           const liveRows = await rows.count();
+
+          await page.setViewportSize({ height: 800, width: 1280 });
+          await screenshot(page, "uploads-desktop.png");
+          await page.setViewportSize({ height: 844, width: 390 });
+          await screenshot(page, "uploads-phone.png");
 
           // Closed before its Daemon is, so its streams ending is not read as a failure.
           await page.context().close();
@@ -4895,7 +4911,7 @@ describe("the web frontend on iirc daemon --web", () => {
           await later.goto(expiring.base);
           await later.getByLabel("Key").fill(key);
           await later.getByRole("button", { name: "Sign in" }).click();
-          await later.getByRole("button", { exact: true, name: "Options" }).click();
+          await showUploads(later);
 
           const laterUploads = later.getByRole("region", { name: "Uploads" });
           const laterRows = laterUploads.getByRole("listitem");
@@ -5014,7 +5030,7 @@ describe("the web frontend on iirc daemon --web", () => {
           await page.goto(started.base);
           await page.getByLabel("Key").fill(key);
           await page.getByRole("button", { name: "Sign in" }).click();
-          await page.getByRole("button", { exact: true, name: "Options" }).click();
+          await showUploads(page);
 
           const uploads = page.getByRole("region", { name: "Uploads" });
           const rows = uploads.getByRole("listitem");
@@ -5246,7 +5262,7 @@ describe("the web frontend on iirc daemon --web", () => {
           await page.getByLabel("Key").fill(key);
           await page.getByRole("button", { name: "Sign in" }).click();
           await networkRow(page);
-          await page.getByRole("button", { exact: true, name: "Options" }).click();
+          await showUploads(page);
 
           const row = page
             .getByRole("region", { name: "Uploads" })
@@ -5266,7 +5282,7 @@ describe("the web frontend on iirc daemon --web", () => {
             (line) => line.command === "PRIVMSG" && line.params[1] === text,
             "the Message"
           );
-          await page.getByRole("button", { exact: true, name: "Options" }).click();
+          await showUploads(page);
 
           const place = row.getByRole("button", {
             name: `Go to where cat.png was said in private ${channel}`,

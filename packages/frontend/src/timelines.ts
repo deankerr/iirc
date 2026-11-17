@@ -31,7 +31,7 @@ import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
-import { Option, Schema } from "effect";
+import { Option, Schema, SchemaGetter } from "effect";
 
 import type { Parsed } from "./commands.ts";
 import {
@@ -236,14 +236,15 @@ type Follow =
     };
 
 /**
- * What a Pane shows: its open Timeline, the options with what filters them, the search, or
- * a Direct Message not yet begun, with the nick it is to. Opening a Timeline, a placement
+ * What a Pane shows: its open Timeline, the options with what filters them, the Uploads,
+ * the search, or a Direct Message not yet begun, with the nick it is to. Opening a Timeline, a placement
  * included, shows it. Each of the others keeps what the Pane showed before it as `back`,
  * which closing it shows again.
  */
 export type MainView =
   | { readonly _tag: "Timeline" }
   | { readonly _tag: "Options"; readonly filter: string; readonly back: BackView }
+  | { readonly _tag: "Uploads"; readonly back: BackView }
   | { readonly _tag: "Search"; readonly back: BackView }
   | ({ readonly _tag: "DirectDraft"; readonly back: BackView } & Drafted);
 
@@ -260,12 +261,14 @@ export interface Drafted {
 }
 
 /**
- * What a Pane showed before the options, the search, or a Direct Message not yet begun,
- * which closing it shows again: one step back, so nothing grows however often they show.
+ * What a Pane showed before the options, the Uploads, the search, or a Direct Message not
+ * yet begun, which closing it shows again: one step back, so nothing grows however often
+ * they show.
  */
 export type BackView =
   | { readonly _tag: "Timeline" }
   | { readonly _tag: "Options"; readonly filter: string }
+  | { readonly _tag: "Uploads" }
   | ({ readonly _tag: "DirectDraft" } & Drafted);
 
 /** The Timeline, as what a Pane shows or showed. */
@@ -285,6 +288,10 @@ const behind = (main: MainView): BackView => {
 
     case "Options": {
       return { _tag: "Options", filter: main.filter };
+    }
+
+    case "Uploads": {
+      return { _tag: "Uploads" };
     }
 
     case "DirectDraft": {
@@ -528,6 +535,9 @@ export type WindowRequest =
  * - `OptionsShown`: the focused Pane shows the options, filtered as given, which counts as
  *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter. `OptionsClosed`:
  *   the Pane they show in shows what it showed before them.
+ * - `UploadsShown`: the Uploads show in the Pane they show in already, which takes the
+ *   focus, or in the focused one, which counts as going elsewhere. `UploadsClosed`: the
+ *   Pane they show in shows what it showed before them.
  * - `DraftShown`: the focused Pane shows a Direct Message not yet begun, to a nick on a
  *   Network. `DraftClosed`: the focused Pane shows what it showed before it.
  * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
@@ -608,6 +618,8 @@ export type TimelinesEvent =
   | { readonly _tag: "OptionsShown"; readonly filter: string }
   | { readonly _tag: "OptionsFiltered"; readonly filter: string }
   | { readonly _tag: "OptionsClosed" }
+  | { readonly _tag: "UploadsShown" }
+  | { readonly _tag: "UploadsClosed" }
   | ({ readonly _tag: "DraftShown" } & Drafted)
   | { readonly _tag: "DraftClosed" }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
@@ -2970,7 +2982,8 @@ const draftsMet = (state: Timelines): Timelines => {
 };
 
 /**
- * The draft a Pane holds: shown, or behind the options or the search, which closing shows.
+ * The draft a Pane holds: shown, or behind the options, the Uploads, or the search, which
+ * closing shows.
  * @param main - What the Pane shows.
  * @returns The draft, or none.
  */
@@ -2979,9 +2992,7 @@ const draftIn = (main: MainView): Drafted | undefined => {
     return main;
   }
 
-  return (main._tag === "Options" || main._tag === "Search") && main.back._tag === "DirectDraft"
-    ? main.back
-    : undefined;
+  return main._tag !== "Timeline" && main.back._tag === "DirectDraft" ? main.back : undefined;
 };
 
 /**
@@ -3034,6 +3045,8 @@ type Navigation = Extract<
       | "OptionsShown"
       | "OptionsFiltered"
       | "OptionsClosed"
+      | "UploadsShown"
+      | "UploadsClosed"
       | "DraftShown"
       | "DraftClosed"
       | "Pane"
@@ -3050,6 +3063,8 @@ const navigations: ReadonlySet<string> = new Set([
   "OptionsShown",
   "OptionsFiltered",
   "OptionsClosed",
+  "UploadsShown",
+  "UploadsClosed",
   "DraftShown",
   "DraftClosed",
   "Pane",
@@ -3116,7 +3131,8 @@ const showingOptions = (state: Timelines, filter: string): Timelines => {
 
 /**
  * What a Pane shows once what stood in front of it closes: what it showed before, the
- * options only while no other Pane shows them since, as they show in one Pane at most.
+ * options or the Uploads only while no other Pane shows them since, as each shows in one
+ * Pane at most.
  * @param layout - The layout.
  * @param at - The Pane.
  * @param back - What it showed before.
@@ -3134,6 +3150,14 @@ const backTo = (layout: Layout<PaneView>, at: string, back: BackView): MainView 
       );
 
       return elsewhere ? timelineMain : { ...back, back: timelineMain };
+    }
+
+    case "Uploads": {
+      const elsewhere = panesOf(layout.root).some(
+        (pane) => pane.id !== at && pane.view.main._tag === "Uploads"
+      );
+
+      return elsewhere ? timelineMain : { _tag: "Uploads", back: timelineMain };
     }
 
     case "DirectDraft": {
@@ -3161,6 +3185,53 @@ const closingOptions = (state: Timelines): Timelines => {
 
   const view = viewIn(layout, at);
   const back = view.main._tag === "Options" ? view.main.back : timelineMain;
+
+  return { ...state, layout: withView(layout, at, { ...view, main: backTo(layout, at, back) }) };
+};
+
+/**
+ * The Pane the Uploads show in, if any.
+ * @param layout - The layout.
+ * @returns Its id, or none.
+ */
+const uploadsPane = (layout: Layout<PaneView>): string | undefined =>
+  panesOf(layout.root).find((pane) => pane.view.main._tag === "Uploads")?.id;
+
+/**
+ * Shows the Uploads: in the Pane they show in already, which takes the focus, or else in
+ * the focused Pane, in front of what it showed, which closing them shows again.
+ * @param state - The state.
+ * @returns The state.
+ */
+const showingUploads = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const at = uploadsPane(layout) ?? layout.focused;
+  const view = viewIn(layout, at);
+  const before = view.main._tag === "Uploads" ? view.main.back : behind(view.main);
+  // Shown again in front of the search they were behind go back to its Timeline.
+  const back = before._tag === "Uploads" ? timelineMain : before;
+
+  return {
+    ...state,
+    layout: withView({ ...layout, focused: at }, at, { ...view, main: { _tag: "Uploads", back } }),
+  };
+};
+
+/**
+ * Closes the Uploads, showing what their Pane showed before them.
+ * @param state - The state.
+ * @returns The state.
+ */
+const closingUploads = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const at = uploadsPane(layout);
+
+  if (at === undefined) {
+    return state;
+  }
+
+  const view = viewIn(layout, at);
+  const back = view.main._tag === "Uploads" ? view.main.back : timelineMain;
 
   return { ...state, layout: withView(layout, at, { ...view, main: backTo(layout, at, back) }) };
 };
@@ -3377,15 +3448,18 @@ const restored = (state: Timelines): Timelines => {
     return unset;
   }
 
-  // A Timeline is open in one Pane at most, and the options show in one: a second is empty.
+  // A Timeline is open in one Pane at most, and the options and the Uploads show in one
+  // each: a second is a Timeline.
   const open = new Set<TimelineId>();
-  let options = false;
+  const shown = new Set<string>();
 
   const layout = mapViews(kept, ({ view }): PaneView => {
     const main =
-      view.main._tag === "Options" && options ? { _tag: "Timeline" as const } : view.main;
+      (view.main._tag === "Options" || view.main._tag === "Uploads") && shown.has(view.main._tag)
+        ? { _tag: "Timeline" as const }
+        : view.main;
 
-    options ||= main._tag === "Options";
+    shown.add(main._tag);
 
     if (view.open === undefined || open.has(resolve(state, view.open))) {
       return { ...emptyView, main };
@@ -3419,7 +3493,14 @@ const inFront = (
   state: Timelines,
   event: Extract<
     Navigation,
-    { readonly _tag: "OptionsFiltered" | "OptionsClosed" | "DraftShown" | "DraftClosed" }
+    {
+      readonly _tag:
+        | "OptionsFiltered"
+        | "OptionsClosed"
+        | "UploadsClosed"
+        | "DraftShown"
+        | "DraftClosed";
+    }
   >
 ): Timelines => {
   switch (event._tag) {
@@ -3440,6 +3521,10 @@ const inFront = (
 
     case "OptionsClosed": {
       return optionsPane(state.layout) === undefined ? state : closingOptions(elsewhere(state));
+    }
+
+    case "UploadsClosed": {
+      return uploadsPane(state.layout) === undefined ? state : closingUploads(elsewhere(state));
     }
 
     case "DraftShown": {
@@ -3501,8 +3586,13 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
       return showingOptions(elsewhere(state), event.filter);
     }
 
+    case "UploadsShown": {
+      return showingUploads(elsewhere(state));
+    }
+
     case "OptionsFiltered":
     case "OptionsClosed":
+    case "UploadsClosed":
     case "DraftShown":
     case "DraftClosed": {
       return inFront(state, event);
@@ -4348,7 +4438,7 @@ export const removedIn = (state: Timelines, pane = state.layout.focused): Networ
 
 /**
  * A Pane's name, as the switcher, the composer's prompt, and its label say it: what it
- * shows, never what stands behind it. `options` or `search` by name, a draft by its nick,
+ * shows, never what stands behind it. `options`, `uploads`, or `search` by name, a draft by its nick,
  * its Timeline by name, `…` while that is read, and `empty` with none open.
  * @param state - The state.
  * @param pane - The Pane's id: the focused Pane unless another is named.
@@ -4360,6 +4450,10 @@ export const paneName = (state: Timelines, pane = state.layout.focused): string 
   switch (view.main._tag) {
     case "Options": {
       return "options";
+    }
+
+    case "Uploads": {
+      return "uploads";
     }
 
     case "Search": {
@@ -4390,13 +4484,14 @@ export const paneName = (state: Timelines, pane = state.layout.focused): string 
 
 /**
  * What a device keeps of a Pane's view: its open Timeline, as the Owner chose it, and the
- * options' filter while they show in its place. A divider is never kept: it is taken afresh
- * as the Timeline opens again. Neither is a search, which comes back as what it showed
- * in front of: its Timeline, or the options.
+ * options' filter while they show in its place, or whether the Uploads do. A divider is
+ * never kept: it is taken afresh as the Timeline opens again. Neither is a search, which
+ * comes back as what it showed in front of: its Timeline, the options, or the Uploads.
  */
 export interface KeptView {
   readonly open: TimelineId | null;
   readonly options: string | null;
+  readonly uploads: boolean;
 }
 
 /** A layout as a device keeps it: plain JSON. */
@@ -4406,11 +4501,19 @@ export type KeptLayout = Layout<KeptView>;
 interface KeptViewJson {
   readonly open: string | null;
   readonly options: string | null;
+  readonly uploads?: boolean;
 }
 
 const KeptViewSchema = Schema.Struct({
   open: Schema.NullOr(TimelineIdSchema),
   options: Schema.NullOr(Schema.String),
+  // A layout kept before the Uploads had a view of their own has none.
+  uploads: Schema.optionalKey(Schema.Boolean).pipe(
+    Schema.decodeTo(Schema.Boolean, {
+      decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => false)),
+      encode: SchemaGetter.passthrough(),
+    })
+  ),
 });
 
 const KeptNode: Schema.Codec<Node<KeptView>, Node<KeptViewJson>> = Schema.Union([
@@ -4447,15 +4550,19 @@ export const KeptLayoutSchema: Schema.Codec<KeptLayout, Layout<KeptViewJson>> = 
 export const keptLayout = (state: Timelines): KeptLayout | undefined =>
   state.restoring === undefined
     ? mapViews(state.layout, ({ view }): KeptView => {
-        // A Pane kept comes back as the options, or else as its Timeline: a search or a
-        // Direct Message not yet begun is never kept, so it comes back as what it was in
-        // front of.
+        // A Pane kept comes back as the options, the Uploads, or else as its Timeline: a
+        // search or a Direct Message not yet begun is never kept, so it comes back as what
+        // it was in front of.
         const main =
           view.main._tag === "Search" || view.main._tag === "DirectDraft"
             ? view.main.back
             : view.main;
 
-        return { open: view.open ?? null, options: main._tag === "Options" ? main.filter : null };
+        return {
+          open: view.open ?? null,
+          options: main._tag === "Options" ? main.filter : null,
+          uploads: main._tag === "Uploads",
+        };
       })
     : undefined;
 
@@ -4464,14 +4571,17 @@ export const keptLayout = (state: Timelines): KeptLayout | undefined =>
  * @param kept - What it kept.
  * @returns The view.
  */
-const keptView = (kept: KeptView): PaneView => ({
-  divider: undefined,
-  main:
-    kept.options === null
-      ? timelineMain
-      : { _tag: "Options", back: timelineMain, filter: kept.options },
-  open: kept.open ?? undefined,
-});
+const keptView = (kept: KeptView): PaneView => {
+  const main = (): MainView => {
+    if (kept.options !== null) {
+      return { _tag: "Options", back: timelineMain, filter: kept.options };
+    }
+
+    return kept.uploads ? { _tag: "Uploads", back: timelineMain } : timelineMain;
+  };
+
+  return { divider: undefined, main: main(), open: kept.open ?? undefined };
+};
 
 /**
  * The layout a device kept, for `Restore`, or none when it is not one: ids that are not a

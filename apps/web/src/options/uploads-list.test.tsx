@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import type { Timeline, TimelineItem, Upload } from "@iirc/api";
+import { mainOf } from "@iirc/frontend/timelines";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { initialUploads } from "@iirc/frontend/uploads";
 import { act } from "react";
@@ -11,7 +12,7 @@ import { App } from "../app/app.tsx";
 import { writeChoice } from "../page/device.ts";
 import { check, signOut } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
-import { sync } from "../timelines/atoms.ts";
+import { layoutKey, sync, timelinesState } from "../timelines/atoms.ts";
 import { optionsState, optionsSync } from "./atoms.ts";
 import { ownerSync } from "./owner.ts";
 import { uploadsState } from "./uploads-state.ts";
@@ -67,19 +68,25 @@ const uploadOf = (letter: string, type: string, name?: string): typeof Upload.En
 };
 
 /**
- * A page signed in to the fake, showing the options, following them and the Uploads, and
- * rendered, and following the Timelines too when asked.
+ * A page signed in to the fake, showing the Uploads, following them, and rendered, and
+ * following the Timelines too when asked.
  * @param fake - The fake Daemon.
  * @param waits - Waits other than the tests' defaults.
- * @param timelines - Whether the Timelines are read and followed, before the options show.
+ * @param timelines - Whether the Timelines are read and followed, before the Uploads show.
+ * @param kept - The layout this device kept, as text, which shows them instead of `/uploads`.
  * @returns The registry and the page.
  */
 const page = async (
   fake: ReturnType<typeof fakeDaemon>,
   waits: Parameters<typeof registryFor>[1] = {},
-  timelines = false
+  timelines = false,
+  kept?: string
 ) => {
   const registry = registryFor(fake.fetch, waits);
+
+  if (kept !== undefined) {
+    writeChoice(layoutKey, kept);
+  }
 
   await run(registry, check, undefined);
   registry.mount(optionsSync);
@@ -115,11 +122,15 @@ const page = async (
     throw new Error("no composer");
   }
 
-  // `/set uploads` shows the options.
+  if (kept !== undefined) {
+    return { container, registry };
+  }
+
+  // `/uploads` shows the Uploads.
   await doing(() => {
     Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
       composer,
-      "/set uploads"
+      "/uploads"
     );
     composer.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -447,11 +458,80 @@ const saidListed = (container: HTMLElement) =>
     })
   );
 
-describe("the Uploads beside the options", () => {
+describe("the Uploads view", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
+
+    writeChoice(layoutKey, undefined);
+  });
+
+  it("shows in the focused Pane, with a status bar that names it, and closes back with its button", async () => {
+    const fake = signedIn(cat);
+    const { container, registry } = await page(fake);
+
+    await settled(() => listed(container).length === 1);
+
+    const bar = container.querySelector('section[aria-label="Uploads"] header');
+    const shown = mainOf(registry.get(timelinesState))._tag;
+
+    await press(container, "Close the Uploads");
+
+    expect({
+      bar: bar?.querySelector("h2")?.textContent,
+      closed: [
+        mainOf(registry.get(timelinesState))._tag,
+        container.querySelector('section[aria-label="Uploads"]'),
+      ],
+      shown,
+    }).toStrictEqual({ bar: "uploads", closed: ["Timeline", null], shown: "Uploads" });
+  });
+
+  it("draws a wait while the first page is read, never an empty list", async () => {
+    const fake = signedIn();
+
+    fake.daemon.holdUploadPages = true;
+
+    const { container } = await page(fake);
+
+    await eventually(() => fake.daemon.uploadPagesHeld.length === 1);
+
+    const view = () => container.querySelector('section[aria-label="Uploads"]');
+    const waiting = view()?.textContent ?? "";
+
+    await doing(() => {
+      fake.daemon.holdUploadPages = false;
+
+      for (const release of fake.daemon.uploadPagesHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => view()?.textContent?.includes("Nothing uploaded yet.") === true);
+
+    expect({
+      after: view()?.textContent?.includes("Reading…"),
+      waiting: [waiting.includes("Reading…"), waiting.includes("Nothing uploaded yet.")],
+    }).toStrictEqual({ after: false, waiting: [true, false] });
+  });
+
+  it("comes back, reading its Uploads, when a layout kept with them showing is restored", async () => {
+    const kept = JSON.stringify({
+      focused: "p0",
+      next: 1,
+      root: { _tag: "Pane", id: "p0", view: { open: null, options: null, uploads: true } },
+      zoomed: false,
+    });
+
+    const fake = onLibera(signedIn(cat));
+    const { container, registry } = await page(fake, {}, true, kept);
+
+    await settled(() => listed(container).length === 1);
+
+    expect({
+      main: mainOf(registry.get(timelinesState))._tag,
+      names: names(container),
+    }).toStrictEqual({ main: "Uploads", names: ["Cat picture.png"] });
   });
 
   it("lists each newest first, an image as a thumbnail of its bytes and any other type as an icon", async () => {

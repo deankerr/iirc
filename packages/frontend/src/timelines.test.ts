@@ -2864,18 +2864,33 @@ describe("the Panes", () => {
           _tag: "Split",
           axis: "Vertical",
           children: [
-            { node: { _tag: "Pane", id: "p0", view: { open: three, options: null } }, ratio: 0.5 },
+            {
+              node: {
+                _tag: "Pane",
+                id: "p0",
+                view: { open: three, options: null, uploads: false },
+              },
+              ratio: 0.5,
+            },
             {
               node: {
                 _tag: "Split",
                 axis: "Horizontal",
                 children: [
                   {
-                    node: { _tag: "Pane", id: "p1", view: { open: two, options: null } },
+                    node: {
+                      _tag: "Pane",
+                      id: "p1",
+                      view: { open: two, options: null, uploads: false },
+                    },
                     ratio: 0.5,
                   },
                   {
-                    node: { _tag: "Pane", id: "p2", view: { open: one, options: "x" } },
+                    node: {
+                      _tag: "Pane",
+                      id: "p2",
+                      view: { open: one, options: "x", uploads: false },
+                    },
                     ratio: 0.5,
                   },
                 ],
@@ -2904,6 +2919,7 @@ describe("the Panes", () => {
 
   it("refuses a kept layout that is not one, and opens a Timeline kept twice once", () => {
     const twice = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(3))));
+
     const twiceIds = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p0", idOf(2))));
 
     // Restored before the Owner went anywhere.
@@ -3322,7 +3338,7 @@ describe("searching", () => {
       main: mainOf(state),
     }).toStrictEqual({
       // A search is never kept: what it shows in front of is.
-      kept: { open: three, options: "nick" },
+      kept: { open: three, options: "nick", uploads: false },
       main: { _tag: "Options", back: { _tag: "Timeline" }, filter: "nick" },
     });
   });
@@ -3806,7 +3822,7 @@ describe("what stands in front of a Timeline", () => {
         },
         three,
       ],
-      kept: { _tag: "Pane", id: "p0", view: { open: three, options: "x" } },
+      kept: { _tag: "Pane", id: "p0", view: { open: three, options: "x", uploads: false } },
       late: [{ _tag: "Options", back: { _tag: "Timeline" }, filter: "x" }, three],
       placed: [{ _tag: "Timeline" }, idOf(6)],
     });
@@ -3834,6 +3850,208 @@ describe("what stands in front of a Timeline", () => {
       },
       { _tag: "Timeline" },
     ]);
+  });
+});
+
+/**
+ * A Pane as a device keeps it, with no Timeline open and no options.
+ * @param id - Its id.
+ * @param uploads - Whether it shows the Uploads.
+ * @returns The Pane.
+ */
+const keptUploadsPane = (id: string, uploads: boolean) => ({
+  _tag: "Pane" as const,
+  id,
+  view: { open: null, options: null, uploads },
+});
+
+describe("the Uploads in a Pane", () => {
+  it("shows in the focused Pane in front of its Timeline, which closing shows again", () => {
+    const shown = reduceTimelines(following(), { _tag: "UploadsShown" });
+    const closed = reduceTimelines(shown, { _tag: "UploadsClosed" });
+
+    expect({
+      again: reduceTimelines(closed, { _tag: "UploadsClosed" }) === closed,
+      chosen: chosenOf(shown),
+      closed: [mainOf(closed), openOf(closed)],
+      moved: closed.navigation > shown.navigation,
+      name: paneName(shown),
+      shown: [mainOf(shown), openOf(shown)],
+    }).toStrictEqual({
+      again: true,
+      chosen: { _tag: "Nothing" },
+      closed: [{ _tag: "Timeline" }, three],
+      moved: true,
+      name: "uploads",
+      shown: [{ _tag: "Uploads", back: { _tag: "Timeline" } }, three],
+    });
+  });
+
+  it("shows in one Pane at most, a second showing focusing the Pane that has them", () => {
+    let state = split(following(), two);
+
+    state = reduceTimelines(state, { _tag: "UploadsShown" });
+    state = reduceTimelines(state, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } });
+    state = reduceTimelines(state, { _tag: "UploadsShown" });
+
+    const closed = reduceTimelines(state, { _tag: "UploadsClosed" });
+
+    expect({
+      closed: panesOf(closed.layout.root).map((pane) => pane.view.main),
+      focused: state.layout.focused,
+      mains: panesOf(state.layout.root).map((pane) => pane.view.main._tag),
+    }).toStrictEqual({
+      closed: [{ _tag: "Timeline" }, { _tag: "Timeline" }],
+      focused: "p1",
+      mains: ["Timeline", "Uploads"],
+    });
+  });
+
+  it("closes in the Pane they show in, whichever has the focus", () => {
+    let state = reduceTimelines(following(), { _tag: "UploadsShown" });
+
+    state = split(state, two);
+    state = reduceTimelines(state, { _tag: "UploadsClosed" });
+
+    expect(panesOf(state.layout.root).map((pane) => pane.view.main)).toStrictEqual([
+      { _tag: "Timeline" },
+      { _tag: "Timeline" },
+    ]);
+  });
+
+  it("goes back one step only, whichever of the options and the Uploads stands in front of the other", () => {
+    const uploads = reduceTimelines(following(), { _tag: "UploadsShown" });
+    const options = reduceTimelines(uploads, { _tag: "OptionsShown", filter: "a" });
+    const optionsFirst = reduceTimelines(following(), { _tag: "OptionsShown", filter: "a" });
+    const over = reduceTimelines(optionsFirst, { _tag: "UploadsShown" });
+
+    expect({
+      optionsClosed: mainOf(reduceTimelines(options, { _tag: "OptionsClosed" })),
+      optionsOver: mainOf(options),
+      uploadsClosed: mainOf(reduceTimelines(over, { _tag: "UploadsClosed" })),
+      uploadsOver: mainOf(over),
+    }).toStrictEqual({
+      optionsClosed: { _tag: "Uploads", back: { _tag: "Timeline" } },
+      optionsOver: { _tag: "Options", back: { _tag: "Uploads" }, filter: "a" },
+      uploadsClosed: { _tag: "Options", back: { _tag: "Timeline" }, filter: "a" },
+      uploadsOver: { _tag: "Uploads", back: { _tag: "Options", filter: "a" } },
+    });
+  });
+
+  it("closes the search shown over them back to them, and a Direct Message not yet begun too", () => {
+    const uploads = reduceTimelines(following(), { _tag: "UploadsShown" });
+    const searched = searching(uploads, "m3 word");
+
+    const draft = reduceTimelines(uploads, {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    expect({
+      draftClosed: mainOf(reduceTimelines(draft, { _tag: "DraftClosed" })),
+      searchClosed: mainOf(reduceTimelines(searched, { _tag: "SearchClosed" })),
+      searched: mainOf(searched),
+    }).toStrictEqual({
+      draftClosed: { _tag: "Uploads", back: { _tag: "Timeline" } },
+      searchClosed: { _tag: "Uploads", back: { _tag: "Timeline" } },
+      searched: { _tag: "Search", back: { _tag: "Uploads" } },
+    });
+  });
+
+  it("closes the options to the Timeline, not to them, once another Pane shows them", () => {
+    let state = split(following(), two);
+
+    // The second Pane has the Uploads behind the options, so shows only the options.
+    state = reduceTimelines(state, { _tag: "UploadsShown" });
+    state = reduceTimelines(state, { _tag: "OptionsShown", filter: "" });
+    // The first Pane then shows them.
+    state = reduceTimelines(state, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } });
+    state = reduceTimelines(state, { _tag: "UploadsShown" });
+
+    const closed = reduceTimelines(state, { _tag: "OptionsClosed" });
+
+    expect({
+      closed: panesOf(closed.layout.root).map((pane) => pane.view.main._tag),
+      shown: panesOf(state.layout.root).map((pane) => pane.view.main._tag),
+    }).toStrictEqual({
+      closed: ["Uploads", "Timeline"],
+      shown: ["Uploads", "Options"],
+    });
+  });
+
+  it("is kept in the layout, comes back as the Uploads in front of the Timeline, and is kept under a search", () => {
+    let state = split(following(), two, true);
+
+    state = reduceTimelines(state, { _tag: "UploadsShown" });
+    state = searching(state, "word");
+
+    const kept = keptLayout(state);
+    const decoded = decodeKept(JSON.stringify(kept));
+    const read = decoded === undefined ? undefined : layoutKept(decoded);
+
+    expect({
+      kept: kept?.root._tag === "Split" ? kept.root.children.map((child) => child.node) : undefined,
+      read: read === undefined ? undefined : panesOf(read.root).map((pane) => pane.view.main),
+    }).toStrictEqual({
+      kept: [
+        { _tag: "Pane", id: "p0", view: { open: three, options: null, uploads: false } },
+        { _tag: "Pane", id: "p1", view: { open: two, options: null, uploads: true } },
+      ],
+      read: [{ _tag: "Timeline" }, { _tag: "Uploads", back: { _tag: "Timeline" } }],
+    });
+  });
+
+  it("restores a second Pane keeping them as its Timeline, since they show in one at most", () => {
+    const decoded = decodeKept(
+      JSON.stringify({
+        focused: "p0",
+        next: 2,
+        root: {
+          _tag: "Split",
+          axis: "Horizontal",
+          children: [
+            { node: keptUploadsPane("p0", true), ratio: 0.5 },
+            { node: keptUploadsPane("p1", true), ratio: 0.5 },
+          ],
+          id: "s0",
+        },
+        zoomed: false,
+      })
+    );
+
+    const fresh = reduceTimelines(timelinesWith(windowCap), {
+      _tag: "Restore",
+      layout: (decoded === undefined ? undefined : layoutKept(decoded)) ?? single(emptyView),
+    });
+
+    const restored = folded(fresh, [
+      { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
+      { _tag: "NetworksRead", entries: decodeEntries([]) },
+    ]);
+
+    expect(panesOf(restored.layout.root).map((one) => one.view.main._tag)).toStrictEqual([
+      "Uploads",
+      "Timeline",
+    ]);
+  });
+
+  it("still restores a layout kept before the Uploads had a view, as one not showing them", () => {
+    const old = JSON.stringify({
+      focused: "p0",
+      next: 1,
+      root: { _tag: "Pane", id: "p0", view: { open: three, options: "x" } },
+      zoomed: false,
+    });
+
+    const decoded = decodeKept(old);
+
+    expect(decoded?.root).toStrictEqual({
+      _tag: "Pane",
+      id: "p0",
+      view: { open: three, options: "x", uploads: false },
+    });
   });
 });
 
