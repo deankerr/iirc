@@ -21,11 +21,16 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
 import type { CommandContext } from "@iirc/frontend/commands";
 import { completes } from "@iirc/frontend/completion";
-import type { List } from "@iirc/frontend/completion";
+import type { Candidate, List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
 import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
-import { allScope } from "@iirc/frontend/palette";
+import {
+  allScope,
+  fontDescription,
+  networkDescription,
+  themeDescription,
+} from "@iirc/frontend/palette";
 import { quotedOf } from "@iirc/frontend/render";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -280,9 +285,78 @@ const sayable = (context: CommandContext): Sayable => {
  */
 const optionId = (list: string, index: number) => `${list}-${index}`;
 
+/** What a Timeline is, in a few words, as the palette says it. */
+const kinds = { Channel: "Channel", Direct: "Direct Message", Network: "Network" } as const;
+
 /**
- * What the composer can complete, listed above it: each candidate's name, and what a
- * command takes, as its usage says, and what it does, the one highlighted kept in view. The textarea keeps the focus,
+ * What a candidate says beyond its name, dim, as the palette's row does: a command's usage,
+ * what it does, and the keys bound to it; a Timeline's kind and Network; whether a theme
+ * is built in or imported and in effect; whether a font is in effect; and what choosing a
+ * Network removes or drops. A word says nothing more.
+ * @param props - The candidate.
+ * @returns Its cells, after its name.
+ */
+const About = ({ candidate }: { readonly candidate: Candidate }) => {
+  switch (candidate._tag) {
+    case "Command": {
+      return (
+        <>
+          <span className={styles.usage}>{candidate.takes}</span>
+          <span className={styles.description}>{candidate.description}</span>
+          {candidate.chords.length === 0 ? null : (
+            <kbd className={styles.keys}>
+              {candidate.chords.map((chord) => showChord(chord, platform)).join(" ")}
+            </kbd>
+          )}
+        </>
+      );
+    }
+
+    case "Timeline": {
+      return (
+        <span className={styles.detail}>
+          {kinds[candidate.kind]} on {candidate.network}
+        </span>
+      );
+    }
+
+    case "Theme": {
+      return (
+        <span className={styles.detail}>
+          {candidate.current
+            ? `${themeDescription(candidate)}, in effect`
+            : themeDescription(candidate)}
+        </span>
+      );
+    }
+
+    case "Font": {
+      return (
+        <span className={styles.detail}>
+          {candidate.current
+            ? `${fontDescription(candidate.name)}, in effect`
+            : fontDescription(candidate.name)}
+        </span>
+      );
+    }
+
+    case "Network": {
+      return <span className={styles.detail}>{networkDescription(candidate)}</span>;
+    }
+
+    case "Word": {
+      return null;
+    }
+
+    default: {
+      return candidate satisfies never;
+    }
+  }
+};
+
+/**
+ * What the composer can complete, listed above it: each candidate's name, and what it is,
+ * a command's usage, description, and keys among it, the one highlighted kept in view. The textarea keeps the focus,
  * so a press writes a candidate in without taking it.
  * @param props - The list, its id, and what picking one does.
  * @returns The listbox.
@@ -337,12 +411,7 @@ const Completions = ({
           tabIndex={-1}
         >
           <bdi className={styles.candidate}>{candidate.name}</bdi>
-          {candidate._tag === "Command" ? (
-            <>
-              <span className={styles.usage}>{candidate.takes}</span>
-              <span className={styles.description}>{candidate.description}</span>
-            </>
-          ) : null}
+          <About candidate={candidate} />
         </div>
       ))}
     </div>

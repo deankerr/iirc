@@ -5,7 +5,8 @@ import { deviceUiKey } from "@iirc/frontend/ui";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
-import { composerState, edit, send } from "../composer/atoms.ts";
+import { edit, send } from "../composer/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { signedOut } from "../options/atoms.ts";
 import { uiInEffect, uiSync } from "../options/ui.ts";
 import { readChoice, writeChoice } from "../page/device.ts";

@@ -5,10 +5,11 @@ import { mainOf, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { composerState, edit, perform, recall, send } from "../composer/atoms.ts";
+import { edit, perform, recall, send } from "../composer/atoms.ts";
 import { chantypesState } from "../composer/chantypes-state.ts";
 import { completionState } from "../composer/completion-state.ts";
 import { chantypesSync, completer, tab, typed } from "../composer/completion.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
 import type { FakeChannel } from "../testing/fake-daemon.ts";

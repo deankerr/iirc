@@ -43,6 +43,7 @@ const inChannel: CommandContext = {
     timeline: channel,
   },
   head: undefined,
+  named: [],
   open: channel,
   panes: 1,
   session: true,

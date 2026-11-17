@@ -16,7 +16,6 @@ import {
   confirm,
   contextOf,
   draftOf,
-  initialComposers,
   placeIn,
   placeOfDraft,
   reduceComposers,
@@ -60,7 +59,7 @@ import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
 import { changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
-import { openPalette } from "../palette/state.ts";
+import { openPalette, paletteHappened } from "../palette/state.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
@@ -69,10 +68,8 @@ import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
+import { composerState } from "./composer-state.ts";
 import { anchorsFollow, uploadingState } from "./uploading-state.ts";
-
-/** Every Timeline's composer, as the core folds it. */
-export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
 
 /** The context commands are judged in, derived from the Timelines. */
 export const commandContext = Atom.make((get) => contextOf(get(timelinesState), get(channelState)));
@@ -916,6 +913,17 @@ const letGoOfKept = (
 };
 
 /**
+ * Has the palette remember the commands a draft ran, as it remembers those it chose.
+ * @param registry - The registry.
+ * @param keys - The keys of the commands, in order.
+ */
+const ran = (registry: AtomRegistry.AtomRegistry, keys: readonly string[]) => {
+  if (keys.length > 0) {
+    paletteHappened(registry, { _tag: "Ran", keys });
+  }
+};
+
+/**
  * Submits a Timeline's draft, and carries out what it asks, unless a file added to it is
  * still uploading.
  */
@@ -934,6 +942,7 @@ export const send = runtime
         replaced(registry, step.state);
         letGoOfTyped(registry, timeline);
         letGoOfKept(registry, timeline, step.intents);
+        ran(registry, step.ran);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }
@@ -958,6 +967,7 @@ export const confirmSend = runtime
 
         replaced(registry, step.state);
         letGoOfKept(registry, timeline, step.intents);
+        ran(registry, step.ran);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }

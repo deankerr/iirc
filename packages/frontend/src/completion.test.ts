@@ -1,17 +1,20 @@
-import type { TimelineItem, Timeline } from "@iirc/api";
+import type { TimelineItem } from "@iirc/api";
 import {
   NetworkEntry,
   NetworkId,
   SessionKnowledge,
+  Timeline,
   TimelineId,
   TimelineList,
   TimelineWindow,
 } from "@iirc/api";
+import { ThemeName, fontNames, uiDefaults } from "@iirc/api/ui";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { commands } from "./commands.ts";
+import { commands, interpret, namedIn } from "./commands.ts";
+import type { CommandContext } from "./commands.ts";
 import {
   announced,
   chantypesWanted,
@@ -21,13 +24,18 @@ import {
   nicksWanted,
   orderNicks,
   owns,
+  previewOf,
   reduceCompletion,
   sourcesOf,
   spotAt,
 } from "./completion.ts";
-import type { Completion, CompletionEvent, Shown, Sources } from "./completion.ts";
+import type { Completion, CompletionEvent, Held, Shown, Sources } from "./completion.ts";
+import { chordsFor, defaultKeymap } from "./keymap.ts";
+import { choose, networkEntry, sections } from "./palette.ts";
+import type { Listing } from "./palette.ts";
+import { listedThemes } from "./theme.ts";
 import { initialTimelines, reduceTimelines } from "./timelines.ts";
-import type { TimelinesEvent } from "./timelines.ts";
+import type { SidebarNetwork, TimelinesEvent } from "./timelines.ts";
 
 const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
 
@@ -41,15 +49,28 @@ const network = Schema.decodeSync(NetworkId)("libera");
 const iirc = timelineId(idOf(2));
 const peer = timelineId(idOf(4));
 
+const listing = (...names: readonly string[]) => commands.filter((one) => names.includes(one.name));
+
 const sources: Sources = {
   channels: ["#iirc", "#other", "&local"],
   chantypes: undefined,
-  commands: ["me", "members", "msg", "set", "action"],
+  chosen: { dark: uiDefaults.dark, light: uiDefaults.light, theme: uiDefaults.theme },
+  commands: listing("me", "members", "msg", "set"),
+  font: uiDefaults.font,
+  keymap: [],
+  network,
+  networks: [],
   nicks: { _tag: "Members", timeline: iirc },
-  options: ["network.libera.nicks", "network.libera.realname"],
+  options: [
+    { description: "", name: "network.libera.nicks" },
+    { description: "", name: "network.libera.realname" },
+  ],
+  ran: [],
   recent: [],
   self: undefined,
   suffix: ": ",
+  themes: listedThemes([]),
+  timelines: [],
 };
 
 /** Nicks at hand, as in a Direct Message, some alike under RFC 1459. */
@@ -189,7 +210,7 @@ describe("the word at the caret", () => {
 });
 
 describe("completing", () => {
-  it("completes a command at the start of a line, cycling with Tab, backwards with Shift+Tab", () => {
+  it("completes a command at the start of a line, ranked as the palette ranks it, cycling with Tab, backwards with Shift+Tab", () => {
     expect({
       back: shown(play("/m", [back])),
       first: shown(play("/m", [tab])),
@@ -198,13 +219,14 @@ describe("completing", () => {
       wraps: shown(play("/m", [tab, tab, tab, tab])),
       wrapsBack: shown(play("/m", [tab, back])),
     }).toStrictEqual({
-      back: ["/msg ", 5],
+      back: ["/members ", 9],
       first: ["/me ", 4],
       // A word starting with `/` mid-line is no command: none of the nicks start with it.
       notAtStart: "Asking",
-      second: ["/members ", 9],
+      // The shorter name it begins ranks first, as in the palette.
+      second: ["/msg ", 5],
       wraps: ["/me ", 4],
-      wrapsBack: ["/msg ", 5],
+      wrapsBack: ["/members ", 9],
     });
   });
 
@@ -437,7 +459,7 @@ describe("completing", () => {
       elsewhere: owns(first.state, peer, first.text, sources),
       moved: moved.edit?.text,
       typed: announced(first.state, iirc, `${first.text}x`, sources),
-    }).toStrictEqual({ active: true, elsewhere: false, moved: "/action me ", typed: "" });
+    }).toStrictEqual({ active: true, elsewhere: false, moved: "/me me ", typed: "" });
   });
 
   it("gives back exactly what was typed after any number of Tabs, for any text and caret", () => {
@@ -481,13 +503,13 @@ describe("completing", () => {
 });
 
 describe("the list", () => {
-  it("opens as a draft starts with /, listing the commands, and narrows with each key typed", () => {
+  it("opens as a draft starts with /, listing each command once by name, and narrows with each key typed", () => {
     const all = play("", [type("/")]);
     const narrowed = play("", [type("/"), type("/m"), type("/me")]);
     const me = commands.find((one) => one.name === "me");
 
     expect({
-      // An alias takes what its command does.
+      // An alias finds its command, listed by its name.
       alias: listOf(play("", [type("/act")]).state, iirc, "/act", sources)?.candidates[0],
       all: listed(all),
       allText: shown(all),
@@ -498,23 +520,32 @@ describe("the list", () => {
     }).toStrictEqual({
       alias: {
         _tag: "Command",
+        chords: [],
         description: me?.description,
-        name: "/action",
+        name: "/me",
         takes: "<text>",
+        text: "/me",
       },
-      all: {
-        highlighted: undefined,
-        names: ["/action", "/me", "/members", "/msg", "/set"],
-      },
+      all: { highlighted: undefined, names: ["/me", "/members", "/msg", "/set"] },
       allText: ["/", 1],
-      described: { _tag: "Command", description: me?.description, name: "/me", takes: "<text>" },
-      m: { highlighted: undefined, names: ["/me", "/members", "/msg"] },
-      narrowed: { highlighted: undefined, names: ["/me", "/members"] },
+      described: {
+        _tag: "Command",
+        chords: [],
+        description: me?.description,
+        name: "/me",
+        takes: "<text>",
+        text: "/me",
+      },
+      m: { highlighted: undefined, names: ["/me", "/msg", "/members"] },
+      // `/msg` says it sends a Message, a word its description begins with `me`.
+      narrowed: { highlighted: undefined, names: ["/me", "/members", "/msg"] },
       optional: {
         _tag: "Command",
+        chords: [],
         description: commands.find((one) => one.name === "members")?.description,
         name: "/members",
         takes: "[on|off]",
+        text: "/members",
       },
     });
   });
@@ -584,12 +615,12 @@ describe("the list", () => {
       twice: [shown(twice), listed(twice)?.highlighted],
       wrapped: [shown(wrapped), listed(wrapped)?.highlighted],
     }).toStrictEqual({
-      backFirst: [["/msg ", 5], 2],
+      backFirst: [["/members ", 9], 2],
       closed: [["/m", 2], undefined],
       escaped: [["/m", 2], undefined],
-      forth: [["/me ", 4], { highlighted: 0, names: ["/me", "/members", "/msg"] }],
-      twice: [["/members ", 9], 1],
-      wrapped: [["/msg ", 5], 2],
+      forth: [["/me ", 4], { highlighted: 0, names: ["/me", "/msg", "/members"] }],
+      twice: [["/msg ", 5], 1],
+      wrapped: [["/members ", 9], 2],
     });
   });
 
@@ -607,7 +638,7 @@ describe("the list", () => {
       picked: [shown(picked), listed(picked)?.highlighted],
       // Picked from a list for a draft no longer shown, it is let go of.
       stale: [stale.edit, stale.state.phase._tag],
-    }).toStrictEqual({ picked: [["/members ", 9], 1], stale: [undefined, "Idle"] });
+    }).toStrictEqual({ picked: [["/msg ", 5], 1], stale: [undefined, "Idle"] });
   });
 
   it("belongs to the place it was opened in, and to the draft it lists for", () => {
@@ -731,6 +762,18 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
   timeline: idOf(2),
 });
 
+/** What completion lists from beyond the Timelines, as a Frontend would hold it. */
+const held: Held = {
+  chantypes: new Map(),
+  chosen: sources.chosen,
+  font: sources.font,
+  keymap: [],
+  options: [],
+  ran: [],
+  suffix: ": ",
+  themes: sources.themes,
+};
+
 describe("the sources", () => {
   const nothing = { activity: 0, direct: 0, highlights: 0, messages: 0 };
 
@@ -842,19 +885,19 @@ describe("the sources", () => {
 
   it("are the Network's Channels, the open Channel's members, and who spoke there, latest first", () => {
     const state = world();
-    const channel = sourcesOf(state, iirc, []);
-    const direct = sourcesOf(state, peer, []);
-    const nowhere = sourcesOf(state, "Nowhere", []);
+    const channel = sourcesOf(state, iirc, held);
+    const direct = sourcesOf(state, peer, held);
+    const nowhere = sourcesOf(state, "Nowhere", held);
 
     expect({
       channels: channel.channels,
-      commands: channel.commands.includes("query") && channel.commands.includes("action"),
+      commands: channel.commands === commands,
       directNicks: direct.nicks,
       nicks: channel.nicks,
       nowhere: [nowhere.channels, nowhere.nicks],
-      options: channel.options.includes("network.libera.login.account"),
+      options: channel.options.some((one) => one.name === "network.libera.login.account"),
       recent: channel.recent,
-      suffix: [channel.suffix, sourcesOf(state, iirc, [], new Map(), ", ").suffix],
+      suffix: [channel.suffix, sourcesOf(state, iirc, { ...held, suffix: ", " }).suffix],
     }).toStrictEqual({
       channels: ["#iirc", "&local"],
       commands: true,
@@ -873,9 +916,9 @@ describe("the sources", () => {
     const before = new Map([[network, { chantypes: "#", since: 0 }]]);
 
     expect({
-      before: sourcesOf(state, iirc, [], before).chantypes,
-      during: sourcesOf(state, iirc, [], during).chantypes,
-      none: sourcesOf(state, iirc, []).chantypes,
+      before: sourcesOf(state, iirc, { ...held, chantypes: before }).chantypes,
+      during: sourcesOf(state, iirc, { ...held, chantypes: during }).chantypes,
+      none: sourcesOf(state, iirc, held).chantypes,
       wantedBefore: chantypesWanted(state, iirc, before),
       wantedDuring: chantypesWanted(state, iirc, during),
       wantedNowhere: chantypesWanted(state, "Nowhere", new Map()),
@@ -886,6 +929,517 @@ describe("the sources", () => {
       wantedBefore: { network, since: 1 },
       wantedDuring: undefined,
       wantedNowhere: undefined,
+    });
+  });
+});
+
+/**
+ * A Network as the sidebar lists it.
+ * @param on - The Network.
+ * @param removed - Whether it was removed with its Timelines kept.
+ * @param timelines - Its Timelines listed.
+ * @param closed - Its Timelines closed.
+ * @returns It.
+ */
+const networkOf = (
+  on: NetworkId,
+  removed: boolean,
+  timelines: readonly Timeline[],
+  closed: readonly Timeline[]
+): SidebarNetwork => ({
+  away: { _tag: "Unknown" },
+  closed,
+  connection: { _tag: "Unknown" },
+  listed: true,
+  network: on,
+  removed,
+  running: undefined,
+  timelines,
+});
+
+describe("everything the palette lists", () => {
+  const oftc = Schema.decodeSync(NetworkId)("oftc");
+  const decodeTimeline = Schema.decodeSync(Timeline);
+
+  const timelineOf = (
+    sequence: number,
+    on: NetworkId,
+    kind: "Network" | "Channel" | "Direct",
+    name: string
+  ) =>
+    decodeTimeline({
+      changed: 1,
+      closed: false,
+      detached: false,
+      head: null,
+      id: idOf(sequence),
+      key: kind === "Network" ? null : name,
+      kind,
+      latest: null,
+      life: 1,
+      name,
+      network: on,
+      read: null,
+      removed: false,
+      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    });
+
+  const bar: readonly SidebarNetwork[] = [
+    networkOf(
+      network,
+      false,
+      [
+        timelineOf(1, network, "Network", "libera"),
+        timelineOf(2, network, "Channel", "#iirc"),
+        timelineOf(4, network, "Direct", "peer"),
+      ],
+      [timelineOf(5, network, "Channel", "#closed")]
+    ),
+    networkOf(
+      oftc,
+      true,
+      [
+        timelineOf(11, oftc, "Network", "oftc"),
+        timelineOf(12, oftc, "Channel", "#iirc"),
+        timelineOf(13, oftc, "Channel", "#debian"),
+      ],
+      []
+    ),
+  ];
+
+  /** Sources on libera's #iirc, with every command, Timeline, and Network. */
+  const everywhere: Sources = {
+    ...sources,
+    commands,
+    keymap: defaultKeymap,
+    networks: bar.map((one) => ({ network: one.network, removed: one.removed })),
+    timelines: namedIn(bar),
+  };
+
+  /** The same, from a composer on no Network. */
+  const nowhere: Sources = { ...everywhere, network: undefined };
+
+  const context: CommandContext = {
+    behind: false,
+    draft: undefined,
+    focus: {
+      detached: false,
+      key: "#iirc",
+      kind: "Channel",
+      name: "#iirc",
+      network,
+      removed: false,
+      timeline: iirc,
+    },
+    head: undefined,
+    named: namedIn(bar),
+    open: iirc,
+    panes: 1,
+    session: true,
+    shown: [iirc],
+    timelines: [],
+    unread: [],
+    unreadClosed: [],
+  };
+
+  const away: CommandContext = { ...context, focus: undefined, open: undefined, session: false };
+
+  const listing: Listing = {
+    chosen: sources.chosen,
+    context,
+    font: sources.font,
+    keymap: defaultKeymap,
+    options: [],
+    sidebar: bar,
+    themes: sources.themes,
+  };
+
+  /**
+   * The list a draft opens as it is typed.
+   * @param text - The draft.
+   * @param given - The sources.
+   * @returns Its candidates.
+   */
+  const opened = (text: string, given: Sources = everywhere) =>
+    listOf(play("", [type(text)], given).state, iirc, text, given)?.candidates ?? [];
+
+  /**
+   * What a draft says once the candidate at an index is picked from its list.
+   * @param text - The draft.
+   * @param index - The candidate.
+   * @param given - The sources.
+   * @returns The draft after.
+   */
+  const pickedIn = (text: string, index: number, given: Sources = everywhere) =>
+    play("", [type(text), { _tag: "Pick", index }], given).text;
+
+  /**
+   * A section of what the palette lists for a query.
+   * @param query - The query.
+   * @param title - The section's title.
+   * @returns Its entries.
+   */
+  const sectionOf = (query: string, title: string) =>
+    sections(listing, query, []).find((one) => one.title === title)?.entries ?? [];
+
+  /**
+   * Opens `/network remove `, highlights its first candidate, and picks one.
+   * @param index - The candidate picked.
+   * @returns Each step, and the pick.
+   */
+  const steps = (index: number) => {
+    const typed = reduceCompletion(
+      initialCompletion,
+      { _tag: "Typed", caret: 15, place: iirc, text: "/network remove" },
+      everywhere
+    );
+
+    const opening = reduceCompletion(
+      typed.state,
+      { _tag: "Typed", caret: 16, place: iirc, text: "/network remove " },
+      everywhere
+    );
+
+    const highlighted = reduceCompletion(
+      opening.state,
+      { _tag: "Tabbed", backwards: false, caret: 16, place: iirc, text: "/network remove " },
+      everywhere
+    );
+
+    const picked = reduceCompletion(
+      highlighted.state,
+      { _tag: "Picked", index, place: iirc, text: highlighted.edit?.text ?? "" },
+      everywhere
+    );
+
+    return { picked, steps: [typed, opening, highlighted, picked] };
+  };
+
+  /**
+   * What sending a Network picked from `/network remove`'s list asks for, beside what the
+   * palette's entry for it asks for, and what each step of completion gave.
+   * @param index - The Network's index in the list.
+   * @returns The steps' fields, and both asks.
+   */
+  const sent = (index: number) => {
+    const { picked, steps: all } = steps(index);
+    const network_ = everywhere.networks[index];
+
+    return {
+      // Listing, highlighting, and picking only put text in the draft.
+      fields: all.map((one) => Object.keys(one).toSorted()),
+      palette: network_ === undefined ? undefined : choose(networkEntry(network_), context, false),
+      sent: interpret(picked.edit?.text ?? "", context),
+    };
+  };
+
+  it("lists every Timeline on every Network after /go, open then closed, each with its Network and kind", () => {
+    expect(
+      opened("/go ").map((one) =>
+        one._tag === "Timeline" ? [one.name, one.network, one.kind] : one._tag
+      )
+    ).toStrictEqual([
+      ["libera", "libera", "Network"],
+      ["#iirc", "libera", "Channel"],
+      ["peer", "libera", "Direct"],
+      ["#closed", "libera", "Channel"],
+      ["oftc", "oftc", "Network"],
+      ["#iirc", "oftc", "Channel"],
+      ["#debian", "oftc", "Channel"],
+    ]);
+  });
+
+  it("writes for /go the name alone where it finds that Timeline from where the composer is, else its Network too", () => {
+    expect({
+      here: pickedIn("/go #ii", 0),
+      nowhere: opened("/go ", nowhere).map((one) => one.text),
+      there: opened("/go ").map((one) => one.text),
+    }).toStrictEqual({
+      here: "/go #iirc",
+      nowhere: ["libera", "libera #iirc", "peer", "#closed", "oftc", "oftc #iirc", "#debian"],
+      there: ["libera", "#iirc", "peer", "#closed", "oftc", "oftc #iirc", "#debian"],
+    });
+  });
+
+  it("sends from each /go candidate exactly the Timeline it lists, from a Timeline or from nowhere", () => {
+    const timelines = namedIn(bar).map((one) => [{ _tag: "Open", timeline: one.timeline }]);
+
+    const sent = (given: Sources, at: CommandContext) =>
+      timelines.map((_, index) => {
+        const read = interpret(pickedIn("/go ", index, given), at);
+
+        return read._tag === "Parsed" ? read.value : read.message;
+      });
+
+    expect({ here: sent(everywhere, context), nowhere: sent(nowhere, away) }).toStrictEqual({
+      here: timelines,
+      nowhere: timelines,
+    });
+  });
+
+  it("lists no /go candidate it cannot reach, as the second of two that share a name on one Network", () => {
+    const shared: Sources = {
+      ...everywhere,
+      timelines: namedIn([
+        networkOf(
+          network,
+          false,
+          [
+            timelineOf(1, network, "Network", "libera"),
+            timelineOf(2, network, "Channel", "#a[b"),
+            timelineOf(3, network, "Channel", "#a{b"),
+          ],
+          []
+        ),
+      ]),
+    };
+
+    expect(opened("/go #a", shared).map((one) => one.text)).toStrictEqual(["#a[b"]);
+  });
+
+  it("lists no theme after /theme import or /theme remove, which name no theme to draw", () => {
+    // An imported theme's description says "imported theme", which `import` would match.
+    const imported: Sources = {
+      ...everywhere,
+      themes: [
+        ...everywhere.themes,
+        { builtIn: false, name: Schema.decodeSync(ThemeName)("mine") },
+      ],
+    };
+
+    expect({
+      import: opened("/theme import", imported),
+      remove: opened("/theme remove imp", imported),
+      theme: opened("/theme imp", imported).map((one) => one.name),
+    }).toStrictEqual({ import: [], remove: [], theme: ["mine"] });
+  });
+
+  it("takes the whole rest of the line as the query, spaces collapsed, and a candidate replaces all of it", () => {
+    expect({
+      named: opened("/go oftc   #i").map((one) => one.text),
+      written: pickedIn("/go oftc  #deb", 0),
+    }).toStrictEqual({
+      // `#debian` holds an `i`, in order after `oftc #`.
+      named: ["oftc #iirc", "#debian"],
+      written: "/go #debian",
+    });
+  });
+
+  it("ranks as the palette ranks, so nothing the palette finds is harder to find here", () => {
+    const commandIds = new Map(commands.map((one) => [`/${one.name}`, one.id]));
+
+    fc.assert(
+      fc.property(
+        fc.string({
+          minLength: 1,
+          unit: fc.constantFrom("a", "e", "i", "m", "o", "s", "#", "-", "l", "r"),
+        }),
+        (query) => {
+          const palette = {
+            commands: sectionOf(query, "Commands").map((one) => one.key),
+            networks: sectionOf(query, "Networks").flatMap((one) =>
+              one._tag === "Network" ? [one.network] : []
+            ),
+            themes: sectionOf(query, "Themes").map((one) => one.name),
+            timelines: sectionOf(query, "Timelines").flatMap((one) =>
+              one._tag === "Timeline" ? [one.timeline] : []
+            ),
+          };
+
+          const listedHere = new Set(palette.commands);
+          const ids = namedIn(bar);
+
+          const here = {
+            commands: opened(`/${query}`)
+              .map((one) => `command:${commandIds.get(one.name) ?? ""}`)
+              .filter((key) => listedHere.has(key)),
+            networks: opened(`/network remove ${query}`).map((one) => one.name),
+            themes: opened(`/theme ${query}`).map((one) => one.name),
+            timelines: opened(`/go ${query}`).map(
+              (one) =>
+                ids.find(
+                  (named) =>
+                    one._tag === "Timeline" &&
+                    named.network === one.network &&
+                    named.name === one.name &&
+                    named.kind === one.kind
+                )?.timeline
+            ),
+          };
+
+          expect(here).toStrictEqual(palette);
+        }
+      )
+    );
+  });
+
+  it("shows the keys bound to a command beside it", () => {
+    const next = opened("/next").find((one) => one.name === "/next");
+
+    expect(next?._tag === "Command" ? next.chords : undefined).toStrictEqual(
+      chordsFor(defaultKeymap, "timeline.next")
+    );
+    expect(chordsFor(defaultKeymap, "timeline.next")).not.toHaveLength(0);
+  });
+
+  it("lists after a bare / what was run recently first, newest first, then the rest by name", () => {
+    const ran: Sources = {
+      ...sources,
+      ran: ["command:options.set", "timeline:x", "command:say.to", "command:no.such", "theme:dark"],
+    };
+
+    expect({
+      bare: opened("/", ran).map((one) => one.name),
+      query: opened("/m", ran).map((one) => one.name),
+    }).toStrictEqual({
+      bare: ["/set", "/msg", "/me", "/members"],
+      query: ["/me", "/msg", "/members"],
+    });
+  });
+
+  it("lists the themes after /theme, as the palette's themes, each built in or imported and whether it is in effect", () => {
+    const themed: Sources = {
+      ...everywhere,
+      chosen: { dark: "nord", light: "solarized-light", theme: "dark" },
+      themes: [
+        ...listedThemes([]).slice(0, 3),
+        { builtIn: false, name: Schema.decodeSync(ThemeName)("nord") },
+      ],
+    };
+
+    const shown = (text: string) =>
+      opened(text, themed).map((one) =>
+        one._tag === "Theme" ? [one.name, one.builtIn, one.current] : one._tag
+      );
+
+    expect({
+      dark: shown("/theme -dark "),
+      deviceLight: shown("/theme -device -LIGHT  li"),
+      theme: shown("/theme "),
+    }).toStrictEqual({
+      dark: [
+        ["dark", true, false],
+        ["light", true, false],
+        ["nord", false, true],
+      ],
+      deviceLight: [["light", true, false]],
+      theme: [
+        ["system", true, false],
+        ["dark", true, true],
+        ["light", true, false],
+        ["nord", false, false],
+      ],
+    });
+  });
+
+  it("writes a theme after any flags, which sends to set the option they say", () => {
+    const text = pickedIn("/theme -light  ", 1);
+
+    expect([text, interpret(text, context)]).toStrictEqual([
+      "/theme -light  light",
+      {
+        _tag: "Parsed",
+        value: [{ _tag: "UseTheme", device: false, name: "light", option: "light" }],
+      },
+    ]);
+  });
+
+  it("lists the fonts after /set ui.font, and a family typed by name, each with whether it is in effect", () => {
+    const fonts = opened("/set ui.font ");
+    const family = opened("/set -device ui.font Fira  Code");
+    const text = pickedIn("/set -device ui.font Fira  Code", 0);
+
+    expect({
+      current: fonts.flatMap((one) => (one._tag === "Font" && one.current ? [one.name] : [])),
+      family: family[0],
+      fonts: fonts.map((one) => one.name),
+      sent: interpret(text, context),
+      text,
+    }).toStrictEqual({
+      current: [uiDefaults.font],
+      family: { _tag: "Font", current: false, name: "Fira Code", text: "Fira Code" },
+      fonts: [...fontNames],
+      sent: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      },
+      text: "/set -device ui.font Fira Code",
+    });
+  });
+
+  it("draws a theme or a font only while it is highlighted, and the one in effect once the highlight moves on, the list closes, or the draft changes or is sent", () => {
+    const following = play("", [type("/theme ")], everywhere);
+    const first = play("", [type("/theme "), tab], everywhere);
+    const second = play("", [type("/theme "), tab, tab], everywhere);
+    const escaped = play("", [type("/theme "), tab, { _tag: "Escaped", place: iirc }], everywhere);
+    const sent = play("", [type("/theme "), tab, { _tag: "LetGo" }], everywhere);
+    const command = play("", [type("/the"), tab], everywhere);
+    const font = play("", [type("/set ui.font "), tab, tab], everywhere);
+
+    expect({
+      command: previewOf(command.state, iirc, command.text),
+      elsewhere: previewOf(first.state, peer, first.text),
+      escaped: previewOf(escaped.state, iirc, escaped.text),
+      first: previewOf(first.state, iirc, first.text),
+      following: previewOf(following.state, iirc, following.text),
+      font: previewOf(font.state, iirc, font.text),
+      second: previewOf(second.state, iirc, second.text),
+      sent: previewOf(sent.state, iirc, ""),
+      typed: previewOf(first.state, iirc, `${first.text}x`),
+    }).toStrictEqual({
+      command: undefined,
+      elsewhere: undefined,
+      escaped: undefined,
+      first: { _tag: "Theme", name: "system" },
+      following: undefined,
+      font: { _tag: "Font", font: fontNames[1] },
+      second: { _tag: "Theme", name: "dark" },
+      sent: undefined,
+      typed: undefined,
+    });
+  });
+
+  it("lists the Networks after /network remove, a removed one whose Timelines were kept too, and writes only the id", () => {
+    expect({
+      listed: opened("/network remove ").map((one) =>
+        one._tag === "Network" ? [one.name, one.removed, one.text] : one._tag
+      ),
+      narrowed: opened("/network remove oft").map((one) => one.name),
+    }).toStrictEqual({
+      listed: [
+        ["libera", false, "libera"],
+        ["oftc", true, "oftc"],
+      ],
+      narrowed: ["oftc"],
+    });
+  });
+
+  it("asks first, as the palette's entry does, only once /network remove <id> is sent, for a live Network and a removed one", () => {
+    const live = sent(0);
+    const removed = sent(1);
+
+    expect({
+      fields: [live.fields, removed.fields],
+      live: live.sent,
+      removed: removed.sent,
+      samePalette: [live.palette, removed.palette],
+    }).toStrictEqual({
+      fields: [
+        Array.from({ length: 4 }, () => ["edit", "state"]),
+        Array.from({ length: 4 }, () => ["edit", "state"]),
+      ],
+      live: {
+        _tag: "Parsed",
+        value: [{ _tag: "AskRemoval", keep: undefined, network: "libera" }],
+      },
+      removed: {
+        _tag: "Parsed",
+        value: [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
+      },
+      samePalette: [
+        [{ _tag: "AskRemoval", keep: undefined, network: "libera" }],
+        [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
+      ],
     });
   });
 });

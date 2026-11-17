@@ -18,7 +18,8 @@ import {
   sync,
   timelinesState,
 } from "../timelines/atoms.ts";
-import { composerState, confirmSend, draftsCarried, edit, send, takeUp } from "./atoms.ts";
+import { confirmSend, draftsCarried, edit, send, takeUp } from "./atoms.ts";
+import { composerState } from "./composer-state.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
 const idOf = (sequence: number) => `${hex(sequence, 14)}-00000000-00000000`;

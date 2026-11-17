@@ -4,7 +4,8 @@ import { draftOf } from "@iirc/frontend/composer";
 import { Effect, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { composerState, edit, send } from "../composer/atoms.ts";
+import { edit, send } from "../composer/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
 import { deviceUi } from "../options/device.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
 import {

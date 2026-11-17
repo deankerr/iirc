@@ -108,13 +108,14 @@
 
 /*
  * What it can complete, just above its line, as the palette lists: a candidate's name, and
- * what a command takes and does, dim, in columns down the list. The Panes give it room, so
+ * what it is, dim, in columns down the list: what a command takes and does and its keys,
+ * or what a Timeline, theme, font, or Network is. The Panes give it room, so
  * nothing in a Timeline is hidden behind it. It is bounded so the composer stays in view,
  * on a phone with its keyboard up too, and scrolls.
  */
 .list {
   display: grid;
-  grid-template-columns: fit-content(24ch) fit-content(28ch) minmax(0, 1fr);
+  grid-template-columns: fit-content(24ch) fit-content(28ch) minmax(0, 1fr) auto;
   align-content: start;
   max-height: min(calc(12 * var(--line-height) * 1em), 40dvh);
   padding: var(--space-1) 0;
@@ -141,19 +142,34 @@
 
 .candidate,
 .usage,
-.description {
+.description,
+.detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .usage,
-.description {
+.description,
+.detail,
+.keys {
   color: var(--color-muted);
 }
 
+/* What a Timeline, theme, font, or Network is takes the room a command's usage and description do. */
+.detail {
+  grid-column: 2 / 4;
+}
+
+.keys {
+  font: inherit;
+  white-space: nowrap;
+}
+
 .option[aria-selected="true"] .usage,
-.option[aria-selected="true"] .description {
+.option[aria-selected="true"] .description,
+.option[aria-selected="true"] .detail,
+.option[aria-selected="true"] .keys {
   color: inherit;
 }
 
@@ -164,10 +180,11 @@
   }
 
   .option {
-    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
   }
 
-  .description {
+  .description,
+  .detail {
     grid-column: 1 / -1;
   }
 }

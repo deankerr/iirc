@@ -1,7 +1,9 @@
 /**
  * Completion in the composer, as a reducer: the word at the caret, completed from what it
  * can be, a command after `/` at the start of a line, an option after `/set `, a Channel's
- * name, or a nick, listed above the composer. A draft that starts with a command opens the
+ * name, or a nick, or the whole argument of `/go`, `/theme`, `/set ui.font`, and
+ * `/network remove`, a Timeline, a theme, a font, or a Network, listed above the composer
+ * and ranked as the palette ranks them. A draft that starts with a command opens the
  * list as it is typed, and anything else opens it on Tab. Tab, Shift+Tab, and the arrows
  * move through it, writing the one highlighted into the draft, and Escape gives back what
  * was typed. A nick in a Channel comes from the Daemon's members route, which the runtime
@@ -10,16 +12,30 @@
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
-import { uiDefaults } from "@iirc/api/ui";
+import type { FontShown } from "@iirc/api/ui";
+import { themeCommandWords } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
-import { commands } from "./commands.ts";
-import type { Command } from "./commands.ts";
+import { commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
+import type { Command, NamedTimeline } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
+import type { Chord, Keymap } from "./keymap.ts";
 import { fields, optionName } from "./options.ts";
 import type { Option } from "./options.ts";
-import { resolve } from "./timelines.ts";
+import {
+  commandEntry,
+  familyNamed,
+  fontEntries,
+  matchedBy,
+  networkEntry,
+  themeEntries,
+  timelineEntry,
+} from "./palette.ts";
+import type { Entry } from "./palette.ts";
+import { queryOf, ranked } from "./ranking.ts";
+import type { ListedTheme, ThemeOption } from "./theme.ts";
+import { resolve, sidebar } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
 
 /** How many nicks the members route is asked for. */
@@ -30,12 +46,40 @@ export type Nicks =
   | { readonly _tag: "Members"; readonly timeline: TimelineId }
   | { readonly _tag: "Listed"; readonly nicks: readonly string[] };
 
+/** An option as completion lists it: its name, and what it is, which a query matches too. */
+export interface OptionListed {
+  readonly name: string;
+  readonly description: string;
+}
+
+/** A Network as `/network remove` lists it, and whether it was removed with its Timelines kept. */
+export interface NetworkListed {
+  readonly network: NetworkId;
+  readonly removed: boolean;
+}
+
 /** What a word can be completed from, for the composer at one place. */
 export interface Sources {
-  /** Every command's name and alias, without its `/`. */
-  readonly commands: readonly string[];
-  /** Every option's name. */
-  readonly options: readonly string[];
+  /** Every command, each listed once, by its name. */
+  readonly commands: readonly Command[];
+  /** The keymap, for the chords bound to a command. */
+  readonly keymap: Keymap;
+  /** The keys of what the palette remembers as chosen or run recently, newest first. */
+  readonly ran: readonly string[];
+  /** Every option. */
+  readonly options: readonly OptionListed[];
+  /** The Network the composer is on, if any, which `/go` names a Timeline from. */
+  readonly network: NetworkId | undefined;
+  /** Every Timeline by name, as `namedIn` lists them. */
+  readonly timelines: readonly NamedTimeline[];
+  /** Every Network, in the sidebar's order. */
+  readonly networks: readonly NetworkListed[];
+  /** Every theme. */
+  readonly themes: readonly ListedTheme[];
+  /** The theme each option that names one names on this device. */
+  readonly chosen: Readonly<Record<ThemeOption, string>>;
+  /** The font in effect on this device. */
+  readonly font: FontShown;
   /** The names of the Network's Channel Timelines, in code-unit order. */
   readonly channels: readonly string[];
   /**
@@ -64,9 +108,6 @@ export interface Spot {
   readonly word: string;
   readonly after: string;
 }
-
-/** What a list holds: commands, options, Channels' names, or nicks. */
-export type Listing = "Commands" | "Options" | "Channels" | "Nicks";
 
 /**
  * Where completion stands.
@@ -97,8 +138,7 @@ export type Phase =
       readonly _tag: "Listed";
       readonly place: Place;
       readonly spot: Spot;
-      readonly listing: Listing;
-      readonly candidates: readonly string[];
+      readonly candidates: readonly Candidate[];
       readonly index: number;
       readonly suffix: string;
       readonly shown: Shown;
@@ -240,11 +280,6 @@ const at = (state: Completion, place: Place, text: string) => {
     : undefined;
 };
 
-const asciiLower = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
-
-const startsAscii = (name: string, prefix: string) =>
-  asciiLower(name).startsWith(asciiLower(prefix));
-
 /**
  * A nick or Channel's name folded as RFC 1459 does, which is how a Frontend compares names
  * it only orders or offers, never routes.
@@ -334,10 +369,9 @@ const typedOf = (spot: Spot): Shown => ({
   text: `${spot.before}${spot.word}${spot.after}`,
 });
 
-/** Candidates for a word, what they are, and what follows each. */
+/** Candidates for a word, and what follows each. */
 interface Found {
-  readonly listing: Listing;
-  readonly candidates: readonly string[];
+  readonly candidates: readonly Candidate[];
   readonly suffix: string;
 }
 
@@ -368,8 +402,8 @@ const listing = (
     };
   }
 
-  const shown = placed(spot, candidates[index] ?? spot.word, suffix);
-  const phase: Phase = { _tag: "Listed", ...found, index, place, shown, spot };
+  const shown = placed(spot, candidates[index]?.text ?? spot.word, suffix);
+  const phase: Phase = { _tag: "Listed", candidates, index, place, shown, spot, suffix };
 
   return {
     edit: { ...shown, place },
@@ -377,65 +411,341 @@ const listing = (
   };
 };
 
-/** The commands whose argument completion lists as it is typed, and what it lists. */
-const arguments_: ReadonlyMap<string, Exclude<Listing, "Commands" | "Nicks">> = new Map([
-  ["set", "Options"],
-  ["join", "Channels"],
-  ["part", "Channels"],
+/** The commands whose first argument completion lists as it is typed, and what it lists. */
+const arguments_: ReadonlyMap<string, "Options" | "Channels"> = new Map([
+  ["options.set", "Options"],
+  ["channels.join", "Channels"],
+  ["channels.part", "Channels"],
 ]);
 
 /**
- * A command by its name or an alias, as typed after `/`, in any case.
- * @param typed - What was typed.
- * @returns The command, or none.
+ * What a command's whole argument is completed from: a Timeline after `/go`, a theme after
+ * `/theme` and any flags, to set the option they say, a font after `/set ui.font`, or a
+ * Network after `/network remove`.
  */
-const commandNamed = (typed: string): Command | undefined => {
-  const name = asciiLower(typed);
+type Whole =
+  | { readonly _tag: "Timelines" }
+  | { readonly _tag: "Themes"; readonly option: ThemeOption }
+  | { readonly _tag: "Fonts" }
+  | { readonly _tag: "Networks" };
 
-  return commands.find((one) => one.name === name || one.aliases.includes(name));
+/**
+ * Where a command whose whole argument is listed begins that argument, in a line typed up
+ * to the caret, and what it lists.
+ * @param line - The line, up to the caret.
+ * @returns Where its argument begins, and what it is completed from, or none.
+ */
+const wholeIn = (line: string): { readonly start: number; readonly whole: Whole } | undefined => {
+  const head = /^\/(?<name>\S+)\s+/u.exec(line);
+  const name = head?.groups?.name;
+  const command = name === undefined ? undefined : commandNamed(name);
+
+  if (head === null || command === undefined) {
+    return undefined;
+  }
+
+  const after = line.slice(head[0].length);
+
+  /**
+   * The argument after what the head is followed by, if that matched.
+   * @param more - What follows the command's name, matched, or `null`.
+   * @param whole - What the argument is completed from.
+   * @returns Where it begins, and what it is completed from, or none.
+   */
+  const past = (more: RegExpExecArray | null, whole: Whole) =>
+    more === null ? undefined : { start: head[0].length + more[0].length, whole };
+
+  switch (command.id) {
+    case "timeline.go": {
+      return { start: head[0].length, whole: { _tag: "Timelines" } };
+    }
+
+    case "network.manage": {
+      return past(/^remove\s+/u.exec(after), { _tag: "Networks" });
+    }
+
+    case "options.set": {
+      return past(/^(?:-device\s+)?ui\.font\s+/u.exec(after), { _tag: "Fonts" });
+    }
+
+    case "theme.set": {
+      const given = /^(?:(?:-device|-light|-dark)\s+)*/iu.exec(after)?.[0] ?? "";
+
+      const flags = themeFlags(
+        given
+          .toLowerCase()
+          .split(/\s+/u)
+          .filter((one) => one !== "")
+      );
+
+      // `import` and `remove` are verbs, not a theme to draw: neither is listed nor previewed.
+      const verb = /^\S*/u.exec(after.slice(given.length))?.[0].toLowerCase() ?? "";
+
+      return flags === undefined || themeCommandWords.some((word) => word === verb)
+        ? undefined
+        : { start: head[0].length + given.length, whole: { _tag: "Themes", option: flags.option } };
+    }
+
+    default: {
+      return undefined;
+    }
+  }
 };
 
 /**
- * What a word in a command's line is completed from, at hand: a command's name, as the
- * first word of a line, or the first argument of a command whose argument is listed, an
- * option after `/set`, or a Channel's name after `/join` or `/part`.
- * @param spot - The word.
- * @param sources - The sources.
- * @returns The candidates, or none where the word is no such thing.
+ * Entries in their own order with no query, or those a query matches, ranked as the
+ * palette ranks them.
+ * @param query - The query, as `queryOf` reads it.
+ * @param entries - The entries, in their own order.
+ * @returns The entries listed.
  */
-const inCommand = (spot: Spot, sources: Sources): Found | undefined => {
-  const { before, word } = spot;
-  const line = before.slice(before.lastIndexOf("\n") + 1);
+const rankedEntries = (query: string, entries: readonly Entry[]): readonly Entry[] =>
+  query === "" ? entries : ranked(query, entries, matchedBy).map((one) => one.item);
 
-  if (atLineStart(before) && word.startsWith("/") && !word.startsWith("//")) {
-    const typed = word.slice(1);
+/** What `/go` writes for a Timeline, or none for one it cannot reach. */
+type GoText = (timeline: NamedTimeline) => string | undefined;
 
-    const candidates = sources.commands
-      .filter((name) => startsAscii(name, typed))
-      .toSorted(byCodeUnits)
-      .map((name) => `/${name}`);
+/**
+ * What `/go` writes for each Timeline, as `timelineNamed` reads it back: its name where
+ * that finds it from the Network the composer is on, else its Network's id and its name,
+ * or none where neither does, as for the second of two that share a name on one Network.
+ * Every name is folded once, so the list takes time in proportion to the Timelines.
+ * @param sources - The sources.
+ * @returns What it writes for each.
+ */
+const goTexts = (sources: Sources): GoText => {
+  const byName = new Map<string, NamedTimeline[]>();
 
-    return { candidates, listing: "Commands", suffix: " " };
+  for (const one of sources.timelines) {
+    const key = fold(one.name);
+    const same = byName.get(key);
+
+    if (same === undefined) {
+      byName.set(key, [one]);
+    } else {
+      same.push(one);
+    }
   }
 
+  return (timeline) => {
+    const all = byName.get(fold(timeline.name)) ?? [];
+    const networks = new Set(all.map((one) => one.network));
+
+    const alone =
+      all.find((one) => one.network === sources.network) ??
+      (networks.size === 1 ? all[0] : undefined);
+
+    if (alone?.timeline === timeline.timeline) {
+      return timeline.name;
+    }
+
+    const onNetwork = all.find((one) => one.network === timeline.network);
+
+    return onNetwork?.timeline === timeline.timeline
+      ? `${timeline.network} ${timeline.name}`
+      : undefined;
+  };
+};
+
+/**
+ * An entry as a candidate in the list.
+ * @param entry - The entry.
+ * @param go - What `/go` writes for a Timeline, given wherever one can be listed.
+ * @returns The candidate, or none for one the list never shows, or a Timeline `/go` cannot reach.
+ */
+const candidateOfEntry = (entry: Entry, go?: GoText): Candidate | undefined => {
+  switch (entry._tag) {
+    case "Command": {
+      const name = `/${entry.name}`;
+      const space = entry.usage.indexOf(" ");
+
+      return {
+        _tag: "Command",
+        chords: entry.chords,
+        description: entry.description,
+        name,
+        takes: space === -1 ? "" : entry.usage.slice(space + 1),
+        text: name,
+      };
+    }
+
+    case "Timeline": {
+      const { kind, name, network, timeline } = entry;
+      const text = go?.({ kind, name, network, timeline });
+
+      return text === undefined ? undefined : { _tag: "Timeline", kind, name, network, text };
+    }
+
+    case "Network": {
+      return { _tag: "Network", name: entry.network, removed: entry.removed, text: entry.network };
+    }
+
+    case "Theme": {
+      const { builtIn, current, name } = entry;
+
+      return { _tag: "Theme", builtIn, current, name, text: name };
+    }
+
+    case "Font": {
+      return { _tag: "Font", current: entry.current, name: entry.name, text: entry.name };
+    }
+
+    case "Option": {
+      return undefined;
+    }
+
+    default: {
+      return entry satisfies never;
+    }
+  }
+};
+
+/**
+ * The candidates for a command's whole argument, as typed so far.
+ * @param whole - What it is completed from.
+ * @param typed - The argument, as typed.
+ * @param sources - The sources.
+ * @returns The candidates.
+ */
+const wholeCandidates = (whole: Whole, typed: string, sources: Sources): readonly Candidate[] => {
+  const query = queryOf(typed);
+
+  const entries = (): readonly Entry[] => {
+    switch (whole._tag) {
+      case "Timelines": {
+        return sources.timelines.map(timelineEntry);
+      }
+
+      case "Networks": {
+        return sources.networks.map(networkEntry);
+      }
+
+      case "Themes": {
+        return themeEntries(sources.themes, sources.chosen, whole.option);
+      }
+
+      case "Fonts": {
+        return fontEntries(familyNamed(typed.trim().replaceAll(/\s+/gu, " ")), sources.font);
+      }
+
+      default: {
+        return whole satisfies never;
+      }
+    }
+  };
+
+  // Only Timelines are written by name, so only their list folds every name.
+  const go = whole._tag === "Timelines" ? goTexts(sources) : undefined;
+
+  return rankedEntries(query, entries()).flatMap((entry) => candidateOfEntry(entry, go) ?? []);
+};
+
+/**
+ * The commands, once each by name: with nothing typed, those run recently first, newest
+ * first, then the rest by name, and with a query, those it matches, ranked, those that
+ * match as well in the registry's order, as in the palette.
+ * @param typed - What was typed after `/`.
+ * @param sources - The sources.
+ * @returns The candidates.
+ */
+const commandCandidates = (typed: string, sources: Sources): readonly Candidate[] => {
+  const query = queryOf(typed);
+  const all = sources.commands.map((one) => commandEntry(one, sources.keymap));
+
+  const unranked = () => {
+    const byName = all.toSorted((left, right) => byCodeUnits(left.name, right.name));
+    const keyed = new Map(byName.map((one) => [one.key, one] as const));
+    const recently = sources.ran.flatMap((key) => keyed.get(key) ?? []);
+    const shown = new Set(recently.map((one) => one.key));
+
+    return [...recently, ...byName.filter((one) => !shown.has(one.key))];
+  };
+
+  const entries = query === "" ? unranked() : rankedEntries(query, all);
+
+  return entries.flatMap((entry) => candidateOfEntry(entry) ?? []);
+};
+
+/**
+ * A word as a candidate: a Channel's name, a nick, or an option's name.
+ * @param name - The word.
+ * @returns The candidate.
+ */
+const asWord = (name: string): Candidate => ({ _tag: "Word", name, text: name });
+
+/**
+ * The options a query matches, ranked as the palette ranks them, or all, by name.
+ * @param typed - What was typed.
+ * @param sources - The sources.
+ * @returns The candidates.
+ */
+const optionCandidates = (typed: string, sources: Sources): readonly Candidate[] => {
+  const query = queryOf(typed);
+
+  const listed =
+    query === ""
+      ? sources.options
+      : ranked(query, sources.options, (one) => ({
+          description: one.description,
+          names: [one.name],
+        })).map((one) => one.item);
+
+  return listed.map((one) => asWord(one.name));
+};
+
+/** A word, its candidates, and what follows each. */
+interface Listed {
+  readonly spot: Spot;
+  readonly found: Found;
+}
+
+/**
+ * What a word in a command's line is completed from, at hand: a command's name, as the
+ * first word of a line; the whole argument of `/go`, `/theme`, `/set ui.font`, or
+ * `/network remove`; or the first argument of a command whose argument is listed, an
+ * option after `/set`, or a Channel's name after `/join` or `/part`.
+ * @param text - The text.
+ * @param caret - Where the caret is.
+ * @param sources - The sources.
+ * @returns The word and its candidates, or none where the word is no such thing.
+ */
+const inCommand = (text: string, caret: number, sources: Sources): Listed | undefined => {
+  const spot = spotAt(text, caret);
+  const { before, word: typed } = spot;
+  const lineStart = text.lastIndexOf("\n", caret - 1) + 1;
+  const whole = wholeIn(text.slice(lineStart, caret));
+
+  if (whole !== undefined) {
+    const start = lineStart + whole.start;
+    const argument = text.slice(start, caret);
+
+    return {
+      found: { candidates: wholeCandidates(whole.whole, argument, sources), suffix: "" },
+      spot: { after: text.slice(caret), before: text.slice(0, start), word: argument },
+    };
+  }
+
+  if (atLineStart(before) && typed.startsWith("/") && !typed.startsWith("//")) {
+    return { found: { candidates: commandCandidates(typed.slice(1), sources), suffix: " " }, spot };
+  }
+
+  const line = before.slice(before.lastIndexOf("\n") + 1);
   const head = /^\/(?<name>\S+) +$/u.exec(line)?.groups?.name;
   const command = head === undefined ? undefined : commandNamed(head);
-  const listing = command === undefined ? undefined : arguments_.get(command.name);
+  const listing = command === undefined ? undefined : arguments_.get(command.id);
 
   switch (listing) {
     case "Options": {
-      return {
-        candidates: sources.options.filter((name) => startsAscii(name, word)),
-        listing,
-        suffix: " ",
-      };
+      return { found: { candidates: optionCandidates(typed, sources), suffix: " " }, spot };
     }
 
     case "Channels": {
       return {
-        candidates: sources.channels.filter((name) => startsFolded(name, word)),
-        listing,
-        suffix: " ",
+        found: {
+          candidates: sources.channels.filter((name) => startsFolded(name, typed)).map(asWord),
+          suffix: " ",
+        },
+        spot,
       };
     }
 
@@ -457,15 +767,10 @@ const inCommand = (spot: Spot, sources: Sources): Found | undefined => {
  * @param sources - The sources.
  * @returns The word and its candidates, or none for a draft that lists nothing.
  */
-const followed = (
-  shown: Shown,
-  sources: Sources
-): { readonly spot: Spot; readonly found: Found } | undefined => {
-  const spot = spotAt(shown.text, shown.caret);
-  const found = spot.before.includes("\n") ? undefined : inCommand(spot, sources);
-
-  return found === undefined ? undefined : { found, spot };
-};
+const followed = (shown: Shown, sources: Sources): Listed | undefined =>
+  shown.text.slice(0, shown.caret).includes("\n")
+    ? undefined
+    : inCommand(shown.text, shown.caret, sources);
 
 /**
  * A draft typed: one that lists something as it is typed is followed, and anything else
@@ -518,22 +823,16 @@ const begin = (
   }
 
   const first = (count: number) => (backwards ? count - 1 : 0);
-  const found = inCommand(spot, sources);
+  const listed = inCommand(text, caret, sources);
 
-  if (found !== undefined) {
-    return listing(state, place, spot, found, first(found.candidates.length));
+  if (listed !== undefined) {
+    return listing(state, place, listed.spot, listed.found, first(listed.found.candidates.length));
   }
 
   if ((sources.chantypes ?? rfc2811Chantypes).includes(word[0] ?? " ")) {
-    const candidates = sources.channels.filter((name) => startsFolded(name, word));
+    const candidates = sources.channels.filter((name) => startsFolded(name, word)).map(asWord);
 
-    return listing(
-      state,
-      place,
-      spot,
-      { candidates, listing: "Channels", suffix: " " },
-      first(candidates.length)
-    );
+    return listing(state, place, spot, { candidates, suffix: " " }, first(candidates.length));
   }
 
   const lineStart = atLineStart(before);
@@ -571,7 +870,7 @@ const begin = (
     state,
     place,
     spot,
-    { candidates: nicks, listing: "Nicks", suffix },
+    { candidates: nicks.map(asWord), suffix },
     first(nicks.length)
   );
 };
@@ -588,7 +887,7 @@ const highlight = (
   phase: Extract<Phase, { readonly _tag: "Listed" }>,
   index: number
 ): Completed => {
-  const next = placed(phase.spot, phase.candidates[index] ?? phase.spot.word, phase.suffix);
+  const next = placed(phase.spot, phase.candidates[index]?.text ?? phase.spot.word, phase.suffix);
 
   return {
     edit: { ...next, place: phase.place },
@@ -769,7 +1068,7 @@ export const reduceCompletion = (
         state,
         phase.place,
         phase.spot,
-        { candidates: nicks, listing: "Nicks", suffix },
+        { candidates: nicks.map(asWord), suffix },
         phase.backwards ? nicks.length - 1 : 0
       );
     }
@@ -832,48 +1131,62 @@ export const nicksWanted = (
     : undefined;
 
 /**
- * One candidate as the list shows it: a command, with what its usage says it takes after
- * its name and what it does, or a word.
+ * One candidate as the list shows it, with the `text` it writes into the draft, in place of
+ * the word or the whole argument, and `name`, what it shows.
+ *
+ * - `Command`: a command, by its name with its `/`, with what its usage says it takes after
+ *   its name, what it does, and the chords bound to it.
+ * - `Timeline`: a Timeline after `/go`, by its name, with its Network and its kind.
+ * - `Theme`: a theme after `/theme`, whether it is built in or imported, and whether it is
+ *   the one the option it sets names on this device.
+ * - `Font`: a font after `/set ui.font`, or a family typed by name, and whether it is the one
+ *   in effect on this device.
+ * - `Network`: a Network after `/network remove`, by its id, and whether it was removed with
+ *   its Timelines kept.
+ * - `Word`: an option's name, a Channel's name, or a nick.
  */
 export type Candidate =
   | {
       readonly _tag: "Command";
       readonly name: string;
+      readonly text: string;
       readonly takes: string;
       readonly description: string;
+      readonly chords: readonly Chord[];
     }
-  | { readonly _tag: "Word"; readonly name: string };
+  | {
+      readonly _tag: "Timeline";
+      readonly name: string;
+      readonly text: string;
+      readonly network: NetworkId;
+      readonly kind: "Network" | "Channel" | "Direct";
+    }
+  | {
+      readonly _tag: "Theme";
+      readonly name: string;
+      readonly text: string;
+      readonly builtIn: boolean;
+      readonly current: boolean;
+    }
+  | {
+      readonly _tag: "Font";
+      readonly name: FontShown;
+      readonly text: string;
+      readonly current: boolean;
+    }
+  | {
+      readonly _tag: "Network";
+      readonly name: NetworkId;
+      readonly text: string;
+      readonly removed: boolean;
+    }
+  | { readonly _tag: "Word"; readonly name: string; readonly text: string };
 
 /** The list shown above a composer, and which candidate, if any, is highlighted. */
 export interface List {
   readonly candidates: readonly Candidate[];
   readonly highlighted: number | undefined;
 }
-
-/**
- * What a command's usage says it takes after its name, which the usage begins with.
- * @param command - The command.
- * @returns What it takes, or nothing.
- */
-const takesOf = (command: Command) => {
-  const space = command.usage.indexOf(" ");
-
-  return space === -1 ? "" : command.usage.slice(space + 1);
-};
-
-/**
- * A candidate as the list shows it.
- * @param listing - What the list holds.
- * @param name - The candidate.
- * @returns It, a command with what it takes and its description.
- */
-const candidateOf = (listing: Listing, name: string): Candidate => {
-  const command = listing === "Commands" ? commandNamed(name.slice(1)) : undefined;
-
-  return command === undefined
-    ? { _tag: "Word", name }
-    : { _tag: "Command", description: command.description, name, takes: takesOf(command) };
-};
 
 /**
  * The list shown above a composer, while one is open there for what it shows: as the draft
@@ -894,20 +1207,56 @@ export const listOf = (
   const phase = at(state, place, text);
 
   if (phase?._tag === "Listed") {
-    return {
-      candidates: phase.candidates.map((name) => candidateOf(phase.listing, name)),
-      highlighted: phase.index,
-    };
+    return { candidates: phase.candidates, highlighted: phase.index };
   }
 
   const found = phase?._tag === "Following" ? followed(phase.shown, sources)?.found : undefined;
 
   return found === undefined || found.candidates.length === 0
     ? undefined
-    : {
-        candidates: found.candidates.map((name) => candidateOf(found.listing, name)),
-        highlighted: undefined,
-      };
+    : { candidates: found.candidates, highlighted: undefined };
+};
+
+/** A theme or a font drawn while the list highlights it, in place of the one in effect. */
+export type Preview =
+  | { readonly _tag: "Theme"; readonly name: string }
+  | { readonly _tag: "Font"; readonly font: FontShown };
+
+/**
+ * The theme or font a composer's list draws while it highlights one: only while the list
+ * is held with it highlighted, and the composer still shows what completion left, so the
+ * one in effect comes back once the highlight moves on, the list closes, or the draft
+ * changes or is sent.
+ * @param state - The state.
+ * @param place - The composer's place.
+ * @param text - What the composer shows.
+ * @returns What is drawn in place of the one in effect, or none.
+ */
+export const previewOf = (state: Completion, place: Place, text: string): Preview | undefined => {
+  const phase = at(state, place, text);
+  const candidate = phase?._tag === "Listed" ? phase.candidates[phase.index] : undefined;
+
+  switch (candidate?._tag) {
+    case "Theme": {
+      return { _tag: "Theme", name: candidate.name };
+    }
+
+    case "Font": {
+      return { _tag: "Font", font: candidate.name };
+    }
+
+    case "Command":
+    case "Timeline":
+    case "Network":
+    case "Word":
+    case undefined: {
+      return undefined;
+    }
+
+    default: {
+      return candidate satisfies never;
+    }
+  }
 };
 
 /**
@@ -964,39 +1313,44 @@ export const announced = (
 };
 
 /**
- * Every option's name: those of every Configuration read, and each field of every Network,
- * as the Schema has them, so options complete before any Configuration is read.
+ * Every option: those of every Configuration read, and each field of every Network, as the
+ * Schema has them, so options complete before any Configuration is read.
  * @param networks - The Networks.
  * @param options - The options read.
- * @returns The names, in order, each once.
+ * @returns The options, by name, each once.
  */
-export const optionNames = (
+export const optionsListed = (
   networks: readonly NetworkId[],
   options: readonly Option[]
-): readonly string[] => {
-  const names = new Set(options.map((option) => option.name));
+): readonly OptionListed[] => {
+  const listed = new Map<string, string>(
+    options.map((option) => [option.name, option.description])
+  );
+
+  const add = (name: string, description: string) => {
+    if (!listed.has(name)) {
+      listed.set(name, description);
+    }
+  };
 
   for (const network of networks) {
     for (const field of fields) {
-      names.add(optionName(network, [field.key]));
+      add(optionName(network, [field.key]), field.description);
 
       if (field.kind._tag === "Tagged") {
         for (const member of field.kind.members) {
           for (const inner of member.fields) {
-            names.add(optionName(network, [field.key, inner.key]));
+            add(optionName(network, [field.key, inner.key]), inner.description);
           }
         }
       }
     }
   }
 
-  return [...names].toSorted(byCodeUnits);
+  return [...listed]
+    .map(([name, description]) => ({ description, name }))
+    .toSorted((left, right) => byCodeUnits(left.name, right.name));
 };
-
-/** Every command's name and alias, once each. */
-const commandNames: readonly string[] = [
-  ...new Set(commands.flatMap((command) => [command.name, ...command.aliases])),
-];
 
 /**
  * A Network's `CHANTYPES` as read from `known` during a Session, which began at `since`.
@@ -1055,31 +1409,49 @@ const chantypesNow = (
 };
 
 /**
- * What a word typed at a place can be completed from: the commands, the options, the
- * Network's Channels, and the nicks there, the open Channel's members, a Direct Message's
- * partner, or none in the Network's own Timeline, with those who spoke there, latest first.
- * A Network's `CHANTYPES` is taken only as read during the Session it is in now, so one
- * read before a reconnect is never taken for the Ircd's now.
+ * What completion lists from beyond the Timelines, as a Frontend holds it: the options
+ * read, each Network's `CHANTYPES`, `ui.suffix` in effect, the keymap, the keys the palette
+ * remembers as chosen or run recently, every theme, the one each theme option names on this
+ * device, and the font in effect on it, as the palette's `Listing` has them.
+ */
+export interface Held {
+  readonly options: readonly Option[];
+  readonly chantypes: ReadonlyMap<NetworkId, Chantypes>;
+  readonly suffix: string;
+  readonly keymap: Keymap;
+  readonly ran: readonly string[];
+  readonly themes: readonly ListedTheme[];
+  readonly chosen: Readonly<Record<ThemeOption, string>>;
+  readonly font: FontShown;
+}
+
+/**
+ * What a word typed at a place can be completed from: every command, the options, every
+ * Timeline and Network, the themes and fonts, the Network's Channels, and the nicks there,
+ * the open Channel's members, a Direct Message's partner, or none in the Network's own
+ * Timeline, with those who spoke there, latest first. A Network's `CHANTYPES` is taken only
+ * as read during the Session it is in now, so one read before a reconnect is never taken
+ * for the Ircd's now.
  * @param state - The Timelines.
  * @param place - The composer's place.
- * @param options - The options read.
- * @param chantypes - Each Network's `CHANTYPES`, as read.
- * @param suffix - What follows a nick completed at the start of a line, `ui.suffix` in effect.
+ * @param held - What completion lists from beyond the Timelines.
  * @returns The sources.
  */
-export const sourcesOf = (
-  state: Timelines,
-  place: Place,
-  options: readonly Option[],
-  chantypes: ReadonlyMap<NetworkId, Chantypes> = new Map(),
-  suffix: string = uiDefaults.suffix
-): Sources => {
-  const networks = [...state.networks.keys()];
+export const sourcesOf = (state: Timelines, place: Place, held: Held): Sources => {
+  const ids = [...state.networks.keys()];
+  const networks = sidebar(state);
 
   const at = {
-    commands: commandNames,
-    options: optionNames(networks, options),
-    suffix,
+    chosen: held.chosen,
+    commands,
+    font: held.font,
+    keymap: held.keymap,
+    networks: networks.map((one) => ({ network: one.network, removed: one.removed })),
+    options: optionsListed(ids, held.options),
+    ran: held.ran,
+    suffix: held.suffix,
+    themes: held.themes,
+    timelines: namedIn(networks),
   };
 
   if (!isTimelinePlace(place)) {
@@ -1087,6 +1459,7 @@ export const sourcesOf = (
       ...at,
       channels: [],
       chantypes: undefined,
+      network: ids.find((id) => place.startsWith(`draft ${id} `)),
       nicks: { _tag: "Listed", nicks: [] },
       recent: [],
       self: undefined,
@@ -1125,5 +1498,13 @@ export const sourcesOf = (
     nicks = { _tag: "Listed", nicks: [listed.name] };
   }
 
-  return { ...at, channels, chantypes: chantypesNow(network, chantypes), nicks, recent, self };
+  return {
+    ...at,
+    channels,
+    chantypes: chantypesNow(network, held.chantypes),
+    network: network?.network,
+    nicks,
+    recent,
+    self,
+  };
 };

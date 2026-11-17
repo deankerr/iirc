@@ -95,7 +95,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, and what is unread.
+The one registry of commands, `commands`, as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, and what is unread.
 
 | For | Commands |
 | --- | --- |
@@ -104,7 +104,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Lookups | `/whois`, `/whowas`, `/bans`, `/exceptions`, `/invexes` |
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
-| Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/palette`, `/focus` |
+| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
@@ -120,6 +120,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
+- **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the composer's, is refused, naming the Networks. Of two that share a name on one Network, it takes the first, so the list leaves out the other.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
 - **A new command is one entry.** The palette and the keymap add no actions of their own.
 
@@ -154,8 +155,8 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, those closed after the rest, every Network, to remove it or drop what it kept, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
 
-- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
-- **With no query, recent choices come first,** at most 20.
+- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`. The composer's list ranks with the same scorer and the same entries, so each finds what the other does.
+- **With no query, recent choices come first,** at most 20. A command run from the composer is remembered among them, by the `Ran` event, with the keys `submit` gives.
 - **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Network asks to remove it, as `/network remove` does. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, or, listed by `/theme -light` or `-dark`, set as `ui.light` or `ui.dark`, and a bundled font is drawn in on every device too, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
@@ -165,6 +166,7 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 
 - **Each Timeline has its own draft and its own history,** at most 100 lines, which Up and Down go through.
 - **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
+- **What was sent says which commands it ran,** as `ran`, the palette's keys, so the palette remembers them. Plain text runs none.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
 - **A draft can answer one Message,** which `replyOf` offers only for a Message with an id a `+reply` tag can carry, on a Network whose Session carries tags. The draft holds it, with the Message as it was, through edits and turning away, until it is dropped or sent, and only the first Say to its Timeline answers it, so a reply of several lines is tagged on its first.
 - **A refusal is said in words under the composer it came from,** and nothing after it is sent.
@@ -312,10 +314,15 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 
 What the composer can complete, as a reducer, and the list it shows above the composer, `listOf`. It completes the word that ends at the caret, moves through the candidates, and gives back what was typed on Escape.
 
-- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, or a Channel after `/join` or `/part`. Only the first line opens it, and `//` never does. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
+- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, a Channel after `/join` or `/part`, or what the palette lists after `/go`, `/theme`, `/set ui.font`, and `/network remove`. Only the first line opens it, and `//` never does. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
 - **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after `/join `, `/part `, or a `CHANTYPES` character, and otherwise a nick.
+- **What the palette lists is ranked as the palette ranks it:** commands, options, and the whole argument of `/go`, a Timeline on any Network, `/theme`, after any flags, a theme, `/set ui.font`, a font or a family typed by name, and `/network remove`, a Network, a removed one whose Timelines were kept too. That argument is the rest of the line, its spaces collapsed, and a candidate replaces all of it. Channels and nicks are matched by their start.
+- **A bare `/` lists every command once, by name,** those run recently first, newest first. An alias still finds its command.
+- **`/go` writes a name alone where it finds that Timeline from the composer's Network,** and the Network's id before it where it would not.
+- **Picking from the list only writes the draft.** Only sending it asks for anything, so `/network remove` asks first, as the palette does.
+- **A theme or font highlighted is drawn while it is,** as `previewOf` says, and the one in effect comes back as the highlight moves on, the list closes, or the draft changes or is sent.
 - **Nothing is highlighted while the list only follows what is typed,** and that list is derived from the draft and the sources as they are now. Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent, and the list then holds its order while it is moved through.
-- **A command is listed with what its usage says it takes and what it does.**
+- **A command is listed with what its usage says it takes, what it does, and the chords bound to it.** A Timeline is listed with its Network and its kind, a theme with whether it is built in and in effect, a font with whether it is in effect, and a Network with whether it was removed.
 - **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, never by a Timeline's name.
 - **A nick is asked of the Daemon's members route, not guessed,** and only on Tab. An answer is put in only if the composer still holds the exact text it was asked for.
 - **Who spoke latest comes first,** and Self last.

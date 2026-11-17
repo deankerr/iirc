@@ -14,9 +14,11 @@ import { channelSync } from "../channel/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake-daemon.ts";
+import { drawnTheme, watchTheme } from "../theme/atoms.ts";
 import { open, sync } from "../timelines/atoms.ts";
-import { composerState } from "./atoms.ts";
+import { placeOf } from "./atoms.ts";
 import { completer } from "./completion.ts";
+import { composerState } from "./composer-state.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -33,7 +35,8 @@ const iirc = idOf(2);
 const listed = (
   id: string,
   name: string,
-  kind: "Network" | "Channel"
+  kind: "Network" | "Channel",
+  network = "libera"
 ): typeof Timeline.Encoded => ({
   changed: 1,
   closed: false,
@@ -45,7 +48,7 @@ const listed = (
   latest: null,
   life: 1,
   name,
-  network: "libera",
+  network,
   read: null,
   removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
@@ -621,7 +624,8 @@ describe("the Composer's list", () => {
         active: true,
         controls: true,
         highlighted: -1,
-        names: ["/join"],
+        // `/invexes` is found as the palette finds it: its description says "join".
+        names: ["/join", "/invexes"],
         texts: undefined,
       },
     });
@@ -752,7 +756,7 @@ describe("the Composer's list", () => {
       escape: false,
       escaped: "/jo",
       moved: { controls: null, list: undefined },
-      open: ["/join"],
+      open: ["/join", "/invexes"],
       recalled: "said before",
     });
   });
@@ -778,5 +782,246 @@ describe("the Composer's list", () => {
       kept: down.defaultPrevented,
       value: composerOf(container).value,
     }).toStrictEqual({ focused: true, kept: true, value: `/set ${name ?? ""} ` });
+  });
+});
+
+const oftc = idOf(10);
+const oftcHelp = idOf(11);
+const old = idOf(12);
+
+/**
+ * Another live Network, `oftc`, with a Channel, and one, `old`, removed with its Timelines
+ * kept, which the Daemon reads as kept.
+ * @param daemon - The fake Daemon.
+ */
+const withOtherNetworks = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
+  daemon.timelines.set("oftc", [
+    { gaps: [], items: [], timeline: listed(oftc, "oftc", "Network", "oftc") },
+    { gaps: [], items: [], timeline: listed(oftcHelp, "#help", "Channel", "oftc") },
+  ]);
+  daemon.timelines.set("old", [
+    {
+      gaps: [],
+      items: [],
+      timeline: { ...listed(old, "old", "Network", "old"), removed: true },
+    },
+  ]);
+  daemon.kept.add("old");
+};
+
+/**
+ * The text of each candidate in the list, one per option.
+ * @param container - The page.
+ * @returns The texts, none while the list is closed.
+ */
+const textsOf = (container: HTMLElement) => listIn(container).texts ?? [];
+
+/**
+ * The font the page draws its text in, as the root's custom property has it.
+ * @returns The font stack.
+ */
+const font = () => document.documentElement.style.getPropertyValue("--font-text");
+
+const alertdialog = () => document.querySelector('[role="alertdialog"]');
+
+describe("the Composer's list of everything the palette lists", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("lists the Timelines of both Networks after /go with their Network and kind, and picking one then Enter opens it in the focused Pane", async () => {
+    const { container, registry } = await signedIn({}, withOtherNetworks);
+
+    await typeIn(container, "/go ");
+    const listedAll = textsOf(container);
+
+    await typeIn(container, "/go hel");
+    await pressIn(container, "ArrowDown");
+    const picked = composerOf(container).value;
+
+    await pressIn(container, "Enter");
+    await settled(() => placeOf(registry) === oftcHelp);
+
+    expect({ listedAll, opened: placeOf(registry), picked }).toStrictEqual({
+      listedAll: [
+        "liberaNetwork on libera",
+        "#iircChannel on libera",
+        "oftcNetwork on oftc",
+        "#helpChannel on oftc",
+        "oldNetwork on old",
+      ],
+      opened: oftcHelp,
+      picked: "/go #help",
+    });
+  });
+
+  it("lists the themes after /theme, draws the one highlighted, and gives the one in effect back on Escape, and when the draft is typed over", async () => {
+    const { container, registry } = await signedIn();
+    const stop = watchTheme(registry);
+
+    mounted.push(stop);
+
+    const background = () => registry.get(drawnTheme).tokens.background;
+    const inEffect = background();
+
+    await typeIn(container, "/theme ");
+    const names = listIn(container).names ?? [];
+    const row = textsOf(container);
+
+    await typeIn(container, "/theme nord");
+    await pressIn(container, "ArrowDown");
+    const first = composerOf(container).value;
+    const drawn = background();
+
+    await pressIn(container, "Escape");
+    const escaped = background();
+
+    await typeIn(container, "/theme drac");
+    await pressIn(container, "ArrowDown");
+    const second = background();
+
+    await typeIn(container, "hello");
+    const typedOver = background();
+
+    expect({
+      differs: [drawn !== inEffect, second !== drawn],
+      escaped: escaped === inEffect,
+      first,
+      listsBuiltIn: [names.includes("dark"), names.includes("nord")],
+      row: row.find((one) => one.startsWith("dark")),
+      typedOver: typedOver === inEffect,
+    }).toStrictEqual({
+      differs: [true, true],
+      escaped: true,
+      first: "/theme nord",
+      listsBuiltIn: [true, true],
+      row: "darkbuilt-in theme",
+      typedOver: true,
+    });
+  });
+
+  it("lists the fonts after /set ui.font and a family typed by name, and draws the one highlighted until the list closes", async () => {
+    const { container, registry } = await signedIn();
+    const stop = watchTheme(registry);
+
+    mounted.push(stop);
+
+    const inEffect = font();
+
+    await typeIn(container, "/set ui.font ");
+    const names = listIn(container).names ?? [];
+    const row = textsOf(container);
+
+    await typeIn(container, "/set ui.font Fira Code");
+    await pressIn(container, "ArrowDown");
+    const typed = [composerOf(container).value, font().includes("Fira Code")];
+
+    await pressIn(container, "Escape");
+    const escaped = font();
+
+    expect({
+      escaped: escaped === inEffect,
+      names,
+      row: row.find((one) => one.includes("in effect")),
+      typed,
+    }).toStrictEqual({
+      escaped: true,
+      names: [
+        "system",
+        "jetbrains-mono",
+        "ibm-plex-mono",
+        "source-code-pro",
+        "commit-mono",
+        "atkinson-hyperlegible-mono",
+        "system-sans",
+        "ibm-plex-sans",
+        "atkinson-hyperlegible-next",
+        "source-sans-3",
+        "inter",
+      ],
+      row: "systemfont: the device's own monospace font, in effect",
+      typed: ["/set ui.font Fira Code", true],
+    });
+  });
+
+  it("lists the Networks after /network remove, a removed one too, and only Enter asks, never highlighting or picking one", async () => {
+    const { container, daemon } = await signedIn({}, withOtherNetworks);
+
+    await typeIn(container, "/network remove ");
+    const listedAll = textsOf(container);
+
+    await pressIn(container, "ArrowDown");
+    await pressIn(container, "ArrowDown");
+    const highlighted = [composerOf(container).value, alertdialog() === null];
+
+    const [option] = container.querySelectorAll<HTMLElement>('[role="option"]');
+
+    await act(async () => {
+      option?.click();
+      await Promise.resolve();
+    });
+    const picked = [composerOf(container).value, alertdialog() === null];
+
+    await pressIn(container, "Enter");
+    await settled(() => alertdialog() !== null);
+
+    expect({
+      acts: daemon.acts,
+      asked: alertdialog()?.querySelector("h2")?.textContent,
+      highlighted,
+      listedAll,
+      picked,
+      removals: daemon.removals,
+    }).toStrictEqual({
+      acts: [],
+      asked: "Remove libera?",
+      highlighted: ["/network remove oftc", true],
+      listedAll: [
+        "liberanetwork: remove it, asking first whether its Timelines stay readable",
+        "oftcnetwork: remove it, asking first whether its Timelines stay readable",
+        "oldnetwork: drop the Timelines kept since it was removed, which frees its name",
+      ],
+      picked: ["/network remove libera", true],
+      removals: [],
+    });
+  });
+
+  it("shows the keys bound to a command in the list", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "/sidebar");
+    const sidebar = textsOf(container);
+
+    await typeIn(container, "/join");
+    const join = textsOf(container);
+
+    expect({
+      join: join[0]?.endsWith("Alt+N"),
+      sidebar: sidebar[0]?.endsWith("Alt+N"),
+    }).toStrictEqual({
+      join: false,
+      sidebar: true,
+    });
+  });
+
+  it("lists what was run recently first after a bare /, once it is run from the Composer", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "/");
+    const before = listIn(container).names?.slice(0, 3);
+
+    await typeIn(container, "/me waves");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    await typeIn(container, "/");
+    const after = listIn(container).names?.slice(0, 3);
+
+    expect({ after, before }).toStrictEqual({
+      after: ["/me", "/away", "/back"],
+      before: ["/away", "/back", "/ban"],
+    });
   });
 });
