@@ -1,5 +1,6 @@
 /**
- * The Frontend: which screen shows follows from whether the browser is signed in.
+ * The Frontend: which screen shows follows from whether the browser is signed in, and
+ * once it is, from whether the shared options under `ui` are read.
  *
  * @packageDocumentation
  */
@@ -7,6 +8,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
+import { uiKnown } from "../options/ui.ts";
 import { check, signInState } from "../sign-in/atoms.ts";
 import { SignInScreen } from "../sign-in/sign-in-screen.tsx";
 import { Button } from "../ui/button.tsx";
@@ -47,11 +49,15 @@ const Checking = ({ check: attempt }: { readonly check: Attempt }) => {
 };
 
 /**
- * The screen for the sign-in state.
+ * The screen for the sign-in state. Signed in, the shell waits for the shared options under
+ * `ui`, so it never draws first in a theme, font, or format the Owner has overridden. They
+ * are read on every load and again after each sign-in, since signing out forgets them.
  * @returns The screen.
  */
 export const App = () => {
   const state = useAtomValue(signInState);
+  // Read whatever the state, so the options are followed, and forgotten on signing out.
+  const known = useAtomValue(uiKnown);
 
   switch (state._tag) {
     case "Unknown": {
@@ -63,7 +69,13 @@ export const App = () => {
     }
 
     case "SignedIn": {
-      return <Shell signOut={state.signOut} />;
+      return known ? (
+        <Shell signOut={state.signOut} />
+      ) : (
+        <main className={styles.checking}>
+          <p className={styles.muted}>Reading…</p>
+        </main>
+      );
     }
 
     default: {

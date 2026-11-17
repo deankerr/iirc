@@ -535,6 +535,7 @@ export const fakeDaemon = () => {
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
+  const uiFollowsHeld: (() => void)[] = [];
   const statusesHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
   const ownerFollowers: Follower[] = [];
@@ -635,6 +636,8 @@ export const fakeDaemon = () => {
     holdNetworks: false,
     /** Whether each `say` waits, before it is answered as `sayAnswers` says, until released. */
     holdSays: false,
+    /** Whether each request to follow the `ui` options waits until released, then answers with the ones in force then. */
+    holdUiFollows: false,
     /** Whether each read of the `ui` options waits until released, then answers as they were when asked. */
     holdUiReads: false,
     /** Whether each page of the Uploads, taken as it is asked for, waits until released to answer. */
@@ -755,6 +758,8 @@ export const fakeDaemon = () => {
     uiChanges,
     /** Each follower of the `ui` options. */
     uiFollowers,
+    /** Releases each request to follow the `ui` options held, in the order they came. */
+    uiFollowsHeld,
     /** Releases each read of the `ui` options held, in the order they came. */
     uiReadsHeld,
     /**
@@ -1337,6 +1342,10 @@ export const fakeDaemon = () => {
     }
 
     if (url.pathname === "/api/ui/changes") {
+      if (daemon.holdUiFollows) {
+        await heldUntilReleased(uiFollowsHeld, init);
+      }
+
       return signedInOnly(() => {
         const response = following(uiFollowers, url, new Headers(init.headers), init);
 

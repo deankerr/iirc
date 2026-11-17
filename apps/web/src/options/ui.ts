@@ -184,6 +184,16 @@ export const uiSync = runtime
   )
   .pipe(Atom.keepAlive);
 
+/**
+ * Whether the shared options are read, so the shell can draw in them. Whatever reads this
+ * follows them, so a page that waits on them never waits on nothing.
+ */
+export const uiKnown = Atom.make((get) => {
+  get.mount(uiSync);
+
+  return get(optionsState).ui !== undefined;
+});
+
 /** A change of an option under `ui`: its value as JSON, or none to unset it. */
 export interface UiChange {
   readonly option: UiOptionName;
