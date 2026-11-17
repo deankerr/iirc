@@ -395,10 +395,10 @@ const watchedChanged = (run: Run): readonly string[] => {
 
 /**
  * The partners whose presence the step may have changed, by key, or `undefined` for
- * every one: when the Session came or went, the casemapping changed, a Channel's members
- * were replaced, or Self joined or left a Channel. Otherwise only the nicks the step's
- * Activities named, and those whose `MONITOR` entry changed, so a step costs what its
- * Line touches.
+ * every one: when the Session came or went, the Configuration or the casemapping
+ * changed, a Channel's members were replaced, or Self joined or left a Channel. Otherwise
+ * only the nicks the step's Activities named, and those whose `MONITOR` entry changed, so
+ * a step costs what its Line touches.
  * @param run - The step, with its partners followed.
  * @returns The keys, or `undefined` for all.
  */
@@ -407,6 +407,8 @@ const touchedPartners = (run: Run): ReadonlySet<string> | undefined => {
 
   if (
     (sessionOf(before) === undefined) !== (sessionOf(state) === undefined) ||
+    // A Channel the Owner no longer wants is let go of at once, with no Activity.
+    before.configuration !== state.configuration ||
     before.casemapping !== state.casemapping ||
     before.declared !== state.declared
   ) {

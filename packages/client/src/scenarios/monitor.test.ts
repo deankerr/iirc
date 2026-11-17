@@ -570,6 +570,16 @@ describe("telling that a partner's presence changed", () => {
     expect(learned(run)).toStrictEqual(["alice", "alice"]);
   });
 
+  it("tells of a partner who shared only a Channel the Owner no longer wants, without MONITOR", () => {
+    const run = played(
+      registered(base),
+      joined(base, "#iirc", ["alice"]),
+      lines("<< :alice!u@h PRIVMSG iirc :hi", "!! configure -#iirc", ">> PART #iirc")
+    );
+
+    expect(learned(run)).toStrictEqual(["alice"]);
+  });
+
   it("tells of each partner when the Session ends and they are no longer known to be here", () => {
     const run = played(
       settled("MONITOR"),
