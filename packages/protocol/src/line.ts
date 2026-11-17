@@ -999,6 +999,22 @@ export const monitor = (modifier: "+" | "-", nicks: readonly string[]): Outbound
     : rejected("InvalidTarget");
 
 /**
+ * `WATCH +nick +nick` or `WATCH -nick`: the older `MONITOR`, which some Ircds offer
+ * instead, with each nick its own parameter behind its modifier. Which nicks share a
+ * Line, so that each fits, is the caller's to choose.
+ * @param modifier - `+` to add, `-` to remove.
+ * @param nicks - The nicks, one or more, each as {@link nick} takes one.
+ * @returns The Line, or why it cannot be sent, such as too many nicks to fit.
+ */
+export const watch = (modifier: "+" | "-", nicks: readonly string[]): OutboundLine | Rejected =>
+  nicks.length > 0 && nicks.every((one) => isOne(one) && !notInNicks.test(one))
+    ? outbound(
+        "WATCH",
+        nicks.map((one) => `${modifier}${one}`)
+      )
+    : rejected("InvalidTarget");
+
+/**
  * `AWAY`, with a reason to be away, or none to come back.
  * @param reason - Why, or `undefined` to come back.
  * @returns The Line, or why it cannot be sent.

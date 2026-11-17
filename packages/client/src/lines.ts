@@ -1033,7 +1033,7 @@ export const interpret = (
 
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
-  // A refusal of `MONITOR` itself turns it off for the Connection, whatever else it answers.
+  // A refusal of `MONITOR` or `WATCH` itself turns it off for the Connection, whatever else it answers.
   if (arrival.live) {
     monitorRefused(run, line);
   }
@@ -1055,8 +1055,8 @@ export const interpret = (
     if (reply === undefined && !labelled) {
       standardReply(run, arrival);
     }
-  } else if (arrival.live && isMonitorReply(command)) {
-    // What `MONITOR` tells answers no Lookup or action, whatever nick it names.
+  } else if (arrival.live && isMonitorReply(run, command)) {
+    // What `MONITOR` or `WATCH` tells answers no Lookup or action, whatever nick it names.
     monitorReply(run, arrival);
   } else if (arrival.live) {
     // A numeric no label tied goes to whichever was sent first of the Lookup and the
