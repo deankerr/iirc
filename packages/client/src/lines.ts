@@ -64,6 +64,7 @@ import {
   carryOutRefined,
   nickRefused,
   offered,
+  refusesCap,
   unknownCommand,
   welcomed,
 } from "./registration.ts";
@@ -1171,14 +1172,15 @@ export const interpret = (
       !line.tags.has("label");
 
     // A numeric no label tied goes to whichever was sent first of the Lookup and the
-    // action's Line it names. One that none takes, that answers no `OPER`, and that is not
-    // read or reported otherwise, is shown as it came.
+    // action's Line it names. One that none takes, that answers neither the `OPER` nor the
+    // `CAP LS` the Client sent, and that is not read or reported otherwise, is shown as it came.
     const shown =
       untied &&
       !floor(run, line) &&
       isNumeric(command) &&
       !unshown.has(command) &&
-      !answersOper(run, line);
+      !answersOper(run, line) &&
+      !refusesCap(run, line);
 
     // History is reported, and moves no machine: it says what was, not what is.
     protocolLine(run, line, raw);
