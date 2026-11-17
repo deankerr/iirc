@@ -1,0 +1,77 @@
+# hybrid watch: no CAP, and presence through WATCH, which hybrid offers without MONITOR.
+# Recorded, then normalised as fixtures/transcripts/README.md says. Re-record rather than edit by hand.
+
+-> dial hybrid.test:6667
+== opened
+>> NICK iirc
+>> USER iirc 0 * :iirc transcript spike
+<< :hybrid.test NOTICE * :*** Looking up your hostname
+<< :hybrid.test NOTICE * :*** Couldn't look up your hostname
+<< :hybrid.test 433 * iirc :Nickname is already in use.
+>> NICK iirc_
+<< :hybrid.test 001 iirc_ :Welcome to the iirc-spike Internet Relay Chat Network iirc_!~iirc@127.0.0.1
+<< :hybrid.test 002 iirc_ :Your host is hybrid.test[127.0.0.1/6667], running version hybrid-8.2.34
+<< :hybrid.test 003 iirc_ :This server was created at the epoch
+<< :hybrid.test 004 iirc_ hybrid.test hybrid-8.2.34 DFGHXRSWacdefgijklnopqrswy bchiklmnoprstuveCIKLMNORST bkloveIh
+<< :hybrid.test 005 iirc_ CALLERID CASEMAPPING=ascii DEAF=D KICKLEN=180 MODES=6 PREFIX=(ohv)@%+ STATUSMSG=@%+ EXCEPTS INVEX NICKLEN=9 NETWORK=iirc-spike MAXLIST=beI:100 MAXTARGETS=4 :are supported by this server
+<< :hybrid.test 005 iirc_ CHANTYPES=# CHANLIMIT=#:25 CHANNELLEN=50 TOPICLEN=80 CHANMODES=beI,k,l,cimnprstuCKLMNORST EXTBAN=$,acjmnorstuz AWAYLEN=180 KNOCK ELIST=CMNTU SAFELIST WATCH=3 :are supported by this server
+>> WATCH +iirc
+<< :hybrid.test 251 iirc_ :There are 0 users and 3 invisible on 1 servers
+<< :hybrid.test 255 iirc_ :I have 3 clients and 0 servers
+<< :hybrid.test 265 iirc_ :Current local users: 3  Max: 3
+<< :hybrid.test 266 iirc_ :Current global users: 3  Max: 3
+<< :hybrid.test 250 iirc_ :Highest connection count: 3 (3 clients) (3 connections received)
+<<\ :hybrid.test 375 iirc_ :- hybrid.test Message of the Day -\x20
+<< :hybrid.test 372 iirc_ :- iirc transcript spike
+<< :hybrid.test 376 iirc_ :End of /MOTD command.
+<< :iirc_!~iirc@127.0.0.1 MODE iirc_ :+i
+<< :hybrid.test 604 iirc_ iirc ~iirc 127.0.0.1 1767225599 :is online
++1s
+!! configure +#iirc
+>> JOIN #iirc
+<< :iirc_!~iirc@127.0.0.1 JOIN :#iirc
+<< :hybrid.test MODE #iirc +nt
+<< :hybrid.test 353 iirc_ = #iirc :@iirc_
+<< :hybrid.test 366 iirc_ #iirc :End of /NAMES list.
++1s
+# peer >> JOIN #iirc
+<< :peer!~iirc@127.0.0.1 JOIN :#iirc
++1s
+# peer >> PRIVMSG #iirc :hello from the peer
+<< :peer!~iirc@127.0.0.1 PRIVMSG #iirc :hello from the peer
+!! say #iirc :hello from iirc
+>> PRIVMSG #iirc :hello from iirc
+# peer >> PRIVMSG iirc_ :psst
+<< :peer!~iirc@127.0.0.1 PRIVMSG iirc_ :psst
+>> WATCH +peer
+<< :hybrid.test 604 iirc_ peer ~iirc 127.0.0.1 1767225599 :is online
+!! say peer :psst back
+>> PRIVMSG peer :psst back
++1s
+# peer2 >> NICK peer2
+# peer2 >> USER iirc 0 * :iirc transcript spike
+# peer2 >> PRIVMSG iirc_ :hi
+# peer2 >> QUIT :bye
+<< :peer2!~iirc@127.0.0.1 PRIVMSG iirc_ :hi
+>> WATCH +peer2
+<< :hybrid.test 605 iirc_ peer2 * * 0 :is offline
++1s
+# peer2 >> NICK peer2
+# peer2 >> USER iirc 0 * :iirc transcript spike
+<< :hybrid.test 600 iirc_ peer2 ~iirc 127.0.0.1 1767225605 :logged online
++1s
+# peer2 >> QUIT :bye
+<< :hybrid.test 601 iirc_ peer2 ~iirc 127.0.0.1 1767225606 :logged offline
++1s
+# The recorder overflows the list, as the Client never would
+>> WATCH +peer3
+<< :hybrid.test 512 iirc_ peer3 :Maximum size for WATCH-list is 3 entries
+!! close peer2
+>> WATCH -peer2
+<< :hybrid.test 602 iirc_ peer2 * * 0 :stopped watching
++1s
+>> QUIT :bye
+<< ERROR :Closing Link: 127.0.0.1 (Quit: bye)
+== closed Ended
+# peer >> QUIT :bye
+# holder >> QUIT :bye
