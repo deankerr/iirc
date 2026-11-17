@@ -3599,26 +3599,40 @@ const sayAs = (served: Served, call: TestCall, network: string, target: string, 
   Effect.gen(function* () {
     // A say before the welcome and the JOIN are stepped is refused, so it is tried until
     // the Client takes it.
-    yield* settled(
-      Effect.map(
+    const answer = yield* settled(
+      Effect.flatMap(
         served.request(`/api/networks/${network}/say`, {
           body: JSON.stringify({ kind: "Privmsg", target, text }),
           headers: { "content-type": "application/json" },
           method: "POST",
         }),
-        (response) => response.status
+        (response) => Effect.map(textOf(response), (body) => ({ body, status: response.status }))
       ),
-      (status) => status === 200
+      ({ status }) => status === 200
     );
 
-    let line = yield* heard(call);
-
-    // The Client asks of a Channel once it has stepped our JOIN, as for its modes.
-    while (!line.startsWith("PRIVMSG ")) {
-      line = yield* heard(call);
+    if (answer.status !== 200) {
+      return yield* Effect.die(new Error(`say never taken: ${answer.status} ${answer.body}`));
     }
 
-    expect(line).toBe(`PRIVMSG ${target} :${text}`);
+    // The Client asks of a Channel once it has stepped our JOIN, as for its modes.
+    const lines: string[] = [];
+
+    yield* Effect.gen(function* () {
+      let line = yield* heard(call);
+
+      while (!line.startsWith("PRIVMSG ")) {
+        lines.push(line);
+        line = yield* heard(call);
+      }
+
+      expect(line).toBe(`PRIVMSG ${target} :${text}`);
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: "3 seconds",
+        orElse: () => Effect.die(new Error(`no PRIVMSG heard, only ${JSON.stringify(lines)}`)),
+      })
+    );
   });
 
 /**
