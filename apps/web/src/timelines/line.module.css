@@ -484,7 +484,7 @@
 /*
  * Under `ui.line` stacked, a run of plain speech from one User: its head has the nick, in
  * its colour, and the time beside it on a line of their own, a little apart from the row
- * above, and each Message's text, the head's too, is a line of its own below. These rows
+ * above, and each Message's text, the head's too, starts a line of its own below. These rows
  * are only ever drawn under stacked, in a Pane of any width.
  */
 .head {
@@ -499,14 +499,9 @@
   font-weight: bold;
 }
 
-.head .text,
-.continued .text {
-  display: block;
-}
-
 /*
  * A later Message's time is there for a screen reader, and drawn only while its row is
- * hovered or focused, or its menu is open, over the row's top line at its end, left of where
+ * hovered or focused, as a tap focuses it, or its menu is open, over the row's top line at its end, left of where
  * the menu's button stands in a row that has one.
  */
 .continued {
@@ -530,6 +525,10 @@
 .continued:focus-within .later,
 .continued[data-menu] .later {
   clip-path: none;
+}
+
+.continued:focus {
+  outline: none;
 }
 
 .later:focus-visible {

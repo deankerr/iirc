@@ -4244,7 +4244,7 @@ const collapsed = (rows: readonly Row[]): readonly Row[] => {
 };
 
 /** The most time that may separate a Message from the one before it in a run: five minutes. */
-export const runSpan = 300_000;
+const runSpan = 300_000;
 
 /**
  * Who said an item, folded as a nick's colour is, if it is plain speech: a `PRIVMSG`, not an

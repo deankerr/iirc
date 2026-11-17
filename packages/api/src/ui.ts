@@ -590,7 +590,7 @@ export type PreviewsPlayers = typeof PreviewsPlayers.Type;
 export const LineLayout = Schema.Literals(["columns", "inline", "stacked"]).annotate({
   default: "columns",
   description:
-    "How a line is laid out: columns, with the time and the nick each in a column; inline, the time, the nick, then what was said as one run of text that wraps under itself; or stacked, the nick and the time on a line above a run of Messages from one User, each on its own line. A Pane too narrow for columns draws inline whichever is set, but keeps stacked.",
+    "How a line is laid out: columns, with the time and the nick each in a column; inline, the time, the nick, then what was said as one run of text that wraps under itself; or stacked, the nick and the time on a line above a run of Messages from one User, each on its own line. A Pane too narrow for columns draws columns as inline, and inline and stacked as they are.",
 });
 
 /** The decoded form of {@link LineLayout}. */

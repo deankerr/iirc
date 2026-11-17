@@ -1378,14 +1378,16 @@ describe("what the view says it shows", () => {
       rows: rows.map((one) => [
         plain(one.querySelector("bdi")?.textContent),
         one.querySelector("time")?.getAttribute("tabindex") ?? null,
+        // A tap focuses a later Message's row, which shows its time where nothing can be hovered.
+        one.querySelector(":scope > div > div")?.getAttribute("tabindex") ?? null,
         plain(one.textContent),
       ]),
     }).toStrictEqual({
       line: "stacked",
       rows: [
-        ["peer", null, "peer 10:00 line 1"],
-        ["line 2", "0", "10:00 line 2"],
-        ["peer", null, "peer 10:00 line 4"],
+        ["peer", null, null, "peer 10:00 line 1"],
+        ["line 2", "0", "-1", "10:00 line 2"],
+        ["peer", null, null, "peer 10:00 line 4"],
       ],
     });
   });

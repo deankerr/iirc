@@ -508,6 +508,8 @@ const MessageLine = ({
       data-menu={menu || undefined}
       onContextMenu={onContextMenu}
       ref={anchor}
+      // A tap focuses a later Message of a run, which shows its time where nothing hovers.
+      tabIndex={place === "Later" ? -1 : undefined}
     >
       <Said focusable={answering === undefined} item={item} line={line} place={place} />
       <bdi className={styles.text}>
