@@ -155,7 +155,7 @@ A `Refused` for an `Act` names no Message, so it carries `action`: what was trie
 `known(state)` gives Channels, members, Users, Self, the open Direct Message partners, and where the Session is.
 
 - **Keys fold by the Connection's casemapping,** which starts from `rfc1459` on each Connection. When it changes, every key is folded again. `declared` gives the mapping `where` folds by, and `chantypes` the Session's `CHANTYPES`, so a Frontend compares and prefixes Channels' names as the Network does.
-- **Users are those who share a Channel with Self, and Self,** and while a Feature keeps them, those `MONITOR` says are online. What was seen of a User is forgotten once they are neither.
+- **Users are those who share a Channel with Self, and Self,** and while a Feature keeps them, those `MONITOR` or `WATCH` says are online. What was seen of a User is forgotten once they are neither.
 - **`partners` are the open Direct Message partners,** keyed as `where` keys their Timelines, and whether each is `here`: known true while they share a Channel with Self or `MONITOR` or `WATCH` says they are online, known false while it says they are offline, and unknown otherwise, as with no Session.
 - **Self's away status is as the Ircd confirmed it,** never as the Owner asked.
 - **A Channel's `wanted` says whether the Owner wants Self in it.**
