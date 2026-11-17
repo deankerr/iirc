@@ -2553,6 +2553,7 @@ const knownTags = (tags: boolean): TimelinesEvent => ({
   _tag: "StatusRead",
   life: 1,
   network: alpha,
+  partners: [],
   self: null,
   session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags }),
 });
