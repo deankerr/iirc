@@ -226,7 +226,7 @@ describe("the menu on a nick", () => {
     }).toStrictEqual({ elsewhere: [], otherHead: everyone });
   });
 
-  it("says more is coming while the head, the Session, or an operator's User is read, and not once known", () => {
+  it("says how many entries may come while the head, the Session, or an operator's User is read, and none once known", () => {
     const op = inChannel(known(["o"]));
     const unread: CommandContext = { ...op, head: undefined };
 
@@ -243,17 +243,17 @@ describe("the menu on a nick", () => {
       presenceReading: coming(op, { _tag: "Reading" }),
       sessionUnknown: coming({ ...op, session: undefined }),
     }).toStrictEqual({
-      direct: false,
-      elsewhere: false,
-      found: false,
-      gone: false,
-      headUnread: true,
-      headUnreadOffline: false,
-      notOperator: false,
-      notOperatorSessionUnknown: false,
-      otherHead: true,
-      presenceReading: true,
-      sessionUnknown: true,
+      direct: 0,
+      elsewhere: 0,
+      found: 0,
+      gone: 0,
+      headUnread: 6,
+      headUnreadOffline: 0,
+      notOperator: 0,
+      notOperatorSessionUnknown: 0,
+      otherHead: 6,
+      presenceReading: 5,
+      sessionUnknown: 6,
     });
   });
 

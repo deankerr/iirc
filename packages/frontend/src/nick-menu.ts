@@ -33,14 +33,15 @@ export interface NickEntry {
 }
 
 /**
- * What the menu offers now, and whether more is coming: an operator's entries that wait on
- * the Channel's head, whether its Network has a Session, or whether the User is there, any
- * of which is still being read. Leaving them out meanwhile would read as Self may not use
- * them, so a view draws the wait where they will go.
+ * What the menu offers now, and how many more entries may still come, none once all is
+ * known: an operator's entries that wait on the Channel's head, whether its Network has a
+ * Session, or whether the User is there, any of which is still being read. Leaving them
+ * out meanwhile would read as Self may not use them, so a view draws the wait where they
+ * will go, as tall as they may be, so a menu that grows upward moves nothing either.
  */
 export interface NickEntries {
   readonly entries: readonly NickEntry[];
-  readonly coming: boolean;
+  readonly coming: number;
 }
 
 /** What can be done with anyone, by the command that does it. */
@@ -95,16 +96,17 @@ const commandEntry = (
  * Op and voice are offered only while the User is `Here`, and deop, devoice, and kick only
  * while they are too and do not outrank Self, or their rank is not known, which the
  * Network would refuse for want of status. Ban is placed before them, so what a read of
- * the members adds never moves it. More is coming in a Channel while its head is not read,
+ * the members adds never moves it. More may come in a Channel while its head is not read,
  * or Self may operate and whether the Network has a Session, or whether the User is there,
- * is still being read, unless the Network is known to have no Session. Nothing is offered
+ * is still being read, unless the Network is known to have no Session: as many of an
+ * operator's entries as are not offered yet. Nothing is offered
  * unless the context is the menu's own Pane's, its open Timeline the one the menu was
  * opened in, so no entry acts on another Pane's Channel.
  * @param nick - The nick.
  * @param timeline - The Timeline the menu was opened in.
  * @param presence - Whether the User is in its Channel.
  * @param context - The focused Pane's context.
- * @returns The entries, and whether more are coming.
+ * @returns The entries, and how many more may come.
  */
 export const nickEntries = (
   nick: string,
@@ -113,7 +115,7 @@ export const nickEntries = (
   context: CommandContext
 ): NickEntries => {
   if (context.open !== timeline || context.focus?.timeline !== timeline) {
-    return { coming: false, entries: [] };
+    return { coming: 0, entries: [] };
   }
 
   const { focus, session } = context;
@@ -121,10 +123,24 @@ export const nickEntries = (
   const head = context.head?.timeline === timeline ? context.head : undefined;
   const operator = channel && head !== undefined && mayOperate(head);
 
-  const coming =
+  const waiting =
     channel &&
     session !== false &&
     (head === undefined || (operator && (session === undefined || presence._tag === "Reading")));
+
+  const operatorEntries = operator
+    ? operating
+        .filter((one) => {
+          if (one.needs === "nothing") {
+            return true;
+          }
+
+          return (
+            presence._tag === "Here" && (one.needs === "here" || !outranks(head, presence.prefixes))
+          );
+        })
+        .flatMap((one) => commandEntry(one.name, nick, context))
+    : [];
 
   const entries: readonly NickEntry[] = [
     ...anyone.flatMap((name) => commandEntry(name, nick, context)),
@@ -135,23 +151,10 @@ export const nickEntries = (
       text: "mention",
     },
     ...commandEntry("ignore", nick, context),
-    ...(operator
-      ? operating
-          .filter((one) => {
-            if (one.needs === "nothing") {
-              return true;
-            }
-
-            return (
-              presence._tag === "Here" &&
-              (one.needs === "here" || !outranks(head, presence.prefixes))
-            );
-          })
-          .flatMap((one) => commandEntry(one.name, nick, context))
-      : []),
+    ...operatorEntries,
   ];
 
-  return { coming, entries };
+  return { coming: waiting ? operating.length - operatorEntries.length : 0, entries };
 };
 
 /**
