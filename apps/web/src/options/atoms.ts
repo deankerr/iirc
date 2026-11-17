@@ -18,6 +18,7 @@ import type {
   OptionsEvent,
   Path,
   Configuration,
+  Wanted,
 } from "@iirc/frontend/options";
 import {
   apply,
@@ -26,6 +27,7 @@ import {
   listed,
   optionName,
   reduceOptions,
+  uiShown,
   unknownNaming,
 } from "@iirc/frontend/options";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
@@ -58,13 +60,14 @@ export const optionsFilter = Atom.make((get) => {
 });
 
 /**
- * The options the view lists, filtered as the Pane they show in says, those under `ui` as
- * they take effect on this device, with a font's family this device lacks said to be.
+ * The options the view lists, filtered as the Pane they show in says, each as it shows with
+ * the changes on its way, those under `ui` as they take effect on this device, with a font's
+ * family this device lacks said to be.
  */
 export const optionRows = Atom.make((get) => {
   const state = get(optionsState);
   const device = get(deviceUi);
-  const missing = familiesMissing([state.ui?.options.font, device.font], canvasMeasure());
+  const missing = familiesMissing([uiShown(state)?.options.font, device.font], canvasMeasure());
 
   return listed(state, get(optionsFilter) ?? "", device, missing);
 });
@@ -77,6 +80,35 @@ export const optionRows = Atom.make((get) => {
 export const happened = (registry: AtomRegistry.AtomRegistry, event: OptionsEvent) => {
   registry.set(optionsState, reduceOptions(registry.get(optionsState), event));
 };
+
+/**
+ * Carries out a change that shows at once: it is folded in as asked, and let go of once the
+ * work, the tries and the read after the last, is over, however it ended, so what the Daemon
+ * holds shows then, and nothing shows what was refused.
+ * @param registry - The registry.
+ * @param change - What is asked for.
+ * @param work - What carries it out.
+ * @returns What the work came to.
+ */
+export const onItsWay = <A, E, R>(
+  registry: AtomRegistry.AtomRegistry,
+  change: Wanted,
+  work: Effect.Effect<A, E, R>
+) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const id = registry.get(optionsState).asked;
+
+      happened(registry, { _tag: "Asked", change });
+
+      return id;
+    }),
+    () => work,
+    (id) =>
+      Effect.sync(() => {
+        happened(registry, { _tag: "Answered", id });
+      })
+  );
 
 /**
  * What a change came to: done, why it was not made, in words, or the page signed out.
@@ -298,25 +330,30 @@ const tryOnce = (registry: AtomRegistry.AtomRegistry, network: NetworkId, edit: 
   );
 
 /**
- * Makes a change to a Network's Configuration. If another changed it between the read and
- * the write, it is read again and the same edit applied once more.
+ * Makes a change to a Network's Configuration, which shows at once and until it is answered.
+ * If another changed it between the read and the write, it is read again and the same edit
+ * applied once more, from what is in force.
  * @param registry - The registry.
  * @param network - The Network.
  * @param edit - The edit.
  * @returns What it came to.
  */
 export const configure = (registry: AtomRegistry.AtomRegistry, network: NetworkId, edit: Edit) =>
-  Effect.gen(function* () {
-    const first = yield* tryOnce(registry, network, edit);
+  onItsWay(
+    registry,
+    { _tag: "Network", edit, network },
+    Effect.gen(function* () {
+      const first = yield* tryOnce(registry, network, edit);
 
-    if (first._tag !== "Conflict") {
-      return first;
-    }
+      if (first._tag !== "Conflict") {
+        return first;
+      }
 
-    const second = yield* tryOnce(registry, network, edit);
+      const second = yield* tryOnce(registry, network, edit);
 
-    return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
-  });
+      return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
+    })
+  );
 
 /**
  * Adds a Network, made from none, so a Network already configured is never replaced.

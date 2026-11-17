@@ -192,6 +192,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 - **The syntax reads back what it shows,** for every value the Schema admits.
 - **An edit is a pure function of the Configuration** (`apply`), parsed again by the Schema, so the runtime applies the same edit again after a conflict.
+- **A change asked for shows at once, until it is answered.** `Asked` holds it, never a copy of the options, and `Answered` lets it go, however it came out. `uiShown`, `ownerShown`, and `configurationShown` derive what shows from what is in force and what is on its way, and `listed` lists that. Nothing is applied before what is in force is read.
 - **What a new Network starts with is the Schema's,** and `unset` returns an option to it.
 - **A field members of a union share is one option,** such as `login.account`, set in the member in force when it has the field, and otherwise in the first that does, which it puts in force.
 - **A Credential option is write-only.** Its value is given in the password prompt, and the option only names the Credential, by a name derived from the option's own so that two options never share one.

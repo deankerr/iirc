@@ -1,7 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import { OwnerOptions, ownerDefaults, ownerOptionNames } from "@iirc/api/options";
 import type { OwnerInForce } from "@iirc/api/options";
-import { FontFamily, UiOptions } from "@iirc/api/ui";
+import { FontFamily, UiOptions, uiDefaults } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { IgnoreMask } from "@iirc/protocol/mask";
 import { Option, Schema } from "effect";
@@ -37,7 +37,16 @@ import {
   fontMissing,
   unset,
 } from "./options.ts";
-import type { Configuration, Edit, Json, Kind, NetworkOption, OptionsEvent } from "./options.ts";
+import type {
+  Configuration,
+  Edit,
+  Json,
+  Kind,
+  NetworkOption,
+  Options,
+  OptionsEvent,
+  Wanted,
+} from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
 const dotted = Schema.decodeSync(NetworkId)("my.net");
@@ -2160,5 +2169,248 @@ describe("the options under store, uploads, and previews", () => {
       prompt: { name: "store.s3.secretAccessKey", option: "store.s3.secretAccessKey" },
       unnamed: "Owner.store.s3.secretAccessKey",
     });
+  });
+});
+
+const time = (value: Json | undefined): Wanted => ({ _tag: "Ui", option: "time", value });
+
+const bucket = (value: Json | undefined): Wanted => ({
+  _tag: "Owner",
+  option: "store.s3.bucket",
+  value,
+});
+
+const folded = (events: readonly OptionsEvent[]) => {
+  let state = initialOptions;
+
+  for (const event of events) {
+    state = reduceOptions(state, event);
+  }
+
+  return state;
+};
+
+const shownOf = (state: Options, name: string) =>
+  listed(state, name)
+    .filter((one) => one.name === name)
+    .map((one) => one.value);
+
+const text = (value: string) => [{ _tag: "Shown", text: value }];
+
+describe("a change on its way", () => {
+  const inForce = { options: uiDefaults, sequence: 1 };
+  const ownerInForce: OwnerInForce = { options: ownerDefaults, sequence: 1 };
+
+  const realname = (value: string): Wanted => ({
+    _tag: "Network",
+    edit: { _tag: "Set", path: ["realname"], text: value },
+    network: libera,
+  });
+
+  const read: readonly OptionsEvent[] = [
+    { _tag: "Listed", networks: [libera] },
+    { _tag: "Read", configuration: plain, network: libera, sequence: 5 },
+    { _tag: "UiRead", ui: inForce },
+    { _tag: "OwnerRead", owner: ownerInForce },
+  ];
+
+  it("shows a value set, unset, or toggled at once, under ui", () => {
+    const set = folded([...read, { _tag: "Asked", change: time("HH:mm:ss") }]);
+
+    const unset = folded([
+      ...read,
+      { _tag: "UiRead", ui: { ...inForce, options: { ...uiDefaults, time: "none" }, sequence: 2 } },
+      { _tag: "Asked", change: time(undefined) },
+    ]);
+
+    const toggled = folded([
+      ...read,
+      { _tag: "Asked", change: { _tag: "Ui", option: "spellcheck", value: false } },
+    ]);
+
+    expect({
+      set: shownOf(set, "ui.time"),
+      toggled: shownOf(toggled, "ui.spellcheck"),
+      unset: shownOf(unset, "ui.time"),
+    }).toStrictEqual({
+      set: text("HH:mm:ss"),
+      toggled: text("off"),
+      unset: text("HH:mm"),
+    });
+  });
+
+  it("shows an edit at once, under a Network", () => {
+    const set = folded([...read, { _tag: "Asked", change: realname("Dean K") }]);
+
+    const unset = folded([
+      ...read,
+      {
+        _tag: "Asked",
+        change: { _tag: "Network", edit: { _tag: "Unset", path: ["realname"] }, network: libera },
+      },
+    ]);
+
+    expect({
+      kept: set.networks.get(libera),
+      set: shownOf(set, "network.libera.realname"),
+    }).toStrictEqual({
+      kept: { _tag: "Read", configuration: plain, sequence: 5 },
+      set: text("Dean K"),
+    });
+    // Unset, it is what a new Network starts with, not what it was.
+    expect(shownOf(unset, "network.libera.realname")).toHaveLength(1);
+    expect(shownOf(unset, "network.libera.realname")).not.toStrictEqual(text("Dean"));
+  });
+
+  it("shows a value set or unset at once, under store, uploads, and previews", () => {
+    const set = folded([
+      ...read,
+      { _tag: "Asked", change: bucket("uploads") },
+      { _tag: "Asked", change: { _tag: "Owner", option: "uploads.maxSize", value: 2048 } },
+    ]);
+
+    const unset = folded([
+      ...read,
+      { _tag: "OwnerRead", owner: { ...owner, sequence: 2 } },
+      { _tag: "Asked", change: bucket(undefined) },
+      { _tag: "Asked", change: { _tag: "Owner", option: "uploads.maxSize", value: undefined } },
+    ]);
+
+    expect({
+      maxSize: shownOf(set, "uploads.maxSize"),
+      set: shownOf(set, "store.s3.bucket"),
+      unsetBucket: shownOf(unset, "store.s3.bucket"),
+      unsetMaxSize: shownOf(unset, "uploads.maxSize"),
+    }).toStrictEqual({
+      maxSize: text("2048"),
+      set: text("uploads"),
+      unsetBucket: [{ _tag: "Unset" }],
+      unsetMaxSize: text("104857600"),
+    });
+  });
+
+  it("leaves out a value its Schema refuses, under store, uploads, and previews", () => {
+    const state = folded([
+      ...read,
+      { _tag: "OwnerRead", owner: { ...owner, sequence: 2 } },
+      { _tag: "Asked", change: { _tag: "Owner", option: "store.s3.bucket", value: 42 } },
+    ]);
+
+    expect(shownOf(state, "store.s3.bucket")).toStrictEqual(text("uploads"));
+  });
+
+  it("shows what is in force again once it is answered, or refused", () => {
+    let state = folded([...read, { _tag: "Asked", change: time("HH:mm:ss") }]);
+    const id = state.onItsWay[0]?.id ?? -1;
+
+    // A refusal is answered with no new read.
+    const refused = reduceOptions(state, { _tag: "Answered", id });
+
+    // An answer comes with the options as the Daemon now holds them, which win.
+    state = reduceOptions(state, {
+      _tag: "UiRead",
+      ui: { ...inForce, options: { ...uiDefaults, time: "HH:mm:ss" }, sequence: 2 },
+    });
+    const answered = reduceOptions(state, { _tag: "Answered", id });
+
+    expect({
+      answered: [shownOf(answered, "ui.time"), answered.onItsWay],
+      onTheWay: shownOf(state, "ui.time"),
+      refused: [shownOf(refused, "ui.time"), refused.onItsWay],
+    }).toStrictEqual({
+      answered: [text("HH:mm:ss"), []],
+      onTheWay: text("HH:mm:ss"),
+      refused: [text("HH:mm"), []],
+    });
+  });
+
+  it("shows another device's change to another option while ours is on its way", () => {
+    const meanwhile = folded([
+      ...read,
+      { _tag: "Asked", change: time("HH:mm:ss") },
+      {
+        _tag: "UiRead",
+        ui: { ...inForce, options: { ...uiDefaults, day: "iso" }, sequence: 2 },
+      },
+    ]);
+
+    expect([shownOf(meanwhile, "ui.time"), shownOf(meanwhile, "ui.day")]).toStrictEqual([
+      text("HH:mm:ss"),
+      text("iso"),
+    ]);
+  });
+
+  it("shows the later of two changes of one option on their way, each answered on its own", () => {
+    const two = folded([
+      ...read,
+      { _tag: "Asked", change: time("HH:mm:ss") },
+      { _tag: "Asked", change: time("none") },
+    ]);
+
+    const [first = -1] = two.onItsWay.map((way) => way.id);
+    const later = reduceOptions(two, { _tag: "Answered", id: first });
+
+    expect({
+      ids: two.onItsWay.map((way) => way.id),
+      later: shownOf(later, "ui.time"),
+      two: shownOf(two, "ui.time"),
+    }).toStrictEqual({ ids: [0, 1], later: text("none"), two: text("none") });
+  });
+
+  it("applies nothing while what is in force is not known", () => {
+    const unread = folded([
+      { _tag: "Listed", networks: [libera] },
+      { _tag: "Asked", change: time("HH:mm:ss") },
+      { _tag: "Asked", change: bucket("uploads") },
+      { _tag: "Asked", change: realname("Dean K") },
+    ]);
+
+    expect({
+      bucket: shownOf(unread, "store.s3.bucket"),
+      network: listed(unread, "network.libera").length,
+      time: shownOf(unread, "ui.time"),
+    }).toStrictEqual({
+      bucket: [{ _tag: "Unset" }],
+      network: 0,
+      time: text("HH:mm"),
+    });
+  });
+
+  it("leaves out an edit that cannot be made, and one for another Network", () => {
+    const state = folded([
+      ...read,
+      {
+        _tag: "Asked",
+        change: {
+          _tag: "Network",
+          edit: { _tag: "Set", path: ["realname"], text: "Dean K" },
+          network: dotted,
+        },
+      },
+      {
+        _tag: "Asked",
+        change: {
+          _tag: "Network",
+          edit: { _tag: "Set", path: ["nicks"], text: "" },
+          network: libera,
+        },
+      },
+    ]);
+
+    expect(shownOf(state, "network.libera.realname")).toStrictEqual(text("Dean"));
+  });
+
+  it("lets go of those of ui, or of store, uploads, and previews, once the page signs out", () => {
+    const asked = folded([
+      ...read,
+      { _tag: "Asked", change: time("HH:mm:ss") },
+      { _tag: "Asked", change: bucket("uploads") },
+      { _tag: "Asked", change: realname("Dean K") },
+    ]);
+
+    expect({
+      owner: reduceOptions(asked, { _tag: "OwnerForgotten" }).onItsWay.map((way) => way._tag),
+      ui: reduceOptions(asked, { _tag: "UiForgotten" }).onItsWay.map((way) => way._tag),
+    }).toStrictEqual({ owner: ["Ui", "Network"], ui: ["Owner", "Network"] });
   });
 });

@@ -25,6 +25,7 @@ import { retrying, Waits } from "../timelines/atoms.ts";
 import {
   editing,
   happened,
+  onItsWay,
   optionsShown,
   optionsState,
   readHeld,
@@ -226,23 +227,27 @@ const tryOwner = (registry: AtomRegistry.AtomRegistry, change: OwnerChange, fres
 
 /**
  * Changes an option under `store`, `uploads`, or `previews` through the Daemon, made from the options
- * read and made once more after a conflict.
+ * read and made once more after a conflict, and shown at once until the Daemon has answered.
  * @param registry - The registry.
  * @param change - The change.
  * @returns What it came to.
  */
 export const changeOwner = (registry: AtomRegistry.AtomRegistry, change: OwnerChange) =>
-  Effect.gen(function* () {
-    const first = yield* tryOwner(registry, change, false);
+  onItsWay(
+    registry,
+    { _tag: "Owner", option: change.option, value: change.value },
+    Effect.gen(function* () {
+      const first = yield* tryOwner(registry, change, false);
 
-    if (first._tag !== "Conflict") {
-      return first;
-    }
+      if (first._tag !== "Conflict") {
+        return first;
+      }
 
-    const second = yield* tryOwner(registry, change, true);
+      const second = yield* tryOwner(registry, change, true);
 
-    return second._tag === "Conflict" ? ownerFailed("OptionsChanged") : second;
-  });
+      return second._tag === "Conflict" ? ownerFailed("OptionsChanged") : second;
+    })
+  );
 
 /** Makes a change of an option under `store`, `uploads`, or `previews` from the options view, and says there what it came to. */
 export const changeOwnerOption = runtime

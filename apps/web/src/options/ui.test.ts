@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { uiDefaults } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
+import { reduceOptions } from "@iirc/frontend/options";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { describe, expect, it } from "vitest";
 
@@ -11,7 +12,7 @@ import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake
 import { sync } from "../timelines/atoms.ts";
 import { optionRows, optionsState } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
-import { uiInEffect, uiSync } from "./ui.ts";
+import { readRule, uiInEffect, uiSync } from "./ui.ts";
 
 /**
  * A page signed in to the fake, following its Timelines and its `ui` options, with a way to
@@ -140,6 +141,27 @@ describe("the options under ui", () => {
         ],
         theme: "light",
       },
+    });
+  });
+});
+
+describe("a change of ui.read on its way", () => {
+  it("marks nothing by it until the Daemon has taken it", () => {
+    const fake = signedIn();
+    const registry = registryFor(fake.fetch);
+
+    const folded = [
+      { _tag: "UiRead", ui: { options: uiDefaults, sequence: 1 } },
+      { _tag: "Asked", change: { _tag: "Ui", option: "read", value: "asked" } },
+    ] as const;
+
+    for (const event of folded) {
+      registry.set(optionsState, reduceOptions(registry.get(optionsState), event));
+    }
+
+    expect({ rule: registry.get(readRule), shown: registry.get(uiInEffect).read }).toStrictEqual({
+      rule: uiDefaults.read,
+      shown: "asked",
     });
   });
 });
