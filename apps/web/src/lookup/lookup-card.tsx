@@ -213,7 +213,7 @@ const kindWords = {
 export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(paneCard(pane));
   const opened = useAtomValue(paneTimeline(pane));
-  const timeline = opened._tag === "Closed" ? undefined : opened.timeline;
+  const timeline = "timeline" in opened ? opened.timeline : undefined;
   const dismiss = useAtomSet(dismissCard);
   const run = useAtomSet(perform);
   const headingId = useId();

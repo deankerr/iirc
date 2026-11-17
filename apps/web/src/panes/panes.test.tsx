@@ -367,6 +367,12 @@ const signedIn = async ({
 };
 
 /**
+ * The main view's text.
+ * @returns It.
+ */
+const mainText = () => document.querySelector("main")?.textContent ?? "";
+
+/**
  * The composer's textarea.
  * @returns It.
  */
@@ -737,6 +743,64 @@ describe("the Panes", () => {
       same: true,
       scrolled: 140,
     });
+  });
+
+  it("draws a wait, never how to start, in a Pane while the layout kept waits on the Timelines", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.signedIn = true;
+    fake.daemon.timelines.set("libera", [
+      { gaps: [], items: [], timeline: describeTimeline(own, "libera", "Network") },
+      { gaps: [], items: [], timeline: describeTimeline(iirc, "#iirc", "Channel") },
+    ]);
+
+    const registry = registryFor(fake.fetch);
+
+    writeChoice(
+      layoutKey,
+      `{"focused":"p0","next":1,"zoomed":false,"root":{"_tag":"Pane","id":"p0","view":{"open":"${iirc}","options":null,"uploads":false}}}`
+    );
+    registry.set(pageState, { compact: false, focused: true, visible: true });
+    await run(registry, check, undefined);
+    fake.daemon.holdLists = true;
+    registry.mount(sync);
+
+    const container = document.createElement("div");
+
+    document.body.append(container);
+    const root = createRoot(container);
+
+    mounted.push(() => {
+      root.unmount();
+      container.remove();
+    });
+
+    await act(async () => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <App />
+        </RegistryContext.Provider>
+      );
+      await Promise.resolve();
+    });
+
+    await settled(() => fake.daemon.listsHeld.length > 0 && mainText() !== "");
+    const held = mainText();
+
+    fake.daemon.holdLists = false;
+    await act(async () => {
+      for (const release of fake.daemon.listsHeld.splice(0)) {
+        release();
+      }
+
+      await Promise.resolve();
+    });
+    await settled(() => logNamed("#iirc") !== null);
+
+    expect({
+      held: [held.includes("Reading…"), held.includes("Choose a Timeline")],
+      restored: openOf(registry.get(timelinesState)),
+    }).toStrictEqual({ held: [true, false], restored: iirc });
   });
 
   it("starts and follows whatever layout was kept: too deep, too many Panes, too long, or no JSON", async () => {

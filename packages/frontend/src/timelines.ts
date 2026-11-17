@@ -4450,6 +4450,7 @@ export const targetKey = (window: Window): string | undefined =>
 /** A Pane's open Timeline, as shown. */
 export type Opened =
   | { readonly _tag: "Closed" }
+  | { readonly _tag: "Restoring" }
   | { readonly _tag: "Vanished"; readonly timeline: TimelineId }
   | { readonly _tag: "Reading"; readonly timeline: TimelineId }
   | {
@@ -4462,8 +4463,8 @@ export type Opened =
     };
 
 /**
- * A Pane's open Timeline: closed, gone, being read for the first time, or its window, with
- * the Timeline itself as its Network's list has it.
+ * A Pane's open Timeline: closed, waiting on the layout this device kept, gone, being read
+ * for the first time, or its window, with the Timeline itself as its Network's list has it.
  * @param state - The state.
  * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The open Timeline.
@@ -4472,7 +4473,8 @@ export const opened = (state: Timelines, pane = state.layout.focused): Opened =>
   const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
 
   if (view?.open === undefined) {
-    return { _tag: "Closed" };
+    // Until the layout kept is taken or let go, an empty Pane may yet show a Timeline.
+    return state.restoring === undefined ? { _tag: "Closed" } : { _tag: "Restoring" };
   }
 
   const timeline = resolve(state, view.open);
