@@ -4,12 +4,17 @@ declare const styles: {
   readonly activity: string;
   readonly answered: string;
   readonly context: string;
+  readonly continued: string;
   readonly day: string;
   readonly dayText: string;
   readonly delivery: string;
   readonly gap: string;
   readonly gapText: string;
+  readonly head: string;
+  readonly heading: string;
+  readonly headNick: string;
   readonly highlight: string;
+  readonly later: string;
   readonly line: string;
   readonly marker: string;
   readonly menu: string;

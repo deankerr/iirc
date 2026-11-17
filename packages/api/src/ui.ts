@@ -582,13 +582,15 @@ export type PreviewsPlayers = typeof PreviewsPlayers.Type;
 
 /**
  * How a line of a Timeline is laid out: `columns`, the time and the nick each in a column
- * of their own, or `inline`, the time, the nick, then what was said as one run of text that
- * wraps under itself, as a Pane too narrow for the columns draws it.
+ * of their own; `inline`, the time, the nick, then what was said as one run of text that
+ * wraps under itself, as a Pane too narrow for the columns draws it; or `stacked`, a run of
+ * Messages from one User under one line with the nick and the time, each Message's text on
+ * a line of its own below, and everything else as `inline` draws it.
  */
-export const LineLayout = Schema.Literals(["columns", "inline"]).annotate({
+export const LineLayout = Schema.Literals(["columns", "inline", "stacked"]).annotate({
   default: "columns",
   description:
-    "How a line is laid out: columns, with the time and the nick each in a column, or inline, the time, the nick, then what was said as one run of text that wraps under itself. A Pane too narrow for columns draws inline whichever is set.",
+    "How a line is laid out: columns, with the time and the nick each in a column; inline, the time, the nick, then what was said as one run of text that wraps under itself; or stacked, the nick and the time on a line above a run of Messages from one User, each on its own line. A Pane too narrow for columns draws inline whichever is set, but keeps stacked.",
 });
 
 /** The decoded form of {@link LineLayout}. */

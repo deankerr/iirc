@@ -1357,6 +1357,39 @@ describe("what the view says it shows", () => {
     });
   });
 
+  it("draws a run under one nick under ui.line stacked, each later Message its text with its time kept, until Activity ends it", async () => {
+    const { registry } = await signedIn([], [message(1), message(2), joined(3), message(4)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 4"));
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("line ")
+    );
+
+    expect({
+      line: logOf().dataset.line,
+      rows: rows.map((one) => [
+        plain(one.querySelector("bdi")?.textContent),
+        one.querySelector("time")?.getAttribute("tabindex") ?? null,
+        plain(one.textContent),
+      ]),
+    }).toStrictEqual({
+      line: "stacked",
+      rows: [
+        ["peer", null, "peer 10:00 line 1"],
+        ["line 2", "0", "10:00 line 2"],
+        ["peer", null, "peer 10:00 line 4"],
+      ],
+    });
+  });
+
   describe("where the day changes", () => {
     // Local noon on three days, the last two on consecutive days, so no zone moves one across midnight.
     const days = [

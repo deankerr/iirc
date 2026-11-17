@@ -3,7 +3,10 @@
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
  * one's words starting where a Message's text does. Under `ui.line` `inline`, and in a
- * Timeline too narrow for those columns, a row is one run of text that wraps under itself. Failed Connections in a row
+ * Timeline too narrow for those columns, a row is one run of text that wraps under itself.
+ * Under `stacked`, a run of plain speech from one User has its nick and time on a line above
+ * the first Message's text, and each later Message is its text alone, its time shown while
+ * its row is hovered or focused; every other row is drawn as under `inline`. Failed Connections in a row
  * say how many and when. A reply has what it answers above it, as a line that goes there
  * when pressed, and a Direct Message says which Channel it is about. A Message that can be
  * answered has a menu, opened by a button shown while its row is hovered or focused, and
@@ -28,7 +31,7 @@ import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-compon
 
 import { chooseReply, perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
-import { dayShown, timeShown } from "../options/ui.ts";
+import { dayShown, lineShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
@@ -46,7 +49,15 @@ import styles from "./line.module.css";
  * @param props - The instant.
  * @returns The time, with the full date and time on hover.
  */
-const Time = ({ at }: { readonly at: number }) => {
+const Time = ({
+  at,
+  className = styles.time,
+  focusable = false,
+}: {
+  readonly at: number;
+  readonly className?: string;
+  readonly focusable?: boolean;
+}) => {
   const shown = useAtomValue(timeShown);
   const date = dateOf(at);
 
@@ -55,13 +66,19 @@ const Time = ({ at }: { readonly at: number }) => {
   // With no time shown, its column is still there, empty and with no width, so every row
   // keeps the same columns.
   if (shown === "none") {
-    return <span className={styles.time} />;
+    return <span className={className} />;
   }
 
   // An instant a Date cannot hold, as a hostile Ircd's `server-time` can give, is unavailable.
   if (date === undefined) {
     return (
-      <span className={styles.time} data-sample={sample} title="Time unavailable">
+      <span
+        className={className}
+        data-sample={sample}
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a later Message of a run shows its time only while focused.
+        tabIndex={focusable ? 0 : undefined}
+        title="Time unavailable"
+      >
         {hasSeconds(shown) ? "--:--:--" : "--:--"}
       </span>
     );
@@ -69,9 +86,11 @@ const Time = ({ at }: { readonly at: number }) => {
 
   return (
     <time
-      className={styles.time}
+      className={className}
       data-sample={sample}
       dateTime={date.toISOString()}
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a later Message of a run shows its time only while focused.
+      tabIndex={focusable ? 0 : undefined}
       title={datedClockFor(shown).format(date)}
     >
       {clockFor(shown).format(date)}
@@ -368,13 +387,18 @@ const MessageMenu = ({
  * @returns The line.
  */
 const MessageLine = ({
+  continues,
   item,
   line,
 }: {
+  readonly continues: boolean;
   readonly item: TimelineItem;
   readonly line: Extract<LineOfRow, { readonly _tag: "Message" }>;
 }) => {
   const answering = replyOf(item, useAtomValue(tagsOn(item.network)));
+  // Under stacked, plain speech is a run's head, with its nick and time on a line above
+  // its text, or a later Message of one, with its text alone.
+  const stacked = useAtomValue(lineShown) === "stacked" && line.kind === "Privmsg";
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const delivery = line.delivered;
@@ -400,15 +424,14 @@ const MessageLine = ({
     }
   };
 
-  return (
-    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the menu's button is the row's control, and this only listens for the context menu.
-    <div
-      className={answering === undefined ? tone : `${tone} ${styles.menued}`}
-      data-menu={menu || undefined}
-      onContextMenu={onContextMenu}
-      ref={anchor}
-    >
-      <Answered item={item} />
+  let classes = answering === undefined ? tone : `${tone} ${styles.menued}`;
+
+  if (stacked) {
+    classes = `${classes} ${continues ? styles.continued : styles.head}`;
+  }
+
+  let said = (
+    <>
       <Time at={item.position.at} />{" "}
       <span className={styles.sender}>
         <span className={styles.said}>
@@ -417,6 +440,41 @@ const MessageLine = ({
           {line.kind === "Action" ? <>* {nick}</> : null}
         </span>
       </span>{" "}
+    </>
+  );
+
+  if (stacked && continues) {
+    // Its time is still there, for a screen reader, and shown while the row is hovered or
+    // focused, as it is by Tab when nothing else in the row takes focus.
+    said = (
+      <>
+        <Time
+          at={item.position.at}
+          className={`${styles.time} ${styles.later}`}
+          focusable={answering === undefined}
+        />{" "}
+      </>
+    );
+  } else if (stacked) {
+    said = (
+      <>
+        <span className={styles.heading}>
+          <span className={styles.headNick}>{nick}</span> <Time at={item.position.at} />
+        </span>{" "}
+      </>
+    );
+  }
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the menu's button is the row's control, and this only listens for the context menu.
+    <div
+      className={classes}
+      data-menu={menu || undefined}
+      onContextMenu={onContextMenu}
+      ref={anchor}
+    >
+      <Answered item={item} />
+      {said}
       <bdi className={styles.text}>
         <Inlines inlines={line.text} />
         {line.context === undefined ? null : (
@@ -514,7 +572,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
     );
   }
 
-  return <MessageLine item={row.item} line={line} />;
+  return <MessageLine continues={row.continues === true} item={row.item} line={line} />;
 };
 
 /**
