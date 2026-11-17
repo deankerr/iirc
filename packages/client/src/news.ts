@@ -63,7 +63,7 @@ export type CtcpAnswer =
  * operator, or the Ircd refused with `reply`. An `Invited` is an `INVITE` that names Self: `by`
  * is who invited, and `channel` where to, as said, which Self has not joined and may.
  * `CameOnline` and `WentOffline` are a monitored Direct Message partner coming onto the
- * Network or leaving it, as `MONITOR` tells, by the nick monitored.
+ * Network or leaving it, as `MONITOR` or `WATCH` tells, by the nick monitored.
  */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }

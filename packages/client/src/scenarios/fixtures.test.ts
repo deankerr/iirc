@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import ergoFeatures from "../../../../fixtures/transcripts/ergo/first-features.irc?raw";
 import ergoFloor from "../../../../fixtures/transcripts/ergo/floor.irc?raw";
+import hybridWatch from "../../../../fixtures/transcripts/hybrid/watch.irc?raw";
 import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import { client } from "../core.ts";
@@ -24,6 +25,7 @@ import {
 
 const ergo = (port: number, tls: boolean) => ({ host: "ergo.test", port, tls });
 const ngircd = { host: "ngircd.test", port: 6667, tls: false };
+const hybrid = { host: "hybrid.test", port: 6667, tls: false };
 
 const fixtures = [
   [
@@ -42,7 +44,13 @@ const fixtures = [
   ["ergo/floor", ergoFloor, configured({ ircds: [ergo(6667, false)] })],
   ["ngircd/first-features", ngircdFeatures, configured({ ircds: [ngircd] })],
   ["ngircd/floor", ngircdFloor, configured({ ircds: [ngircd] })],
+  ["hybrid/watch", hybridWatch, configured({ ircds: [hybrid] })],
 ] as const;
+
+// The transcript up to the first line that starts with the marker, as a peer's comment
+// may hold the same words.
+const until = (transcript: string, marker: string) =>
+  transcript.slice(0, transcript.indexOf(`\n${marker}`) + 1);
 
 describe("the recorded fixtures", () => {
   it.each(fixtures)(
@@ -65,7 +73,7 @@ describe("the recorded fixtures", () => {
     (_name, transcript, configuration) => {
       const before = replay(client, {
         configuration,
-        transcript: transcript.slice(0, transcript.indexOf(">> QUIT")),
+        transcript: until(transcript, ">> QUIT"),
       });
 
       const known = client.known(before.state);
@@ -78,9 +86,6 @@ describe("the recorded fixtures", () => {
     }
   );
 });
-
-const until = (transcript: string, marker: string) =>
-  transcript.slice(0, transcript.indexOf(marker));
 
 describe("the first Features on the recorded Ircds", () => {
   const [[, ergoTranscript, ergoConfiguration], , [, ngircdTranscript, ngircdConfiguration]] =
@@ -309,5 +314,21 @@ describe("a long scenario with every Feature on", () => {
         name: "client",
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("the recorded WATCH Session", () => {
+  it("tells a partner coming and going, as MONITOR's would", () => {
+    const played = replay(client, {
+      configuration: configured({ ircds: [hybrid] }),
+      transcript: hybridWatch,
+    });
+
+    expect(played.transcript).toMatch(
+      /\?\? activity CameOnline peer2 .*in=existing-direct:peer2$/mu
+    );
+    expect(played.transcript).toMatch(
+      /\?\? activity WentOffline peer2 .*in=existing-direct:peer2$/mu
+    );
   });
 });

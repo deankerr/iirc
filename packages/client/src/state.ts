@@ -189,24 +189,30 @@ type LinkPhase =
       readonly pings: readonly Pinged[];
       /** How many `PING`s the Owner has sent on this Connection, which numbers their tokens. */
       readonly pingsSent: number;
-      /** What `MONITOR` has asked of the Ircd on this Connection, and what it told. */
+      /** What `MONITOR` or `WATCH` has asked of the Ircd on this Connection, and what it told. */
       readonly monitoring: Monitoring;
     };
 
+/** The commands that keep a monitor list: `MONITOR`, or the older `WATCH` where only it is offered. */
+export type MonitorCommand = "MONITOR" | "WATCH";
+
 /**
- * What a Connection asked of `MONITOR`, and what it heard. The list asked for is derived
- * from the State, and this is only what was sent, so the next step sends the difference.
+ * What a Connection asked of `MONITOR` or `WATCH`, and what it heard. The list asked for
+ * is derived from the State, and this is only what was sent, so the next step sends the
+ * difference.
  */
 export interface Monitoring {
   /** Whether the Ircd refused the command itself, so nothing more is sent on this Connection. */
   readonly off: boolean;
+  /** The command `watched` was sent with, or `undefined` before anything was. */
+  readonly command: MonitorCommand | undefined;
   /**
-   * Each nick sent with `MONITOR +` and not since taken off, keyed by folded nick, oldest
-   * first, with whether the Ircd says it is online. Bounded by the list derived.
+   * Each nick added and not since taken off, keyed by folded nick, oldest first, with
+   * whether the Ircd says it is online. Bounded by the list derived.
    */
   readonly watched: ReadonlyMap<string, Watched>;
   /**
-   * The nicks a `734` refused, by folded nick, which are never sent again on this
+   * The nicks a `734` or `512` refused, by folded nick, which are never sent again on this
    * Connection. Only a nick that was watched can be refused, so they are bounded too.
    */
   readonly refused: ReadonlySet<string>;
@@ -219,8 +225,13 @@ export interface Watched {
   readonly here: Fact<boolean>;
 }
 
-/** Nothing asked of `MONITOR` yet. */
-export const unmonitored: Monitoring = { off: false, refused: new Set(), watched: new Map() };
+/** Nothing asked of `MONITOR` or `WATCH` yet. */
+export const unmonitored: Monitoring = {
+  command: undefined,
+  off: false,
+  refused: new Set(),
+  watched: new Map(),
+};
 
 /** A CTCP `PING` the Owner sent: who to, as said, its token, and the instant it was sent. */
 export interface Pinged {

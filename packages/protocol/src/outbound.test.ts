@@ -31,6 +31,7 @@ import {
   tagmsg,
   topic,
   user,
+  watch,
   who,
   whois,
   whowas,
@@ -220,6 +221,8 @@ describe("the builders", () => {
     [invite("alice", "#iirc"), "INVITE alice #iirc"],
     [monitor("+", ["alice", "bob"]), "MONITOR + alice,bob"],
     [monitor("-", ["alice"]), "MONITOR - alice"],
+    [watch("+", ["alice", "bob"]), "WATCH +alice +bob"],
+    [watch("-", ["alice"]), "WATCH -alice"],
     [whois("alice"), "WHOIS alice"],
     [whowas("alice"), "WHOWAS alice"],
     // A dotted name is a nick by `nick`'s rules: sent as one, for the Ircd to decide.
@@ -244,6 +247,17 @@ describe("the builders", () => {
     ["MONITOR of nothing", monitor("+", []), "InvalidTarget"],
     ["MONITOR of a mask", monitor("+", ["a*"]), "InvalidTarget"],
     ["MONITOR of a list in one nick", monitor("-", ["a,b"]), "InvalidTarget"],
+    ["WATCH of nothing", watch("+", []), "InvalidTarget"],
+    ["WATCH of a mask", watch("+", ["a*"]), "InvalidTarget"],
+    ["WATCH of a list in one nick", watch("-", ["a,b"]), "InvalidTarget"],
+    [
+      "WATCH of more nicks than a Line has parameters",
+      watch(
+        "+",
+        Array.from({ length: 16 }, (_unused, index) => `n${index}`)
+      ),
+      "TooManyParameters",
+    ],
     ["JOIN of a list in one name", join(["#a,#b"]), "InvalidTarget"],
     ["PART of two Channels", part("#a,#b"), "InvalidTarget"],
     ["a nick that is a mask", nick("a*"), "InvalidTarget"],
