@@ -101,7 +101,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Saying | `/say`, `/me`, `/msg`, `/notice`, `/query` |
 | Acting | `/topic`, `/kick`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, `/unban`, `/invite`, `/ctcp`, `/ping`, `/away`, `/back`, `/nick`, `/quote` |
 | Lookups | `/whois`, `/whowas`, `/bans`, `/exceptions`, `/invexes` |
-| Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
+| Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
@@ -113,7 +113,8 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **Arguments are parsed into typed values,** or the command says why not, naming its usage. The text after a Target is kept exactly.
 - **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, a removed Network, whose Timelines are only read, or one Pane with nothing to close.
 - **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
-- **Configuration is changed by intents, never in place.** `/join`, `/part`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
+- **Configuration is changed by intents, never in place.** `/join`, `/part`, `/ignore`, `/unignore`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
+- **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, and a mask is parsed as the Client parses one, or refused saying why. Masks are compared folded by the casemapping the Network declared, or `rfc1459` while none has, so a mask already held is not added twice, and `/unignore` takes out every spelling of it, or says it is not there. `/ignore` alone opens the options on the Network's `ignores`.
 - **`/query` opens a Timeline by name and never makes one.** It folds the name by the casemapping `known` reports. When `known` cannot be read it opens nothing, since a guessed mapping could open another User's Direct Message.
 - **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.

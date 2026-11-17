@@ -228,15 +228,16 @@ const reportedNaming = (network: NetworkId) =>
   }).pipe(Effect.orElseSucceed(() => unknownNaming));
 
 /**
- * What the Daemon reports of a Network, read only for an edit of its Channels.
+ * What the Daemon reports of a Network, read only for an edit that compares names, of its
+ * Channels or its ignore masks.
  * @param network - The Network.
  * @param edit - The edit.
  * @returns What it reports.
  */
 const namingOf = (network: NetworkId, edit: Edit) =>
-  edit._tag === "Join" || edit._tag === "Part" || edit._tag === "PartTimeline"
-    ? reportedNaming(network)
-    : Effect.succeed(unknownNaming);
+  edit._tag === "Set" || edit._tag === "Unset" || edit._tag === "Point"
+    ? Effect.succeed(unknownNaming)
+    : reportedNaming(network);
 
 /**
  * A Network's Configuration in force, read into the view, and what the Daemon reports of

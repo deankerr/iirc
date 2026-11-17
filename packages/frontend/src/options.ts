@@ -30,6 +30,7 @@ import type { FontFamily, UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
+import type { IgnoreMask } from "@iirc/protocol/mask";
 import {
   Exit,
   Number as Numbers,
@@ -226,6 +227,8 @@ export type Option = NetworkOption | UiOption | OwnerOption;
  * - `Join`, `Part`: Channels added to, or taken from, the Channels wanted, by name.
  * - `PartTimeline`: the Channel a Channel Timeline was routed to taken from those wanted,
  *   by the Timeline's key, as the Daemon folded it.
+ * - `Ignore`, `Unignore`: a mask added to, or taken from, the masks ignored, as the Network
+ *   folds them.
  */
 export type Edit =
   | { readonly _tag: "Set"; readonly path: Path; readonly text: string }
@@ -233,7 +236,9 @@ export type Edit =
   | { readonly _tag: "Point"; readonly path: Path; readonly credential: string }
   | { readonly _tag: "Join"; readonly channels: readonly string[] }
   | { readonly _tag: "Part"; readonly channels: readonly string[] }
-  | { readonly _tag: "PartTimeline"; readonly key: string; readonly name: string };
+  | { readonly _tag: "PartTimeline"; readonly key: string; readonly name: string }
+  | { readonly _tag: "Ignore"; readonly mask: IgnoreMask }
+  | { readonly _tag: "Unignore"; readonly mask: IgnoreMask };
 
 const parsed = <A>(value: A): Parsed<A> => ({ _tag: "Parsed", value });
 
@@ -2076,6 +2081,57 @@ const partedTimeline = (
 };
 
 /**
+ * How masks are compared on a Network: folded by the casemapping it declared, or `rfc1459`
+ * while none has, as the Client folds them.
+ * @param naming - What the Daemon reports of the Network.
+ * @returns The fold.
+ */
+const maskFold =
+  (naming: Naming) =>
+  (mask: string): string =>
+    casefold(naming.casemapping ?? defaultCasemapping, mask);
+
+/**
+ * A mask added to those ignored, unless one the Network folds it to already is.
+ * @param plain - The Configuration, as JSON.
+ * @param mask - The mask.
+ * @param naming - What the Daemon reports of the Network.
+ * @returns The JSON after.
+ */
+const ignored = (plain: Record, mask: IgnoreMask, naming: Naming): Record => {
+  const fold = maskFold(naming);
+  const current = texts(plain.ignores);
+
+  return current.some((one) => fold(one) === fold(mask))
+    ? plain
+    : withKey(plain, "ignores", [...current, mask]);
+};
+
+/**
+ * Every mask ignored that the Network folds a mask to, taken out, since each hides the
+ * same Users.
+ * @param network - The Network.
+ * @param plain - The Configuration, as JSON.
+ * @param mask - The mask.
+ * @param naming - What the Daemon reports of the Network.
+ * @returns The JSON after, or why not.
+ */
+const unignored = (
+  network: string,
+  plain: Record,
+  mask: IgnoreMask,
+  naming: Naming
+): Parsed<Record> => {
+  const fold = maskFold(naming);
+  const current = texts(plain.ignores);
+  const kept = current.filter((one) => fold(one) !== fold(mask));
+
+  return kept.length === current.length
+    ? invalid(`${mask} is not among ${optionName(network, ["ignores"])}.`)
+    : parsed(withKey(plain, "ignores", kept));
+};
+
+/**
  * The JSON an edit leaves, before it is parsed again.
  * @param network - The Network.
  * @param plain - The Configuration, as JSON.
@@ -2111,6 +2167,14 @@ const edited = (network: string, plain: Record, edit: Edit, naming: Naming): Par
       return partedTimeline(network, plain, edit, naming);
     }
 
+    case "Ignore": {
+      return parsed(ignored(plain, edit.mask, naming));
+    }
+
+    case "Unignore": {
+      return unignored(network, plain, edit.mask, naming);
+    }
+
     default: {
       return edit satisfies never;
     }
@@ -2124,7 +2188,7 @@ const edited = (network: string, plain: Record, edit: Edit, naming: Naming): Par
  * @param configuration - Its Configuration in force.
  * @param edit - The edit.
  * @param naming - What the Daemon reports of the Network, which `Join` and `Part` compare
- * Channels' names by.
+ * Channels' names by, and `Ignore` and `Unignore` masks.
  * @returns The Configuration after, or why the edit cannot be made, in words.
  */
 export const apply = (
