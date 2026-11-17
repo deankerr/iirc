@@ -447,6 +447,15 @@ const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts
       return { head: [atom(activity.nick), `reply=${activity.reply}`], tail: [] };
     }
 
+    // Each parameter but the last as an atom, and the last as trailing text, whether or not
+    // the Ircd sent it so.
+    case "Numeric": {
+      return {
+        head: [activity.numeric, ...activity.params.slice(0, -1).map(atom)],
+        tail: trailing(activity.params.at(-1)),
+      };
+    }
+
     case "CtcpUnsent":
     case "CtcpSent":
     case "CtcpRequest":

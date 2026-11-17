@@ -80,6 +80,15 @@ const answerOf = (run: Run, line: Line): "Granted" | OperRefusal | undefined => 
 };
 
 /**
+ * Whether a numeric answers the `OPER` the Session awaits, before it is read.
+ * @param run - The step.
+ * @param line - The numeric, live.
+ * @returns Whether it does.
+ */
+export const answersOper = (run: Run, line: Line): boolean =>
+  sessionOf(run.state)?.opering === true && answerOf(run, line) !== undefined;
+
+/**
  * A numeric that may answer the `OPER` the Session awaits. One that does is reported in
  * the Network's own Timeline, and ends the wait.
  * @param run - The step.

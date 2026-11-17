@@ -63,7 +63,9 @@ export type CtcpAnswer =
  * operator, or the Ircd refused with `reply`. An `Invited` is an `INVITE` that names Self: `by`
  * is who invited, and `channel` where to, as said, which Self has not joined and may.
  * `CameOnline` and `WentOffline` are a monitored Direct Message partner coming onto the
- * Network or leaving it, as `MONITOR` or `WATCH` tells, by the nick monitored.
+ * Network or leaving it, as `MONITOR` or `WATCH` tells, by the nick monitored. A `Numeric`
+ * is a numeric the Ircd sent that nothing else reports, such as its welcome or its counts of
+ * Users, kept as it came.
  */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }
@@ -107,6 +109,7 @@ export type Activity =
   | { readonly _tag: "OperGranted"; readonly nick: string }
   | { readonly _tag: "OperRefused"; readonly nick: string; readonly reply: OperRefusal }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
+  | ({ readonly _tag: "Numeric" } & OtherReply)
   | ({ readonly _tag: "CtcpRequest"; readonly answer: CtcpAnswer } & Ctcp)
   | ({ readonly _tag: "CtcpReply"; readonly roundTrip: number | null } & Ctcp)
   | ({ readonly _tag: "CtcpSent" } & Omit<Ctcp, "target">)
@@ -114,12 +117,12 @@ export type Activity =
 
 /**
  * An Activity that is addressed to Self and belongs to the Network's own Timeline alone: an
- * answer to the `OPER` Self sent as its Session began, or an invitation. It settles
- * nothing and changes no Channel.
+ * answer to the `OPER` Self sent as its Session began, an invitation, or a numeric nothing
+ * else reports. It settles nothing and changes no Channel.
  */
 export type NetworkOnly = Extract<
   Activity,
-  { readonly _tag: "OperGranted" | "OperRefused" | "Invited" }
+  { readonly _tag: "OperGranted" | "OperRefused" | "Invited" | "Numeric" }
 >;
 
 /**
@@ -128,7 +131,10 @@ export type NetworkOnly = Extract<
  * @returns Whether it is.
  */
 export const isNetworkOnly = (activity: Activity): activity is NetworkOnly =>
-  activity._tag === "OperGranted" || activity._tag === "OperRefused" || activity._tag === "Invited";
+  activity._tag === "OperGranted" ||
+  activity._tag === "OperRefused" ||
+  activity._tag === "Invited" ||
+  activity._tag === "Numeric";
 
 /** A monitored partner coming onto the Network or leaving it, which changes no Channel. */
 export type PresenceChange = Extract<Activity, { readonly _tag: "CameOnline" | "WentOffline" }>;
