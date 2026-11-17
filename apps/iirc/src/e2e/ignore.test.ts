@@ -101,9 +101,16 @@ describe("ignoring a User by mask, on iirc daemon --web", () => {
         await composer.press("Enter");
         await log.getByText("hello, you two").waitFor();
 
-        // A line of another User after theirs is in the window, so nothing of theirs is merely late.
+        // The Ircd answers the peer's PING only once it has passed on what the peer said, so a
+        // line of another User sent after the PONG reaches the Daemon after theirs, and a
+        // window holding it holds anything of theirs that was not hidden.
         friend.send(`PRIVMSG ${channel} :friend again, after`);
         peer.send(`PRIVMSG ${channel} :said while ignored`);
+        peer.send("PING :ordered");
+        await peer.waitFor(
+          (line) => line.command === "PONG" && line.params.at(-1) === "ordered",
+          "the PONG"
+        );
         friend.send(`PRIVMSG ${channel} :friend last`);
         await log.getByText("friend last").waitFor();
 

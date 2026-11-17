@@ -16,7 +16,19 @@ import { isSelf } from "./meaning.ts";
 import type { Run } from "./run.ts";
 
 // Every casemapping an Ircd may declare, so a mask folded by any of them is found again.
-const casemappings: readonly Casemapping[] = ["ascii", "rfc1459", "rfc1459-strict", "rfc8265"];
+// A mask respelt across a casemapping change, then dropped, may leave what the old spelling
+// stamped hidden, since neither spelling folds to the other's stamp. That needs a mapping
+// change and a respelling together, so it is left as it is.
+const everyMapping = {
+  ascii: true,
+  rfc1459: true,
+  "rfc1459-strict": true,
+  rfc8265: true,
+} as const satisfies { readonly [mapping in Casemapping]: true };
+
+const isCasemapping = (name: string): name is Casemapping => Object.hasOwn(everyMapping, name);
+
+const casemappings: readonly Casemapping[] = Object.keys(everyMapping).filter(isCasemapping);
 
 // A stamp is folded by the casemapping the Network last declared, which outlives each
 // Connection, as Timelines are keyed, and never by the one a new Connection starts from.
