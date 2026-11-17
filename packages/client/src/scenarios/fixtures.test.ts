@@ -87,13 +87,13 @@ describe("the recorded fixtures", () => {
   );
 });
 
-describe("a Session's opening on the recorded Ircds", () => {
-  // Each numeric shown, by number, as `describeNews` writes it.
-  const shownNumerics = (transcript: string): readonly string[] =>
-    [...transcript.matchAll(/^\?\? activity Numeric (?<numeric>\d{3}) /gmu)].map(
-      (match) => match.groups?.numeric ?? ""
-    );
+// Each numeric shown, by number, as `describeNews` writes it.
+const shownNumerics = (transcript: string): readonly string[] =>
+  [...transcript.matchAll(/^\?\? activity Numeric (?<numeric>\d{3}) /gmu)].map(
+    (match) => match.groups?.numeric ?? ""
+  );
 
+describe("a Session's opening on the recorded Ircds", () => {
   it.each([
     [
       "ergo/floor",
