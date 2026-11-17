@@ -95,19 +95,20 @@ export const onItsWay = <A, E, R>(
   change: Wanted,
   work: Effect.Effect<A, E, R>
 ) =>
-  Effect.suspend(() => {
-    const id = registry.get(optionsState).asked;
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const id = registry.get(optionsState).asked;
 
-    happened(registry, { _tag: "Asked", change });
+      happened(registry, { _tag: "Asked", change });
 
-    return work.pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          happened(registry, { _tag: "Answered", id });
-        })
-      )
-    );
-  });
+      return id;
+    }),
+    () => work,
+    (id) =>
+      Effect.sync(() => {
+        happened(registry, { _tag: "Answered", id });
+      })
+  );
 
 /**
  * What a change came to: done, why it was not made, in words, or the page signed out.

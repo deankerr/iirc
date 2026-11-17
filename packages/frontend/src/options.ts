@@ -2772,12 +2772,15 @@ export const ownerShown = (state: Options): OwnerInForce | undefined => {
   const options: OwnerOptions = { ...owner.options };
 
   for (const way of state.onItsWay) {
-    if (way._tag === "Owner") {
+    // A value its Schema refuses is left out, as `uiShown` leaves one out.
+    const kept =
+      way._tag !== "Owner" || way.value === undefined
+        ? undefined
+        : ownerValueKept(way.option, way.value);
+
+    if (way._tag === "Owner" && (way.value === undefined || kept !== undefined)) {
       Object.assign(options, {
-        [way.option]:
-          way.value === undefined
-            ? ownerDefaults[way.option]
-            : ownerValueKept(way.option, way.value),
+        [way.option]: way.value === undefined ? ownerDefaults[way.option] : kept,
       });
     }
   }

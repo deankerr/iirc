@@ -77,9 +77,10 @@ export const mediaHeightShown = Atom.make(
 
 /**
  * When a Timeline is marked read on this device, as `timeShown` is, but none until it is
- * known: this device's override, or the shared options once read.
+ * known: this device's override, or the shared options in force once read. A change on its
+ * way marks nothing until the Daemon has taken it, since a Read Marker moved cannot be undone.
  */
-export const readRule = Atom.make((get) => readRuleOf(uiShown(get(optionsState)), get(deviceUi)));
+export const readRule = Atom.make((get) => readRuleOf(get(optionsState).ui, get(deviceUi)));
 
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older

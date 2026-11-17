@@ -379,7 +379,11 @@ export const moreUploads = runtime
 export const copyLink = runtime
   .fn((upload: { readonly id: UploadId; readonly safeName: string }, get) =>
     Effect.gen(function* () {
-      const link = linkOf(get.registry.get(publicUrl), upload);
+      // From the public URL in force, never one on its way, which the Daemon may refuse.
+      const link = linkOf(
+        get.registry.get(optionsState).owner?.options["uploads.publicUrl"],
+        upload
+      );
 
       if (link === undefined) {
         return;

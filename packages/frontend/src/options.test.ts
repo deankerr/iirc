@@ -2289,6 +2289,16 @@ describe("a change on its way", () => {
     });
   });
 
+  it("leaves out a value its Schema refuses, under store, uploads, and previews", () => {
+    const state = folded([
+      ...read,
+      { _tag: "OwnerRead", owner: { ...owner, sequence: 2 } },
+      { _tag: "Asked", change: { _tag: "Owner", option: "store.s3.bucket", value: 42 } },
+    ]);
+
+    expect(shownOf(state, "store.s3.bucket")).toStrictEqual(text("uploads"));
+  });
+
   it("shows what is in force again once it is answered, or refused", () => {
     let state = folded([...read, { _tag: "Asked", change: time("HH:mm:ss") }]);
     const id = state.onItsWay[0]?.id ?? -1;
