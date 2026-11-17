@@ -381,6 +381,70 @@ const twoFrameGif = (side: number) => {
   );
 };
 
+/**
+ * A fixture page whose Open Graph tags give a site, a title, and a description.
+ * @param title - The page's title.
+ * @param more - More tags, such as an image.
+ * @returns The answer.
+ */
+const ogPage = (title: string, more: string) =>
+  new Response(
+    `<!doctype html><html><head><meta charset="utf-8"><title>ignored</title>` +
+      `<meta property="og:title" content="${title}">` +
+      `<meta property="og:description" content="Cats, and the people who keep them, told over a long afternoon with more detail than any one line could hold.">` +
+      `<meta property="og:site_name" content="Cat Fixture">${more}</head><body></body></html>`,
+    { headers: { "content-type": "text/html; charset=utf-8" } }
+  );
+
+/** How rich a Preview looks, and what to call a screenshot of it. */
+interface Look {
+  readonly folded: "chip" | "open" | "summary";
+  readonly height?: "large";
+  readonly name: string;
+  readonly style: "card" | "line" | "thumbnail";
+}
+
+/**
+ * How far the page, and each list of Previews, reaches past where it should.
+ * @param tab - The screen's page.
+ * @returns Pixels, rounded: the page's sideways scroll, and for each list its own and
+ * how far anything inside reaches past its right edge or its Pane's.
+ */
+const reachOf = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const root = document.documentElement;
+
+    const lists = [...document.querySelectorAll('ul[aria-label="Previews"]')].map((list) => {
+      const edge = list.getBoundingClientRect().right;
+      const pane = list.closest("[data-pane]")?.getBoundingClientRect().right ?? edge;
+      let inside = 0;
+
+      for (const one of list.querySelectorAll("*")) {
+        const box = one.getBoundingClientRect();
+        let { right } = box;
+
+        // Text cut to its line, with an ellipsis, is clipped, not overflowing.
+        for (let up = one.parentElement; up !== null && up !== list; up = up.parentElement) {
+          if (getComputedStyle(up).overflowX !== "visible") {
+            right = Math.min(right, up.getBoundingClientRect().right);
+          }
+        }
+
+        if (box.width > 1) {
+          inside = Math.max(inside, Math.round(right - Math.min(edge, pane)));
+        }
+      }
+
+      return {
+        inside: Math.max(0, inside),
+        own: list.scrollWidth - list.clientWidth,
+        past: Math.max(0, Math.round(edge - pane)),
+      };
+    });
+
+    return { lists, page: root.scrollWidth - root.clientWidth };
+  });
+
 describe("a link's Preview, end to end", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "iirc-previews-"));
   let browser: Browser | undefined;
@@ -494,6 +558,9 @@ describe("a link's Preview, end to end", () => {
       await shoot(said, "before-off.png");
 
       const set = await api("PUT", "/ui/previews", JSON.stringify({ value: "links only" }));
+
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
 
       // Pending: `/slow` is held, so it pulses while the others settle.
       const pending = previews.locator('[data-preview="pending"]');
@@ -780,6 +847,9 @@ describe("a link's Preview, end to end", () => {
 
       const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
 
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
+
       const { page: tab, problems } = await watchedPage(browser);
       const log = await openChannel(tab, stack, channel);
 
@@ -918,6 +988,9 @@ describe("a link's Preview, end to end", () => {
       );
 
       const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
+
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
 
       const { page: tab, problems } = await watchedPage(browser);
       const requested: string[] = [];
@@ -1118,6 +1191,9 @@ describe("a link's Preview, end to end", () => {
 
       await api("PUT", "/ui/previews", JSON.stringify({ value: "on" }));
 
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
+
       const { page: tab, problems } = await watchedPage(browser);
 
       await tab.setViewportSize({ height: 800, width: 1280 });
@@ -1285,6 +1361,9 @@ describe("a link's Preview, end to end", () => {
       const { api, peer } = stack;
       const site = `http://127.0.0.1:${fixture.port}`;
       const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
+
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
 
       const { page: tab, problems } = await watchedPage(browser);
 
@@ -1510,6 +1589,9 @@ describe("a link's Preview, end to end", () => {
 
       const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
 
+      // Previews are folded to a summary by default, and this one draws them open.
+      await api("PUT", "/ui/previews.folded", JSON.stringify({ value: "open" }));
+
       const { page: tab, problems } = await watchedPage(browser);
       const requested: string[] = [];
 
@@ -1615,4 +1697,338 @@ describe("a link's Preview, end to end", () => {
       await Promise.all([minio.stop(), ircd.stop()]);
     }
   }, 120_000);
+
+  // The looks, the screens, and the steps of each are taken in order, one at a time, on
+  // the options every screen shares.
+  /* oxlint-disable no-await-in-loop */
+  it("draws every style of Preview, folded and open, at every size without overflowing, and keeps the media to its height", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const cat =
+      "The Complete and Unabridged Illustrated History of Domestic Cats, Their Keepers, and the Remarkably Long Titles That Their Admirers Give to Pages About Them";
+
+    const png = { headers: { "content-type": "image/png" } };
+    const thumbnail = solidPng(600, [220, 90, 60]);
+    const tall = solidPng(800, [40, 120, 200]);
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        if (pathname === "/thumb.png") {
+          return new Response(thumbnail, png);
+        }
+
+        if (pathname === "/big.png") {
+          return new Response(tall, png);
+        }
+
+        return pathname === "/cat"
+          ? ogPage(cat, `<meta property="og:image" content="/thumb.png">`)
+          : ogPage("A second page about cats", "");
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const [minio, ircd] = await Promise.all([startMinio(), startNgircd()]);
+    const channel = "#previews";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "styles-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, peer } = stack;
+
+      await Promise.all(
+        Object.entries({
+          "minio-key": minio.accessKeyId,
+          "minio-secret": minio.secretAccessKey,
+        }).map(
+          async ([name, value]) =>
+            await api("PUT", `/credentials/${name}`, JSON.stringify({ value }))
+        )
+      );
+
+      await Promise.all(
+        Object.entries({
+          "store.s3.accessKeyId": "minio-key",
+          "store.s3.bucket": minio.bucket,
+          "store.s3.endpoint": minio.endpoint,
+          "store.s3.region": minio.region,
+          "store.s3.secretAccessKey": "minio-secret",
+        }).map(
+          async ([option, value]) =>
+            await api("PUT", `/options/${option}`, JSON.stringify({ value }))
+        )
+      );
+
+      const statuses = [await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })))];
+
+      // Three screens: a desktop with one Pane, the same with three, so the middle one is
+      // narrow, and a phone.
+      const desktop = await watchedPage(browser);
+      const narrow = await watchedPage(browser);
+
+      const phoneContext = await browser.newContext({
+        deviceScaleFactor: 2,
+        hasTouch: true,
+        isMobile: true,
+        viewport: { height: 844, width: 390 },
+      });
+
+      const phone = await phoneContext.newPage();
+
+      await desktop.page.setViewportSize({ height: 800, width: 1280 });
+      await narrow.page.setViewportSize({ height: 800, width: 1280 });
+
+      const log = await openChannel(desktop.page, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      // Two more Channels, for the Panes beside this one.
+      const composer = desktop.page.getByRole("textbox", { name: channel });
+
+      for (const other of ["#aside", "#third"]) {
+        await composer.fill(`/join ${other}`);
+        await composer.press("Enter");
+        await desktop.page.getByRole("row", { name: other }).waitFor();
+      }
+
+      const site = `http://127.0.0.1:${fixture.port}`;
+
+      peer.send(`PRIVMSG ${channel} :look ${site}/cat and ${site}/big.png`);
+      peer.send(`PRIVMSG ${channel} :and also ${site}/other`);
+
+      // Panes: #aside, then #previews, then #third, side by side.
+      const { page: split } = narrow;
+
+      await split.goto(stack.base);
+      await split.getByLabel("Key").fill(stack.key);
+      await split.getByRole("button", { name: "Sign in" }).click();
+      await networkRow(split);
+      await split.getByRole("row", { name: "#aside" }).click();
+      await split.keyboard.press("Alt+Shift+S");
+      await split.getByRole("row", { name: channel }).click();
+      await split.keyboard.press("Alt+Shift+S");
+      await split.getByRole("row", { name: "#third" }).click();
+      await split.getByRole("log", { name: "#third" }).waitFor();
+
+      // The phone's sidebar is a drawer.
+      await phone.goto(stack.base);
+      await phone.getByLabel("Key").fill(stack.key);
+      await phone.getByRole("button", { name: "Sign in" }).tap();
+
+      const networks = phone.getByRole("button", { name: /^Networks/u });
+
+      await networks.tap();
+
+      const drawer = phone.getByRole("dialog", { name: "Networks" });
+
+      await drawer.getByRole("row", { name: channel }).tap();
+      await drawer.waitFor({ state: "detached" });
+
+      const looks: readonly Look[] = [
+        { folded: "open", name: "line-open", style: "line" },
+        { folded: "open", name: "thumbnail-open", style: "thumbnail" },
+        { folded: "open", name: "card-open", style: "card" },
+        { folded: "summary", name: "thumbnail-summary", style: "thumbnail" },
+        { folded: "chip", name: "thumbnail-chip", style: "thumbnail" },
+        { folded: "open", height: "large", name: "card-open-large", style: "card" },
+      ];
+
+      const screens = [
+        { name: "desktop", tab: desktop.page },
+        { name: "pane", tab: narrow.page },
+        { name: "phone", tab: phone },
+      ] as const;
+
+      const set = async (option: string, value: string) =>
+        await status(api("PUT", `/ui/${option}`, JSON.stringify({ value })));
+
+      const choose = async (look: Look) => [
+        await set("previews.style", look.style),
+        await set("previews.folded", look.folded),
+        await set("previews.mediaHeight", look.height ?? "medium"),
+      ];
+
+      /**
+       * Waits for a screen's Previews to stand as the look says and their images to load, and
+       * finds the Timeline they are in.
+       * @param tab - The screen's page.
+       * @param look - The look.
+       * @returns The Timeline's log.
+       */
+      const settle = async (tab: Page, look: Look) => {
+        const where = tab.getByRole("log", { name: channel });
+        const lists = where.getByRole("list", { name: "Previews" });
+
+        const rows = {
+          chip: where.locator('[data-preview="chip"]'),
+          open: where.locator('[data-preview="ready"]'),
+          summary: where.locator('[data-preview="folded"]'),
+        }[look.folded];
+
+        await expect
+          .poll(async () => await rows.count(), { timeout: 20_000 })
+          .toBe(look.folded === "chip" ? 2 : 3);
+
+        for (const image of await where.locator("img").all()) {
+          await image.scrollIntoViewIfNeeded();
+          await expect
+            .poll(async () => await image.evaluate((one: HTMLImageElement) => one.naturalWidth), {
+              timeout: 20_000,
+            })
+            .toBeGreaterThan(0);
+        }
+
+        await lists.last().scrollIntoViewIfNeeded();
+
+        return where;
+      };
+
+      const overflows: string[] = [];
+      const statusesSet: number[] = [];
+      const drawnWith: Record<string, string[]> = {};
+      const widths: Record<string, number> = {};
+
+      for (const look of looks) {
+        statusesSet.push(...(await choose(look)));
+
+        for (const { name, tab } of screens) {
+          const where = await settle(tab, look);
+          const found = await reachOf(tab);
+          const all = `${look.name}-${name}`;
+
+          if (
+            found.page > 0 ||
+            found.lists.some((one) => one.own > 0 || one.inside > 0 || one.past > 0)
+          ) {
+            overflows.push(`${all} ${JSON.stringify(found)}`);
+          }
+
+          if (name === "desktop") {
+            drawnWith[look.name] = await where
+              .locator("img")
+              .evaluateAll((images) => images.map((image) => image.dataset.drawn ?? "?"));
+          }
+
+          if (name === "pane") {
+            const pane = where.locator("xpath=ancestor::*[@data-pane][1]");
+
+            const box = await pane.boundingBox();
+
+            widths[look.name] = Math.round(box?.width ?? 0);
+            await shoot(pane, `after-${look.name}-${name}.png`);
+          } else {
+            await screenshot(tab, `after-${look.name}-${name}.png`);
+          }
+        }
+      }
+
+      // The largest height, on the desktop: a tall image is cut to 400, and at the default
+      // it was cut to 260.
+      const wholeHeight = async () => {
+        const box = await desktop.page.locator('img[data-drawn="whole"]').boundingBox();
+
+        return box?.height ?? 0;
+      };
+
+      const large = await wholeHeight();
+
+      await choose({ folded: "open", name: "", style: "card" });
+      await settle(desktop.page, { folded: "open", name: "", style: "card" });
+
+      const medium = await wholeHeight();
+
+      // Folded to a summary, a press of one row opens that row alone.
+      const summaryLook: Look = { folded: "summary", name: "", style: "thumbnail" };
+
+      await choose(summaryLook);
+
+      const summaryWhere = await settle(desktop.page, summaryLook);
+      const first = summaryWhere.getByRole("list", { name: "Previews" }).first();
+      const foldedBefore = await first.locator('[data-preview="folded"]').count();
+
+      await first.locator('[data-preview="folded"]').first().getByRole("button").click();
+
+      const opened = {
+        folded: await first.locator('[data-preview="folded"]').count(),
+        foldedBefore,
+        ready: await first.locator('[data-preview="ready"]').count(),
+      };
+
+      // Folded to a chip, `[+2]` for the Message with two, which a press opens as two rows.
+      // A press stays open in the page, so this is another screen from the summary's.
+      await choose({ folded: "chip", name: "", style: "thumbnail" });
+
+      const chipLook: Look = { folded: "chip", name: "", style: "thumbnail" };
+      const chipWhere = await settle(narrow.page, chipLook);
+      const chips = await chipWhere.locator('[data-preview="chip"]').allTextContents();
+      const chipLists = chipWhere.getByRole("list", { name: "Previews" });
+
+      await chipLists.first().getByRole("button").click();
+
+      const afterChip = await chipLists.first().locator('[data-preview="ready"]').count();
+
+      expect({
+        afterChip,
+        chips,
+        drawnWith,
+        large: large > 260 && large <= 400,
+        medium: medium > 160 && medium <= 260,
+        opened,
+        overflows,
+        paneWidthsNarrow: Object.values(widths).every((width) => width > 0 && width <= 400),
+        problems: [desktop, narrow].flatMap((one) =>
+          one.problems.filter((problem) => !problem.includes("401"))
+        ),
+        statuses: [...statuses, ...statusesSet].filter((code) => code !== 200),
+      }).toStrictEqual({
+        afterChip: 2,
+        chips: ["[+2]", "[+1]"],
+        drawnWith: {
+          "card-open": ["card", "whole"],
+          "card-open-large": ["card", "whole"],
+          "line-open": ["whole"],
+          "thumbnail-chip": [],
+          "thumbnail-open": ["thumbnail", "whole"],
+          "thumbnail-summary": [],
+        },
+        large: true,
+        medium: true,
+        opened: { folded: 1, foldedBefore: 2, ready: 1 },
+        overflows: [],
+        paneWidthsNarrow: true,
+        problems: [],
+        statuses: [],
+      });
+
+      await phoneContext.close();
+      peer.close();
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await Promise.all([minio.stop(), ircd.stop()]);
+    }
+  }, 240_000);
+  /* oxlint-enable no-await-in-loop */
 });
