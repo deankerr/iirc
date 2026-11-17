@@ -525,6 +525,7 @@ export const fakeDaemon = () => {
   const reads: (typeof ReadBody.Type)[] = [];
   const closes: { readonly network: string; readonly target: string }[] = [];
   const channelsRead: string[] = [];
+  const channelsAsked: string[] = [];
   const channelsHeld: (() => void)[] = [];
   const membersHeld: (() => void)[] = [];
   const knownHeld: (() => void)[] = [];
@@ -581,7 +582,9 @@ export const fakeDaemon = () => {
     actsHeld,
     /** Each Channel behind a Channel Timeline, by its id, which `channel` and `members` read. */
     channels: new Map<string, FakeChannel>(),
-    /** Each read of a Channel's head, by its Timeline. */
+    /** Each read of a Channel's head as it is asked, held or not, by its Timeline. */
+    channelsAsked,
+    /** Each read of a Channel's head answered, by its Timeline. */
     channelsRead,
     /** Each close asked for, joined or not, in order. */
     closes,
@@ -2143,7 +2146,12 @@ export const fakeDaemon = () => {
    * @returns The answer, or nothing.
    */
   const held = (url: URL, init: RequestInit | undefined): Promise<Response> | undefined => {
-    const kind = /\/(?<what>channel|members|known)$/u.exec(url.pathname)?.groups?.what;
+    const match = /\/(?<timeline>[^/]+)\/(?<what>channel|members|known)$/u.exec(url.pathname);
+    const kind = match?.groups?.what;
+
+    if (kind === "channel") {
+      channelsAsked.push(match?.groups?.timeline ?? "");
+    }
 
     if (kind === "known" && daemon.knownDown) {
       return Promise.reject(new TypeError("fetch failed"));

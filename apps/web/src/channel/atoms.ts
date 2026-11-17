@@ -133,6 +133,9 @@ const kept = Atom.make((get) => {
 
 /** How many heads of Channels no Pane shows are asked at once. */
 const listedAtOnce = 2;
+// A read that keeps failing keeps its turn while it is asked again, so two that never
+// succeed would leave the rest waiting. The Daemon answers a head from what the Client
+// holds, so one that cannot answer one cannot answer the rest either.
 
 /** The errors a read gives up on: no sign-in, or nothing to read. */
 const final: ReadonlySet<string> = new Set([
@@ -272,6 +275,56 @@ const perform = (
 const asItIs = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
 
 /**
+ * Waits until a Pane shows a Channel.
+ * @param registry - The registry.
+ * @param timeline - The Channel's Timeline.
+ * @returns The wait.
+ */
+const untilShown = (registry: AtomRegistry.AtomRegistry, timeline: TimelineId) =>
+  Effect.callback((resume) => {
+    const stop = registry.subscribe(
+      timelinesState,
+      (state) => {
+        if (openChannels(state).some((one) => one.timeline === timeline)) {
+          resume(Effect.void);
+        }
+      },
+      { immediate: true }
+    );
+
+    return Effect.sync(stop);
+  });
+
+/**
+ * Asks a read of a Channel no Pane shows in its turn, one of `listed`'s permits, or at once
+ * if a Pane shows it before then, so a Channel opened while the heads are queued is not
+ * kept behind them. Once begun in its turn, it is not asked again.
+ * @param registry - The registry.
+ * @param listed - The turns.
+ * @param timeline - The Channel's Timeline.
+ * @returns The gate.
+ */
+const queued =
+  (registry: AtomRegistry.AtomRegistry, listed: Semaphore.Semaphore, timeline: TimelineId) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      let begun = false;
+
+      return yield* Effect.raceFirst(
+        listed.withPermits(1)(
+          Effect.suspend(() => {
+            begun = true;
+
+            return effect;
+          })
+        ),
+        untilShown(registry, timeline).pipe(
+          Effect.andThen(Effect.suspend(() => (begun ? Effect.never : effect)))
+        )
+      );
+    });
+
+/**
  * While the browser is signed in, the head of each Channel followed is read, and the
  * members of each shown while they show, as the core calls for them, from nothing each time
  * it signs in. The core gives one read of each kind of each Channel at a time, and says how
@@ -302,7 +355,6 @@ export const channelSync = runtime
       const heads = yield* FiberMap.make<TimelineId>();
       const members = yield* FiberMap.make<TimelineId>();
       const listed = yield* Semaphore.make(listedAtOnce);
-      const queued = <A, E, R>(effect: Effect.Effect<A, E, R>) => listed.withPermits(1)(effect);
 
       // A Channel no longer followed is let go of, and its members once no Pane shows it,
       // each with a read of it in flight.
@@ -344,7 +396,12 @@ export const channelSync = runtime
               yield* FiberMap.run(
                 one._tag === "Head" ? heads : members,
                 one.timeline,
-                perform(registry, one, delay, shown.has(one.timeline) ? asItIs : queued)
+                perform(
+                  registry,
+                  one,
+                  delay,
+                  shown.has(one.timeline) ? asItIs : queued(registry, listed, one.timeline)
+                )
               );
             }
           })

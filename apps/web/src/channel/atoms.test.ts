@@ -676,7 +676,7 @@ describe("re-reading under sustained Activity", () => {
 });
 
 describe("the heads of Channels the Sidebar lists", () => {
-  it("are asked two at a time beside those the Panes show, and each is read", async () => {
+  it("are asked two at a time, one a Pane opens meanwhile at once, and each is read", async () => {
     const others = [7, 8, 9, 10].map((sequence) =>
       listed(idOf(sequence), `#c${sequence}`, "Channel")
     );
@@ -697,13 +697,16 @@ describe("the heads of Channels the Sidebar lists", () => {
     // Give every read its chance to be asked.
     await wait(200);
     const atOnce = daemon.held.channel.length;
+    // The open Channel's read is asked though the heads before it hold every turn.
+    const opened = daemon.channelsAsked.includes(iirc);
 
     daemon.holdChannels = false;
     release(daemon.held.channel);
     await eventually(() => daemon.channelsRead.length === 5);
 
-    expect({ atOnce: atOnce <= 3, reads: new Set(daemon.channelsRead).size }).toStrictEqual({
-      atOnce: true,
+    expect({ atOnce, opened, reads: new Set(daemon.channelsRead).size }).toStrictEqual({
+      atOnce: 3,
+      opened: true,
       reads: 5,
     });
   });
