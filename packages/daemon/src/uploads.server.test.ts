@@ -102,7 +102,8 @@ const start = (world: World, dataDir: string, stopping: Effect.Effect<void>) =>
       Layer.provideMerge(
         BunHttpServer.layer({ gracefulShutdownTimeout: 100, hostname: loopback, port: 0 })
       ),
-      Layer.provide(layerWorld(world, dataDir)),
+      // A burst wide enough that no Line waits on the real clock's pacing.
+      Layer.provide(layerWorld(world, dataDir, { burst: 100, interval: 2000 })),
       Layer.provide(Layer.succeed(Stopping, stopping)),
       Layer.provide(Layer.succeed(Heartbeat, Duration.millis(50)))
     );
@@ -3751,6 +3752,5 @@ describe("where an Upload was said", () => {
         { network: "libera", target: "#iirc", text: "fresh <link>" },
       ],
     });
-    // Past the Runtime's burst, each Line waits its turn.
-  }, 10_000);
+  });
 });
