@@ -208,9 +208,10 @@ export const refresh = (registry: AtomRegistry.AtomRegistry) =>
   }).pipe(Effect.ignore);
 
 /**
- * What the Daemon reports of a Network that bears on its Channels' names: the casemapping
- * an Ircd declared, and `CHANTYPES`. A read that fails is taken as knowing neither, so
- * names are compared exactly and none is prefixed.
+ * What the Daemon reports of a Network that bears on its Channels' names and its ignore
+ * masks: the casemapping an Ircd declared, and `CHANTYPES`. A read that fails is taken as
+ * knowing neither, so Channels' names are compared exactly and none is prefixed, and masks
+ * are folded by `rfc1459`, as before any Ircd declared one.
  * @param network - The Network.
  * @returns What it reports.
  */
