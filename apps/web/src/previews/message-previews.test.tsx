@@ -1816,7 +1816,7 @@ describe("a Message's Previews", () => {
       expect(drawn().map((one) => one.state)).toStrictEqual(["ready", "failed"]);
     });
 
-    it("folds a Message's Previews into one chip under chip, which a press opens, all of them", async () => {
+    it("folds a Message's Previews into one chip under chip, which a press opens, all of them, descriptions shown", async () => {
       await seenWith(readyWithImage("page"), { "previews.folded": "chip" }, dogsItem);
       await settled(() => drawn()[0]?.state === "chip");
 
@@ -1825,8 +1825,13 @@ describe("a Message's Previews", () => {
       await pressed(list()?.querySelector("button") ?? null);
       await settled(() => drawn().length === 2);
 
-      expect({ chip, opened: drawn().map((one) => one.state) }).toStrictEqual({
+      const expanded = [...(list()?.querySelectorAll('[slot="trigger"]') ?? [])].map((one) =>
+        one.getAttribute("aria-expanded")
+      );
+
+      expect({ chip, expanded, opened: drawn().map((one) => one.state) }).toStrictEqual({
         chip: [{ state: "chip", text: "[+2]" }],
+        expanded: ["true"],
         opened: ["ready", "ready"],
       });
     });

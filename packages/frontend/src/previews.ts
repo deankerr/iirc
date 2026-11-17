@@ -1093,7 +1093,7 @@ const showsMore = (shown: PreviewShown): boolean =>
  * Under `summary`, each that shows more than its summary line is folded to it until it is
  * pressed open, and any other, pending, failed, waiting for a press, or with nothing more,
  * is drawn as it is. Under `chip`, they are one `[+n]` until it is pressed, which opens
- * them all.
+ * them all, each that shows more `Opened`, as a summary pressed is.
  * @param folded - `ui.previews.folded` on this device.
  * @param opened - The Previews pressed open, as {@link opening} keeps them.
  * @param key - The Message's key.
@@ -1128,7 +1128,10 @@ export const foldedOf = (
 
     case "chip": {
       return shown.every((one) => opened.has(openedKey(key, one)))
-        ? { _tag: "Rows", rows: shown.map(open) }
+        ? {
+            _tag: "Rows",
+            rows: shown.map((one) => (showsMore(one) ? { fold: "Opened", shown: one } : open(one))),
+          }
         : { _tag: "Chip", count: shown.length };
     }
 

@@ -1061,10 +1061,20 @@ describe("ui.previews.folded", () => {
     ]);
   });
 
-  it("opens every Preview of a Message once its chip is pressed", () => {
-    expect(foldedOf("chip", opening(new Set(), key, rows), key, rows)).toStrictEqual({
+  it("opens every Preview of a Message once its chip is pressed, a description shown at once", () => {
+    const described = readyRow("6", {}, "thumbnail");
+    const all = [...rows, described];
+
+    expect(foldedOf("chip", opening(new Set(), key, all), key, all)).toStrictEqual({
       _tag: "Rows",
-      rows: rows.map((shown) => ({ fold: "Open", shown })),
+      rows: [
+        { fold: "Open", shown: pendingRow },
+        { fold: "Open", shown: failedRow },
+        { fold: "Open", shown: waitingRow },
+        { fold: "Open", shown: plainPage },
+        { fold: "Opened", shown: withImage },
+        { fold: "Opened", shown: described },
+      ],
     });
   });
 });
