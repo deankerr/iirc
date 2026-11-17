@@ -120,11 +120,11 @@ The core decides and this package draws and does the I/O.
 
 ### Nothing is drawn before it is known
 
-Every view keeps three rules, and a review holds new work to them:
+Every view is held to three rules, and a review holds new work to them:
 
-- **What a view needs is held before it can be opened.** What a view draws as it opens comes from what the page already holds, read as the page started or followed since, never from a read that opening it begins. A read as it opens may bring what is held up to date, never fill it for the first time. The page's first frames are a view too.
-- **A change the Owner makes shows at once.** It is drawn as asked the moment it is asked, derived in the core from what is in force and what is on its way, never kept as a second copy in step by hand. Once the Daemon answers, what it holds wins, and a refusal draws what is in force again and says why. A Message is not such a change: it appears when the Daemon folds it.
-- **A wait that cannot be avoided is drawn as a wait.** What is truly not known yet, such as a Lookup's answer or the topic of a Channel just joined, draws as on its way, or as nothing, never as a default, an empty list, "none", or "not connected", which read as the answer. In the core, not known is a case of its own, such as `Unknown` or `undefined`, and the view never draws it as a default.
+- **What a view needs is held before it can be opened.** What a view draws as it opens comes from what the page already holds, read as the page started or followed since, never from a read that opening it begins. A read as it opens may bring what is held up to date, never fill it for the first time. The page's first frames are a view too: until the shell has what it draws, the page draws a wait, in the theme's defaults.
+- **A change the Owner makes shows at once.** It is drawn as asked the moment it is asked, derived in the core from what is in force and what is on its way, never kept as a second copy in step by hand. Once the Daemon answers, what it holds wins, and a refusal draws what is in force again and says why. A Message is not such a change.
+- **A wait that cannot be avoided is drawn as a wait.** What is truly not known yet, such as a Lookup's answer or the topic of a Channel just joined, draws as on its way, or as nothing only where nothing cannot be read as the answer, never as a default, an empty list, "none", or "not connected", which read as the answer. In the core, not known is a case of its own, such as `Unknown` or `undefined`, and the view never draws it as a default.
 
 ### What this device keeps
 
