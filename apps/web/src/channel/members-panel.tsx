@@ -186,7 +186,7 @@ const Members = ({
           onClose={() => {
             setMenu(undefined);
           }}
-          presence="Here"
+          presence={{ _tag: "Here", prefixes: opened.prefixes }}
           timeline={timeline}
         >
           <Account account={opened.account} />

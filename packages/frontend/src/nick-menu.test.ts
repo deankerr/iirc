@@ -1,11 +1,11 @@
-import { ChannelHeader, NetworkId, TimelineId } from "@iirc/api";
+import { ChannelHeader, Member, NetworkId, TimelineId } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { interpret } from "./commands.ts";
 import type { CommandContext, Focus } from "./commands.ts";
 import { initialNickMenus, nickEntries, presenceWanted, reduceNickMenus } from "./nick-menu.ts";
-import type { NickMenus, NickMenusEvent } from "./nick-menu.ts";
+import type { NickMenus, NickMenusEvent, Presence } from "./nick-menu.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
@@ -74,16 +74,26 @@ const inChannel = (held: Held): CommandContext => ({
   head: headOf(held),
 });
 
-const ids = (context: CommandContext, presence: "Here" | "Gone" | "Unknown" = "Here") =>
+const here = (prefixes: readonly string[] | undefined): Presence => ({ _tag: "Here", prefixes });
+
+const ids = (context: CommandContext, presence: Presence = here([])) =>
   nickEntries("peer", timeline, presence, context).map((entry) => entry.id);
 
+const knownSet = (value: readonly string[]) =>
+  Schema.decodeSync(Member.fields.prefixes)({
+    _tag: "Known",
+    at: 1,
+    from: "ircd",
+    value: [...value],
+  });
+
 const everyone = ["query", "whois", "mention", "ignore"];
-const operator = [...everyone, "op", "deop", "voice", "devoice", "kick", "ban"];
+const operator = [...everyone, "ban", "op", "deop", "voice", "devoice", "kick"];
 
 describe("the menu on a nick", () => {
   it("runs the command the Composer would for each entry, and starts the Composer to mention", () => {
     const context = inChannel(known(["o"]));
-    const entries = nickEntries("peer", timeline, "Here", context);
+    const entries = nickEntries("peer", timeline, here([]), context);
 
     const composed = (line: string) => {
       const read = interpret(line, context);
@@ -96,12 +106,12 @@ describe("the menu on a nick", () => {
       ["whois", "Whois peer", composed("/whois peer")],
       ["mention", "Mention peer", [{ _tag: "FocusComposer", text: "peer: " }]],
       ["ignore", "Ignore peer", composed("/ignore peer")],
+      ["ban", "Ban peer", composed("/ban peer")],
       ["op", "Op peer", composed("/op peer")],
       ["deop", "Deop peer", composed("/deop peer")],
       ["voice", "Voice peer", composed("/voice peer")],
       ["devoice", "Devoice peer", composed("/devoice peer")],
       ["kick", "Kick peer", composed("/kick peer")],
-      ["ban", "Ban peer", composed("/ban peer")],
     ]);
   });
 
@@ -133,12 +143,56 @@ describe("the menu on a nick", () => {
     const context = inChannel(known(["o"]));
 
     expect({
-      gone: ids(context, "Gone"),
-      unknown: ids(context, "Unknown"),
+      gone: ids(context, { _tag: "Gone" }),
+      unknown: ids(context, { _tag: "Unknown" }),
     }).toStrictEqual({
       gone: [...everyone, "ban"],
       unknown: [...everyone, "ban"],
     });
+  });
+
+  it("offers no kick, deop, or devoice of a member who outranks Self, though op, voice, and ban", () => {
+    const op = inChannel(known(["o"]));
+
+    expect({
+      founder: ids(op, here(["q"])),
+      founderAndOp: ids(op, here(["q", "o"])),
+    }).toStrictEqual({
+      founder: [...everyone, "ban", "op", "voice"],
+      founderAndOp: [...everyone, "ban", "op", "voice"],
+    });
+  });
+
+  it("offers kick, deop, and devoice of a member of equal or lower rank", () => {
+    const op = inChannel(known(["o"]));
+
+    expect({
+      equal: ids(op, here(["o"])),
+      ownerOfOp: ids(inChannel(known(["q"])), here(["o"])),
+      plain: ids(op, here([])),
+      voiced: ids(op, here(["v"])),
+    }).toStrictEqual({
+      equal: operator,
+      ownerOfOp: operator,
+      plain: operator,
+      voiced: operator,
+    });
+  });
+
+  it("offers no kick, deop, or devoice of a member whose prefixes are not known", () => {
+    expect(ids(inChannel(known(["o"])), here(undefined))).toStrictEqual([
+      ...everyone,
+      "ban",
+      "op",
+      "voice",
+    ]);
+  });
+
+  it("places ban straight after ignore, before the entries that need the User there", () => {
+    const context = inChannel(known(["o"]));
+
+    expect(ids(context, { _tag: "Unknown" }).slice(3)).toStrictEqual(["ignore", "ban"]);
+    expect(ids(context, here([])).slice(3, 5)).toStrictEqual(["ignore", "ban"]);
   });
 
   it("offers nothing to operate outside a Channel", () => {
@@ -202,8 +256,8 @@ describe("whether the User of a nick menu is in its Channel", () => {
             {
               _tag: "MembersRead",
               casemapping: "rfc1459",
+              members: [],
               more: false,
-              nicks: [],
               request: 1,
             },
           ],
@@ -220,7 +274,16 @@ describe("whether the User of a nick menu is in its Channel", () => {
 
   it("is there when a member's nick folds as theirs, gone when none does and none follow, and unknown otherwise", () => {
     const answered = (nicks: readonly string[], more: boolean, casemapping = "rfc1459" as const) =>
-      fold([opened, { _tag: "MembersRead", casemapping, more, nicks, request: 1 }]).open?.presence;
+      fold([
+        opened,
+        {
+          _tag: "MembersRead",
+          casemapping,
+          members: nicks.map((nick) => ({ nick, prefixes: knownSet(["o"]) })),
+          more,
+          request: 1,
+        },
+      ]).open?.presence;
 
     expect({
       failed: fold([opened, { _tag: "MembersFailed", request: 1 }]).open?.presence,
@@ -229,11 +292,11 @@ describe("whether the User of a nick menu is in its Channel", () => {
       longer: answered(["peerless"], true),
       unanswered: fold([opened]).open?.presence,
     }).toStrictEqual({
-      failed: "Unknown",
-      folded: "Here",
-      gone: "Gone",
-      longer: "Unknown",
-      unanswered: "Unknown",
+      failed: { _tag: "Unknown" },
+      folded: here(["o"]),
+      gone: { _tag: "Gone" },
+      longer: { _tag: "Unknown" },
+      unanswered: { _tag: "Unknown" },
     });
   });
 
@@ -241,8 +304,8 @@ describe("whether the User of a nick menu is in its Channel", () => {
     const answer: NickMenusEvent = {
       _tag: "MembersRead",
       casemapping: "ascii",
+      members: [{ nick: "Peer", prefixes: knownSet([]) }],
       more: false,
-      nicks: ["Peer"],
       request: 1,
     };
 
@@ -254,7 +317,7 @@ describe("whether the User of a nick menu is in its Channel", () => {
       wanted: presenceWanted(reopened),
     }).toStrictEqual({
       closed: undefined,
-      reopened: "Unknown",
+      reopened: { _tag: "Unknown" },
       wanted: { prefix: "Peer", request: 2, timeline },
     });
   });

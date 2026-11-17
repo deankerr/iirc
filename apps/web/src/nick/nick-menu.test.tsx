@@ -388,12 +388,12 @@ const everyone = (nick: string) => [
 
 const operator = (nick: string) => [
   ...everyone(nick),
+  `Ban ${nick}`,
   `Op ${nick}`,
   `Deop ${nick}`,
   `Voice ${nick}`,
   `Devoice ${nick}`,
   `Kick ${nick}`,
-  `Ban ${nick}`,
 ];
 
 describe("the menu on a nick", () => {

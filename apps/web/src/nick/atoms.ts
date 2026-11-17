@@ -81,8 +81,11 @@ const askPresence = (
             Effect.map((known): NickMenusEvent => ({
               _tag: "MembersRead",
               casemapping: known.casemapping,
+              members: page.members.map((member) => ({
+                nick: member.nick,
+                prefixes: member.prefixes,
+              })),
               more: page.more,
-              nicks: page.members.map((member) => member.nick),
               request: wanted.request,
             }))
           )
