@@ -26,7 +26,7 @@ import type { ChannelEvent, ChannelRead, OpenChannel } from "@iirc/frontend/chan
 import type { Intent } from "@iirc/frontend/commands";
 import { listedChannels } from "@iirc/frontend/lookup";
 import { opened } from "@iirc/frontend/timelines";
-import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
+import { Clock, Duration, Effect, FiberMap, Semaphore, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -131,6 +131,9 @@ const kept = Atom.make((get) => {
   return `${timelines.join(" ")}|${shown.join(" ")}`;
 });
 
+/** How many heads of Channels no Pane shows are asked at once. */
+const listedAtOnce = 2;
+
 /** The errors a read gives up on: no sign-in, or nothing to read. */
 const final: ReadonlySet<string> = new Set([
   "Unauthorized",
@@ -174,25 +177,14 @@ const settled = <E extends { readonly _tag: string }>(
   });
 
 /**
- * Makes one read and folds in its answer. A read again waits as the core said first, and
- * nothing interrupts it: a change while it is asked leaves what it reads dirty, and the
- * core calls for the next read once it answers. It is asked at the generation the state
- * has then, which its answer says. A failure is asked again until it succeeds, except a
- * refusal, which signs the page out, and an answer that there is nothing to read, or, for
- * the members, that Self is not in the Channel.
+ * Asks one read, at the generation the state has now, and folds in its answer.
  * @param registry - The registry.
  * @param read - The read.
- * @param delay - How long to wait first, in milliseconds.
  * @returns The read, which never fails.
  */
-const perform = (registry: AtomRegistry.AtomRegistry, read: ChannelRead, delay: number) =>
+const asked = (registry: AtomRegistry.AtomRegistry, read: ChannelRead) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
-
-    if (delay > 0) {
-      yield* Effect.sleep(Duration.millis(delay));
-    }
-
     const { generation } = channelIn(registry.get(channelState), read.timeline);
 
     const event =
@@ -245,12 +237,49 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: ChannelRead, delay: 
   });
 
 /**
- * While the browser is signed in, the open Channel's head is read, and its members while
- * they show, as the core calls for them, from nothing each time it signs in. The core
- * gives one read of each kind at a time, and says how long a read again waits: the first
- * change after quiet is read after `debounce`, and changes that keep coming at most once
- * an `interval`. Each kind is one fiber, which only a read of another Channel interrupts.
- * Mounted once for the page.
+ * Makes one read and folds in its answer. A read again waits as the core said first, and
+ * nothing interrupts it: a change while it is asked leaves what it reads dirty, and the
+ * core calls for the next read once it answers. It is asked at the generation the state
+ * has then, which its answer says. A failure is asked again until it succeeds, except a
+ * refusal, which signs the page out, and an answer that there is nothing to read, or, for
+ * the members, that Self is not in the Channel. Once waited, it is asked through `gate`, so
+ * the heads of Channels no Pane shows take turns rather than crowd out what the Panes read.
+ * @param registry - The registry.
+ * @param read - The read.
+ * @param delay - How long to wait first, in milliseconds.
+ * @param gate - What it is asked through, once waited.
+ * @returns The read, which never fails.
+ */
+const perform = (
+  registry: AtomRegistry.AtomRegistry,
+  read: ChannelRead,
+  delay: number,
+  gate: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+) =>
+  Effect.gen(function* () {
+    if (delay > 0) {
+      yield* Effect.sleep(Duration.millis(delay));
+    }
+
+    yield* gate(asked(registry, read));
+  });
+
+/**
+ * Asks an effect as it is, with no turn to wait for.
+ * @param effect - The effect.
+ * @returns It.
+ */
+const asItIs = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
+
+/**
+ * While the browser is signed in, the head of each Channel followed is read, and the
+ * members of each shown while they show, as the core calls for them, from nothing each time
+ * it signs in. The core gives one read of each kind of each Channel at a time, and says how
+ * long a read again waits: the first change after quiet is read after `debounce`, and
+ * changes that keep coming at most once an `interval`. Each is one fiber, which only
+ * letting go of its Channel, or of its members, interrupts. The heads of Channels no Pane
+ * shows are asked `listedAtOnce` at a time, so a Gap that dirties them all queues neither
+ * what the Panes read nor what the Owner says behind them. Mounted once for the page.
  */
 export const channelSync = runtime
   .atom((get) =>
@@ -270,7 +299,10 @@ export const channelSync = runtime
       }
 
       // One fiber for each kind of read of each Channel.
-      const fibers = yield* FiberMap.make<string>();
+      const heads = yield* FiberMap.make<TimelineId>();
+      const members = yield* FiberMap.make<TimelineId>();
+      const listed = yield* Semaphore.make(listedAtOnce);
+      const queued = <A, E, R>(effect: Effect.Effect<A, E, R>) => listed.withPermits(1)(effect);
 
       // A Channel no longer followed is let go of, and its members once no Pane shows it,
       // each with a read of it in flight.
@@ -281,12 +313,14 @@ export const channelSync = runtime
 
             channelHappened(registry, { _tag: "Kept", ...now });
 
-            for (const key of [...fibers].map(([one]) => one)) {
-              const [kind = "", timeline = ""] = key.split(" ");
-              const still = kind === "Head" ? now.timelines : now.shown;
-
-              if (!still.some((one) => one === timeline)) {
-                yield* FiberMap.remove(fibers, key);
+            for (const [fibers, still] of [
+              [heads, now.timelines],
+              [members, now.shown],
+            ] as const) {
+              for (const timeline of Array.from(fibers, ([one]) => one)) {
+                if (!still.includes(timeline)) {
+                  yield* FiberMap.remove(fibers, timeline);
+                }
               }
             }
           })
@@ -296,6 +330,10 @@ export const channelSync = runtime
       const read = get.stream(wanted).pipe(
         Stream.runForEach(() =>
           Effect.gen(function* () {
+            const shown = new Set(
+              openChannels(registry.get(timelinesState)).map((open) => open.timeline)
+            );
+
             // As the state is now, so a read taken on since is not taken on again.
             for (const one of readsNow((atom) => registry.get(atom))) {
               const now = yield* Clock.currentTimeMillis;
@@ -304,9 +342,9 @@ export const channelSync = runtime
 
               channelHappened(registry, { _tag: "ReadStarted", at: now + delay, read: one });
               yield* FiberMap.run(
-                fibers,
-                `${one._tag} ${one.timeline}`,
-                perform(registry, one, delay)
+                one._tag === "Head" ? heads : members,
+                one.timeline,
+                perform(registry, one, delay, shown.has(one.timeline) ? asItIs : queued)
               );
             }
           })

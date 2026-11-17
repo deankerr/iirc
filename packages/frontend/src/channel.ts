@@ -723,6 +723,8 @@ export const reduceChannels = (state: Channels, event: ChannelsEvent): Channels 
 
         changed = true;
 
+        // A page of members answered just before the runtime let go of its read is still
+        // taken: it is as current as any read.
         return [[timeline, { ...held, roster: unreadRoster }]];
       });
 

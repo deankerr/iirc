@@ -675,6 +675,40 @@ describe("re-reading under sustained Activity", () => {
   );
 });
 
+describe("the heads of Channels the Sidebar lists", () => {
+  it("are asked two at a time beside those the Panes show, and each is read", async () => {
+    const others = [7, 8, 9, 10].map((sequence) =>
+      listed(idOf(sequence), `#c${sequence}`, "Channel")
+    );
+
+    const { daemon } = await inChannel([member("op")], { holdHead: true, timelines: others });
+    const ours = daemon.channels.get(iirc);
+
+    // Each is a Channel the Daemon reads, once its held reads are let go.
+    for (const other of others) {
+      if (ours !== undefined) {
+        daemon.channels.set(other.id, {
+          ...ours,
+          header: { ...ours.header, name: other.name, timeline: timelineId(other.id) },
+        });
+      }
+    }
+
+    // Give every read its chance to be asked.
+    await wait(200);
+    const atOnce = daemon.held.channel.length;
+
+    daemon.holdChannels = false;
+    release(daemon.held.channel);
+    await eventually(() => daemon.channelsRead.length === 5);
+
+    expect({ atOnce: atOnce <= 3, reads: new Set(daemon.channelsRead).size }).toStrictEqual({
+      atOnce: true,
+      reads: 5,
+    });
+  });
+});
+
 describe("completing by the Network's CHANTYPES", () => {
   it("completes a word as a nick when the Network no longer says its first character starts a Channel", async () => {
     const { daemon, registry } = await inChannel([member("[bob]")], {
