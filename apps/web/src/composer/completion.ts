@@ -39,6 +39,9 @@ import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 import { composerState } from "./composer-state.ts";
 
+/** What was run or chosen recently, apart from the palette's query, so typing there recomputes no composer's sources. */
+const ranRecently = Atom.make((get) => get(paletteState).recent);
+
 /** What a word typed at a place can be completed from, as things are now. */
 const sourcesAt = Atom.family((place: Place) =>
   Atom.make((get): Sources =>
@@ -46,7 +49,7 @@ const sourcesAt = Atom.family((place: Place) =>
       chantypes: get(chantypesState),
       keymap: get(keymapState),
       options: listed(get(optionsState), ""),
-      ran: get(paletteState).recent,
+      ran: get(ranRecently),
       suffix: get(uiInEffect).suffix,
       ...get(themesListed),
       font: get(uiInEffect).font,

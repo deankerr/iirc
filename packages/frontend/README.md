@@ -120,7 +120,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
-- **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the composer's, is refused, naming the Networks.
+- **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the composer's, is refused, naming the Networks. Of two that share a name on one Network, it takes the first, so the list leaves out the other.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
 - **A new command is one entry.** The palette and the keymap add no actions of their own.
 

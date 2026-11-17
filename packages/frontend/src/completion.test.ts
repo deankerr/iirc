@@ -1177,6 +1177,43 @@ describe("everything the palette lists", () => {
     });
   });
 
+  it("lists no /go candidate it cannot reach, as the second of two that share a name on one Network", () => {
+    const shared: Sources = {
+      ...everywhere,
+      timelines: namedIn([
+        networkOf(
+          network,
+          false,
+          [
+            timelineOf(1, network, "Network", "libera"),
+            timelineOf(2, network, "Channel", "#a[b"),
+            timelineOf(3, network, "Channel", "#a{b"),
+          ],
+          []
+        ),
+      ]),
+    };
+
+    expect(opened("/go #a", shared).map((one) => one.text)).toStrictEqual(["#a[b"]);
+  });
+
+  it("lists no theme after /theme import or /theme remove, which name no theme to draw", () => {
+    // An imported theme's description says "imported theme", which `import` would match.
+    const imported: Sources = {
+      ...everywhere,
+      themes: [
+        ...everywhere.themes,
+        { builtIn: false, name: Schema.decodeSync(ThemeName)("mine") },
+      ],
+    };
+
+    expect({
+      import: opened("/theme import", imported),
+      remove: opened("/theme remove imp", imported),
+      theme: opened("/theme imp", imported).map((one) => one.name),
+    }).toStrictEqual({ import: [], remove: [], theme: ["mine"] });
+  });
+
   it("takes the whole rest of the line as the query, spaces collapsed, and a candidate replaces all of it", () => {
     expect({
       named: opened("/go oftc   #i").map((one) => one.text),

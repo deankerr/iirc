@@ -15,7 +15,7 @@ import type { NetworkId, TimelineId } from "@iirc/api";
 import type { FontShown } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
-import { commandNamed, commands, namedIn, themeFlags, timelineNamed } from "./commands.ts";
+import { commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
 import type { Command, NamedTimeline } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
@@ -477,7 +477,8 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
           .filter((one) => one !== "")
       );
 
-      return flags === undefined
+      // `import` and `remove` are verbs, not a theme to draw: neither is listed nor previewed.
+      return flags === undefined || /^(?:import|remove)(?:\s|$)/iu.test(after.slice(given.length))
         ? undefined
         : { start: head[0].length + given.length, whole: { _tag: "Themes", option: flags.option } };
     }
@@ -498,28 +499,58 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
 const rankedEntries = (query: string, entries: readonly Entry[]): readonly Entry[] =>
   query === "" ? entries : ranked(query, entries, matchedBy).map((one) => one.item);
 
-/**
- * What `/go` writes for a Timeline: its name where that finds it from the Network the
- * composer is on, else its Network's id and its name.
- * @param timeline - The Timeline.
- * @param sources - The sources.
- * @returns The argument.
- */
-const goText = (timeline: NamedTimeline, sources: Sources) => {
-  const found = timelineNamed(sources.timelines, sources.network, timeline.name);
+/** What `/go` writes for a Timeline, or none for one it cannot reach. */
+type GoText = (timeline: NamedTimeline) => string | undefined;
 
-  return found._tag === "Parsed" && found.value === timeline.timeline
-    ? timeline.name
-    : `${timeline.network} ${timeline.name}`;
+/**
+ * What `/go` writes for each Timeline, as `timelineNamed` reads it back: its name where
+ * that finds it from the Network the composer is on, else its Network's id and its name,
+ * or none where neither does, as for the second of two that share a name on one Network.
+ * Every name is folded once, so the list takes time in proportion to the Timelines.
+ * @param sources - The sources.
+ * @returns What it writes for each.
+ */
+const goTexts = (sources: Sources): GoText => {
+  const byName = new Map<string, NamedTimeline[]>();
+
+  for (const one of sources.timelines) {
+    const key = fold(one.name);
+    const same = byName.get(key);
+
+    if (same === undefined) {
+      byName.set(key, [one]);
+    } else {
+      same.push(one);
+    }
+  }
+
+  return (timeline) => {
+    const all = byName.get(fold(timeline.name)) ?? [];
+    const networks = new Set(all.map((one) => one.network));
+
+    const alone =
+      all.find((one) => one.network === sources.network) ??
+      (networks.size === 1 ? all[0] : undefined);
+
+    if (alone?.timeline === timeline.timeline) {
+      return timeline.name;
+    }
+
+    const onNetwork = all.find((one) => one.network === timeline.network);
+
+    return onNetwork?.timeline === timeline.timeline
+      ? `${timeline.network} ${timeline.name}`
+      : undefined;
+  };
 };
 
 /**
  * An entry as a candidate in the list.
  * @param entry - The entry.
- * @param sources - The sources.
- * @returns The candidate, or none for one the list never shows.
+ * @param go - What `/go` writes for a Timeline, given wherever one can be listed.
+ * @returns The candidate, or none for one the list never shows, or a Timeline `/go` cannot reach.
  */
-const candidateOfEntry = (entry: Entry, sources: Sources): Candidate | undefined => {
+const candidateOfEntry = (entry: Entry, go?: GoText): Candidate | undefined => {
   switch (entry._tag) {
     case "Command": {
       const name = `/${entry.name}`;
@@ -537,14 +568,9 @@ const candidateOfEntry = (entry: Entry, sources: Sources): Candidate | undefined
 
     case "Timeline": {
       const { kind, name, network, timeline } = entry;
+      const text = go?.({ kind, name, network, timeline });
 
-      return {
-        _tag: "Timeline",
-        kind,
-        name,
-        network,
-        text: goText({ kind, name, network, timeline }, sources),
-      };
+      return text === undefined ? undefined : { _tag: "Timeline", kind, name, network, text };
     }
 
     case "Network": {
@@ -605,7 +631,9 @@ const wholeCandidates = (whole: Whole, typed: string, sources: Sources): readonl
     }
   };
 
-  return rankedEntries(query, entries()).flatMap((entry) => candidateOfEntry(entry, sources) ?? []);
+  const go = goTexts(sources);
+
+  return rankedEntries(query, entries()).flatMap((entry) => candidateOfEntry(entry, go) ?? []);
 };
 
 /**
@@ -631,7 +659,7 @@ const commandCandidates = (typed: string, sources: Sources): readonly Candidate[
 
   const entries = query === "" ? unranked() : rankedEntries(query, all);
 
-  return entries.flatMap((entry) => candidateOfEntry(entry, sources) ?? []);
+  return entries.flatMap((entry) => candidateOfEntry(entry) ?? []);
 };
 
 /**
