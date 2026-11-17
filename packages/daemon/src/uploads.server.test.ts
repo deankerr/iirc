@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
-import { SearchResults, Upload, UploadsStatus } from "@iirc/api";
+import { Said, SearchResults, Upload, UploadsStatus } from "@iirc/api";
 import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import type { ByteStoreService } from "@iirc/byte-store";
 import { configured } from "@iirc/client/testing";
@@ -56,6 +56,8 @@ const decodeStatus = Schema.decodeUnknownSync(Schema.fromJsonString(UploadsStatu
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 const decodeResults = Schema.decodeUnknownSync(Schema.fromJsonString(SearchResults));
+
+const decodeSaid = Schema.decodeUnknownSync(Schema.fromJsonString(Said));
 
 /** A request's body, as these tests send it. */
 type Body = Uint8Array | string | ReadableStream<Uint8Array>;
@@ -3598,7 +3600,7 @@ const joined = (served: Served, network: string) =>
 const sayAs = (served: Served, call: TestCall, network: string, target: string, text: string) =>
   Effect.gen(function* () {
     // A say before the welcome and the JOIN are stepped is refused, so it is tried until
-    // the Client takes it.
+    // the Client says it.
     const answer = yield* settled(
       Effect.flatMap(
         served.request(`/api/networks/${network}/say`, {
@@ -3606,19 +3608,24 @@ const sayAs = (served: Served, call: TestCall, network: string, target: string, 
           headers: { "content-type": "application/json" },
           method: "POST",
         }),
-        (response) => Effect.map(textOf(response), (body) => ({ body, status: response.status }))
+        (response) =>
+          Effect.map(textOf(response), (body) => ({
+            body,
+            said: response.status === 200 ? decodeSaid(body)._tag : undefined,
+          }))
       ),
-      ({ status }) => status === 200
+      // A say the Client refused, as one before the JOIN is stepped, still answers 200.
+      ({ said }) => said === "Said"
     );
 
-    if (answer.status !== 200) {
-      return yield* Effect.die(new Error(`say never taken: ${answer.status} ${answer.body}`));
+    if (answer.said !== "Said") {
+      return yield* Effect.die(new Error(`say never said: ${answer.body}`));
     }
 
     // The Client asks of a Channel once it has stepped our JOIN, as for its modes.
     const lines: string[] = [];
 
-    yield* Effect.gen(function* () {
+    return yield* Effect.gen(function* () {
       let line = yield* heard(call);
 
       while (!line.startsWith("PRIVMSG ")) {
@@ -3627,6 +3634,8 @@ const sayAs = (served: Served, call: TestCall, network: string, target: string, 
       }
 
       expect(line).toBe(`PRIVMSG ${target} :${text}`);
+
+      return line;
     }).pipe(
       Effect.timeoutOrElse({
         duration: "3 seconds",
