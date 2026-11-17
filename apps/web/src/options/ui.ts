@@ -48,6 +48,9 @@ export const sizeShown = Atom.make((get) => get(uiInEffect).size);
 /** The line height on this device, as a multiple of the text's size, alone, as `timeShown` is. */
 export const leadingShown = Atom.make((get) => get(uiInEffect).leading);
 
+/** How a line is laid out on this device, alone, as `timeShown` is. */
+export const lineShown = Atom.make((get) => get(uiInEffect).line);
+
 /** What Enter does in the Composer on this device, alone, as `timeShown` is. */
 export const enterShown = Atom.make((get) => get(uiInEffect).enter);
 

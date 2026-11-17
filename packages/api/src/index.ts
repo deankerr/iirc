@@ -169,6 +169,7 @@ export {
   FontFamily,
   FontShown,
   Leading,
+  LineLayout,
   NickSuffix,
   Palette,
   PreviewsByTimeline,

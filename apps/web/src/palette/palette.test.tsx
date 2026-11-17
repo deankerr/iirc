@@ -579,6 +579,36 @@ describe("the palette and the keys", () => {
     expect(field).toStrictEqual(["number", "1", "2", "0.01", "1.45"]);
   });
 
+  it("edits a line's layout in the options, set for every device on Enter", async () => {
+    const { container, daemon, registry } = await signedIn();
+    const name = "ui.line";
+    const selector = `input[aria-label="Value of ${name}"]`;
+
+    await run(registry, openOptions, "ui.line");
+    await act(async () => {
+      registry.set(editing, name);
+      await Promise.resolve();
+    });
+    await settled(() => container.querySelector(selector) !== null);
+
+    const editor = container.querySelector<HTMLInputElement>(selector);
+
+    if (editor === null) {
+      throw new Error("no editor");
+    }
+
+    await act(async () => {
+      editor.focus();
+      editor.value = "inline";
+      await Promise.resolve();
+    });
+
+    await press(editor, { key: "Enter" });
+    await settled(() => daemon.ui.options.line === "inline");
+
+    expect(daemon.ui.options.line).toBe("inline");
+  });
+
   it("edits a font's family in place for this device alone, though it overrides nothing, and leaves every device's font", async () => {
     const { container, daemon, registry } = await signedIn();
     const name = "ui.font";

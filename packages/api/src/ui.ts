@@ -580,6 +580,20 @@ export const PreviewsPlayers = Schema.Array(PlayerHost).annotate({
 /** The decoded form of {@link PreviewsPlayers}. */
 export type PreviewsPlayers = typeof PreviewsPlayers.Type;
 
+/**
+ * How a line of a Timeline is laid out: `columns`, the time and the nick each in a column
+ * of their own, or `inline`, the time, the nick, then what was said as one run of text that
+ * wraps under itself, as a Pane too narrow for the columns draws it.
+ */
+export const LineLayout = Schema.Literals(["columns", "inline"]).annotate({
+  default: "columns",
+  description:
+    "How a line is laid out: columns, with the time and the nick each in a column, or inline, the time, the nick, then what was said as one run of text that wraps under itself. A Pane too narrow for columns draws inline whichever is set.",
+});
+
+/** The decoded form of {@link LineLayout}. */
+export type LineLayout = typeof LineLayout.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -590,6 +604,7 @@ export const UiOptions = Schema.Struct({
   font: FontShown,
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
+  line: LineLayout,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
   "previews.folded": PreviewsFolded,

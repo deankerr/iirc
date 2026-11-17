@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { uiDefaults } from "@iirc/api";
-import type { ReadRule, TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
+import type { LineLayout, ReadRule, TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
 import { Effect } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -1322,6 +1322,39 @@ describe("what the view says it shows", () => {
       withSeconds: written({ ...twentyFour, second: "2-digit" }),
     });
     expect(titles.twelve).not.toBe(titles.twentyFour);
+  });
+
+  it("marks the log inline under ui.line inline, on a device or for every device, and nothing under columns", async () => {
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const marked = async (
+      shared: LineLayout,
+      device: LineLayout | undefined
+    ): Promise<string | undefined> => {
+      await act(async () => {
+        uiRead(registry, { options: { ...uiDefaults, line: shared }, sequence: 1 });
+        registry.set(deviceUi, device === undefined ? {} : { line: device });
+        await Promise.resolve();
+      });
+
+      return logOf().dataset.line;
+    };
+
+    expect({
+      columns: await marked("columns", undefined),
+      deviceColumns: await marked("inline", "columns"),
+      deviceInline: await marked("columns", "inline"),
+      inline: await marked("inline", undefined),
+    }).toStrictEqual({
+      columns: undefined,
+      deviceColumns: undefined,
+      deviceInline: "inline",
+      inline: "inline",
+    });
   });
 
   describe("where the day changes", () => {

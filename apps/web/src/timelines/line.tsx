@@ -2,8 +2,8 @@
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
- * one's words starting where a Message's text does. In a Timeline too narrow for those
- * columns, a row is one run of text that wraps under itself. Failed Connections in a row
+ * one's words starting where a Message's text does. Under `ui.line` `inline`, and in a
+ * Timeline too narrow for those columns, a row is one run of text that wraps under itself. Failed Connections in a row
  * say how many and when. A reply has what it answers above it, as a line that goes there
  * when pressed, and a Direct Message says which Channel it is about. A Message that can be
  * answered has a menu, opened by a button shown while its row is hovered or focused, and

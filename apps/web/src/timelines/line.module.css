@@ -322,12 +322,17 @@
 }
 
 /*
- * A Timeline narrower than a row's shared columns can hold with room left for its text,
- * which would shrink to a character a line: each row stops using them and reads as one run
- * that wraps under itself, as the time, the sender, then the text. The columns take up to
- * seventeen em in monospace and twenty-one in the widest sans font, so thirty-six em, sixty
- * characters of monospace, leaves the text at least fifteen em, some thirty characters,
- * above it. A query's em is the Timeline's own text size, so this holds at any size.
+ * A row that reads as one run of text that wraps under itself, as the time, the sender,
+ * then the text, in place of the shared columns. A Timeline narrower than the columns can
+ * hold with room left for its text, which would shrink to a character a line, draws every
+ * row so: the columns take up to seventeen em in monospace and twenty-one in the widest
+ * sans font, so thirty-six em, sixty characters of monospace, leaves the text at least
+ * fifteen em, some thirty characters, above it. A query's em is the Timeline's own text
+ * size, so this holds at any size.
+ *
+ * `ui.line` inline draws every row so at any width, as the Timeline's `data-line` says. A
+ * container query cannot be joined to a selector, so the rules are written twice, first
+ * under the query, then under that attribute, and the two must stay alike.
  */
 @container (max-width: 36em) {
   .message,
@@ -414,6 +419,68 @@
   }
 }
 
+/* The same rules, as `ui.line` inline asks for them at any width. */
+:global([data-line="inline"])
+  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .gap, .day) {
+  display: block;
+}
+
+:global([data-line="inline"])
+  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session) {
+  padding-inline-end: max(var(--space-3), 100% - var(--space-3) - var(--widest-line, 100%));
+}
+
+:global([data-line="inline"]) .time::before,
+:global([data-line="inline"]) .sender::before,
+:global([data-line="inline"]) .marker::before,
+:global([data-line="inline"]) .rule::before {
+  display: none;
+}
+
+:global([data-line="inline"]) .said {
+  display: inline;
+  overflow: visible;
+  text-overflow: clip;
+  contain: none;
+}
+
+:global([data-line="inline"]) :is(.time, .marker):empty {
+  display: none;
+}
+
+:global([data-line="inline"]) .marker {
+  overflow: visible;
+  text-align: start;
+  white-space: normal;
+}
+
+:global([data-line="inline"]) .sender {
+  text-align: start;
+  white-space: normal;
+}
+
+:global([data-line="inline"]) .rule {
+  display: none;
+}
+
+:global([data-line="inline"]) :is(.gapText, .dayText) {
+  grid-column: auto;
+  justify-content: center;
+  text-align: center;
+}
+
+:global([data-line="inline"]) .gapText::before {
+  content: "";
+  flex: 1;
+  border-top: var(--border-width) dashed var(--color-border);
+}
+
+:global([data-line="inline"]) .dayText::before {
+  content: "";
+  flex: 1;
+  border-top: var(--border-width) solid var(--color-border);
+}
+
 @media (pointer: coarse) {
   .more {
     border-color: transparent;
@@ -423,6 +490,26 @@
 
   .menued.menued {
     padding-inline-end: calc(var(--target-size) + var(--space-1));
+  }
+
+  /*
+   * As one run, a Message with a menu keeps room for its button and still wraps at the
+   * widest line, whichever needs more. The two rules must stay alike.
+   */
+  @container (max-width: 36em) {
+    .menued.menued {
+      padding-inline-end: max(
+        var(--target-size) + var(--space-1),
+        100% - var(--space-3) - var(--widest-line, 100%)
+      );
+    }
+  }
+
+  :global([data-line="inline"]) .menued.menued {
+    padding-inline-end: max(
+      var(--target-size) + var(--space-1),
+      100% - var(--space-3) - var(--widest-line, 100%)
+    );
   }
 
   .action {
