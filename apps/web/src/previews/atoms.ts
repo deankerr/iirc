@@ -35,6 +35,15 @@ import { retrying, Waits } from "../timelines/atoms.ts";
 /** What the core holds of Previews. */
 export const previewsState = Atom.make<Previews>(initialPreviews).pipe(Atom.keepAlive);
 
+/**
+ * The Previews the Owner pressed open, by their Message's key and their own, held here
+ * rather than in a row, since a Timeline's rows are drawn again as they scroll back into
+ * view. A Preview opened stays open.
+ */
+export const previewsOpened = Atom.make<ReadonlySet<string>>(new Set<string>()).pipe(
+  Atom.keepAlive
+);
+
 /** `ui.previews` and each Timeline's own choice over it, as the Daemon acts on them, once read. */
 export const previewsModes = Atom.make((get) => previewsModesOf(get(optionsState).ui));
 

@@ -6,7 +6,7 @@ import {
   UiInForce,
   uiDefaults,
 } from "@iirc/api";
-import type { Preview, PreviewsShown } from "@iirc/api";
+import type { Preview, PreviewsShown, PreviewsStyle } from "@iirc/api";
 import { cursorOf } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Schema } from "effect";
@@ -17,10 +17,13 @@ import {
   asksFor,
   asksWanted,
   choosing,
+  foldedOf,
   initialPreviews,
   mayPreview,
+  messageKey,
   modeIn,
   motionOf,
+  opening,
   pressOf,
   pressOn,
   previewsModesOf,
@@ -35,6 +38,7 @@ import type {
   PressDoes,
   Previews,
   PreviewsAsk,
+  PreviewShown,
   PreviewsEvent,
   PreviewsModes,
 } from "./previews.ts";
@@ -102,6 +106,9 @@ const item = (
 
 /** The hosts `ui.previews.players` lists by default. */
 const listed = uiDefaults["previews.players"];
+
+/** The hosts listed by default, and the default style. */
+const drawing = { players: listed, style: "thumbnail" } as const;
 
 const pending = { _tag: "Pending" } as const;
 const waitingForPress = { _tag: "WaitingForPress" } as const;
@@ -255,7 +262,7 @@ describe("asking", () => {
     expect(
       asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on"))
     ).toStrictEqual([]);
-    expect(previewsOf(refused, "on", timeline, at(1), links, listed)).toStrictEqual([]);
+    expect(previewsOf(refused, "on", timeline, at(1), links, drawing)).toStrictEqual([]);
   });
 
   it("asks again, once followed again, for a Message still pending when the stream was lost", () => {
@@ -335,7 +342,7 @@ describe("asking per Timeline", () => {
     expect({
       default: asksWanted(answered, everywhere("on")),
       onceAnswered: asksWanted(reanswered, chosen),
-      shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/"), listed).map(
+      shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/"), drawing).map(
         (one) => one._tag
       ),
     }).toStrictEqual({ default: [], onceAnswered: [], shown: ["Pending"] });
@@ -358,7 +365,7 @@ const waiting = () => {
 
 describe("a link waiting for a press", () => {
   it("is drawn as the plain link with a press, by its index among the Message's links", () => {
-    expect(previewsOf(waiting(), "on", timeline, at(1), links, listed)).toStrictEqual([
+    expect(previewsOf(waiting(), "on", timeline, at(1), links, drawing)).toStrictEqual([
       expect.objectContaining({ _tag: "Ready", key: "0" }),
       {
         _tag: "Waiting",
@@ -393,7 +400,7 @@ describe("a link waiting for a press", () => {
     );
 
     const tags = (one: Previews) =>
-      previewsOf(one, "on", timeline, at(1), links, listed).map((shown) => shown._tag);
+      previewsOf(one, "on", timeline, at(1), links, drawing).map((shown) => shown._tag);
 
     expect([tags(pressed), tags(raced)]).toStrictEqual([
       ["Ready", "Pending"],
@@ -436,7 +443,7 @@ describe("folding a change", () => {
 
     expect(
       [at(1), at(2)].map((position) =>
-        previewsOf(both, "on", timeline, position, said("https://a.example/"), listed).map(
+        previewsOf(both, "on", timeline, position, said("https://a.example/"), drawing).map(
           (shownItem) => shownItem._tag
         )
       )
@@ -453,7 +460,7 @@ describe("folding a change", () => {
     );
 
     expect(
-      previewsOf(raced, "on", timeline, at(1), links, listed).map((one) => one._tag)
+      previewsOf(raced, "on", timeline, at(1), links, drawing).map((one) => one._tag)
     ).toStrictEqual(["Ready"]);
   });
 
@@ -481,7 +488,7 @@ describe("folding a change", () => {
     );
 
     expect(
-      previewsOf(again, "on", timeline, at(1), said("https://a.example/"), listed).map(
+      previewsOf(again, "on", timeline, at(1), said("https://a.example/"), drawing).map(
         (one) => one._tag
       )
     ).toStrictEqual(["Pending"]);
@@ -505,20 +512,20 @@ describe("folding a change", () => {
 
 describe("what a Message shows", () => {
   it("shows a placeholder for each link that may be previewed before it is answered", () => {
-    expect(previewsOf(initialPreviews, "links only", timeline, at(1), links, listed)).toStrictEqual(
-      [
-        {
-          _tag: "Pending",
-          key: "0",
-          link: { href: "https://a.example/", text: "https://a.example/" },
-        },
-        {
-          _tag: "Pending",
-          key: "1",
-          link: { href: "https://b.example/", text: "https://b.example/" },
-        },
-      ]
-    );
+    expect(
+      previewsOf(initialPreviews, "links only", timeline, at(1), links, drawing)
+    ).toStrictEqual([
+      {
+        _tag: "Pending",
+        key: "0",
+        link: { href: "https://a.example/", text: "https://a.example/" },
+      },
+      {
+        _tag: "Pending",
+        key: "1",
+        link: { href: "https://b.example/", text: "https://b.example/" },
+      },
+    ]);
   });
 
   it("shows at most three, as the protocol counts them", () => {
@@ -526,7 +533,7 @@ describe("what a Message shows", () => {
       "https://a.example/ https://b.example/ https://c.example/ https://d.example/"
     );
 
-    expect(previewsOf(initialPreviews, "on", timeline, at(1), four, listed)).toHaveLength(3);
+    expect(previewsOf(initialPreviews, "on", timeline, at(1), four, drawing)).toHaveLength(3);
   });
 
   it("shows nothing while the mode is off or unknown, nor for anything but a Message", () => {
@@ -541,8 +548,8 @@ describe("what a Message shows", () => {
     const modes: readonly (PreviewsShown | undefined)[] = ["off", undefined];
 
     expect([
-      ...modes.map((mode) => previewsOf(initialPreviews, mode, timeline, at(1), links, listed)),
-      previewsOf(initialPreviews, "on", timeline, at(1), joined, listed),
+      ...modes.map((mode) => previewsOf(initialPreviews, mode, timeline, at(1), links, drawing)),
+      previewsOf(initialPreviews, "on", timeline, at(1), joined, drawing),
     ]).toStrictEqual([[], [], []]);
   });
 
@@ -560,10 +567,10 @@ describe("what a Message shows", () => {
       ],
     });
 
-    expect(previewsOf(answered, "on", timeline, at(1), links, listed)).toStrictEqual([
+    expect(previewsOf(answered, "on", timeline, at(1), links, drawing)).toStrictEqual([
       {
         _tag: "Ready",
-        description: "A page about cats.",
+        description: { drawn: "Pressed", text: "A page about cats." },
         image: undefined,
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
@@ -600,7 +607,7 @@ describe("what a Message shows", () => {
       previews: [item("a", pending, "data:text/html,hi")],
     });
 
-    expect(previewsOf(answered, "on", timeline, at(1), links, listed)).toStrictEqual([
+    expect(previewsOf(answered, "on", timeline, at(1), links, drawing)).toStrictEqual([
       {
         _tag: "Pending",
         key: "0",
@@ -622,7 +629,7 @@ describe("what a Message shows", () => {
       ],
     });
 
-    const shown = previewsOf(answered, "on", timeline, at(1), message, listed);
+    const shown = previewsOf(answered, "on", timeline, at(1), message, drawing);
 
     expect(shown.map((one) => [one._tag, one.link.href, one.key])).toStrictEqual([
       ["Ready", "https://a.example/#one", "0"],
@@ -654,8 +661,8 @@ describe("what a Message shows", () => {
     );
 
     expect([
-      previewsOf(both, "on", timeline, at(1), one, listed).map((shown) => shown.link.href),
-      previewsOf(both, "on", timeline, at(2), two, listed).map((shown) => shown.link.href),
+      previewsOf(both, "on", timeline, at(1), one, drawing).map((shown) => shown.link.href),
+      previewsOf(both, "on", timeline, at(2), two, drawing).map((shown) => shown.link.href),
     ]).toStrictEqual([["https://a.example/#one"], ["https://a.example/#two"]]);
   });
 });
@@ -682,12 +689,14 @@ const hash = "ab".repeat(32);
  * @param fields - Those fields, as the wire carries them.
  * @param mode - `ui.previews`, `on` unless given.
  * @param players - The hosts `ui.previews.players` lists, its default unless given.
+ * @param style - `ui.previews.style`, `thumbnail` unless given.
  * @returns What it shows, or none.
  */
 const shownReady = (
   fields: Partial<typeof Preview.Encoded>,
   mode: "on" | "links only" = "on",
-  players: readonly string[] = listed
+  players: readonly string[] = listed,
+  style: PreviewsStyle = "thumbnail"
 ) => {
   const { ask, state } = asking(1);
 
@@ -703,7 +712,10 @@ const shownReady = (
     ],
   });
 
-  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), players);
+  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), {
+    players,
+    style,
+  });
 
   return only?._tag === "Ready" ? only : undefined;
 };
@@ -887,6 +899,173 @@ describe("a Preview's player", () => {
       "example.com · A song",
       "example.com",
     ]);
+  });
+});
+
+const image = { animated: false, hash, size: 10, type: "image/png" } as const;
+
+describe("ui.previews.style", () => {
+  it("draws a page as its site and title alone on a line: no image, no description", () => {
+    const shown = shownReady({ image }, "on", listed, "line");
+
+    expect([shown?.summary, shown?.description, shown?.image]).toStrictEqual([
+      "example.com · Cats",
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("draws a page's description behind a press and its image beside it as a thumbnail", () => {
+    const shown = shownReady({ image }, "on", listed, "thumbnail");
+
+    expect([shown?.description, shown?.image?.drawn]).toStrictEqual([
+      { drawn: "Pressed", text: "A page about cats." },
+      "Thumbnail",
+    ]);
+  });
+
+  it("draws a page's description below its summary and its image under it as a card", () => {
+    const shown = shownReady({ image }, "on", listed, "card");
+
+    expect([shown?.description, shown?.image?.drawn]).toStrictEqual([
+      { drawn: "Below", text: "A page about cats." },
+      "Card",
+    ]);
+  });
+
+  it("draws an image link, a video's poster, and a player whole in every style", () => {
+    const styles = ["line", "thumbnail", "card"] as const;
+
+    expect(
+      styles.map((style) => [
+        shownReady({ image, kind: "image", title: null }, "on", listed, style)?.image?.drawn,
+        shownReady(
+          { image, kind: "video", media: "https://example.com/cats.mp4" },
+          "on",
+          listed,
+          style
+        )?.image?.drawn,
+        shownReady(playing, "on", listed, style)?.player?.host,
+      ])
+    ).toStrictEqual(styles.map(() => ["Whole", "Poster", "www.youtube-nocookie.com"]));
+  });
+});
+
+const key = messageKey(timeline, at(1));
+
+const pendingRow: PreviewShown = {
+  _tag: "Pending",
+  key: "0",
+  link: { href: "https://a.example/", text: "https://a.example/" },
+};
+
+const failedRow: PreviewShown = {
+  _tag: "Plain",
+  key: "1",
+  link: { href: "https://b.example/", text: "https://b.example/" },
+  reason: "No preview: this link had nothing to show.",
+};
+
+const waitingRow: PreviewShown = {
+  _tag: "Waiting",
+  index: 2,
+  key: "2",
+  link: { href: "https://c.example/", text: "https://c.example/" },
+};
+
+/**
+ * A ready row, under a key, as drawn with some fields of the page's.
+ * @param rowKey - Its key.
+ * @param fields - Those fields.
+ * @param style - `ui.previews.style`.
+ * @returns The row.
+ */
+const readyRow = (
+  rowKey: string,
+  fields: Partial<typeof Preview.Encoded>,
+  style: PreviewsStyle = "thumbnail"
+): PreviewShown => {
+  const shown = shownReady(fields, "on", listed, style);
+
+  if (shown === undefined) {
+    throw new Error("not ready");
+  }
+
+  return { ...shown, key: rowKey };
+};
+
+describe("ui.previews.folded", () => {
+  const plainPage = readyRow("3", { description: null });
+  const withImage = readyRow("4", { image });
+  const rows = [pendingRow, failedRow, waitingRow, plainPage, withImage];
+
+  it("draws every Preview open under open", () => {
+    expect(foldedOf("open", new Set(), key, rows)).toStrictEqual({
+      _tag: "Rows",
+      rows: rows.map((shown) => ({ fold: "Open", shown })),
+    });
+  });
+
+  it("folds under summary only a ready Preview that shows more than its summary line", () => {
+    expect(foldedOf("summary", new Set(), key, rows)).toStrictEqual({
+      _tag: "Rows",
+      rows: [
+        { fold: "Open", shown: pendingRow },
+        { fold: "Open", shown: failedRow },
+        { fold: "Open", shown: waitingRow },
+        { fold: "Open", shown: plainPage },
+        { fold: "Folded", shown: withImage },
+      ],
+    });
+  });
+
+  it("folds a page with a description under summary, but not on a line, which draws none", () => {
+    expect([
+      foldedOf("summary", new Set(), key, [readyRow("0", {}, "thumbnail")]),
+      foldedOf("summary", new Set(), key, [readyRow("0", { image }, "line")]),
+    ]).toStrictEqual([
+      { _tag: "Rows", rows: [{ fold: "Folded", shown: readyRow("0", {}, "thumbnail") }] },
+      { _tag: "Rows", rows: [{ fold: "Open", shown: readyRow("0", { image }, "line") }] },
+    ]);
+  });
+
+  it("opens under summary only the Preview pressed, and keeps it open", () => {
+    const other = readyRow("5", { image });
+    const opened = opening(new Set(), key, [withImage]);
+
+    expect(foldedOf("summary", opened, key, [withImage, other])).toStrictEqual({
+      _tag: "Rows",
+      rows: [
+        { fold: "Opened", shown: withImage },
+        { fold: "Folded", shown: other },
+      ],
+    });
+  });
+
+  it("keeps a Preview opened in one Message folded in another", () => {
+    const opened = opening(new Set(), messageKey(timeline, at(2)), [withImage]);
+
+    expect(foldedOf("summary", opened, key, [withImage])).toStrictEqual({
+      _tag: "Rows",
+      rows: [{ fold: "Folded", shown: withImage }],
+    });
+  });
+
+  it("draws a Message's Previews as one chip counting them under chip, whatever they are", () => {
+    expect([
+      foldedOf("chip", new Set(), key, rows),
+      foldedOf("chip", new Set(), key, [pendingRow]),
+    ]).toStrictEqual([
+      { _tag: "Chip", count: 5 },
+      { _tag: "Chip", count: 1 },
+    ]);
+  });
+
+  it("opens every Preview of a Message once its chip is pressed", () => {
+    expect(foldedOf("chip", opening(new Set(), key, rows), key, rows)).toStrictEqual({
+      _tag: "Rows",
+      rows: rows.map((shown) => ({ fold: "Open", shown })),
+    });
   });
 });
 

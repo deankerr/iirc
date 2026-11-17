@@ -8,7 +8,7 @@
  *
  * @packageDocumentation
  */
-import type { UiInForce, UiOptionName } from "@iirc/api";
+import type { PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions } from "@iirc/frontend/options";
 import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
@@ -51,6 +51,24 @@ export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
 
 /** Whether animated images play on their own on this device, alone, as `timeShown` is. */
 export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);
+
+/** How rich a Preview looks on this device, alone, as `timeShown` is. */
+export const previewsStyleShown = Atom.make((get) => get(uiInEffect)["previews.style"]);
+
+/** Whether Previews start folded on this device, alone, as `timeShown` is. */
+export const previewsFoldedShown = Atom.make((get) => get(uiInEffect)["previews.folded"]);
+
+/** How tall each `ui.previews.mediaHeight` draws a Preview's media at most, in pixels. */
+const mediaPixels: Readonly<Record<PreviewsMediaHeight, number>> = {
+  large: 400,
+  medium: 260,
+  small: 160,
+};
+
+/** How tall a Preview's media is drawn at most on this device, in pixels, as `timeShown` is. */
+export const mediaHeightShown = Atom.make(
+  (get) => mediaPixels[get(uiInEffect)["previews.mediaHeight"]]
+);
 
 /**
  * When a Timeline is marked read on this device, as `timeShown` is, but none until it is

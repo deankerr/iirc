@@ -16,8 +16,8 @@
 }
 
 /*
- * A link that is itself an image, or a player's poster: as tall as the medium size, never
- * wider than the column.
+ * A link that is itself an image, a player's poster, or a card's image: as tall as
+ * `--preview-media-height` at most, never wider than the column.
  */
 .whole {
   position: relative;
@@ -51,7 +51,7 @@
  * column, in the shape its page gave it.
  */
 .frame {
-  --frame-tallest: 260px;
+  --frame-tallest: var(--preview-media-height);
 
   display: block;
   border: 0;
@@ -60,19 +60,19 @@
 }
 
 /*
- * A video in a box of a fixed shape, as tall as the medium size at most, so playing it
- * moves nothing below it, with the control that opens it large in its corner.
+ * A video in a box of a fixed shape, as tall as `--preview-media-height` at most, so
+ * playing it moves nothing below it, with the control that opens it large in its corner.
  */
 .boxed {
   position: relative;
   display: block;
-  width: min(100%, 462px);
+  width: min(100%, calc(var(--preview-media-height) * 16 / 9));
 }
 
 .video {
   display: block;
   width: 100%;
-  max-height: 260px;
+  max-height: var(--preview-media-height);
   aspect-ratio: 16 / 9;
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -112,7 +112,7 @@
   width: auto;
   max-width: 100%;
   height: auto;
-  max-height: 260px;
+  max-height: var(--preview-media-height);
 }
 
 /* The play badge, over the middle of an animated image's first frame. */

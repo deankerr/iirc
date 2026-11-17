@@ -230,7 +230,7 @@ const StillImage = ({
             <img
               alt={image.alt}
               className={styles.picture}
-              data-drawn={image.drawn === "Whole" ? "whole" : "thumbnail"}
+              data-drawn={image.drawn.toLowerCase()}
               decoding="async"
               loading="lazy"
               onError={() => {
@@ -289,7 +289,7 @@ const AnimatedImage = ({
               <img
                 alt={image.alt}
                 className={styles.picture}
-                data-drawn={image.drawn === "Whole" ? "whole" : "thumbnail"}
+                data-drawn={image.drawn.toLowerCase()}
                 data-playing
                 decoding="async"
                 referrerPolicy="no-referrer"

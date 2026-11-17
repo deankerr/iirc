@@ -1,7 +1,8 @@
 /*
  * A Message's Previews: under its text, in the text's column, as wide as its text may run,
- * marked by a rule at their start, one row each. Every row is one line until a press opens
- * one, so a Preview that arrives moves nothing below it. Nothing in it scrolls sideways.
+ * marked by a rule at their start, one row each. A row pending is one line, so a Preview
+ * that arrives folded moves nothing below it. Nothing in it scrolls sideways. Its media is
+ * as tall as `--preview-media-height` at most, which the view sets from the option.
  */
 .previews {
   display: flex;
@@ -21,6 +22,7 @@
 .row,
 .pending,
 .ready,
+.card,
 .media,
 .failed,
 .text {
@@ -39,6 +41,19 @@
 
 .text {
   flex: 1 1 0;
+}
+
+/* A card: its text, and the page's image under it. */
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.card > .text {
+  flex: none;
+  width: 100%;
 }
 
 /* A link that is itself a video or a sound: its text, and the player under it. */
@@ -129,6 +144,45 @@ button.summary[data-focus-visible] {
   overflow-wrap: anywhere;
 }
 
+/* A card's summary wraps to two lines at most, and its description to three. */
+.text[data-card="true"] .summary {
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.below {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+/* A Message's Previews folded to one chip, quiet until hovered, which a press opens. */
+.chip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.chip[data-hovered] {
+  color: var(--color-text);
+}
+
+.chip[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
 /* A failure is the plain link, cut to its line, saying why on hover. */
 .plain {
   display: block;
@@ -192,6 +246,7 @@ a.plain:focus-visible {
 
 @media (pointer: coarse) {
   button.summary,
+  .chip,
   .press {
     min-height: var(--target-size);
   }

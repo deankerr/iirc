@@ -1,7 +1,8 @@
 /**
  * A Message's Previews, under its text behind a left rule, one row each: a pulsing
- * placeholder while pending, a ready one's site and title on one line, which a press opens
- * to its description, a failed one as the plain link, saying why on hover, and one the
+ * placeholder while pending, a ready one's site and title on one line, with a page's
+ * description and image as `ui.previews.style` draws them, folded as `ui.previews.folded`
+ * says, a failed one as the plain link, saying why on hover, and one the
  * Daemon holds for a press as the plain link and "show preview", which fetches it. A link
  * that is itself a video or a sound is its summary with a native player under it, which
  * fetches nothing until pressed. A video, a link to one or a page that names one, has a
@@ -18,21 +19,36 @@
  *
  * @packageDocumentation
  */
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtom, useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
-import { mayPreview, modeIn, previewsOf } from "@iirc/frontend/previews";
+import {
+  foldedOf,
+  mayPreview,
+  messageKey,
+  modeIn,
+  opening,
+  previewsOf,
+} from "@iirc/frontend/previews";
 import type {
+  Fold,
   ImageShown,
   LinkShown,
   MediaShown,
   PlayerShown,
   PreviewShown,
 } from "@iirc/frontend/previews";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
-import { pressPreview, previewsModes, previewsShown, previewsState } from "./atoms.ts";
+import { mediaHeightShown, previewsFoldedShown, previewsStyleShown } from "../options/ui.ts";
+import {
+  pressPreview,
+  previewsModes,
+  previewsOpened,
+  previewsShown,
+  previewsState,
+} from "./atoms.ts";
 import { PlayButton } from "./play-button.tsx";
 import {
   EnlargeControl,
@@ -44,6 +60,17 @@ import {
 } from "./preview-image.tsx";
 
 import styles from "./message-previews.module.css";
+
+/**
+ * The custom property a Message's Previews draw their media's height from.
+ * @param pixels - How tall media is at most, in pixels.
+ * @returns The style that sets it.
+ */
+const mediaStyle = (pixels: number): CSSProperties => {
+  const style: Record<`--${string}`, string> = { "--preview-media-height": `${pixels}px` };
+
+  return style;
+};
 
 /** No host listed as a player, before the shared options are read. */
 const noPlayers: readonly string[] = [];
@@ -181,30 +208,38 @@ const PreviewMedia = ({
 };
 
 /**
- * A ready Preview's text: its summary, opening to its description when it has one.
- * @param props - The Preview, as drawn.
+ * A ready Preview's text: its summary, with its description when it has one, behind a
+ * press of the summary, opened already when the Preview was pressed open from its fold,
+ * or under it, as a card draws it, where a long summary wraps too.
+ * @param props - The Preview, as drawn, and how it stands folded.
  * @returns Its text.
  */
 const ReadyText = ({
+  fold,
   shown,
 }: {
+  readonly fold: Fold;
   readonly shown: Extract<PreviewShown, { readonly _tag: "Ready" }>;
 }) => {
-  if (shown.description === undefined) {
+  const { description } = shown;
+  const card = description?.drawn === "Below" || shown.image?.drawn === "Card";
+
+  if (description === undefined || description.drawn === "Below") {
     return (
-      <div className={styles.text}>
+      <div className={styles.text} data-card={card}>
         <bdi className={styles.summary}>{shown.summary}</bdi>
+        {description === undefined ? null : <bdi className={styles.below}>{description.text}</bdi>}
       </div>
     );
   }
 
   return (
-    <Disclosure className={styles.text}>
+    <Disclosure className={styles.text} defaultExpanded={fold === "Opened"}>
       <AriaButton className={styles.summary} slot="trigger">
         <bdi>{shown.summary}</bdi>
       </AriaButton>
       <DisclosurePanel className={styles.description}>
-        <bdi>{shown.description}</bdi>
+        <bdi>{description.text}</bdi>
       </DisclosurePanel>
     </Disclosure>
   );
@@ -349,14 +384,19 @@ const PosterVideo = ({
 
 /**
  * One Preview.
- * @param props - The Preview, as drawn, and what presses a link waiting for it.
+ * @param props - The Preview, as drawn, how it stands folded, what presses a link waiting
+ *   for it, and what opens it from its fold.
  * @returns Its row.
  */
 const PreviewRow = ({
+  fold,
+  onOpen,
   onPress,
   shown,
 }: {
+  readonly fold: Fold;
   readonly shown: PreviewShown;
+  readonly onOpen: () => void;
   readonly onPress: (link: number) => void;
 }) => {
   switch (shown._tag) {
@@ -372,7 +412,23 @@ const PreviewRow = ({
     }
 
     case "Ready": {
-      const text = <ReadyText shown={shown} />;
+      // Folded, it is its summary line alone, which a press opens.
+      if (fold === "Folded") {
+        return (
+          <div className={styles.text} data-preview="folded">
+            <AriaButton
+              aria-expanded={false}
+              aria-label={`Open the preview of ${shown.summary}`}
+              className={styles.summary}
+              onPress={onOpen}
+            >
+              <bdi>{shown.summary}</bdi>
+            </AriaButton>
+          </div>
+        );
+      }
+
+      const text = <ReadyText fold={fold} shown={shown} />;
       const { image, media, player } = shown;
 
       // A link that is itself a video or a sound is its text, with the player under it,
@@ -411,6 +467,16 @@ const PreviewRow = ({
             {/* Keyed by its address, a press plays only the player it was given for: one
                 the Daemon answers anew waits for a press of its own. */}
             <PreviewPlayer image={image} key={player.src} player={player} text={text} />
+          </div>
+        );
+      }
+
+      // A card's image is under its text, and one that fails leaves the text alone.
+      if (image?.drawn === "Card") {
+        return (
+          <div className={styles.card} data-preview="ready">
+            {text}
+            <PreviewImage image={image} key={image.src} link={shown.link} without={null} />
           </div>
         );
       }
@@ -470,13 +536,20 @@ const PreviewRow = ({
 };
 
 /**
- * A Message's Previews, if it may have any, asked for once it scrolls into view.
+ * A Message's Previews, if it may have any, asked for once it scrolls into view, as
+ * `ui.previews.style` draws them and `ui.previews.folded` folds them, with their media as
+ * tall as `ui.previews.mediaHeight` at most. Folded, or one chip, they are still watched,
+ * so the Message is asked for once it is seen.
  * @param props - The Message's item.
  * @returns Its Previews, or nothing.
  */
 export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
   const modes = useAtomValue(previewsModes);
   const state = useAtomValue(previewsState);
+  const style = useAtomValue(previewsStyleShown);
+  const folded = useAtomValue(previewsFoldedShown);
+  const mediaHeight = useAtomValue(mediaHeightShown);
+  const [opened, setOpened] = useAtom(previewsOpened);
   const show = useAtomSet(previewsShown);
   const press = useAtomSet(pressPreview);
   const block = useRef<HTMLUListElement>(null);
@@ -484,11 +557,18 @@ export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
   const mode = modeIn(modes, timeline);
   const players = modes?.players ?? noPlayers;
   const watched = mayPreview(mode, content);
+  const key = messageKey(timeline, position);
 
   const shown = useMemo(
-    () => previewsOf(state, mode, timeline, position, content, players),
-    [content, mode, players, position, state, timeline]
+    () => previewsOf(state, mode, timeline, position, content, { players, style }),
+    [content, mode, players, position, state, style, timeline]
   );
+
+  const folding = foldedOf(folded, opened, key, shown);
+
+  const open = (rows: readonly PreviewShown[]) => {
+    setOpened(opening(opened, key, rows));
+  };
 
   // Seen once, and asked for then: the core asks for a Message once, however often it
   // comes back into view. Where no browser observes, nothing is asked for.
@@ -519,17 +599,41 @@ export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
   }
 
   return (
-    <ul aria-label="Previews" className={styles.previews} ref={block}>
-      {shown.map((one) => (
-        <li className={styles.row} key={one.key}>
-          <PreviewRow
-            onPress={(link) => {
-              press({ link, position, timeline });
+    <ul
+      aria-label="Previews"
+      className={styles.previews}
+      ref={block}
+      style={mediaStyle(mediaHeight)}
+    >
+      {folding._tag === "Chip" ? (
+        <li className={styles.row}>
+          <AriaButton
+            aria-label={`Show ${folding.count === 1 ? "1 preview" : `${folding.count} previews`}`}
+            className={styles.chip}
+            data-preview="chip"
+            onPress={() => {
+              open(shown);
             }}
-            shown={one}
-          />
+          >
+            [+{folding.count}]
+          </AriaButton>
         </li>
-      ))}
+      ) : (
+        folding.rows.map((row) => (
+          <li className={styles.row} key={row.shown.key}>
+            <PreviewRow
+              fold={row.fold}
+              onOpen={() => {
+                open([row.shown]);
+              }}
+              onPress={(link) => {
+                press({ link, position, timeline });
+              }}
+              shown={row.shown}
+            />
+          </li>
+        ))
+      )}
     </ul>
   );
 };
