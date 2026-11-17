@@ -316,3 +316,19 @@ describe("a long scenario with every Feature on", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("the recorded WATCH Session", () => {
+  it("tells a partner coming and going, as MONITOR's would", () => {
+    const played = replay(client, {
+      configuration: configured({ ircds: [hybrid] }),
+      transcript: hybridWatch,
+    });
+
+    expect(played.transcript).toMatch(
+      /\?\? activity CameOnline peer2 .*in=existing-direct:peer2$/mu
+    );
+    expect(played.transcript).toMatch(
+      /\?\? activity WentOffline peer2 .*in=existing-direct:peer2$/mu
+    );
+  });
+});
