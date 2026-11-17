@@ -240,7 +240,7 @@ a.plain:focus-visible {
 
 /*
  * With no columns, the Previews run the Timeline's width under the words: in a narrow
- * Timeline, and under `ui.line` inline, as the Timeline's `data-line` says. The two rules
+ * Timeline, and under `ui.line` inline or stacked, as the Timeline's `data-line` says. The two rules
  * must stay alike.
  */
 @container (max-width: 36em) {
@@ -249,7 +249,7 @@ a.plain:focus-visible {
   }
 }
 
-:global([data-line="inline"]) .previews {
+:global([data-line]) .previews {
   max-width: 100%;
 }
 

@@ -1357,6 +1357,79 @@ describe("what the view says it shows", () => {
     });
   });
 
+  it("draws a run under one nick under ui.line stacked, each later Message its text with its time kept, until Activity ends it", async () => {
+    const { registry } = await signedIn([], [message(1), message(2), joined(3), message(4)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 4"));
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("line ")
+    );
+
+    expect({
+      line: logOf().dataset.line,
+      rows: rows.map((one) => [
+        plain(one.querySelector("bdi")?.textContent),
+        one.querySelector("time")?.getAttribute("tabindex") ?? null,
+        // A tap focuses a later Message's row, which shows its time where nothing can be hovered.
+        one.querySelector(":scope > div > div")?.getAttribute("tabindex") ?? null,
+        // The time is the device's zone's, so only where it stands is compared.
+        plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T"),
+      ]),
+    }).toStrictEqual({
+      line: "stacked",
+      rows: [
+        ["peer", null, null, "peer T line 1"],
+        ["line 2", "0", "-1", "T line 2"],
+        ["peer", null, null, "peer T line 4"],
+      ],
+    });
+  });
+
+  it("puts what a run's head answers under its nick under ui.line stacked, and a later Message's above its text", async () => {
+    const answered = {
+      kind: "Privmsg",
+      position: message(1).position,
+      sender: "alice",
+      text: "the first thing",
+    } as const;
+
+    const original = {
+      ...message(1),
+      content: { ...message(1).content, sender: "alice", text: "the first thing" },
+    };
+
+    const { registry } = await signedIn([], [original, replied(2, answered), replied(3, answered)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 3"));
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("line ")
+    );
+
+    // The time is the device's zone's, so only where it stands is compared.
+    expect(
+      rows.map((one) => plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T"))
+    ).toStrictEqual([
+      "peer T \u21B3 alice: the first thing line 2",
+      "\u21B3 alice: the first thing T line 3",
+    ]);
+  });
+
   describe("where the day changes", () => {
     // Local noon on three days, the last two on consecutive days, so no zone moves one across midnight.
     const days = [

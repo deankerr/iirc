@@ -330,9 +330,10 @@
  * fifteen em, some thirty characters, above it. A query's em is the Timeline's own text
  * size, so this holds at any size.
  *
- * `ui.line` inline draws every row so at any width, as the Timeline's `data-line` says. A
- * container query cannot be joined to a selector, so the rules are written twice, first
- * under the query, then under that attribute, and the two must stay alike.
+ * `ui.line` inline or stacked draws every row so at any width, as the Timeline's `data-line`
+ * says, stacked then setting a run's Messages apart below. A container query cannot be
+ * joined to a selector, so the rules are written twice, first under the query, then under
+ * that attribute, and the two must stay alike.
  */
 @container (max-width: 36em) {
   .message,
@@ -419,69 +420,126 @@
   }
 }
 
-/* The same rules, as `ui.line` inline asks for them at any width. */
-:global([data-line="inline"])
+/* The same rules, as `ui.line` inline or stacked asks for them at any width. */
+:global([data-line])
   :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .gap, .day) {
   display: block;
 }
 
-:global([data-line="inline"])
-  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session) {
+:global([data-line]) :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session) {
   padding-inline-end: max(var(--space-3), 100% - var(--space-3) - var(--widest-line, 100%));
 }
 
-:global([data-line="inline"]) .time::before,
-:global([data-line="inline"]) .sender::before,
-:global([data-line="inline"]) .marker::before,
-:global([data-line="inline"]) .rule::before {
+:global([data-line]) .time::before,
+:global([data-line]) .sender::before,
+:global([data-line]) .marker::before,
+:global([data-line]) .rule::before {
   display: none;
 }
 
-:global([data-line="inline"]) .said {
+:global([data-line]) .said {
   display: inline;
   overflow: visible;
   text-overflow: clip;
   contain: none;
 }
 
-:global([data-line="inline"]) :is(.time, .marker):empty {
+:global([data-line]) :is(.time, .marker):empty {
   display: none;
 }
 
-:global([data-line="inline"]) .marker {
+:global([data-line]) .marker {
   overflow: visible;
   text-align: start;
   white-space: normal;
 }
 
-:global([data-line="inline"]) .sender {
+:global([data-line]) .sender {
   text-align: start;
   white-space: normal;
 }
 
-:global([data-line="inline"]) .rule {
+:global([data-line]) .rule {
   display: none;
 }
 
-:global([data-line="inline"]) :is(.gapText, .dayText) {
+:global([data-line]) :is(.gapText, .dayText) {
   grid-column: auto;
   justify-content: center;
   text-align: center;
 }
 
-:global([data-line="inline"]) .gapText::before {
+:global([data-line]) .gapText::before {
   content: "";
   flex: 1;
   border-top: var(--border-width) dashed var(--color-border);
 }
 
-:global([data-line="inline"]) .dayText::before {
+:global([data-line]) .dayText::before {
   content: "";
   flex: 1;
   border-top: var(--border-width) solid var(--color-border);
 }
 
+/*
+ * Under `ui.line` stacked, a run of plain speech from one User: its head has the nick, in
+ * its colour, and the time beside it on a line of their own, a little apart from the row
+ * above, and each Message's text, the head's too, starts a line of its own below. These rows
+ * are only ever drawn under stacked, in a Pane of any width.
+ */
+.head {
+  padding-top: var(--space-1);
+}
+
+.heading {
+  display: block;
+}
+
+.headNick {
+  font-weight: bold;
+}
+
+/*
+ * A later Message's time is there for a screen reader, and drawn only while its row is
+ * hovered or focused, as a tap focuses it, or its menu is open, over the row's top line at its end, left of where
+ * the menu's button stands in a row that has one.
+ */
+.continued {
+  position: relative;
+}
+
+.later {
+  position: absolute;
+  top: 0;
+  right: var(--space-3);
+  padding: 0 var(--space-1);
+  background: var(--color-background);
+  clip-path: inset(50%);
+}
+
+.menued .later {
+  right: calc(var(--space-1) + 3ch + var(--space-1));
+}
+
+.continued:hover .later,
+.continued:focus-within .later,
+.continued[data-menu] .later {
+  clip-path: none;
+}
+
+.continued:focus {
+  outline: none;
+}
+
+.later:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
 @media (pointer: coarse) {
+  .menued .later {
+    right: calc(var(--space-1) + var(--target-size) + var(--space-1));
+  }
+
   .more {
     border-color: transparent;
     width: var(--target-size);
@@ -505,7 +563,7 @@
     }
   }
 
-  :global([data-line="inline"]) .menued.menued {
+  :global([data-line]) .menued.menued {
     padding-inline-end: max(
       var(--target-size) + var(--space-1),
       100% - var(--space-3) - var(--widest-line, 100%)

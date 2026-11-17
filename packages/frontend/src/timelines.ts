@@ -4181,6 +4181,12 @@ export type Row =
        * its Timeline. Present only for more than one.
        */
       readonly repeated?: Repeated;
+      /**
+       * A Message that continues a run: plain speech from the User who said the item drawn
+       * just before it, within {@link runSpan} of it. Present only when it does, so a run's
+       * head, and every other row, has none.
+       */
+      readonly continues?: true;
     }
   | { readonly _tag: "Gap"; readonly key: string; readonly gap: WindowGap }
   | { readonly _tag: "New"; readonly key: string }
@@ -4237,6 +4243,55 @@ const collapsed = (rows: readonly Row[]): readonly Row[] => {
   return out;
 };
 
+/** The most time that may separate a Message from the one before it in a run: five minutes. */
+const runSpan = 300_000;
+
+/**
+ * Who said an item, folded as a nick's colour is, if it is plain speech: a `PRIVMSG`, not an
+ * action or a notice.
+ * @param item - The item.
+ * @returns Its sender, folded, or none.
+ */
+const speaker = (item: TimelineItem): string | undefined =>
+  item.content._tag === "Message" && item.content.kind === "Privmsg"
+    ? casefold(defaultCasemapping, item.content.sender)
+    : undefined;
+
+/**
+ * Whether an item continues a run that the item drawn just before it is in: both are plain
+ * speech, from one User, with no more than {@link runSpan} between their own times, in
+ * either direction, since a Network's time can go back.
+ * @param item - The item.
+ * @param before - The item drawn just before it.
+ * @returns Whether it continues the run.
+ */
+const continuesRun = (item: TimelineItem, before: TimelineItem): boolean => {
+  const said = speaker(item);
+
+  return (
+    said !== undefined &&
+    said === speaker(before) &&
+    Math.abs(item.position.at - before.position.at) <= runSpan
+  );
+};
+
+/**
+ * The rows with each Message that continues a run marked so. Only rows next to one another
+ * join, so anything drawn between two Messages ends a run: an Activity, a Gap, a Day, or the
+ * "new" divider. An item that is not drawn is no row, and ends nothing. The first row has
+ * nothing before it, so a window that starts mid-run heads it with its first Message.
+ * @param rows - The rows.
+ * @returns The rows, with each run's later Messages marked.
+ */
+const runs = (rows: readonly Row[]): readonly Row[] =>
+  rows.map((row, index) => {
+    const before = rows[index - 1];
+
+    return row._tag === "Item" && before?._tag === "Item" && continuesRun(row.item, before.item)
+      ? { ...row, continues: true }
+      : row;
+  });
+
 /** The key of the "new" divider's row, which no item's or Gap's can be. */
 const newKey = "new";
 
@@ -4277,6 +4332,9 @@ const dayOf = (zone: Zone, at: number): number | undefined => {
  * midnight in the zone. An item the zone cannot place starts no day and does not end one.
  * A Day comes after any Gap and before the "new" divider that stand before the same item.
  * With no zone, there are no Day rows.
+ *
+ * Each Message that continues a run of plain speech from one User is marked, as `runs` says,
+ * whatever layout a view draws.
  *
  * A Gap that ended, with no item of the Timeline before it, in a window that holds the
  * Timeline's start, says nothing: nothing was there to miss. It is left out of the rows and
@@ -4350,7 +4408,7 @@ export const rowsOf = (
     drawGap(gap);
   }
 
-  return collapsed(rows);
+  return runs(collapsed(rows));
 };
 
 /**
