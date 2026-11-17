@@ -4,9 +4,10 @@
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
  * one's words starting where a Message's text does. In a Timeline too narrow for those
  * columns, a row is one run of text that wraps under itself. Failed Connections in a row
- * say how many and when. A reply has what it answers above it, as a line that goes there when
- * pressed, and a Direct Message says which Channel it is about. A Message's Previews, if it has any, are under its text. Every name
- * and every text a Network sent sits in its own isolate, as a text node.
+ * say how many and when. A reply has what it answers above it, as a line that goes there
+ * when pressed, and a Direct Message says which Channel it is about. A Message's Previews,
+ * if it has any, are under its text. Every name and every text a Network sent sits in its
+ * own isolate, as a text node.
  *
  * @packageDocumentation
  */
