@@ -108,6 +108,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it: whether a Timeline is still closed is the projection's to derive. |
 | `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
+| `PartnerLearned` | Whether a Direct Message partner is on the Network, as `Knowledge.partners` says, changed with no Activity saying so: the first status `MONITOR` gave, their joining or leaving a Channel Self shares, or the Session ending. It says which partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
 | `Ignored` | An input that changed nothing, and why. |
@@ -137,7 +138,7 @@ Every rule is decided from commands, parameters, `CHANTYPES`, `PREFIX`, and `STA
 - **A Direct Message** belongs to the other participant, whichever way it went.
 - **Any other Message** belongs to the Network: one from a server, to a mask, or to someone other than Self.
 - **`Joined`, `Parted`, `Kicked`, `TopicChanged`, and a Channel's `ModeChanged`** belong to their Channel.
-- **Another User's `Quit`, `NickChanged`, or `AccountChanged`** belongs to every Channel they shared with Self, and to their Direct Messages if those exist. A live rename moves the Direct Message Timeline. One from history renames nothing, since the old nick may be someone else's by now.
+- **Another User's `Quit`, `NickChanged`, or `AccountChanged`** belongs to every Channel they shared with Self, and to their Direct Messages if those exist. `CameOnline` and `WentOffline` belong to their Direct Messages alone. A live rename moves the Direct Message Timeline. One from history renames nothing, since the old nick may be someone else's by now.
 - **Self's `NickChanged`, `Quit`, `AwayChanged`, and `AccountChanged`** belong to the Network, the first two to every Channel Self is in as well.
 - **A list of Targets is never one Timeline.** Each item is placed by itself, and a `Say` to a list is `Unsendable`.
 - **History is placed as the present is,** by what is known as it arrives.
@@ -151,10 +152,11 @@ A `Refused` for an `Act` names no Message, so it carries `action`: what was trie
 
 ## Knowledge
 
-`known(state)` gives Channels, members, Users, Self, and where the Session is.
+`known(state)` gives Channels, members, Users, Self, the open Direct Message partners, and where the Session is.
 
 - **Keys fold by the Connection's casemapping,** which starts from `rfc1459` on each Connection. When it changes, every key is folded again. `declared` gives the mapping `where` folds by, and `chantypes` the Session's `CHANTYPES`, so a Frontend compares and prefixes Channels' names as the Network does.
-- **Users are those who share a Channel with Self, and Self.** What was seen of a User is forgotten once they share none.
+- **Users are those who share a Channel with Self, and Self,** and while a Feature keeps them, those `MONITOR` says are online. What was seen of a User is forgotten once they are neither.
+- **`partners` are the open Direct Message partners,** keyed as `where` keys their Timelines, and whether each is `here`: known true while they share a Channel with Self or `MONITOR` says they are online, known false while it says they are offline, and unknown otherwise, as with no Session.
 - **Self's away status is as the Ircd confirmed it,** never as the Owner asked.
 - **A Channel's `wanted` says whether the Owner wants Self in it.**
 - **A User's account is `null` when known to be logged out, and `Unknown` when not known.** Another User's is learned only from the caps below, or a `WHOIS`.
@@ -247,7 +249,7 @@ Each is built from the floor up: what it needs, what it changes, and its scenari
 These need nothing from the Ircd beyond RFC 1459 and 2812.
 
 - **Connecting and redialling** (`connection.test.ts`). The backoff is 2 s doubling to 5 minutes, and starts again after a Session that lasted 5 minutes. It takes no randomness, since one Daemon serves one Owner and there is no herd to spread out.
-- **Registration** (`registration.test.ts`, `reclaim.test.ts`). Sends `CAP LS 302`, `PASS` when configured, `NICK`, and `USER` at once. An Ircd with no cap negotiation answers `421` or goes straight to `001`. When a nick is taken, it offers the configured nicks in order, then the first with `_`, `2`, `3`, and on, within `NICKLEN`. Self takes the first configured nick back when it holds another it settled for and sees that nick's holder leave it, by a `QUIT` or by a `NICK` to another nick (not a change of case), and then asks once: a refusal is not retried until the holder is seen to leave again, nothing polls, and a nick the Owner set with a `NICK` during the Session is never taken back. Self sees only the holders it shares a Channel with. The ask's answer is never taken for an answer to the Owner's own `NICK`. It is Activity like any other change of Self's nick.
+- **Registration** (`registration.test.ts`, `reclaim.test.ts`). Sends `CAP LS 302`, `PASS` when configured, `NICK`, and `USER` at once. An Ircd with no cap negotiation answers `421` or goes straight to `001`. When a nick is taken, it offers the configured nicks in order, then the first with `_`, `2`, `3`, and on, within `NICKLEN`. Self takes the first configured nick back when it holds another it settled for and sees that nick's holder leave it, by a `QUIT` or by a `NICK` to another nick (not a change of case), or `MONITOR` reports it offline, and then asks once: a refusal is not retried until the holder is seen to leave again, nothing polls, and nothing is taken back for the rest of a Session once the Owner sets a nick with a `NICK`, or once the Network renames Self off the first nick with no `NICK` of ours asking, as services do. Without `MONITOR`, Self sees only the holders it shares a Channel with. The ask's answer is never taken for an answer to the Owner's own `NICK`. It is Activity like any other change of Self's nick.
 - **The Session and ISUPPORT** (`session.test.ts`). `001` begins a Session. ISUPPORT accumulates over every `005`, at most 256 tokens. Self's mask is never read from `001`, whose text is for people.
 - **A service login** (`service-login.test.ts`). With a `Service` login, each Session begins by telling the service `IDENTIFY <account> <credential>` in a `PRIVMSG`, and its Channels wait. A `900`, which also makes Self's account known, lets them be joined, and so do the Configuration's `wait` running out, an unfilled Credential, and a Configuration with no service login. No user mode counts, since none means logged in across the protocol: RFC 2812's `r` is "restricted". A `NOTICE` from the service never counts, whatever it says. The Credential is never told while the Ircd may echo it back to be journaled: a service login stops `echo-message` being asked for on later Connections, and a Session that finds it on or asked for at `001`, because the login was configured while registering, tells nothing and joins at once. A Connection that has it keeps the Feature on, so each echo is still matched to its Message.
 - **An operator login** (`oper.test.ts`). With an `oper` login, each Session begins by sending `OPER <name> <credential>`, and awaits the answer, read from its numeric alone: `381` is an `OperGranted`, and `464`, `491`, or a `461` naming `OPER` an `OperRefused` with that numeric, each once, in the Network's own Timeline. A numeric when nothing awaits it reports nothing. `echo-message` never echoes `OPER`, so no cap is declined for it.
@@ -309,9 +311,20 @@ A `Look` asks the Network something and collects the reply, which may span many 
 | Account tags | `account-tag` | A User's Message or Activity without an `account` tag says they are logged out, and with one, their account. A tag with no value says nothing. | `accounts.test.ts` |
 | Account changes | `account-notify` | An `ACCOUNT` Line is `AccountChanged` Activity, `*` meaning logged out, and Self's is Self's own account. Accounts go stale when the cap is deleted. | `accounts.test.ts` |
 | Extended joins | `extended-join` | A `JOIN` with an account and a realname sets both, `*` meaning logged out. | `accounts.test.ts` |
+| Extended monitor | `extended-monitor` | A User `MONITOR` says is online is kept as one in a shared Channel is, so `AWAY` and `ACCOUNT` keep their facts and `730` their mask. They go stale when the cap is deleted. | `monitor.test.ts` |
 | UTF-8 only | the ISUPPORT token `UTF8ONLY` | Bytes are read as UTF-8 with no fallback, and nothing leaves that is not UTF-8. | `utf8.test.ts` |
 
 `seam.test.ts` drives each stage of the seam with Features of its own, and `laws.test.ts` runs the four laws over every Feature in the registry.
+
+### Presence, with MONITOR
+
+`monitor.test.ts`. Where ISUPPORT offers `MONITOR`, the Client monitors the Users it cares about. Without it, nothing is sent or reported.
+
+- **The list is derived, in a stated order:** the first configured nick while Self would take it back, then each open Direct Message partner, most recently messaged first. It is cut to `MONITOR`'s limit, and to 256 partners, then less what a `734` refused on the Connection, which is never sent again there. Self is never on it.
+- **The partners are folded from the Client's own News,** as a projection folds Timelines: a Direct Message adds a partner, a live rename moves them, closing their Timeline removes them. Replaying the Journal rebuilds them.
+- **Only the difference is sent,** as `MONITOR -` then `MONITOR +`, as few Lines as fit and `TARGMAX` allows, after a step that may change the list. Each Connection starts with nothing sent, so each Session sends it whole once its `005` offers `MONITOR`. Nothing polls.
+- **`730` and `731` say who is online.** The first word on a nick after `MONITOR +` is learned silently. Only a change from what the Connection knew is Activity, `CameOnline` or `WentOffline`, and only for a partner. A `QUIT` or rename seen in a shared Channel is that change already, so the `731` after it tells nothing again.
+- **A refusal ends it for the Connection:** a `421` or `461` naming `MONITOR`, or a `FAIL MONITOR`. Nothing is retried.
 
 ### Strict Transport Security
 

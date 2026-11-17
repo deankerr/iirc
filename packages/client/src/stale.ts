@@ -5,12 +5,13 @@
  *
  * @packageDocumentation
  */
+import { shares } from "./channels.ts";
 import type { Kept } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import type { Fact } from "./known.ts";
 import { changeListing } from "./members.ts";
 import type { Run } from "./run.ts";
-import { updateOpen } from "./run.ts";
+import { folder, updateOpen } from "./run.ts";
 import type { Joined, Member, Seen } from "./state.ts";
 
 /**
@@ -116,6 +117,25 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
             ...seen,
             realname: staled(seen.realname, since),
           })),
+        }));
+        break;
+      }
+
+      // Each fact of a User kept only because `MONITOR` says they are online.
+      case "user.monitored": {
+        updateOpen(run, (open) => ({
+          ...open,
+          users: usersStaled(open.users, (seen) =>
+            shares(run.state, folder(run.state)(seen.nick))
+              ? seen
+              : {
+                  ...seen,
+                  account: staled(seen.account, since),
+                  away: staled(seen.away, since),
+                  mask: staled(seen.mask, since),
+                  realname: staled(seen.realname, since),
+                }
+          ),
         }));
         break;
       }

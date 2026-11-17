@@ -23,6 +23,7 @@ const knowsNothing: Knowledge = {
   channels: new Map(),
   chantypes: undefined,
   declared: undefined,
+  partners: new Map(),
   self: undefined,
   session: { _tag: "Offline", since: undefined },
   users: new Map(),

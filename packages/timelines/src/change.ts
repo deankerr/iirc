@@ -34,8 +34,9 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   any Read Marker it had. What stands after it counts as unread.
  * - `Closed`: the Owner closed `timeline`. It stays closed until an item is added to it
  *   at a later sequence than this one, which a store derives: nothing is cleared.
- * - `HeadChanged`: what the Client knows of the Channel `timeline` is changed in a way no
- *   item says, such as its modes becoming known, so a Frontend reads it again.
+ * - `HeadChanged`: what the Client knows of the Channel or Direct Message partner `timeline`
+ *   is of changed in a way no item says, such as a Channel's modes becoming known or
+ *   whether the partner is on the Network, so a Frontend reads it again.
  * - `Removed`: the Owner removed `network`. With `keep`, its Timelines stay readable and
  *   are marked as a removed Network's. Without it, they are dropped, with their items and
  *   Gaps, and only their ids are kept, to say they are gone.

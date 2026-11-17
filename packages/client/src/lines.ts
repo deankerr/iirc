@@ -39,10 +39,18 @@ import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { askModes, modesQueryOver, queryAnswered, queryByCommand } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
-import { isNetworkOnly } from "./news.ts";
+import { isMonitorReply, left, monitorRefused, monitorReply } from "./monitor.ts";
+import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { oper, operAnswered } from "./oper.ts";
-import { reclaim, reclaimAsked, reclaimOver, reclaimRefused, reclaimTaken } from "./reclaim.ts";
+import {
+  reclaim,
+  reclaimAsked,
+  reclaimOver,
+  reclaimRefused,
+  reclaimTaken,
+  yieldedBy,
+} from "./reclaim.ts";
 import {
   abandon,
   capLine,
@@ -208,12 +216,15 @@ const isSameNick = (run: Run, first: string, second: string): boolean => {
 // free a nick Self wants back.
 const nickSettled = (run: Run, from: string, to: string): void => {
   if (isSelf(run, from)) {
+    yieldedBy(run, from, to);
+
     // The Client's own ask answers a change to its nick when it was sent first.
     if (!reclaimTaken(run, to)) {
       answered(run, "NICK", [to]);
     }
-  } else if (!isSameNick(run, from, to)) {
-    // A case-only change keeps the nick, so it leaves nothing to take.
+  } else if (!isSameNick(run, from, to) && left(run, from)) {
+    // A case-only change keeps the nick, so it leaves nothing to take, and a leave
+    // `MONITOR` already told of is not asked for twice.
     reclaim(run, from);
   }
 };
@@ -222,7 +233,7 @@ const nickSettled = (run: Run, from: string, to: string): void => {
 // `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to them, and
 // a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
 const settled = (run: Run, activity: Activity): void => {
-  if (isNetworkOnly(activity)) {
+  if (changesNothingHere(activity)) {
     return;
   }
 
@@ -259,7 +270,10 @@ const settled = (run: Run, activity: Activity): void => {
 
     case "Quit": {
       forgetPings(run, activity.nick);
-      reclaim(run, activity.nick);
+
+      if (left(run, activity.nick)) {
+        reclaim(run, activity.nick);
+      }
 
       break;
     }
@@ -510,6 +524,7 @@ const welcome = (run: Run, line: Line): void => {
       opering: false,
       realname: { _tag: "Known", at: phase.opened, from: "ours", value: realname },
       server: line.source ?? link.ircd.host,
+      yielded: false,
     },
   }));
   run.news.push({ _tag: "SessionBegan", at: run.at, nick });
@@ -1018,6 +1033,11 @@ export const interpret = (
 
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
+  // A refusal of `MONITOR` itself turns it off for the Connection, whatever else it answers.
+  if (arrival.live) {
+    monitorRefused(run, line);
+  }
+
   if (arrival.answers !== undefined && reply !== undefined) {
     refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
   }
@@ -1035,6 +1055,9 @@ export const interpret = (
     if (reply === undefined && !labelled) {
       standardReply(run, arrival);
     }
+  } else if (arrival.live && isMonitorReply(command)) {
+    // What `MONITOR` tells answers no Lookup or action, whatever nick it names.
+    monitorReply(run, arrival);
   } else if (arrival.live) {
     // A numeric no label tied goes to whichever was sent first of the Lookup and the
     // action's Line it names.

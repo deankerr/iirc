@@ -169,6 +169,17 @@ export interface ChannelView {
   readonly users: ReadonlyMap<string, UserKnowledge>;
 }
 
+/** An open Direct Message partner: their nick, and whether they are on the Network now. */
+export interface PartnerKnowledge {
+  readonly nick: string;
+  /**
+   * Known true while they share a Channel with Self or `MONITOR` says they are online,
+   * known false while `MONITOR` says they are offline, and unknown otherwise, as with no
+   * Session.
+   */
+  readonly here: Fact<boolean>;
+}
+
 /** Everything a Client knows of its Network. Keys are folded by the Network's casemapping. */
 export interface Knowledge {
   readonly session: SessionKnowledge;
@@ -183,4 +194,9 @@ export interface Knowledge {
   readonly self: UserKnowledge | undefined;
   readonly channels: ReadonlyMap<string, ChannelKnowledge>;
   readonly users: ReadonlyMap<string, UserKnowledge>;
+  /**
+   * The open Direct Message partners, least recently messaged first, keyed as `where`
+   * keys their Timelines, by `declared`.
+   */
+  readonly partners: ReadonlyMap<string, PartnerKnowledge>;
 }

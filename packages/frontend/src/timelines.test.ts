@@ -905,6 +905,7 @@ const simulate = (played: Scenario) => {
           _tag: "StatusRead",
           life: daemon.life(read.network),
           network: read.network,
+          partners: [],
           self: null,
           session: daemon.known(read.network),
         };
@@ -2363,6 +2364,7 @@ describe("the Timelines' state", () => {
       _tag: "StatusRead",
       life: 1,
       network: alpha,
+      partners: [],
       self: null,
       session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }),
     });
@@ -2551,6 +2553,7 @@ const knownTags = (tags: boolean): TimelinesEvent => ({
   _tag: "StatusRead",
   life: 1,
   network: alpha,
+  partners: [],
   self: null,
   session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags }),
 });
@@ -4063,6 +4066,7 @@ describe("a draft meets its Timeline", () => {
         _tag: "StatusRead",
         life: 1,
         network: alpha,
+        partners: [],
         self: null,
         session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }),
       },
@@ -4849,7 +4853,14 @@ describe("removing a Network", () => {
       [
         "its Session",
         status,
-        { _tag: "StatusRead", life: 1, network: alpha, self: null, session: registered },
+        {
+          _tag: "StatusRead",
+          life: 1,
+          network: alpha,
+          partners: [],
+          self: null,
+          session: registered,
+        },
       ],
       [
         "its Session finding no Network",
@@ -4911,6 +4922,7 @@ describe("removing a Network", () => {
       _tag: "StatusRead",
       life: 9,
       network: alpha,
+      partners: [],
       self: null,
       session: decodeSession({ _tag: "Offline", since: null }),
     });
@@ -4950,6 +4962,7 @@ describe("removing a Network", () => {
       _tag: "StatusRead",
       life: 9,
       network: alpha,
+      partners: [],
       self: null,
       session: decodeSession({ _tag: "Offline", since: 90 }),
     });

@@ -227,6 +227,7 @@ const request = (read: Read) =>
           _tag: "StatusRead",
           life: known.life,
           network: read.network,
+          partners: known.partners,
           self: known.self,
           session: known.session,
         } as const;

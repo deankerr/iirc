@@ -63,6 +63,7 @@ const describeNews = (happened: readonly Happened[]) =>
         case "Ignored":
         case "LookedUp":
         case "NetworkRemoved":
+        case "PartnerLearned":
         case "ReadMarker":
         case "Refolded":
         case "Refused":

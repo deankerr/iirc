@@ -960,6 +960,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["looked-up", "LookedUp"],
   ["message", "Message"],
   ["network-removed", "NetworkRemoved"],
+  ["partner-learned", "PartnerLearned"],
   ["read-marker", "ReadMarker"],
   ["refolded", "Refolded"],
   ["refused", "Refused"],

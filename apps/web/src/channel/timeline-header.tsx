@@ -10,7 +10,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimeShown } from "@iirc/api";
-import type { Header, TopicShown } from "@iirc/frontend/channel";
+import type { Header, Presence, TopicShown } from "@iirc/frontend/channel";
 import { useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
@@ -140,6 +140,44 @@ const MembersToggle = ({
 };
 
 /**
+ * Whether a Direct Message's partner is on the Network, in a word with a mark before it,
+ * and nothing while that is not known.
+ * @param props - Whether they are.
+ * @returns The word, or none.
+ */
+const PartnerPresence = ({ presence }: { readonly presence: Presence }) => {
+  switch (presence) {
+    case "Here": {
+      return (
+        <BarText fill={false}>
+          <span className={styles.online} data-presence="online">
+            <span aria-hidden="true">● </span>online
+          </span>
+        </BarText>
+      );
+    }
+
+    case "Gone": {
+      return (
+        <BarText fill={false}>
+          <span data-presence="offline">
+            <span aria-hidden="true">○ </span>offline
+          </span>
+        </BarText>
+      );
+    }
+
+    case "Unknown": {
+      return null;
+    }
+
+    default: {
+      return presence satisfies never;
+    }
+  }
+};
+
+/**
  * What a Header says after its name, on the bar's one line.
  * @param props - The header, and whether its topic is disclosed.
  * @returns Its details.
@@ -164,10 +202,15 @@ const Details = ({ header, open }: { readonly header: Header; readonly open: boo
     }
 
     case "Direct": {
-      return header.note === undefined ? (
-        <BarText>Direct Message</BarText>
-      ) : (
-        <BarText tone="Note">{header.note}</BarText>
+      return (
+        <>
+          <PartnerPresence presence={header.presence} />
+          {header.note === undefined ? (
+            <BarText>Direct Message</BarText>
+          ) : (
+            <BarText tone="Note">{header.note}</BarText>
+          )}
+        </>
       );
     }
 

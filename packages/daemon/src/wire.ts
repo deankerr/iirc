@@ -211,10 +211,28 @@ const ctcp = (source: Ctcp): Ctcp => ({
   target: source.target,
 });
 
-// What a User's presence changed to, as an Away or an account.
-const presence = (
-  source: Extract<Activity, { readonly _tag: "AccountChanged" | "AwayChanged" }>
-): WireActivity => {
+type Presence = Extract<
+  Activity,
+  { readonly _tag: "AccountChanged" | "AwayChanged" | "CameOnline" | "WentOffline" }
+>;
+
+const isPresence = (source: Activity): source is Presence =>
+  source._tag === "AccountChanged" ||
+  source._tag === "AwayChanged" ||
+  source._tag === "CameOnline" ||
+  source._tag === "WentOffline";
+
+// What a User's presence changed to, as an Away, an account, or coming or going.
+const presence = (source: Presence): WireActivity => {
+  if (source._tag === "CameOnline" || source._tag === "WentOffline") {
+    const wire: Case<Activity, WireActivity, typeof source._tag> = {
+      _tag: source._tag,
+      nick: source.nick,
+    };
+
+    return wire;
+  }
+
   if (source._tag === "AccountChanged") {
     const wire: Case<Activity, WireActivity, "AccountChanged"> = {
       _tag: "AccountChanged",
@@ -235,12 +253,11 @@ const presence = (
 };
 
 const activity = (source: Activity): WireActivity => {
-  switch (source._tag) {
-    case "AccountChanged":
-    case "AwayChanged": {
-      return presence(source);
-    }
+  if (isPresence(source)) {
+    return presence(source);
+  }
 
+  switch (source._tag) {
     case "Joined": {
       const wire: Case<Activity, WireActivity, "Joined"> = {
         _tag: "Joined",
@@ -1043,6 +1060,15 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
+    case "PartnerLearned": {
+      const wire: Case<News, WireNews, "PartnerLearned"> = {
+        _tag: "PartnerLearned",
+        partner: { key: source.partner.key, name: source.partner.name },
+      };
+
+      return wire;
+    }
+
     case "ReadMarker": {
       const wire: Case<News, WireNews, "ReadMarker"> = {
         _tag: "ReadMarker",
@@ -1263,6 +1289,11 @@ export const knowledge = ({
   chantypes: source.chantypes ?? null,
   declared: source.declared ?? null,
   life,
+  partners: [...source.partners].map(([key, one]) => ({
+    here: fact(one.here, same),
+    key,
+    nick: one.nick,
+  })),
   self: source.self === undefined ? null : user(source.self),
   session: sessionKnowledge(source.session),
   users: [...source.users].map(([key, one]) => ({ ...user(one), key })),

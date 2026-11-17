@@ -231,20 +231,22 @@ export type Line =
 export type Marker = "-->" | "<--" | "--";
 
 /**
- * What marks an Activity: `-->` for a join, `<--` for a part, a quit, or a kick, and `--`
- * for anything else.
+ * What marks an Activity: `-->` for a join or a partner coming online, `<--` for a part, a
+ * quit, a kick, or a partner going offline, and `--` for anything else.
  * @param activity - The Activity.
  * @returns Its marker.
  */
 const markerOf = (activity: Activity): Marker => {
   switch (activity._tag) {
-    case "Joined": {
+    case "Joined":
+    case "CameOnline": {
       return "-->";
     }
 
     case "Parted":
     case "Quit":
-    case "Kicked": {
+    case "Kicked":
+    case "WentOffline": {
       return "<--";
     }
 
@@ -372,14 +374,31 @@ const describeInvitation = (
   { _tag: "Join", channel: activity.channel, network },
 ];
 
+type Presence = Extract<
+  Activity,
+  { readonly _tag: "AccountChanged" | "AwayChanged" | "CameOnline" | "WentOffline" }
+>;
+
+const isPresence = (activity: Activity): activity is Presence =>
+  activity._tag === "AccountChanged" ||
+  activity._tag === "AwayChanged" ||
+  activity._tag === "CameOnline" ||
+  activity._tag === "WentOffline";
+
 /**
- * A User's away or account changing, in words.
+ * A User's away, account, or presence changing, in words.
  * @param activity - The Activity.
  * @returns Its parts.
  */
-const describePresence = (
-  activity: Extract<Activity, { readonly _tag: "AccountChanged" | "AwayChanged" }>
-): readonly Part[] => {
+const describePresence = (activity: Presence): readonly Part[] => {
+  if (activity._tag === "CameOnline") {
+    return [nickPart(activity.nick), words(" is online")];
+  }
+
+  if (activity._tag === "WentOffline") {
+    return [nickPart(activity.nick), words(" went offline")];
+  }
+
   if (activity._tag === "AccountChanged") {
     return activity.account === null
       ? [nickPart(activity.nick), words(" logged out")]
@@ -403,6 +422,10 @@ const describePresence = (
 const describeOtherActivity = (
   activity: Exclude<Activity, OperAnswer | { readonly _tag: "Invited" }>
 ): readonly Part[] => {
+  if (isPresence(activity)) {
+    return describePresence(activity);
+  }
+
   switch (activity._tag) {
     case "Joined": {
       return [nickPart(activity.nick), words(" joined "), name(activity.channel)];
@@ -462,11 +485,6 @@ const describeOtherActivity = (
         words(" on "),
         name(activity.target),
       ];
-    }
-
-    case "AwayChanged":
-    case "AccountChanged": {
-      return describePresence(activity);
     }
 
     // As the Network gave it: its kind, the command it is about, its code, its context, and

@@ -7,12 +7,14 @@
  * @packageDocumentation
  */
 import type {
+  Activity,
   EndReason,
   Gap,
   NetworkEntry,
   NetworkId,
   NetworkStatus,
   SearchResults,
+  PartnerKnowledge,
   SessionKnowledge,
   Timeline,
   TimelineChange,
@@ -146,8 +148,18 @@ export interface NetworkView {
   readonly connectionAt: number;
   /** Whether Self is away, as `known` last said, or a Session item since. */
   readonly away: SelfAway;
-  /** The sequence of the last `AwayChanged` in the Network's own Timeline, which `known` is read again for. */
-  readonly awayAt: number;
+  /**
+   * Which Direct Message partners are on the Network, as `known` last said, by the key of
+   * their Timeline. A partner `known` did not say is there or gone is not in it.
+   */
+  readonly partners: ReadonlyMap<string, boolean>;
+  /**
+   * The sequence of the last step `known` is read again for: an `AwayChanged` in the
+   * Network's own Timeline, or a partner coming, going, quitting, or changing nick in a
+   * Direct Message Timeline, or what is learned of whether they are there, which moves its
+   * `head`.
+   */
+  readonly statusAt: number;
   readonly timelines: ReadonlyMap<TimelineId, Timeline>;
   readonly list: ListLoad;
   readonly status: StatusLoad;
@@ -554,6 +566,7 @@ export type TimelinesEvent =
       readonly life: number;
       readonly session: SessionKnowledge;
       readonly self: UserKnowledge | null;
+      readonly partners: readonly PartnerKnowledge[];
     }
   | {
       readonly _tag: "WindowRead";
@@ -658,15 +671,16 @@ export const initialTimelines: Timelines = timelinesWith(windowCap);
 
 const newNetwork = (network: NetworkId, life: number): NetworkView => ({
   away: { _tag: "Unknown" },
-  awayAt: 0,
   connection: { _tag: "Unknown" },
   connectionAt: 0,
   kept: false,
   life,
   list: unreadList,
   network,
+  partners: new Map(),
   running: undefined,
   status: unreadStatus,
+  statusAt: 0,
   timelines: new Map(),
 });
 
@@ -1235,6 +1249,18 @@ const changeList = (
 };
 
 /**
+ * Whether an Activity in a Direct Message Timeline may have changed whether its partner is
+ * on the Network.
+ * @param activity - The Activity.
+ * @returns Whether it may have.
+ */
+const changesPartner = (activity: Activity): boolean =>
+  activity._tag === "CameOnline" ||
+  activity._tag === "WentOffline" ||
+  activity._tag === "Quit" ||
+  activity._tag === "NickChanged";
+
+/**
  * Whether Self is away, once a Session item set the connection: here as a Session begins,
  * and unknown with none.
  * @param connection - The connection.
@@ -1268,6 +1294,26 @@ const tagsUnknown = (connection: Connection): boolean =>
   connection._tag === "Connected" && connection.tags === undefined;
 
 /**
+ * The sequence of the last step that learned whether a partner is there, which no item
+ * says, as a change moves their Direct Message Timeline's `head`.
+ * @param network - The Network.
+ * @param change - The step's changes.
+ * @returns The sequence, or 0 when none did.
+ */
+const partnerLearnedAt = (network: NetworkView, change: TimelineChange): number =>
+  Math.max(
+    0,
+    ...change.timelines.flatMap((timeline) =>
+      timeline.network === network.network &&
+      timeline.life === network.life &&
+      timeline.kind === "Direct" &&
+      timeline.head !== null
+        ? [timeline.head]
+        : []
+    )
+  );
+
+/**
  * Brings a Network's connection up to date with the Session items of one step, when they
  * are later than what set it and of the life held: an item of a Timeline of an older life,
  * as the step names it or as one let go of when that life ended, says nothing of it.
@@ -1281,7 +1327,7 @@ const changeConnection = (
   change: TimelineChange,
   vanished: ReadonlySet<TimelineId>
 ): NetworkView => {
-  let { awayAt, connection, connectionAt } = network;
+  let { connection, connectionAt, statusAt } = network;
 
   const older = (timeline: TimelineId) =>
     vanished.has(timeline) ||
@@ -1291,22 +1337,29 @@ const changeConnection = (
     const ours = item.network === network.network && !older(item.timeline);
     const said = ours ? connectionFromItem(item) : undefined;
 
+    // A Session begins or ends, with every partner's presence new to it.
     if (said !== undefined && item.sequence > connectionAt) {
       connection = said;
       connectionAt = item.sequence;
+      statusAt = Math.max(statusAt, item.sequence);
     }
 
-    // Self's away changes belong to the Network's own Timeline. Which User it was, and
-    // what the Ircd confirmed, `known` says.
-    if (
-      ours &&
-      item.content._tag === "Activity" &&
-      item.content.activity._tag === "AwayChanged" &&
-      network.timelines.get(item.timeline)?.kind === "Network"
-    ) {
-      awayAt = Math.max(awayAt, item.sequence);
+    if (ours && item.content._tag === "Activity") {
+      const kind = network.timelines.get(item.timeline)?.kind;
+
+      // Self's away changes belong to the Network's own Timeline. Which User it was, and
+      // what the Ircd confirmed, `known` says. So does whether a partner is there, which
+      // these four, in their Direct Message Timeline, may have changed.
+      if (
+        (kind === "Network" && item.content.activity._tag === "AwayChanged") ||
+        (kind === "Direct" && changesPartner(item.content.activity))
+      ) {
+        statusAt = Math.max(statusAt, item.sequence);
+      }
     }
   }
+
+  statusAt = Math.max(statusAt, partnerLearnedAt(network, change));
 
   const connected =
     connectionAt === network.connectionAt
@@ -1316,12 +1369,13 @@ const changeConnection = (
           away: awayOfConnection(connection),
           connection,
           connectionAt,
+          partners: new Map(),
         };
 
-  // Whether the Session carries tags, and Self's away, are `known`'s to say.
-  return awayAt === network.awayAt && !tagsUnknown(connected.connection)
+  // Whether the Session carries tags, Self's away, and the partners are `known`'s to say.
+  return statusAt === network.statusAt && !tagsUnknown(connected.connection)
     ? connected
-    : { ...connected, awayAt, status: { ...connected.status, fresh: false } };
+    : { ...connected, status: { ...connected.status, fresh: false }, statusAt };
 };
 
 /**
@@ -1339,6 +1393,23 @@ const awayOfKnown = (session: SessionKnowledge, self: UserKnowledge | null): Sel
 
   return fact.value === null ? { _tag: "Here" } : { _tag: "Away", message: fact.value.message };
 };
+
+/**
+ * Which Direct Message partners are on the Network, as `known` says: only those it says,
+ * while registered.
+ * @param session - The Session, as `known` says.
+ * @param partners - The partners, as `known` says.
+ * @returns Whether each is, by the key of their Timeline.
+ */
+const partnersOfKnown = (
+  session: SessionKnowledge,
+  partners: readonly PartnerKnowledge[]
+): ReadonlyMap<string, boolean> =>
+  new Map(
+    session._tag === "Registered"
+      ? partners.flatMap(({ here, key }) => (here._tag === "Known" ? [[key, here.value]] : []))
+      : []
+  );
 
 /**
  * Marks a Network's list for reading again from its first page.
@@ -2160,7 +2231,13 @@ const listRead = (
  */
 const statusRead = (
   state: Timelines,
-  { life, network: id, self, session }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
+  {
+    life,
+    network: id,
+    partners,
+    self,
+    session,
+  }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
 ): Timelines => {
   // Of a newer life, held or not, it begins that life, whose Timelines and Session are
   // read afresh. Of an older one, it says nothing of the life held, whose Session is read
@@ -2201,12 +2278,13 @@ const statusRead = (
       away: newer ? network.away : awayOfKnown(session, self),
       connection,
       connectionAt: Math.max(network.connectionAt, from),
-      // An away change after the read began may not be in it, nor whether a Session that
+      partners: newer ? network.partners : partnersOfKnown(session, partners),
+      // A step after the read began may not be in it, nor whether a Session that
       // began after it carries tags, so it is read again.
       status: {
         ...network.status,
         attempt: 0,
-        fresh: network.awayAt <= from && !tagsUnknown(connection),
+        fresh: network.statusAt <= from && !tagsUnknown(connection),
         reading: false,
       },
     }),
@@ -3379,6 +3457,28 @@ const inFront = (
 };
 
 /**
+ * Has `known` read again for a Direct Message Timeline's Network, so whether its partner
+ * is there is as the Daemon says now.
+ * @param state - The state.
+ * @param timeline - The Timeline.
+ * @returns The state.
+ */
+const partnerAsked = (state: Timelines, timeline: TimelineId): Timelines => {
+  const found = listed(state, resolve(state, timeline));
+  const network = found?.kind === "Direct" ? state.networks.get(found.network) : undefined;
+
+  return network === undefined
+    ? state
+    : {
+        ...state,
+        networks: setIn(state.networks, network.network, {
+          ...network,
+          status: { ...network.status, fresh: false },
+        }),
+      };
+};
+
+/**
  * Where the Owner went: a Timeline opened, a placement to open, the options shown or
  * filtered, or the Panes changed.
  * @param state - The state.
@@ -3388,7 +3488,7 @@ const inFront = (
 const navigated = (state: Timelines, event: Navigation): Timelines => {
   switch (event._tag) {
     case "Opened": {
-      return opening(elsewhere(state), event.timeline);
+      return partnerAsked(opening(elsewhere(state), event.timeline), event.timeline);
     }
 
     case "Located": {

@@ -30,7 +30,12 @@ export type Kept =
   /** Another User's realname, as their join says it. */
   | "user.realname"
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
-  | "member.prefixes";
+  | "member.prefixes"
+  /**
+   * What is seen of a monitored User who is online and shares no Channel with Self, kept
+   * as for one who does. Without it, such a User is not kept at all.
+   */
+  | "user.monitored";
 
 /**
  * What a hook may read of what the Client knew before this step: where the Session is,

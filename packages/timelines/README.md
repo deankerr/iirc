@@ -67,6 +67,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `TimelineClosed` | `Closed` for the Timeline its `where` names, when one has that key. Closing opens nothing. Whether it stays closed is the store's to derive, from what is added to it after. |
 | `ChannelLearned` | `HeadChanged` for the Channel's Timeline, when one exists, so a Frontend reads the Channel's head again. It opens no Timeline and adds no item. |
+| `PartnerLearned` | `HeadChanged` for the partner's Direct Message Timeline, when one exists, so a Frontend reads whether they are there again. It opens no Timeline and adds no item. |
 | `NetworkRemoved` | `Removed` for the Network, with `keep`. The Network leaves the directory, so an id given to a Network again opens its Timelines anew, and a removal of a Network the directory no longer holds, to drop what it kept, opens nothing. |
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |
 | `Ignored` | Nothing. |

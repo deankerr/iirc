@@ -37,6 +37,7 @@ import { interpret } from "./lines.ts";
 import { endLookups, expireLookup, look, removedLookups, unsentLookups } from "./lookups.ts";
 import { read } from "./markers.ts";
 import { modesQueryOver } from "./modes-query.ts";
+import { monitorAfter } from "./monitor.ts";
 import type { EndReason } from "./news.ts";
 import { operUnsent } from "./oper.ts";
 import {
@@ -928,6 +929,7 @@ export const makeClient = (features: readonly Registered[]): Client<State> => ({
     };
 
     dispatch(run, input);
+    monitorAfter(run);
     run.state = pruned(run.state, run.at);
 
     return {
