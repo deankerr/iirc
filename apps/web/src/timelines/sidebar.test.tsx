@@ -3,7 +3,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { NetworkId, TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
-import { Redacted, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -132,9 +132,14 @@ const noMore: More = { listed: 0, timelines: [] };
  * its own Timeline, `#iirc`, and `#other`, and any more given.
  * @param more - More Timelines, and how many of them the sidebar lists.
  * @param fake - The fake Daemon.
+ * @param fetch - How the page reaches it, the fake's own unless a test stands between.
  * @returns The registry.
  */
-const signedIn = async (more = noMore, fake = fakeDaemon()) => {
+const signedIn = async (
+  more = noMore,
+  fake = fakeDaemon(),
+  fetch: typeof globalThis.fetch = fake.fetch
+) => {
   fake.daemon.signedIn = true;
   fake.daemon.timelines.set("libera", [
     { gaps: [], items: [], timeline: describeTimeline(own, "libera", "Network") },
@@ -143,7 +148,7 @@ const signedIn = async (more = noMore, fake = fakeDaemon()) => {
     ...more.timelines.map((timeline) => ({ gaps: [], items: [], timeline })),
   ]);
 
-  const registry = registryFor(fake.fetch);
+  const registry = registryFor(fetch);
 
   registry.set(pageState, { compact: false, focused: true, visible: true });
   await run(registry, check, undefined);
@@ -625,7 +630,8 @@ describe("closing a Timeline from the sidebar", () => {
       await run(registry, signOut, undefined);
       await run(registry, signInWithKey, Redacted.make(theKey));
     });
-    await settled(() => rows().length === 3);
+    // The close is still on its way, so #iirc stays out of the sidebar until it is answered.
+    await settled(() => rows().length === 2);
 
     // The Daemon answers `Joined` for the close asked under the earlier sign-in. A close
     // asked after it waits its turn behind it, so once that one is done, so is the first.
@@ -684,6 +690,121 @@ describe("closing a Timeline from the sidebar", () => {
       after: ["libera", "#iirc", "#other"],
       before: ["libera", "#iirc", "#other"],
       opened: [["libera", "#iirc", "#other", "peer"], "true"],
+    });
+  });
+});
+
+/**
+ * The fake Daemon with each close held before it reaches it, until the test lets it go, and
+ * then either taken as the fake takes it, or refused as a Daemon whose Network has stopped.
+ * @param fake - The fake Daemon.
+ * @returns The fetch to hand the page, and the closes held.
+ */
+const holdingCloses = (fake: ReturnType<typeof fakeDaemon>) => {
+  const closes: (() => void)[] = [];
+  const state = { refusing: false };
+
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+
+    if (!url.pathname.endsWith("/close")) {
+      return await fake.fetch(input, init);
+    }
+
+    const { promise, resolve } = Promise.withResolvers<undefined>();
+
+    closes.push(() => {
+      resolve(undefined);
+    });
+    await promise;
+
+    return state.refusing
+      ? Response.json(
+          { _tag: "NetworkStopped", network: "libera", outcome: "Uncertain", reason: "stopped" },
+          { status: 503 }
+        )
+      : await fake.fetch(input, init);
+  };
+
+  return { closes, fetch, state };
+};
+
+/** Lets several frames pass, so a close still held is seen to be. */
+const later = async () => {
+  await act(async () => {
+    await Effect.runPromise(Effect.sleep("100 millis"));
+  });
+};
+
+describe("a close, while it is on its way", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("takes the row out of the sidebar as soon as the close is asked, and keeps it out once answered", async () => {
+    const fake = fakeDaemon();
+    const { closes, fetch } = holdingCloses(fake);
+
+    await signedIn(undefined, fake, fetch);
+    await pressButton("More for #other");
+    await chooseFromMenu("Close");
+    await settled(() => closes.length === 1);
+    await later();
+
+    const whileHeld = names();
+
+    await doing(() => {
+      for (const release of closes.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => fake.daemon.closes.length === 1);
+    await later();
+
+    expect({ after: names(), closes: fake.daemon.closes, whileHeld }).toStrictEqual({
+      after: ["libera", "#iirc"],
+      closes: [{ network: "libera", target: "#other" }],
+      whileHeld: ["libera", "#iirc"],
+    });
+  });
+
+  it("shows the row again, and says why, when the close is refused", async () => {
+    const fake = fakeDaemon();
+    const { closes, fetch, state } = holdingCloses(fake);
+    const registry = await signedIn(undefined, fake, fetch);
+
+    state.refusing = true;
+    await doing(() => {
+      registry.set(open, iirc);
+    });
+    await settled(() => document.querySelector("textarea") !== null);
+    await pressButton("More for #other");
+    await chooseFromMenu("Close");
+    await settled(() => closes.length === 1);
+    await later();
+
+    const whileHeld = names();
+
+    await doing(() => {
+      for (const release of closes.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => names().includes("#other"));
+
+    expect({
+      after: names(),
+      notice: document.querySelector('[role="alert"]')?.firstChild?.textContent,
+      whileHeld,
+    }).toStrictEqual({
+      after: ["libera", "#iirc", "#other"],
+      notice:
+        "libera has stopped, so whether #other was closed is unknown. Closing it again is safe.",
+      whileHeld: ["libera", "#iirc"],
     });
   });
 });

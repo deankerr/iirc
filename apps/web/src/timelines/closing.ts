@@ -3,15 +3,21 @@
  * Self is in, which the core folds. The Daemon never closes a Channel Self is in, and says
  * so in its answer, decided as the close was stepped, so the page asks nothing first: a
  * close refused as `Joined` offers to leave the Channel instead, with nothing sent until the
- * Owner chooses. Whether a Timeline is closed comes back on the changes stream, and the
- * sidebar derives it from there.
+ * Owner chooses. A close shows at once: the sidebar leaves its Timeline out from when it is
+ * asked, and until the changes stream says it is closed, or shows it again if it was not.
  *
  * @packageDocumentation
  */
-import { initialLeaving, leaveOf, reduceLeaving } from "@iirc/frontend/closing";
-import type { Leave, Leaving, LeavingEvent } from "@iirc/frontend/closing";
+import {
+  closedBy,
+  initialLeaving,
+  leaveOf,
+  reduceClosing,
+  reduceLeaving,
+} from "@iirc/frontend/closing";
+import type { ClosingEvent, Leave, Leaving, LeavingEvent } from "@iirc/frontend/closing";
 import type { CloseTimeline } from "@iirc/frontend/commands";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -21,6 +27,7 @@ import { runtime } from "../app/runtime.ts";
 import { configure, readChannels, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
+import { closingState, timelinesState } from "./atoms.ts";
 
 /**
  * The offer to leave a Channel, as the core folds it, which begins again as nothing offered
@@ -44,6 +51,56 @@ export const leavingState = Atom.writable(
  */
 const happened = (registry: AtomRegistry.AtomRegistry, event: LeavingEvent) => {
   registry.set(leavingState, reduceLeaving(registry.get(leavingState), event));
+};
+
+/**
+ * Folds one event into the closes on their way.
+ * @param registry - The registry.
+ * @param event - What happened.
+ */
+const closingHappened = (registry: AtomRegistry.AtomRegistry, event: ClosingEvent) => {
+  registry.set(closingState, reduceClosing(registry.get(closingState), event));
+};
+
+/**
+ * Carries out a close that shows at once, when it names a Timeline held: it is folded in as
+ * asked, and let go of once answered, however that ends, but for a close the Daemon did,
+ * which holds until the stream says so, so the Timeline never shows again meanwhile.
+ * @param registry - The registry.
+ * @param close - The close.
+ * @param work - What carries it out.
+ * @param closedAt - The step the Daemon closed the Timeline in, from what the work came to,
+ * or none when it did not.
+ * @returns What the work came to.
+ */
+const onItsWay = <A, E, R>(
+  registry: AtomRegistry.AtomRegistry,
+  close: CloseTimeline,
+  work: Effect.Effect<A, E, R>,
+  closedAt: (done: A) => number | undefined
+) => {
+  const timeline = closedBy(registry.get(timelinesState).networks, close);
+
+  return timeline === undefined
+    ? work
+    : Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const { next } = registry.get(closingState);
+
+          closingHappened(registry, { _tag: "Asked", network: close.network, timeline });
+
+          return next;
+        }),
+        () => work,
+        (ask, exit) =>
+          Effect.sync(() => {
+            closingHappened(registry, {
+              _tag: "Answered",
+              ask,
+              closedAt: Exit.isSuccess(exit) ? closedAt(exit.value) : undefined,
+            });
+          })
+      );
 };
 
 /**
@@ -73,9 +130,9 @@ const refusedWith = (close: CloseTimeline, tag: string): Outcome => {
 };
 
 /**
- * Asks the Daemon to close a Timeline, and offers to leave a Channel it refused to close
- * because Self is in it. An answer that lands once the page signed out, or signed in again,
- * offers nothing, since its offer would outlive the sign-in it was asked in.
+ * Asks the Daemon to close a Timeline, which shows at once, and offers to leave a Channel it
+ * refused to close because Self is in it. An answer that lands once the page signed out, or
+ * signed in again, offers nothing, since its offer would outlive the sign-in it was asked in.
  * @param registry - The registry.
  * @param close - The close.
  * @returns What it came to, in words when it was not done.
@@ -95,12 +152,22 @@ export const closeTimeline = (
         })
       ),
       () =>
-        client.networks
-          .close({ params: { network: close.network }, payload: { target: close.target } })
-          .pipe(
-            Effect.map((closed) => ({ _tag: "Answered", closed }) as const),
-            Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
-          ),
+        onItsWay(
+          registry,
+          close,
+          client.networks
+            .close({ params: { network: close.network }, payload: { target: close.target } })
+            .pipe(
+              Effect.map((closed) => ({ _tag: "Answered", closed }) as const),
+              Effect.catch((error) =>
+                Effect.succeed({ _tag: "Failed", error: error._tag } as const)
+              )
+            ),
+          (done) =>
+            done._tag === "Answered" && done.closed._tag === "Closed"
+              ? done.closed.sequence
+              : undefined
+        ),
       (unsubscribe) => Effect.sync(unsubscribe)
     );
 
