@@ -107,6 +107,18 @@ const press = async (target: EventTarget, init: KeyboardEventInit) => {
  */
 const rows = () => [...document.querySelectorAll<HTMLElement>('nav [role="row"]')];
 
+/**
+ * The sidebar's text.
+ * @returns It.
+ */
+const sidebarText = () => document.querySelector("nav")?.textContent ?? "";
+
+/**
+ * The text of each of the sidebar's rows, all of it.
+ * @returns Each.
+ */
+const rowTexts = () => rows().map((one) => one.textContent);
+
 /** Timelines beside the three every test has, and how many of them the sidebar lists. */
 interface More {
   readonly timelines: readonly (typeof Timeline.Encoded)[];
@@ -238,6 +250,72 @@ describe("the sidebar", () => {
     }
 
     localStorage.clear();
+  });
+
+  it("draws a wait, never none configured or a Network with no Timelines, until the lists are read", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.signedIn = true;
+    fake.daemon.timelines.set("libera", [
+      { gaps: [], items: [], timeline: describeTimeline(own, "libera", "Network") },
+      { gaps: [], items: [], timeline: describeTimeline(iirc, "#iirc", "Channel") },
+    ]);
+
+    const registry = registryFor(fake.fetch);
+
+    registry.set(pageState, { compact: false, focused: true, visible: true });
+    await run(registry, check, undefined);
+    fake.daemon.holdNetworks = true;
+    fake.daemon.holdLists = true;
+    registry.mount(sync);
+
+    const container = document.createElement("div");
+
+    document.body.append(container);
+    const root = createRoot(container);
+
+    mounted.push(() => {
+      root.unmount();
+      container.remove();
+    });
+
+    await doing(() => {
+      root.render(
+        <RegistryContext.Provider value={registry}>
+          <App />
+        </RegistryContext.Provider>
+      );
+    });
+
+    await settled(() => fake.daemon.networksHeld.length > 0 && sidebarText() !== "");
+    const unlisted = sidebarText();
+
+    fake.daemon.holdNetworks = false;
+    await doing(() => {
+      for (const release of fake.daemon.networksHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => fake.daemon.listsHeld.length > 0 && rows().length > 0);
+    const unread = rowTexts();
+
+    fake.daemon.holdLists = false;
+    await doing(() => {
+      for (const release of fake.daemon.listsHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => rows().length === 2);
+
+    expect({
+      read: rowTexts().map((one) => one.includes("Reading…")),
+      unlisted: [unlisted.includes("Reading…"), unlisted.includes("No Networks are configured")],
+      unread: unread.map((one) => one.includes("Reading…")),
+    }).toStrictEqual({
+      read: [false, false],
+      unlisted: [true, false],
+      unread: [false, true],
+    });
   });
 
   it("draws a Network as its own Timeline's row, which opens it and is chosen, with its Channels under it", async () => {

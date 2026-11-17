@@ -22,6 +22,7 @@ import {
   initialTimelines,
   keptLayout,
   layoutKeptText,
+  networksListed,
   opened,
   openOf,
   reduceTimelines,
@@ -57,6 +58,9 @@ export const timelinesState = Atom.make<Timelines>(initialTimelines).pipe(Atom.k
 
 /** The Networks and their Timelines, in sidebar order. */
 export const sidebarNetworks = Atom.make((get) => sidebar(get(timelinesState)));
+
+/** Whether the Network list was ever read, so having no Network says none is configured. */
+export const listedNetworks = Atom.make((get) => networksListed(get(timelinesState)));
 
 /** The focused Pane's open Timeline, as shown. */
 export const openTimeline = Atom.make((get) => opened(get(timelinesState)));
