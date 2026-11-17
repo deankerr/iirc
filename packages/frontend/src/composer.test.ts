@@ -816,6 +816,7 @@ describe("a reply", () => {
         true
       ),
       unsendable: replyOf(item({ id: known("has space") }), true),
+      unsendableC1: replyOf(item({ id: known("ab\u0085cd") }), true),
     }).toStrictEqual({
       activity: undefined,
       noId: undefined,
@@ -829,6 +830,7 @@ describe("a reply", () => {
         message: { kind: "Privmsg", position: item().position, sender: "alice", text: "ok!" },
       },
       unsendable: undefined,
+      unsendableC1: undefined,
     });
   });
 
@@ -879,5 +881,17 @@ describe("a reply", () => {
       confirmed: [["msg-1", ...lines.slice(1).map(() => "none")], undefined],
       refused: answering,
     });
+  });
+
+  it("lets lines waiting to be confirmed go when it is dropped or another is chosen", () => {
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
+    const asked = submit(replying([edited(lines.join("\n"))]), channel, context);
+    const dropped = fold([{ _tag: "ReplyDropped", timeline: channel }], asked.state);
+    const chosen = fold([{ _tag: "ReplyChosen", answering, timeline: channel }], asked.state);
+
+    expect({
+      chosen: draftOf(chosen, channel).confirming,
+      dropped: draftOf(dropped, channel).confirming,
+    }).toStrictEqual({ chosen: undefined, dropped: undefined });
   });
 });

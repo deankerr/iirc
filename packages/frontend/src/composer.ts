@@ -213,8 +213,9 @@ export type SayFailure =
  * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
  * - `ReplyChosen`: the Owner chose to answer a Message, which the draft holds until it is
- *   sent or dropped, through edits and turning away.
- * - `ReplyDropped`: the Owner chose not to answer it after all. The text stays.
+ *   sent or dropped, through edits and turning away. Lines waiting to be confirmed go.
+ * - `ReplyDropped`: the Owner chose not to answer it after all. The text stays, and lines
+ *   waiting to be confirmed go.
  * - `Carried`: a draft came to show its Timeline, so what was typed under it, unsent, goes
  *   to the Timeline's composer, unless that holds text of its own, with its notice unless
  *   that holds one, and what is said later of a Say sent from the draft is said there. A
@@ -412,14 +413,13 @@ type AnswersId = NonNullable<SayRequest["answers"]>;
 /**
  * Reads a Message's id as `say` takes it to answer: 1 to 256 characters, none a space or a
  * control character, as a `+reply` tag can carry. The core takes the API's types alone, so
- * this mirrors its rule, and the type says the two agree.
+ * this repeats the Client's `SendableMessageId` rule, which must change with it.
  */
 const sendableId: (id: string) => Option.Option<AnswersId> = Schema.decodeUnknownOption(
   Schema.String.check(
     Schema.isMinLength(1),
     Schema.isMaxLength(256),
-    // Neither a space, nor a control character from NUL to US, nor DEL.
-    Schema.isPattern(/^[!-~\u0080-\u{10FFFF}]+$/u)
+    Schema.isPattern(/^[^\p{Cc} ]+$/u)
   ).pipe(Schema.brand("MessageId"))
 );
 
@@ -847,15 +847,21 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
       return noticed(state, event.timeline, outcome(event.message));
     }
 
+    // Lines waiting to be confirmed were read under the reply as it was.
     case "ReplyChosen": {
       return withDraft(state, event.timeline, (draft) => ({
         ...draft,
         answering: event.answering,
+        confirming: undefined,
       }));
     }
 
     case "ReplyDropped": {
-      return withDraft(state, event.timeline, (draft) => ({ ...draft, answering: undefined }));
+      return withDraft(state, event.timeline, (draft) => ({
+        ...draft,
+        answering: undefined,
+        confirming: undefined,
+      }));
     }
 
     default: {
