@@ -42,10 +42,11 @@
   list-style: none;
 }
 
-/* The thumbnail, what the Upload is, and what can be done with it. */
+/* The thumbnail, what the Upload is, and what can be done with it, under what it is where
+   the view is narrow, so what it is keeps the width. */
 .row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-3);
   align-items: center;
   padding: var(--space-1) 0;
@@ -123,8 +124,9 @@
 /* Copying its link, renaming it, and deleting it, wrapping on a narrow screen. */
 .actions {
   display: flex;
+  grid-column: 2;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   gap: var(--space-2);
 }
@@ -137,14 +139,31 @@
   align-self: flex-start;
 }
 
+/* Wide enough for the buttons beside what it is. */
+@container (min-width: 60ch) {
+  .row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .actions {
+    grid-column: auto;
+    justify-content: flex-end;
+  }
+}
+
 /* Wide enough for a row on one line: the name, what it is, and where it was said, each in
-   a column of its own, then the buttons. A failure keeps the line under them. */
+   a column of its own, then the buttons. What it is stays on its line. A
+   failure keeps the line under them. */
 @container (min-width: 90ch) {
   .about {
     display: grid;
-    grid-template-columns: minmax(12ch, 2fr) minmax(16ch, 2fr) minmax(0, 2fr);
+    grid-template-columns: minmax(12ch, 1fr) max-content minmax(0, 1fr);
     gap: var(--space-3);
     align-items: baseline;
+  }
+
+  .details {
+    white-space: nowrap;
   }
 
   .failure {
