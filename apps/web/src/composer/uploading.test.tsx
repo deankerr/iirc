@@ -14,7 +14,8 @@ import { check, signOut } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { testUploader } from "../testing/uploader.ts";
 import { open, sync } from "../timelines/atoms.ts";
-import { composerState, setComposers } from "./atoms.ts";
+import { setComposers } from "./atoms.ts";
+import { composerState } from "./composer-state.ts";
 import { uploadingState } from "./uploading-state.ts";
 import { addFiles, previews, uploadsSignedOut } from "./uploading.ts";
 

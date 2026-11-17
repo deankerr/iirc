@@ -30,22 +30,27 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import { uiInEffect } from "../options/ui.ts";
+import { keymapState, paletteState } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
+import { themesListed } from "../theme/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
-import { composerState, draft, edited, placeOf, setComposers } from "./atoms.ts";
+import { draft, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
+import { composerState } from "./composer-state.ts";
 
 /** What a word typed at a place can be completed from, as things are now. */
 const sourcesAt = Atom.family((place: Place) =>
   Atom.make((get): Sources =>
-    sourcesOf(
-      get(timelinesState),
-      place,
-      listed(get(optionsState), ""),
-      get(chantypesState),
-      get(uiInEffect).suffix
-    )
+    sourcesOf(get(timelinesState), place, {
+      chantypes: get(chantypesState),
+      keymap: get(keymapState),
+      options: listed(get(optionsState), ""),
+      ran: get(paletteState).recent,
+      suffix: get(uiInEffect).suffix,
+      ...get(themesListed),
+      font: get(uiInEffect).font,
+    })
   )
 );
 

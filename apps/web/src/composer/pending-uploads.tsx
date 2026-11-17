@@ -27,7 +27,7 @@ import { openOptions } from "../options/atoms.ts";
 import { RenameField } from "../options/rename-field.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
-import { composerState } from "./atoms.ts";
+import { composerState } from "./composer-state.ts";
 import { uploadingState } from "./uploading-state.ts";
 import { dismissUploadNote, dropUpload, previews, renameKept } from "./uploading.ts";
 
