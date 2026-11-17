@@ -381,6 +381,77 @@ const MessageMenu = ({
 };
 
 /**
+ * Where a Message stands: on a line of its own, or under `ui.line` stacked, a run's head or
+ * a later Message of one.
+ */
+type Place = "Line" | "Head" | "Later";
+
+/**
+ * What comes before a Message's text: what it answers, the time, and the sender as said. A
+ * run's head has its nick and time on a line of their own, with what it answers under them,
+ * just above the text that answers it. A later Message of a run has its time alone, still
+ * there for a screen reader and shown while the row is hovered or focused, and reached by
+ * Tab when nothing else in the row takes focus.
+ * @param props - The Message's item, its line, where it stands, and whether its time takes focus.
+ * @returns What comes before its text.
+ */
+const Said = ({
+  focusable,
+  item,
+  line,
+  place,
+}: {
+  readonly focusable: boolean;
+  readonly item: TimelineItem;
+  readonly line: Extract<LineOfRow, { readonly _tag: "Message" }>;
+  readonly place: Place;
+}) => {
+  const nick = (
+    <NickButton nick={line.nick} timeline={item.timeline}>
+      <Nick colour={line.colour} nick={line.nick} />
+    </NickButton>
+  );
+
+  if (place === "Head") {
+    return (
+      <>
+        <span className={styles.heading}>
+          <span className={styles.headNick}>{nick}</span> <Time at={item.position.at} />
+        </span>{" "}
+        <Answered item={item} />
+      </>
+    );
+  }
+
+  if (place === "Later") {
+    return (
+      <>
+        <Answered item={item} />
+        <Time
+          at={item.position.at}
+          className={`${styles.time} ${styles.later}`}
+          focusable={focusable}
+        />{" "}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Answered item={item} />
+      <Time at={item.position.at} />{" "}
+      <span className={styles.sender}>
+        <span className={styles.said}>
+          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
+          {line.kind === "Notice" ? <>-{nick}-</> : null}
+          {line.kind === "Action" ? <>* {nick}</> : null}
+        </span>
+      </span>{" "}
+    </>
+  );
+};
+
+/**
  * A Message's line: what it answers, the time, the sender as said, its text, how it fares
  * if it is ours, and its Previews, with its menu where it can be answered.
  * @param props - Its item, and its line.
@@ -399,15 +470,15 @@ const MessageLine = ({
   // Under stacked, plain speech is a run's head, with its nick and time on a line above
   // its text, or a later Message of one, with its text alone.
   const stacked = useAtomValue(lineShown) === "stacked" && line.kind === "Privmsg";
+  let place: Place = "Line";
+
+  if (stacked) {
+    place = continues ? "Later" : "Head";
+  }
+
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const delivery = line.delivered;
-
-  const nick = (
-    <NickButton nick={line.nick} timeline={item.timeline}>
-      <Nick colour={line.colour} nick={line.nick} />
-    </NickButton>
-  );
 
   let tone = item.level === "Highlight" ? styles.highlight : styles.message;
 
@@ -426,43 +497,8 @@ const MessageLine = ({
 
   let classes = answering === undefined ? tone : `${tone} ${styles.menued}`;
 
-  if (stacked) {
-    classes = `${classes} ${continues ? styles.continued : styles.head}`;
-  }
-
-  let said = (
-    <>
-      <Time at={item.position.at} />{" "}
-      <span className={styles.sender}>
-        <span className={styles.said}>
-          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
-          {line.kind === "Notice" ? <>-{nick}-</> : null}
-          {line.kind === "Action" ? <>* {nick}</> : null}
-        </span>
-      </span>{" "}
-    </>
-  );
-
-  if (stacked && continues) {
-    // Its time is still there, for a screen reader, and shown while the row is hovered or
-    // focused, as it is by Tab when nothing else in the row takes focus.
-    said = (
-      <>
-        <Time
-          at={item.position.at}
-          className={`${styles.time} ${styles.later}`}
-          focusable={answering === undefined}
-        />{" "}
-      </>
-    );
-  } else if (stacked) {
-    said = (
-      <>
-        <span className={styles.heading}>
-          <span className={styles.headNick}>{nick}</span> <Time at={item.position.at} />
-        </span>{" "}
-      </>
-    );
+  if (place !== "Line") {
+    classes = `${classes} ${place === "Later" ? styles.continued : styles.head}`;
   }
 
   return (
@@ -473,8 +509,7 @@ const MessageLine = ({
       onContextMenu={onContextMenu}
       ref={anchor}
     >
-      <Answered item={item} />
-      {said}
+      <Said focusable={answering === undefined} item={item} line={line} place={place} />
       <bdi className={styles.text}>
         <Inlines inlines={line.text} />
         {line.context === undefined ? null : (

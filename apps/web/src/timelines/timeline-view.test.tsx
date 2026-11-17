@@ -1390,6 +1390,40 @@ describe("what the view says it shows", () => {
     });
   });
 
+  it("puts what a run's head answers under its nick under ui.line stacked, and a later Message's above its text", async () => {
+    const answered = {
+      kind: "Privmsg",
+      position: message(1).position,
+      sender: "alice",
+      text: "the first thing",
+    } as const;
+
+    const original = {
+      ...message(1),
+      content: { ...message(1).content, sender: "alice", text: "the first thing" },
+    };
+
+    const { registry } = await signedIn([], [original, replied(2, answered), replied(3, answered)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 3"));
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("line ")
+    );
+
+    expect(rows.map((one) => plain(one.textContent))).toStrictEqual([
+      "peer 10:00 \u21B3 alice: the first thing line 2",
+      "\u21B3 alice: the first thing 10:00 line 3",
+    ]);
+  });
+
   describe("where the day changes", () => {
     // Local noon on three days, the last two on consecutive days, so no zone moves one across midnight.
     const days = [
