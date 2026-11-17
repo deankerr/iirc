@@ -34,6 +34,7 @@ declare const styles: {
   readonly upload: string;
   readonly uploads: string;
   readonly usage: string;
+  readonly whole: string;
 };
 
 export default styles;

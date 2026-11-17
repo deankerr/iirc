@@ -411,9 +411,13 @@ const Completions = ({
           // Pressed, never focused: the textarea keeps the focus.
           tabIndex={-1}
         >
-          <bdi className={styles.candidate}>
-            {candidate._tag === "Emoji" ? `${candidate.emoji} ${candidate.name}` : candidate.name}
-          </bdi>
+          {candidate._tag === "Emoji" ? (
+            <bdi className={`${styles.candidate} ${styles.whole}`}>
+              {candidate.emoji} {candidate.name}
+            </bdi>
+          ) : (
+            <bdi className={styles.candidate}>{candidate.name}</bdi>
+          )}
           <About candidate={candidate} />
         </div>
       ))}
