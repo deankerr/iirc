@@ -2579,7 +2579,8 @@ export type Prompt = Asked & {
  * - `Answered`: the Daemon answered a change asked for, however it came out, so it is no longer
  *   on its way and what is in force shows.
  * - `Held`, `HeldFailed`: the names of the Credentials the Vault holds, or they could not be
- *   read, which leaves the names last read, if any.
+ *   read, so whether each is held is not known, whatever was read before, since the Vault
+ *   is not followed and those names may no longer be the ones held.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
  * - `Confirming`: the Owner is asked to confirm unsetting an option, or is not.
@@ -2689,13 +2690,6 @@ const configurationRead = (
 };
 
 /**
- * The names held once a read of them failed: those last read, or not known.
- * @param held - The names held before.
- * @returns The names held after.
- */
-const heldFailed = (held: HeldNames): HeldNames => held ?? "NotKnown";
-
-/**
  * The options view after an event.
  * @param state - The view before.
  * @param event - What happened.
@@ -2756,7 +2750,7 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
     }
 
     case "HeldFailed": {
-      return { ...state, held: heldFailed(state.held) };
+      return { ...state, held: "NotKnown" };
     }
 
     case "Noticed": {

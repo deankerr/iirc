@@ -196,7 +196,17 @@ const readConfiguration = (registry: AtomRegistry.AtomRegistry, network: Network
   });
 
 /**
- * Reads the names of the Credentials the Vault holds into the view.
+ * Signs the page out, when a request was refused for its sign-in.
+ * @param registry - The registry.
+ */
+export const signedOut = (registry: AtomRegistry.AtomRegistry) => {
+  registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
+};
+
+/**
+ * Reads the names of the Credentials the Vault holds into the view. When they cannot be
+ * read, whether each is held is not known, never the names last read, and a refusal for
+ * the sign-in signs the page out.
  * @param registry - The registry.
  * @returns Once read, or not.
  */
@@ -206,15 +216,17 @@ export const readHeld = (registry: AtomRegistry.AtomRegistry) =>
     const { names } = yield* client.credentials.list();
 
     happened(registry, { _tag: "Held", names });
-  }).pipe(Effect.ignore);
-
-/**
- * Signs the page out, when a request was refused for its sign-in.
- * @param registry - The registry.
- */
-export const signedOut = (registry: AtomRegistry.AtomRegistry) => {
-  registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
-};
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        if (error._tag === "Unauthorized") {
+          signedOut(registry);
+        } else {
+          happened(registry, { _tag: "HeldFailed" });
+        }
+      })
+    )
+  );
 
 /**
  * Says in the view that a read it needs failed, or signs the page out when it was refused
@@ -237,9 +249,15 @@ const readFailed = (
   }
 
   failed();
+
+  // The Networks and the names held are read together, so one failure's words never hide
+  // the other's.
+  const before = registry.get(optionsState).notice;
+  const said = `${message} Open the options again to read them.`;
+
   happened(registry, {
     _tag: "Noticed",
-    message: `${message} Open the options again to read them.`,
+    message: before === undefined ? said : `${before} ${said}`,
   });
 };
 

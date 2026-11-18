@@ -954,6 +954,44 @@ describe("the options view, opened when a read fails", () => {
     });
   });
 
+  it("says both when the Networks and the names held both fail, one never hiding the other", async () => {
+    const { container } = await failed(["/api/networks", "/api/credentials"]);
+
+    await settled(() =>
+      (container.querySelector('[role="alert"]')?.textContent ?? "").includes("Credentials")
+    );
+    await later();
+
+    const notice = container.querySelector('[role="alert"]')?.textContent ?? "";
+
+    expect({
+      credentials: notice.includes("did not say which Credentials it holds"),
+      networks: notice.includes("did not list its Networks"),
+    }).toStrictEqual({ credentials: true, networks: true });
+  });
+
+  it("shows a Credential as not known, never by the names last read, when a later read of them fails", async () => {
+    const fake = configured();
+    const refused = new Set<string>();
+    const shown = await page(fake, failingReads(fake, refused));
+
+    shown.registry.mount(uiSync);
+    await shown.type("/set");
+    await settled(
+      () =>
+        rowOf(shown.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
+    );
+    refused.add("/api/credentials");
+    // A Change followed reads the names held again, as another device may have held one.
+    await shown.type("/set uploads.maxSize 2048");
+    await settled(() => rowOf(shown.container, "uploads.maxSize")?.[1] === "2048");
+    await later();
+
+    expect(rowOf(shown.container, "store.s3.accessKeyId")?.[1]).toBe(
+      "Owner.store.s3.accessKeyId not known"
+    );
+  });
+
   it("asks nothing of an option still being read when Delete is pressed on it", async () => {
     const fake = configured();
     const reads = holdingReads(fake);

@@ -1245,7 +1245,7 @@ describe("the options view", () => {
     });
   });
 
-  it("shows whether a Credential is held as not known once the names held could not be read, and keeps names already read", () => {
+  it("shows whether a Credential is held as not known once the names held could not be read, even when some were read before", () => {
     const failed = reduceOptions(initialOptions, { _tag: "HeldFailed" });
 
     const kept = reduceOptions(reduceOptions(initialOptions, { _tag: "Held", names: ["a"] }), {
@@ -1254,7 +1254,7 @@ describe("the options view", () => {
 
     expect({ failed: failed.held, kept: kept.held }).toStrictEqual({
       failed: "NotKnown",
-      kept: new Set(["a"]),
+      kept: "NotKnown",
     });
   });
 
