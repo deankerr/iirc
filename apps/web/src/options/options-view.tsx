@@ -34,6 +34,7 @@ import {
   confirming as confirmingAtom,
   editing as editingAtom,
   filterOptions,
+  networksWaited,
   notice as noticeAtom,
   optionsFilter,
   optionRows,
@@ -48,12 +49,17 @@ import styles from "./options-view.module.css";
 
 /**
  * An option's value, as the view shows it: a Credential by its name and whether it is
- * held, never a value.
+ * held, never a value. What is still being read draws as a wait, never as a default or
+ * as "not held".
  * @param props - The value.
  * @returns The value.
  */
 const Shown = ({ value }: { readonly value: Value }) => {
   switch (value._tag) {
+    case "Reading": {
+      return <span className={styles.muted}>reading…</span>;
+    }
+
     case "Shown": {
       return <bdi>{value.text}</bdi>;
     }
@@ -66,9 +72,15 @@ const Shown = ({ value }: { readonly value: Value }) => {
       return (
         <span>
           <bdi>{value.name}</bdi>{" "}
-          <span className={value.held === true ? styles.held : styles.missing}>
-            {value.held === true ? "held" : "not held"}
-          </span>
+          {value.held === undefined || value.held === "NotKnown" ? (
+            <span className={styles.muted}>
+              {value.held === undefined ? "reading…" : "not known"}
+            </span>
+          ) : (
+            <span className={value.held ? styles.held : styles.missing}>
+              {value.held ? "held" : "not held"}
+            </span>
+          )}
         </span>
       );
     }
@@ -318,6 +330,7 @@ const NetworkRemovals = () => {
  */
 export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const rows = useAtomValue(optionRows);
+  const waits = useAtomValue(networksWaited);
   const { confirming, editing, notice } = useAtomValue(optionsState);
   const filter = useAtomValue(optionsFilter) ?? "";
   const setFilter = useAtomSet(filterOptions);
@@ -367,7 +380,9 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const onAction = (key: Key) => {
     const option = named(key);
 
-    if (option === undefined) {
+    // An option still being read is changed only once its value shows, so a toggle never
+    // turns over from a value not known.
+    if (option === undefined || option.value._tag === "Reading") {
       return;
     }
 
@@ -395,7 +410,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
 
     const option = named(row?.dataset.key);
 
-    if (option?.unsettable === true) {
+    // An option still being read is unset only once its value shows, as it is changed.
+    if (option?.unsettable === true && option.value._tag !== "Reading") {
       event.preventDefault();
       ask(option.name);
     }
@@ -436,6 +452,15 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
         </p>
       )}
       {asked === undefined ? null : <Confirm done={focusRow(asked.name)} option={asked} />}
+      {waits.length === 0 ? null : (
+        <ul aria-label="Being read" className={styles.waits}>
+          {waits.map((name) => (
+            <li key={name}>
+              Reading <bdi>{name}</bdi>…
+            </li>
+          ))}
+        </ul>
+      )}
       <div className={styles.body}>
         {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the GridList's own rows take the keys; this only hears Delete from them. */}
         <div className={styles.scroller} onKeyDown={onKeyDown} ref={list}>
@@ -445,7 +470,10 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
             className={styles.list}
             items={rows}
             onAction={onAction}
-            renderEmptyState={() => <p className={styles.muted}>No option matches.</p>}
+            renderEmptyState={() =>
+              // While Networks are read, their options may yet match, which the waits say.
+              waits.length === 0 ? <p className={styles.muted}>No option matches.</p> : null
+            }
           >
             {(option) => (
               <GridListItem className={styles.row} id={option.name} textValue={option.name}>

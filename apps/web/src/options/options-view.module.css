@@ -58,6 +58,15 @@
   color: var(--color-danger);
 }
 
+/* The Networks still being read, drawn as a wait where their options will be. */
+.waits {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  border-bottom: var(--border-width) solid var(--color-border);
+  color: var(--color-muted);
+}
+
 .confirm {
   display: flex;
   flex-wrap: wrap;
