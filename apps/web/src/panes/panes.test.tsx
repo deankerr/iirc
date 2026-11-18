@@ -945,7 +945,7 @@ describe("what stands in front of a Timeline", () => {
 
     await settled(
       () =>
-        registry.get(optionsState).networks.get(Schema.decodeSync(NetworkId)("libera"))?._tag ===
+        registry.get(optionsState).networks?.get(Schema.decodeSync(NetworkId)("libera"))?._tag ===
         "Read"
     );
 

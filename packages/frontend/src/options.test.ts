@@ -19,6 +19,7 @@ import {
   fields,
   initialOptions,
   listed,
+  networksReading,
   matches,
   optionsOf,
   ownerCredentialFor,
@@ -1204,12 +1205,63 @@ describe("the options view", () => {
     }
 
     expect({
-      kept: state.networks.get(libera),
+      kept: state.networks?.get(libera),
       names: listed(state, "*nicks").map((option) => option.name),
     }).toStrictEqual({
       kept: { _tag: "Read", configuration: plain, sequence: 5 },
       names: ["network.libera.nicks", "network.my.net.nicks"],
     });
+  });
+
+  it("says which Networks are still read: all before they are listed, then each not read yet", () => {
+    const listedTwo = reduceOptions(initialOptions, {
+      _tag: "Listed",
+      networks: [libera, dotted],
+    });
+
+    const oneRead = reduceOptions(listedTwo, {
+      _tag: "Read",
+      configuration: plain,
+      network: libera,
+      sequence: 1,
+    });
+
+    const bothDone = reduceOptions(oneRead, {
+      _tag: "ReadFailed",
+      message: "Not read.",
+      network: dotted,
+    });
+
+    expect({
+      bothDone: networksReading(bothDone),
+      listed: networksReading(listedTwo),
+      oneRead: networksReading(oneRead),
+      unlisted: networksReading(initialOptions),
+    }).toStrictEqual({
+      bothDone: [],
+      listed: ["network.libera.*", "network.my.net.*"],
+      oneRead: ["network.my.net.*"],
+      unlisted: ["network.*"],
+    });
+  });
+
+  it("lets go of a Network's read that lands before the Networks are listed, as listing reads each again", () => {
+    const early = reduceOptions(initialOptions, {
+      _tag: "Read",
+      configuration: plain,
+      network: libera,
+      sequence: 1,
+    });
+
+    expect({
+      failed: reduceOptions(initialOptions, {
+        _tag: "ReadFailed",
+        message: "Not read.",
+        network: libera,
+      }).networks,
+      read: early.networks,
+      reading: networksReading(early),
+    }).toStrictEqual({ failed: undefined, read: undefined, reading: ["network.*"] });
   });
 });
 
@@ -1972,9 +2024,7 @@ describe("the options under store, uploads, and previews", () => {
       held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(1, 3),
       notHeld: ownerRows(owner, new Set()).slice(1, 2),
       read: ownerRows(owner, undefined),
-      unread: ownerOptionsOf(undefined, undefined)
-        .filter((option) => option.value._tag !== "Unset")
-        .map((option) => [option.name, option.value, option.starts]),
+      unread: [...new Set(ownerOptionsOf(undefined, undefined).map((option) => option.value._tag))],
     }).toStrictEqual({
       held: [
         [
@@ -2008,11 +2058,8 @@ describe("the options under store, uploads, and previews", () => {
         ["uploads.maxTotal", { _tag: "Unset" }, "unset"],
         ["uploads.publicUrl", { _tag: "Shown", text: "https://files.example.com" }, "unset"],
       ],
-      // Before they are read, each is what it starts as.
-      unread: [
-        ["previews.maxTotal", { _tag: "Shown", text: "1073741824" }, "1073741824"],
-        ["uploads.maxSize", { _tag: "Shown", text: "104857600" }, "104857600"],
-      ],
+      // Before they are read, each is being read, never what it starts as.
+      unread: ["Reading"],
     });
   });
 
@@ -2275,7 +2322,7 @@ describe("a change on its way", () => {
     ]);
 
     expect({
-      kept: set.networks.get(libera),
+      kept: set.networks?.get(libera),
       set: shownOf(set, "network.libera.realname"),
     }).toStrictEqual({
       kept: { _tag: "Read", configuration: plain, sequence: 5 },
@@ -2394,7 +2441,7 @@ describe("a change on its way", () => {
       network: listed(unread, "network.libera").length,
       time: shownOf(unread, "ui.time"),
     }).toStrictEqual({
-      bucket: [{ _tag: "Unset" }],
+      bucket: [{ _tag: "Reading" }],
       network: 0,
       time: text("HH:mm"),
     });

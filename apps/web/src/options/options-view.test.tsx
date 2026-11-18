@@ -10,7 +10,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../app/app.tsx";
 import { writeChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake-daemon.ts";
+import {
+  eventually,
+  fakeDaemon,
+  holds,
+  liberaConfiguration,
+  registryFor,
+  run,
+} from "../testing/fake-daemon.ts";
 import { editing, optionsState, optionsSync } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
 import { ownerSync } from "./owner.ts";
@@ -671,6 +678,201 @@ describe("an option's change, while it is on its way", () => {
     }).toStrictEqual({
       notice: "The Daemon could not record this, so nothing was changed.",
       whileHeld: "HH:mm:ss",
+    });
+  });
+});
+
+/**
+ * The fake Daemon with each read of the paths a test names held until it lets them go.
+ * @param fake - The fake Daemon.
+ * @returns The fetch to hand the page, the paths held, and the reads held.
+ */
+const holdingReads = (fake: ReturnType<typeof fakeDaemon>) => {
+  const reads: (() => void)[] = [];
+  const paths = new Set<string>();
+
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+
+    if ((init?.method ?? "GET") === "GET" && paths.has(url.pathname)) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      reads.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+    }
+
+    return await fake.fetch(input, init);
+  };
+
+  const release = () => {
+    paths.clear();
+
+    for (const read of reads.splice(0)) {
+      read();
+    }
+  };
+
+  return { fetch, paths, reads, release };
+};
+
+/**
+ * A fake Daemon whose options name a Credential under `store` and one of libera's, both
+ * held, and set `uploads.publicUrl`, so no value is its default or "not held".
+ * @returns The fake.
+ */
+const configured = () => {
+  const fake = signedIn();
+
+  fake.daemon.owner = {
+    options: {
+      ...fake.daemon.owner.options,
+      "previews.maxTotal": 4096,
+      "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
+      "uploads.publicUrl": "https://files.example.com",
+    },
+    sequence: 3,
+  };
+  fake.daemon.configurations.set("libera", {
+    configuration: { ...liberaConfiguration, password: "libera.password" },
+    sequence: 2,
+  });
+  fake.daemon.credentials.set("Owner.store.s3.accessKeyId", "an-access-key-id");
+  fake.daemon.credentials.set("libera.password", "a-password");
+
+  return fake;
+};
+
+/**
+ * Whatever in the view would read as an answer while it is not known: a default, "not
+ * held", an empty filter, or a Network with no rows and no wait.
+ * @param container - The page.
+ * @returns What the view says of each.
+ */
+const answers = (container: HTMLElement) => {
+  const text = container.querySelector('section[aria-label="Options"]')?.textContent ?? "";
+
+  return {
+    accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+    libera: rows(container).some(([name]) => name?.startsWith("network.libera.") === true),
+    maxTotal: rowOf(container, "previews.maxTotal")?.[1],
+    nothingMatches: text.includes("No option matches."),
+    password: rowOf(container, "network.libera.password")?.[1],
+    publicUrl: rowOf(container, "uploads.publicUrl")?.[1],
+    waits: [...container.querySelectorAll('[aria-label="Being read"] li')].map(
+      (wait) => wait.textContent
+    ),
+  };
+};
+
+/** What the view says once everything is read. */
+const allRead = {
+  accessKeyId: "Owner.store.s3.accessKeyId held",
+  libera: true,
+  maxTotal: "4096",
+  nothingMatches: false,
+  password: "libera.password held",
+  publicUrl: "https://files.example.com",
+  waits: [],
+};
+
+/**
+ * Opens the options with each read of the paths given held, then lets them go.
+ * @param held - The paths whose reads are held.
+ * @param filter - What to filter the options by.
+ * @returns What the view says while they are held, and once they are read.
+ */
+const opened = async (held: readonly string[], filter = "") => {
+  const fake = configured();
+  const reads = holdingReads(fake);
+  const shown = await page(fake, reads.fetch);
+
+  shown.registry.mount(uiSync);
+  await settled(() => shown.registry.get(optionsState).ui !== undefined);
+
+  for (const path of held) {
+    reads.paths.add(path);
+  }
+
+  await shown.type(`/set ${filter}`.trimEnd());
+  await settled(() => reads.reads.length >= 1);
+  await later();
+
+  const holding = answers(shown.container);
+
+  reads.release();
+  await settled(() => {
+    const now = answers(shown.container);
+
+    return now.waits.length === 0 && !JSON.stringify(now).includes("reading…");
+  });
+
+  return { holding, read: answers(shown.container) };
+};
+
+describe("the options view, opened while what it shows is read", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("draws each option under store, uploads, and previews as being read, never its default, until they are", async () => {
+    const { holding, read } = await opened(["/api/options/changes"]);
+
+    expect({ holding, read }).toStrictEqual({
+      holding: {
+        ...allRead,
+        accessKeyId: "reading…",
+        maxTotal: "reading…",
+        publicUrl: "reading…",
+      },
+      read: allRead,
+    });
+  });
+
+  it("draws whether a Credential is held as being read, never as not held, until the names held are", async () => {
+    const { holding, read } = await opened(["/api/credentials"]);
+
+    expect({ holding, read }).toStrictEqual({
+      holding: {
+        ...allRead,
+        accessKeyId: "Owner.store.s3.accessKeyId reading…",
+        password: "libera.password reading…",
+      },
+      read: allRead,
+    });
+  });
+
+  it("draws the Networks as being read, never as none, until they are listed", async () => {
+    const { holding, read } = await opened(["/api/networks"], "network.libera.*");
+
+    expect({ holding, read }).toStrictEqual({
+      holding: {
+        ...allRead,
+        accessKeyId: undefined,
+        libera: false,
+        maxTotal: undefined,
+        password: undefined,
+        publicUrl: undefined,
+        waits: ["Reading network.*…"],
+      },
+      read: { ...allRead, accessKeyId: undefined, maxTotal: undefined, publicUrl: undefined },
+    });
+  });
+
+  it("draws a Network as being read, never with no rows, until its Configuration is", async () => {
+    const { holding, read } = await opened(["/api/networks/libera/configuration"]);
+
+    expect({ holding, read }).toStrictEqual({
+      holding: {
+        ...allRead,
+        libera: false,
+        password: undefined,
+        waits: ["Reading network.libera.*…"],
+      },
+      read: allRead,
     });
   });
 });

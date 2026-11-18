@@ -21,6 +21,7 @@ declare const styles: {
   readonly starts: string;
   readonly value: string;
   readonly view: string;
+  readonly waits: string;
 };
 
 export default styles;

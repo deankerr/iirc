@@ -151,8 +151,10 @@ export type Path = readonly string[];
  * - `Unset`: no value: an optional field left out, or a field of another member than the
  *   one in force.
  * - `Credential`: the Credential it names, and whether the Vault holds it, when known.
+ * - `Reading`: not known yet, as the options it is among are still being read.
  */
 export type Value =
+  | { readonly _tag: "Reading" }
   | { readonly _tag: "Shown"; readonly text: string }
   | { readonly _tag: "Unset" }
   | { readonly _tag: "Credential"; readonly name: string; readonly held: boolean | undefined };
@@ -1471,8 +1473,9 @@ export const ownerCredentialFor = (owner: OwnerOptions, option: OwnerOptionName)
 
 /**
  * Every option under `store`, `uploads`, and `previews`, in the Schema's order, each with its value in
- * force, or what it starts as before they are read. A Credential option shows the
- * Credential it names, and whether the Vault holds it, never a value.
+ * force, or as being read before they are, never what it starts as, which would read as the
+ * answer. A Credential option shows the Credential it names, and whether the Vault holds it,
+ * never a value.
  * @param owner - The options in force, once read.
  * @param held - The Credentials the Vault holds, when known.
  * @returns The options.
@@ -1480,10 +1483,8 @@ export const ownerCredentialFor = (owner: OwnerOptions, option: OwnerOptionName)
 export const ownerOptionsOf = (
   owner: OwnerInForce | undefined,
   held: ReadonlySet<string> | undefined
-): readonly OwnerOption[] => {
-  const options = owner?.options ?? ownerDefaults;
-
-  return ownerFields.flatMap((field) => {
+): readonly OwnerOption[] =>
+  ownerFields.flatMap((field) => {
     const option = decodeOwnerName(field.key);
 
     if (Maybe.isNone(option)) {
@@ -1491,11 +1492,15 @@ export const ownerOptionsOf = (
     }
 
     const name = option.value;
-    const value = options[name];
+    const value = owner?.options[name];
     const json = value === undefined ? undefined : ownerValueJson(name, value);
     const credential = field.kind._tag === "Credential" ? textOf(json) : undefined;
 
     const shown = (): Value => {
+      if (owner === undefined) {
+        return { _tag: "Reading" };
+      }
+
       if (json === undefined) {
         return { _tag: "Unset" };
       }
@@ -1518,7 +1523,6 @@ export const ownerOptionsOf = (
       },
     ];
   });
-};
 
 // Reading by path.
 
@@ -2490,8 +2494,8 @@ export type Reading =
  * in step with anything.
  */
 export interface Options {
-  /** Each Network's Configuration, by id, in the order the Networks were listed. */
-  readonly networks: ReadonlyMap<NetworkId, Reading>;
+  /** Each Network's Configuration, by id, in the order the Networks were listed, once they are. */
+  readonly networks: ReadonlyMap<NetworkId, Reading> | undefined;
   /** The options under `ui` every device shares, as last read or followed, once they are. */
   readonly ui: UiInForce | undefined;
   /** The options under `store`, `uploads`, and `previews`, as last read or followed, once they are. */
@@ -2587,7 +2591,7 @@ export const initialOptions: Options = {
   confirming: undefined,
   editing: undefined,
   held: undefined,
-  networks: new Map(),
+  networks: undefined,
   notice: undefined,
   onItsWay: [],
   owner: undefined,
@@ -2614,6 +2618,19 @@ const askedName = (asked: Asked): string =>
   "option" in asked ? asked.option : optionName(asked.network, asked.path);
 
 /**
+ * The view with a Network's read in. Before the Networks are listed, a read is let go of,
+ * as listing them reads each again.
+ * @param state - The view.
+ * @param network - The Network.
+ * @param reading - What its read came to.
+ * @returns The view after.
+ */
+const readInto = (state: Options, network: NetworkId, reading: Reading): Options =>
+  state.networks === undefined
+    ? state
+    : { ...state, networks: new Map(state.networks).set(network, reading) };
+
+/**
  * The options view after an event.
  * @param state - The view before.
  * @param event - What happened.
@@ -2627,35 +2644,27 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
         networks: new Map(
           event.networks.map((network) => [
             network,
-            state.networks.get(network) ?? { _tag: "Reading" },
+            state.networks?.get(network) ?? { _tag: "Reading" },
           ])
         ),
       };
     }
 
     case "Read": {
-      const { configuration, network, sequence } = event;
-      const before = state.networks.get(network);
+      const before = state.networks?.get(event.network);
 
       // An older read that lands late never replaces a newer one.
-      if (before?._tag === "Read" && before.sequence > sequence) {
-        return state;
-      }
-
-      return {
-        ...state,
-        networks: new Map(state.networks).set(network, { _tag: "Read", configuration, sequence }),
-      };
+      return before?._tag === "Read" && before.sequence > event.sequence
+        ? state
+        : readInto(state, event.network, {
+            _tag: "Read",
+            configuration: event.configuration,
+            sequence: event.sequence,
+          });
     }
 
     case "ReadFailed": {
-      return {
-        ...state,
-        networks: new Map(state.networks).set(event.network, {
-          _tag: "Failed",
-          message: event.message,
-        }),
-      };
+      return readInto(state, event.network, { _tag: "Failed", message: event.message });
     }
 
     case "UiRead": {
@@ -2800,7 +2809,7 @@ export const configurationShown = (
   state: Options,
   network: NetworkId
 ): Configuration | undefined => {
-  const reading = state.networks.get(network);
+  const reading = state.networks?.get(network);
 
   if (reading?._tag !== "Read") {
     return undefined;
@@ -2838,10 +2847,25 @@ export const listed = (
 ): readonly Option[] =>
   [
     ...ownerOptionsOf(ownerShown(state), state.held),
-    ...[...state.networks.keys()].flatMap((network) => {
+    ...[...(state.networks?.keys() ?? [])].flatMap((network) => {
       const configuration = configurationShown(state, network);
 
       return configuration === undefined ? [] : optionsOf(network, configuration, state.held);
     }),
     ...uiOptionsOf(uiShown(state), device, missing),
   ].filter((option) => matches(filter, option.name));
+
+/**
+ * The Networks whose options the view is still reading, by the names their options fall
+ * under, such as `network.libera.*`: every Network, as `network.*`, before they are listed,
+ * then each listed and not yet read. They draw as a wait, since leaving them out would read
+ * as the answer that there are none.
+ * @param state - The view.
+ * @returns The names, none once every Network is read or failed.
+ */
+export const networksReading = (state: Options): readonly string[] =>
+  state.networks === undefined
+    ? ["network.*"]
+    : [...state.networks].flatMap(([network, reading]) =>
+        reading._tag === "Reading" ? [optionName(network, ["*"])] : []
+      );

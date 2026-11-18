@@ -121,12 +121,14 @@ describe("the options", () => {
   it("sets an option made from the Configuration read, and shows what it became", async () => {
     const { daemon, inForce, registry, type } = await configuring();
 
+    await run(registry, openOptions, "");
+    await until(registry, optionsState, (state) => state.held !== undefined);
     await type("/set network.libera.nicks dean, dean_");
 
     expect({
       nicks: inForce()?.configuration.nicks,
       puts: daemon.puts,
-      read: registry.get(optionsState).networks.get(libera)?._tag,
+      read: registry.get(optionsState).networks?.get(libera)?._tag,
     }).toStrictEqual({
       nicks: ["dean", "dean_"],
       puts: [{ ifSequence: "1", network: "libera" }],

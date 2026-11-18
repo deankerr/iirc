@@ -25,6 +25,7 @@ import {
   credentialFor,
   initialOptions,
   listed,
+  networksReading,
   optionName,
   reduceOptions,
   uiShown,
@@ -71,6 +72,9 @@ export const optionRows = Atom.make((get) => {
 
   return listed(state, get(optionsFilter) ?? "", device, missing);
 });
+
+/** The Networks whose options the view is still reading, which it draws as a wait. */
+export const networksWaited = Atom.make((get) => networksReading(get(optionsState)));
 
 /**
  * Folds one event into the options view.
