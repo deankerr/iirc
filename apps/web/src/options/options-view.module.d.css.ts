@@ -9,6 +9,7 @@ declare const styles: {
   readonly filter: string;
   readonly filterInput: string;
   readonly header: string;
+  readonly hidden: string;
   readonly held: string;
   readonly list: string;
   readonly missing: string;

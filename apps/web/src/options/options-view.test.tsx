@@ -1064,41 +1064,11 @@ const pressed = async (element: Element, key: string, shiftKey = false) => {
   return prevented;
 };
 
-/** The longhands of a box that decide where the text in it is drawn. */
-const boxProperties = [
-  "display",
-  "box-sizing",
-  "width",
-  "min-height",
-  "margin-top",
-  "margin-bottom",
-  "margin-left",
-  "padding-top",
-  "padding-left",
-  "border-top-width",
-  "border-top-style",
-  "border-left-width",
-  "line-height",
-] as const;
-
-/**
- * An element's box, as the longhands that decide where its text is drawn.
- * @param element - The element.
- * @returns The box.
- */
-const boxOf = (element: Element) => {
-  const style = getComputedStyle(element);
-
-  return Object.fromEntries(boxProperties.map((name) => [name, style.getPropertyValue(name)]));
-};
-
 describe("an option edited in place", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
-
-    document.documentElement.removeAttribute("style");
   });
 
   it("leaves Left, Right, Home, End and their selecting forms to the caret, and Up and Down to a number", async () => {
@@ -1132,30 +1102,30 @@ describe("an option edited in place", () => {
     });
   });
 
-  it("draws the value in the box its editor takes, so opening it moves nothing", async () => {
+  it("keeps the value in its place, hidden under its editor, so opening it moves nothing", async () => {
     const shown = await page(signedIn());
 
-    // The theme's own sizes, which the view's styles are written in.
-    for (const [name, value] of Object.entries({
-      "--border-width": "1px",
-      "--font-size": "14px",
-      "--line-height": "1.45",
-      "--space-1": "2px",
-    })) {
-      document.documentElement.style.setProperty(name, value);
-    }
-
-    await shown.type("/set");
+    await shown.type("/set network.libera.");
     await settled(() => rowOf(shown.container, "network.libera.realname") !== undefined);
 
     const value = () =>
-      shown.container.querySelector('[data-key="network.libera.realname"] [data-value]');
+      shown.container.querySelector<HTMLElement>(
+        '[data-key="network.libera.realname"] [data-value]'
+      );
 
-    const shownValue = value();
-    const before = shownValue === null ? undefined : boxOf(shownValue);
+    const before = value();
+    const text = before?.textContent;
     const field = await editorOf(shown, "network.libera.realname");
+    const during = value();
 
-    expect(before).toStrictEqual(boxOf(field));
+    // The value's own element, in the flow of its row, decides the row's height either way,
+    // and the editor takes no room of its own.
+    expect({
+      editor: getComputedStyle(field).position,
+      same: during !== null && during === before,
+      text: during?.textContent,
+      visibility: during === null ? undefined : getComputedStyle(during).visibility,
+    }).toStrictEqual({ editor: "absolute", same: true, text, visibility: "hidden" });
   });
 
   it("says in a word that a value, and what it starts as, is empty", async () => {

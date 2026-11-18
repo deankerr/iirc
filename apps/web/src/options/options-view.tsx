@@ -96,8 +96,15 @@ const Shown = ({ value }: { readonly value: Value }) => {
 };
 
 /**
- * What an option starts as, as the view shows it: its text, `empty` where that text is,
- * such as an empty list's, or that it must be given.
+ * What an option starts as, in words: its text, or `empty` where that text is, such as an
+ * empty list's.
+ * @param starts - What it starts as.
+ * @returns The words.
+ */
+const startsInWords = (starts: string) => (starts === "" ? "empty" : starts);
+
+/**
+ * What an option starts as, as the view shows it: in words, or that it must be given.
  * @param props - What it starts as, or nothing when it must be given.
  * @returns What it starts as.
  */
@@ -106,7 +113,7 @@ const Starts = ({ starts }: { readonly starts: string | undefined }) => {
     return "must be given";
   }
 
-  return starts === "" ? "empty" : <bdi>{starts}</bdi>;
+  return <bdi>{startsInWords(starts)}</bdi>;
 };
 
 /**
@@ -178,14 +185,6 @@ const useUnset = () => {
     }
   };
 };
-
-/**
- * What an option starts as, in words: its text, or `empty` where that text is, such as an
- * empty list's.
- * @param starts - What it starts as.
- * @returns The words.
- */
-const startsInWords = (starts: string) => (starts === "" ? "empty" : starts);
 
 /**
  * What unsetting an option goes back to, in words.
@@ -266,7 +265,7 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
       // An editor opens because the Owner asked for it, so it takes focus.
       // oxlint-disable-next-line jsx-a11y/no-autofocus
       autoFocus
-      className={`${styles.field} ${styles.editor}`}
+      className={styles.editor}
       defaultValue={startingText(option)}
       onKeyDown={onKeyDown}
       spellCheck={false}
@@ -511,13 +510,20 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                   <bdi>{option.name}</bdi>
                 </span>
                 <span className={styles.value}>
-                  {editing === option.name ? (
-                    <Editor done={focusRow(option.name)} option={option} />
-                  ) : (
-                    <span className={styles.field} data-value>
+                  {/* The value stays where it is while it is edited, hidden under its editor, so
+                      the row keeps its height however many lines the value takes. */}
+                  <span className={styles.field}>
+                    <span
+                      aria-hidden={editing === option.name || undefined}
+                      className={editing === option.name ? styles.hidden : undefined}
+                      data-value
+                    >
                       <Shown value={option.value} />
                     </span>
-                  )}
+                    {editing === option.name ? (
+                      <Editor done={focusRow(option.name)} option={option} />
+                    ) : null}
+                  </span>
                   {option._tag === "Ui" && option.device !== undefined ? (
                     <span className={styles.device}>
                       on this device, over <Shown value={option.shared} />
