@@ -61,7 +61,11 @@ const Shown = ({ value }: { readonly value: Value }) => {
     }
 
     case "Shown": {
-      return <bdi>{value.text}</bdi>;
+      return value.text === "" ? (
+        <span className={styles.muted}>empty</span>
+      ) : (
+        <bdi>{value.text}</bdi>
+      );
     }
 
     case "Unset": {
@@ -89,6 +93,20 @@ const Shown = ({ value }: { readonly value: Value }) => {
       return value satisfies never;
     }
   }
+};
+
+/**
+ * What an option starts as, as the view shows it: its text, `empty` where that text is,
+ * such as an empty list's, or that it must be given.
+ * @param props - What it starts as, or nothing when it must be given.
+ * @returns What it starts as.
+ */
+const Starts = ({ starts }: { readonly starts: string | undefined }) => {
+  if (starts === undefined) {
+    return "must be given";
+  }
+
+  return starts === "" ? "empty" : <bdi>{starts}</bdi>;
 };
 
 /**
@@ -162,6 +180,14 @@ const useUnset = () => {
 };
 
 /**
+ * What an option starts as, in words: its text, or `empty` where that text is, such as an
+ * empty list's.
+ * @param starts - What it starts as.
+ * @returns The words.
+ */
+const startsInWords = (starts: string) => (starts === "" ? "empty" : starts);
+
+/**
  * What unsetting an option goes back to, in words.
  * @param option - The option.
  * @returns The question.
@@ -173,7 +199,7 @@ const unsetQuestion = (option: Option): string => {
 
   return option.starts === "unset" || option.starts === undefined
     ? `Unset ${option.name}?`
-    : `Unset ${option.name}, back to ${option.starts}?`;
+    : `Unset ${option.name}, back to ${startsInWords(option.starts)}?`;
 };
 
 /**
@@ -240,7 +266,7 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
       // An editor opens because the Owner asked for it, so it takes focus.
       // oxlint-disable-next-line jsx-a11y/no-autofocus
       autoFocus
-      className={styles.editor}
+      className={`${styles.field} ${styles.editor}`}
       defaultValue={startingText(option)}
       onKeyDown={onKeyDown}
       spellCheck={false}
@@ -469,6 +495,10 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
             aria-label="Options"
             className={styles.list}
             items={rows}
+            // A row has no part of its own to move to but an open editor, whose caret takes
+            // Left, Right, Home, and End, and whose number takes Up and Down, so the row
+            // takes no arrow from it.
+            keyboardNavigationBehavior="tab"
             onAction={onAction}
             renderEmptyState={() =>
               // While Networks are read, their options may yet match, which the waits say.
@@ -484,11 +514,12 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                   {editing === option.name ? (
                     <Editor done={focusRow(option.name)} option={option} />
                   ) : (
-                    <Shown value={option.value} />
+                    <span className={styles.field} data-value>
+                      <Shown value={option.value} />
+                    </span>
                   )}
                   {option._tag === "Ui" && option.device !== undefined ? (
                     <span className={styles.device}>
-                      {" "}
                       on this device, over <Shown value={option.shared} />
                     </span>
                   ) : null}
@@ -497,7 +528,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                   ) : null}
                 </span>
                 <span className={styles.starts}>
-                  {option.starts === undefined ? "must be given" : <bdi>{option.starts}</bdi>}
+                  <Starts starts={option.starts} />
                 </span>
                 <span className={styles.description}>{option.description}</span>
               </GridListItem>

@@ -100,7 +100,9 @@
   display: grid;
   grid-template-columns: minmax(16ch, 2fr) minmax(12ch, 2fr) minmax(8ch, 1fr) minmax(0, 3fr);
   gap: var(--space-3);
-  align-items: baseline;
+  /* Every cell's text is one size on one line height, so their tops align their text, and an
+     editor, whose baseline is its own, moves no other cell. */
+  align-items: start;
   padding: var(--space-1) var(--space-3);
   outline: none;
   cursor: default;
@@ -135,8 +137,10 @@
   color: var(--color-ok);
 }
 
-/* An option this device overrides for itself, and the value every device shares under it. */
+/* An option this device overrides for itself, and the value every device shares under it,
+   on a line of its own under the value's box. */
 .device {
+  display: block;
   color: var(--color-muted);
 }
 
@@ -150,14 +154,41 @@
   color: var(--color-danger);
 }
 
-.editor {
-  width: 100%;
-  padding: 0 var(--space-1);
-  border: var(--border-width) solid var(--color-border);
+/* A value and its editor draw in one box of one line's height, with the editor's border
+   hidden until it opens, so opening an edit moves no text. The box's border and padding
+   lie outside the value's own line, in negative margins, so a value's text stands where
+   the column starts and a row is as tall as its text. Each longhand is spelled out, as the
+   component test compares them. */
+.field {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% + 2 * (var(--border-width) + var(--space-1)));
+  min-height: calc(var(--font-size) * var(--line-height) + 2 * var(--border-width));
+  margin-top: calc(-1 * var(--border-width));
+  margin-right: calc(-1 * (var(--border-width) + var(--space-1)));
+  margin-bottom: calc(-1 * var(--border-width));
+  margin-left: calc(-1 * (var(--border-width) + var(--space-1)));
+  padding-top: 0;
+  padding-right: var(--space-1);
+  padding-bottom: 0;
+  padding-left: var(--space-1);
+  border-top-width: var(--border-width);
+  border-right-width: var(--border-width);
+  border-bottom-width: var(--border-width);
+  border-left-width: var(--border-width);
+  border-style: solid;
+  border-color: transparent;
   border-radius: var(--radius);
+  line-height: calc(var(--font-size) * var(--line-height));
+}
+
+/* Its text is never smaller than a phone zooms in on, within the same line. */
+.editor {
+  height: calc(var(--font-size) * var(--line-height) + 2 * var(--border-width));
+  border-color: var(--color-border);
   background: var(--color-background);
   color: var(--color-text);
-  font: inherit;
+  font-family: inherit;
   font-size: var(--font-size-input);
 }
 
@@ -188,8 +219,8 @@
     min-height: var(--target-size);
   }
 
-  .filterInput,
-  .editor {
+  /* The row is the target, and an editor opens in its value's box, never taller. */
+  .filterInput {
     min-height: var(--target-size);
   }
 }

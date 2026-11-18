@@ -1017,3 +1017,157 @@ describe("the options view, opened when a read fails", () => {
     expect(asked).toBeUndefined();
   });
 });
+
+/**
+ * Opens an option's value to edit, as Enter on its row does.
+ * @param shown - The page.
+ * @param name - The option.
+ * @returns Its editor.
+ */
+const editorOf = async (shown: Awaited<ReturnType<typeof page>>, name: string) => {
+  await doing(() => {
+    shown.registry.set(editing, name);
+  });
+  await settled(
+    () => shown.container.querySelector(`input[aria-label="Value of ${name}"]`) !== null
+  );
+
+  const field = shown.container.querySelector<HTMLInputElement>(
+    `input[aria-label="Value of ${name}"]`
+  );
+
+  if (field === null) {
+    throw new Error("no editor");
+  }
+
+  field.focus();
+
+  return field;
+};
+
+/**
+ * Presses a key on an element, held with Shift or not, as a browser does.
+ * @param element - The element.
+ * @param key - The key.
+ * @param shiftKey - Whether Shift is held.
+ * @returns Whether anything stopped the browser carrying it out.
+ */
+const pressed = async (element: Element, key: string, shiftKey = false) => {
+  let prevented = false;
+
+  await doing(() => {
+    prevented = !element.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: key, key, shiftKey })
+    );
+  });
+
+  return prevented;
+};
+
+/** The longhands of a box that decide where the text in it is drawn. */
+const boxProperties = [
+  "display",
+  "box-sizing",
+  "width",
+  "min-height",
+  "margin-top",
+  "margin-bottom",
+  "margin-left",
+  "padding-top",
+  "padding-left",
+  "border-top-width",
+  "border-top-style",
+  "border-left-width",
+  "line-height",
+] as const;
+
+/**
+ * An element's box, as the longhands that decide where its text is drawn.
+ * @param element - The element.
+ * @returns The box.
+ */
+const boxOf = (element: Element) => {
+  const style = getComputedStyle(element);
+
+  return Object.fromEntries(boxProperties.map((name) => [name, style.getPropertyValue(name)]));
+};
+
+describe("an option edited in place", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    document.documentElement.removeAttribute("style");
+  });
+
+  it("leaves Left, Right, Home, End and their selecting forms to the caret, and Up and Down to a number", async () => {
+    const shown = await page(signedIn());
+
+    await shown.type("/set");
+    await readAt(shown.registry, 0);
+
+    const field = await editorOf(shown, "uploads.maxSize");
+
+    // Each key is pressed in turn, as the Owner would, alone and then with Shift.
+    const caret = [
+      ["ArrowLeft", await pressed(field, "ArrowLeft"), await pressed(field, "ArrowLeft", true)],
+      ["ArrowRight", await pressed(field, "ArrowRight"), await pressed(field, "ArrowRight", true)],
+      ["Home", await pressed(field, "Home"), await pressed(field, "Home", true)],
+      ["End", await pressed(field, "End"), await pressed(field, "End", true)],
+      ["ArrowUp", await pressed(field, "ArrowUp")],
+      ["ArrowDown", await pressed(field, "ArrowDown")],
+    ];
+
+    expect({ caret, focused: document.activeElement === field }).toStrictEqual({
+      caret: [
+        ["ArrowLeft", false, false],
+        ["ArrowRight", false, false],
+        ["Home", false, false],
+        ["End", false, false],
+        ["ArrowUp", false],
+        ["ArrowDown", false],
+      ],
+      focused: true,
+    });
+  });
+
+  it("draws the value in the box its editor takes, so opening it moves nothing", async () => {
+    const shown = await page(signedIn());
+
+    // The theme's own sizes, which the view's styles are written in.
+    for (const [name, value] of Object.entries({
+      "--border-width": "1px",
+      "--font-size": "14px",
+      "--line-height": "1.45",
+      "--space-1": "2px",
+    })) {
+      document.documentElement.style.setProperty(name, value);
+    }
+
+    await shown.type("/set");
+    await settled(() => rowOf(shown.container, "network.libera.realname") !== undefined);
+
+    const value = () =>
+      shown.container.querySelector('[data-key="network.libera.realname"] [data-value]');
+
+    const shownValue = value();
+    const before = shownValue === null ? undefined : boxOf(shownValue);
+    const field = await editorOf(shown, "network.libera.realname");
+
+    expect(before).toStrictEqual(boxOf(field));
+  });
+
+  it("says in a word that a value, and what it starts as, is empty", async () => {
+    const shown = await page(signedIn());
+
+    await shown.type("/set network.libera.highlights");
+    await settled(() => rowOf(shown.container, "network.libera.highlights") !== undefined);
+
+    expect(rowOf(shown.container, "network.libera.highlights")?.slice(0, 3)).toStrictEqual([
+      "network.libera.highlights",
+      "empty",
+      "empty",
+    ]);
+  });
+});

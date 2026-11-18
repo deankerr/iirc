@@ -5,6 +5,7 @@ declare const styles: {
   readonly description: string;
   readonly device: string;
   readonly editor: string;
+  readonly field: string;
   readonly filter: string;
   readonly filterInput: string;
   readonly header: string;
