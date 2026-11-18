@@ -135,8 +135,10 @@
   color: var(--color-ok);
 }
 
-/* An option this device overrides for itself, and the value every device shares under it. */
+/* An option this device overrides for itself, and the value every device shares under it,
+   on a line of its own under the value's box. */
 .device {
+  display: block;
   color: var(--color-muted);
 }
 
@@ -150,15 +152,38 @@
   color: var(--color-danger);
 }
 
+/* A value, and its editor laid over its first line while it is edited, with the value
+   left in place but hidden, so opening an edit moves no text, however many lines the value
+   takes. The editor's border and padding lie outside the value's line, so its text stands
+   where the value's did. */
+.field {
+  display: block;
+  position: relative;
+}
+
+.hidden {
+  visibility: hidden;
+}
+
+/* Its text is never smaller than a phone zooms in on, so on a touch screen it may be a
+   little larger than the value it edits, within the same line. The row is the touch
+   target, so the editor is no taller than the line. */
 .editor {
-  width: 100%;
+  position: absolute;
+  top: calc(-1 * var(--border-width));
+  left: calc(-1 * (var(--border-width) + var(--space-1)));
+  box-sizing: border-box;
+  width: calc(100% + 2 * (var(--border-width) + var(--space-1)));
+  height: calc(var(--font-size) * var(--line-height) + 2 * var(--border-width));
+  margin: 0;
   padding: 0 var(--space-1);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-background);
   color: var(--color-text);
-  font: inherit;
+  font-family: inherit;
   font-size: var(--font-size-input);
+  line-height: calc(var(--font-size) * var(--line-height));
 }
 
 /* Too narrow for four columns of the text as it is drawn: each option's parts one under
@@ -188,8 +213,8 @@
     min-height: var(--target-size);
   }
 
-  .filterInput,
-  .editor {
+  /* The row is the target, and an editor opens in its value's box, never taller. */
+  .filterInput {
     min-height: var(--target-size);
   }
 }
