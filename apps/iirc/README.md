@@ -69,9 +69,9 @@ Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from 
 
 ## Tests
 
-`bun run test` runs `iirc` from source, as a process. `bun run e2e` builds the web frontend, compiles `iirc` with and without it, and drives a real `iirc daemon --web` with Chromium through Playwright, on private Ircds that `@iirc/daemon/testing` starts. It needs Playwright's Chromium, which `bunx playwright install chromium` fetches. Where `systemd-analyze` is installed, it also verifies `systemd/iirc.service`, and installs nothing.
+`bun run test` runs `iirc` from source, as a process. `bun run e2e` builds the web frontend, compiles `iirc` with and without it, and drives a real `iirc daemon --web` with Chromium through Playwright, on private Ircds that `@iirc/daemon/testing` starts, as a smoke set against a real Ircd. It needs Playwright's Chromium, which `bunx playwright install chromium` fetches. Where `systemd-analyze` is installed, it also verifies `systemd/iirc.service`, and installs nothing.
 
-One end-to-end file runs from this directory, as `bun run --filter @iirc/web build && bun --bun vitest run src/e2e/web.test.ts`. Neither the hooks nor CI run them, so a change to behaviour they cover runs them by hand.
+One end-to-end file runs from this directory, as `bun run --filter @iirc/web build && bun --bun vitest run src/e2e/web.test.ts`. Neither the hooks nor CI run them. A change to the Transport, the Runtime, pacing, or the Daemon runs them by hand, and a Frontend change shows fake-Daemon tests and screenshots instead. A test that flakes is quarantined, not rerun.
 
 ## Not yet
 

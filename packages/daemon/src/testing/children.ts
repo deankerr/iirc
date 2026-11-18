@@ -1,11 +1,11 @@
 /**
  * What the private servers of the end-to-end runs share: loopback ports the kernel picks,
  * release binaries fetched once into `.cache/` and checked against a pinned SHA-256, and
- * children that are killed however the run ends.
+ * children that are killed however the run ends. Linux only: readiness reads `/proc`.
  *
  * @packageDocumentation
  */
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readlink, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { Subprocess } from "bun";
@@ -36,48 +36,122 @@ export const freePort = (): number => {
   }
 };
 
+/** A child that exited before listening because another socket took one of its ports first. */
+class PortTakenError extends Error {
+  override name = "PortTakenError";
+}
+
 /**
- * Waits until something accepts a TCP Connection on the port, or the child exits.
+ * The kernel's TCP sockets bound to a local port, from `/proc/net/tcp` and `/proc/net/tcp6`.
+ * @param port - The local port.
+ * @returns Each socket's inode, and whether it listens.
+ */
+const socketsOn = async (port: number) => {
+  const tables = await Promise.all(
+    ["/proc/net/tcp", "/proc/net/tcp6"].map(async (table) => await Bun.file(table).text())
+  );
+
+  return tables
+    .flatMap((table) => table.split("\n").slice(1))
+    .flatMap((row) => {
+      // `sl local_address rem_address st … inode`, with the port in hex after the colon.
+      const { 1: address, 3: state, 9: inode } = row.trim().split(/\s+/u);
+      const local = address?.split(":")[1];
+
+      return local !== undefined && inode !== undefined && Number.parseInt(local, 16) === port
+        ? [{ inode, listening: state === "0A" }]
+        : [];
+    });
+};
+
+/**
+ * Whether the process itself holds a socket listening on the port.
+ * @param pid - The process.
+ * @param port - The port.
+ * @returns Whether one of its file descriptors is that socket.
+ */
+const listensOn = async (pid: number, port: number): Promise<boolean> => {
+  const sockets = await socketsOn(port);
+
+  const listening = new Set(
+    sockets.filter((socket) => socket.listening).map((socket) => `socket:[${socket.inode}]`)
+  );
+
+  if (listening.size === 0) {
+    return false;
+  }
+
+  const fds = await readdir(`/proc/${pid}/fd`).catch((): string[] => []);
+
+  const links = await Promise.all(
+    fds.map(async (fd) => await readlink(`/proc/${pid}/fd/${fd}`).catch(() => ""))
+  );
+
+  return links.some((link) => listening.has(link));
+};
+
+/**
+ * Waits until the child itself listens on every port, or exits.
+ *
+ * Connecting to a port proves only that something listens there. A port from
+ * {@link freePort} is free only until another process binds it, and an Ircd that then
+ * fails to bind it exits, so the proof is that the child holds the listening socket.
  * @param child - The server's process.
- * @param port - The port it should listen on.
+ * @param ports - The ports it should listen on.
  * @param what - What it is, for the error.
  * @returns Once it listens.
  */
 export const waitListening = async (
   child: Subprocess,
-  port: number,
+  ports: readonly number[],
   what: string
 ): Promise<void> => {
   const deadline = performance.now() + 20_000;
 
   while (performance.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`${what} exited with ${child.exitCode} before listening`);
-    }
-
     // oxlint-disable-next-line no-await-in-loop -- polling until it listens
-    const open = await Bun.connect({
-      hostname: loopback,
-      port,
-      socket: { data: ignore },
-    }).then(
-      (socket) => {
-        socket.end();
-
-        return true;
-      },
-      () => false
+    const listening = await Promise.all(
+      ports.map(async (port) => await listensOn(child.pid, port))
     );
 
-    if (open) {
+    if (listening.every(Boolean)) {
       return;
     }
 
+    if (child.exitCode !== null || child.signalCode !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- once, on the way out
+      const held = await Promise.all(ports.map(async (port) => await socketsOn(port)));
+      const error = held.some((sockets) => sockets.length > 0) ? PortTakenError : Error;
+
+      throw new error(
+        `${what} exited with ${child.exitCode ?? child.signalCode} before listening on ${ports.join(", ")}`
+      );
+    }
+
     // oxlint-disable-next-line no-await-in-loop -- polling until it listens
-    await Bun.sleep(100);
+    await Bun.sleep(20);
   }
 
-  throw new Error(`${what} did not listen on ${port}`);
+  throw new Error(`${what} did not listen on ${ports.join(", ")}`);
+};
+
+/**
+ * Starts a child on fresh ports again whenever another socket took one of its ports between
+ * {@link freePort} and the child's bind.
+ * @param start - Picks its ports, starts it, and waits until it listens.
+ * @returns What `start` returns, once it succeeds.
+ */
+export const onFreePorts = async <A>(start: () => Promise<A>): Promise<A> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt follows a failed one
+      return await start();
+    } catch (error) {
+      if (!(error instanceof PortTakenError) || attempt === 5) {
+        throw error;
+      }
+    }
+  }
 };
 
 /**

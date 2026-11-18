@@ -1718,6 +1718,43 @@ describe("the handlers", () => {
     ]);
   });
 
+  it("says whether a Direct Message's partner is here, as MONITOR tells it, in the partners `known` projects", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+        const call = yield* registerOnFloor(world.memory);
+
+        yield* say(call, ":irc.test 005 iirc MONITOR=100 :are supported by this server");
+        yield* say(call, ":peer!u@h PRIVMSG iirc :hello");
+        yield* settle;
+
+        const here = Effect.map(api.networks.known({ params: { network: libera } }), (known) =>
+          known.partners.map((partner) => [
+            partner.nick,
+            partner.here._tag === "Known" ? partner.here.value : partner.here._tag,
+          ])
+        );
+
+        const asked = yield* here;
+
+        yield* say(call, ":irc.test 730 iirc :peer!u@h");
+        yield* settle;
+        const online = yield* here;
+
+        yield* say(call, ":irc.test 731 iirc :peer");
+        yield* settle;
+
+        return { asked, offline: yield* here, online };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [["peer", "Unknown"]],
+      offline: [["peer", false]],
+      online: [["peer", true]],
+    });
+  });
+
   it("gives a reply what it answers, a Highlight when it answers Self, and a Direct Message its Channel", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
