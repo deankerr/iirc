@@ -1245,6 +1245,19 @@ describe("the options view", () => {
     });
   });
 
+  it("shows whether a Credential is held as not known once the names held could not be read, and keeps names already read", () => {
+    const failed = reduceOptions(initialOptions, { _tag: "HeldFailed" });
+
+    const kept = reduceOptions(reduceOptions(initialOptions, { _tag: "Held", names: ["a"] }), {
+      _tag: "HeldFailed",
+    });
+
+    expect({ failed: failed.held, kept: kept.held }).toStrictEqual({
+      failed: "NotKnown",
+      kept: new Set(["a"]),
+    });
+  });
+
   it("lets go of a Network's read that lands before the Networks are listed, as listing reads each again", () => {
     const early = reduceOptions(initialOptions, {
       _tag: "Read",

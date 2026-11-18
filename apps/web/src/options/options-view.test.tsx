@@ -876,3 +876,106 @@ describe("the options view, opened while what it shows is read", () => {
     });
   });
 });
+
+/**
+ * The fake Daemon with each read of the paths a test names refused as an Ircd's gateway
+ * would, with no answer the API knows.
+ * @param fake - The fake Daemon.
+ * @param paths - The paths refused.
+ * @returns The fetch to hand the page.
+ */
+const failingReads =
+  (fake: ReturnType<typeof fakeDaemon>, paths: ReadonlySet<string>) =>
+  async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+
+    return (init?.method ?? "GET") === "GET" && paths.has(url.pathname)
+      ? new Response(null, { status: 502 })
+      : await fake.fetch(input, init);
+  };
+
+/**
+ * Opens the options with each read of the paths given refused.
+ * @param paths - The paths refused.
+ * @returns The page once the options are read.
+ */
+const failed = async (paths: readonly string[]) => {
+  const fake = configured();
+  const refused = new Set<string>();
+  const shown = await page(fake, failingReads(fake, refused));
+
+  shown.registry.mount(uiSync);
+  await settled(() => shown.registry.get(optionsState).ui !== undefined);
+
+  for (const path of paths) {
+    refused.add(path);
+  }
+
+  await shown.type("/set");
+  await settled(() => shown.registry.get(optionsState).notice !== undefined);
+
+  return shown;
+};
+
+describe("the options view, opened when a read fails", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("says the Networks were not listed, and draws no wait for them", async () => {
+    const { container } = await failed(["/api/networks"]);
+
+    expect({
+      accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+      notice: container.querySelector('[role="alert"]')?.textContent,
+      waits: answers(container).waits,
+    }).toStrictEqual({
+      accessKeyId: "Owner.store.s3.accessKeyId held",
+      notice:
+        "The Daemon did not list its Networks, so their options are not shown. Open the options again to read them.",
+      waits: [],
+    });
+  });
+
+  it("says whether each Credential is held is not known, and never that one is not held", async () => {
+    const { container } = await failed(["/api/credentials"]);
+
+    expect({
+      accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+      notice: container.querySelector('[role="alert"]')?.textContent,
+      password: rowOf(container, "network.libera.password")?.[1],
+    }).toStrictEqual({
+      accessKeyId: "Owner.store.s3.accessKeyId not known",
+      notice:
+        "The Daemon did not say which Credentials it holds, so whether each is held is not known. Open the options again to read them.",
+      password: "libera.password not known",
+    });
+  });
+
+  it("asks nothing of an option still being read when Delete is pressed on it", async () => {
+    const fake = configured();
+    const reads = holdingReads(fake);
+    const shown = await page(fake, reads.fetch);
+
+    shown.registry.mount(uiSync);
+    await settled(() => shown.registry.get(optionsState).ui !== undefined);
+    reads.paths.add("/api/options/changes");
+    await shown.type("/set");
+    await settled(() => rowOf(shown.container, "uploads.publicUrl")?.[1] === "reading…");
+
+    const row = shown.container.querySelector<HTMLElement>('[data-key="uploads.publicUrl"]');
+
+    if (row === null) {
+      throw new Error("no row");
+    }
+
+    await press(row, "Delete");
+    const asked = shown.registry.get(optionsState).confirming;
+
+    reads.release();
+
+    expect(asked).toBeUndefined();
+  });
+});

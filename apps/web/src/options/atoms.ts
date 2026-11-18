@@ -209,11 +209,47 @@ export const readHeld = (registry: AtomRegistry.AtomRegistry) =>
   }).pipe(Effect.ignore);
 
 /**
- * Reads every Network's Configuration, and the Credentials held, into the view.
+ * Signs the page out, when a request was refused for its sign-in.
+ * @param registry - The registry.
+ */
+export const signedOut = (registry: AtomRegistry.AtomRegistry) => {
+  registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
+};
+
+/**
+ * Says in the view that a read it needs failed, or signs the page out when it was refused
+ * for its sign-in.
+ * @param registry - The registry.
+ * @param tag - The error's tag.
+ * @param message - What was not read, in words.
+ * @param failed - What the view folds in for it.
+ */
+const readFailed = (
+  registry: AtomRegistry.AtomRegistry,
+  tag: string,
+  message: string,
+  failed: () => void
+) => {
+  if (tag === "Unauthorized") {
+    signedOut(registry);
+
+    return;
+  }
+
+  failed();
+  happened(registry, {
+    _tag: "Noticed",
+    message: `${message} Open the options again to read them.`,
+  });
+};
+
+/**
+ * Reads every Network's Configuration into the view. When the Networks cannot be listed,
+ * the view says so, and, never having listed them, lists none rather than wait for ever.
  * @param registry - The registry.
  * @returns Once read.
  */
-export const refresh = (registry: AtomRegistry.AtomRegistry) =>
+const readNetworks = (registry: AtomRegistry.AtomRegistry) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const entries = yield* client.networks.list();
@@ -240,8 +276,60 @@ export const refresh = (registry: AtomRegistry.AtomRegistry) =>
         ),
       { concurrency: 4, discard: true }
     );
-    yield* readHeld(registry);
-  }).pipe(Effect.ignore);
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        readFailed(
+          registry,
+          error._tag,
+          "The Daemon did not list its Networks, so their options are not shown.",
+          () => {
+            if (registry.get(optionsState).networks === undefined) {
+              happened(registry, { _tag: "Listed", networks: [] });
+            }
+          }
+        );
+      })
+    )
+  );
+
+/**
+ * Reads the Credentials held into the view, saying so when they cannot be, so a Credential
+ * shows as not known rather than wait for ever.
+ * @param registry - The registry.
+ * @returns Once read.
+ */
+const readHeldOrSay = (registry: AtomRegistry.AtomRegistry) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    const { names } = yield* client.credentials.list();
+
+    happened(registry, { _tag: "Held", names });
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        readFailed(
+          registry,
+          error._tag,
+          "The Daemon did not say which Credentials it holds, so whether each is held is not known.",
+          () => {
+            happened(registry, { _tag: "HeldFailed" });
+          }
+        );
+      })
+    )
+  );
+
+/**
+ * Reads every Network's Configuration, and the Credentials held, into the view.
+ * @param registry - The registry.
+ * @returns Once read.
+ */
+export const refresh = (registry: AtomRegistry.AtomRegistry) =>
+  Effect.all([readNetworks(registry), readHeldOrSay(registry)], {
+    concurrency: "unbounded",
+    discard: true,
+  });
 
 /**
  * What the Daemon reports of a Network that bears on its Channels' names and its ignore
@@ -441,14 +529,6 @@ const holdCredential = (
     Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(value))),
     Effect.catch((error) => Effect.succeed(failedWith(error._tag, network)))
   );
-
-/**
- * Signs the page out, when a request was refused for its sign-in.
- * @param registry - The registry.
- */
-export const signedOut = (registry: AtomRegistry.AtomRegistry) => {
-  registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
-};
 
 /**
  * Says in the view what a change from it came to.

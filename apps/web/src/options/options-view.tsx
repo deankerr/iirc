@@ -72,8 +72,10 @@ const Shown = ({ value }: { readonly value: Value }) => {
       return (
         <span>
           <bdi>{value.name}</bdi>{" "}
-          {value.held === undefined ? (
-            <span className={styles.muted}>reading…</span>
+          {value.held === undefined || value.held === "NotKnown" ? (
+            <span className={styles.muted}>
+              {value.held === undefined ? "reading…" : "not known"}
+            </span>
           ) : (
             <span className={value.held ? styles.held : styles.missing}>
               {value.held ? "held" : "not held"}
@@ -408,7 +410,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
 
     const option = named(row?.dataset.key);
 
-    if (option?.unsettable === true) {
+    // An option still being read is unset only once its value shows, as it is changed.
+    if (option?.unsettable === true && option.value._tag !== "Reading") {
       event.preventDefault();
       ask(option.name);
     }

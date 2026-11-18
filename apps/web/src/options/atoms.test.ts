@@ -88,7 +88,11 @@ describe("the options", () => {
 
     daemon.credentials.set("libera.sasl", "not shown");
     await run(registry, openOptions, "*nicks");
-    await until(registry, optionsState, (state) => state.held !== undefined);
+    await until(
+      registry,
+      optionsState,
+      (state) => state.held !== undefined && state.networks?.get(libera)?._tag === "Read"
+    );
 
     expect({
       held: registry.get(optionsState).held,
@@ -122,7 +126,7 @@ describe("the options", () => {
     const { daemon, inForce, registry, type } = await configuring();
 
     await run(registry, openOptions, "");
-    await until(registry, optionsState, (state) => state.held !== undefined);
+    await until(registry, optionsState, (state) => state.networks?.get(libera)?._tag === "Read");
     await type("/set network.libera.nicks dean, dean_");
 
     expect({

@@ -150,14 +150,34 @@ export type Path = readonly string[];
  * - `Shown`: its value in its text syntax.
  * - `Unset`: no value: an optional field left out, or a field of another member than the
  *   one in force.
- * - `Credential`: the Credential it names, and whether the Vault holds it, when known.
+ * - `Credential`: the Credential it names, and whether the Vault holds it: none while that
+ *   is being read, and `NotKnown` when it could not be.
  * - `Reading`: not known yet, as the options it is among are still being read.
  */
 export type Value =
   | { readonly _tag: "Reading" }
   | { readonly _tag: "Shown"; readonly text: string }
   | { readonly _tag: "Unset" }
-  | { readonly _tag: "Credential"; readonly name: string; readonly held: boolean | undefined };
+  | {
+      readonly _tag: "Credential";
+      readonly name: string;
+      readonly held: boolean | "NotKnown" | undefined;
+    };
+
+/**
+ * The names of the Credentials the Vault holds, once read, `NotKnown` when they could not
+ * be read, or none while they are being read.
+ */
+export type HeldNames = ReadonlySet<string> | "NotKnown" | undefined;
+
+/**
+ * Whether the Vault holds a Credential, as far as is known.
+ * @param held - The names held.
+ * @param credential - The Credential.
+ * @returns Whether it is held, `NotKnown`, or none while being read.
+ */
+const heldOf = (held: HeldNames, credential: string) =>
+  held === "NotKnown" || held === undefined ? held : held.has(credential);
 
 /** One option of a Network's Configuration, as the options view lists it. */
 export interface NetworkOption {
@@ -1482,7 +1502,7 @@ export const ownerCredentialFor = (owner: OwnerOptions, option: OwnerOptionName)
  */
 export const ownerOptionsOf = (
   owner: OwnerInForce | undefined,
-  held: ReadonlySet<string> | undefined
+  held: HeldNames
 ): readonly OwnerOption[] =>
   ownerFields.flatMap((field) => {
     const option = decodeOwnerName(field.key);
@@ -1507,7 +1527,7 @@ export const ownerOptionsOf = (
 
       return credential === undefined
         ? { _tag: "Shown", text: showText(field.kind, json) }
-        : { _tag: "Credential", held: held?.has(credential), name: credential };
+        : { _tag: "Credential", held: heldOf(held, credential), name: credential };
     };
 
     return [
@@ -2322,7 +2342,7 @@ const optionOf = (
   field: Field,
   path: Path,
   value: Json | undefined,
-  held: ReadonlySet<string> | undefined
+  held: HeldNames
 ): NetworkOption => {
   const credential = field.kind._tag === "Credential" ? textOf(value) : undefined;
 
@@ -2333,7 +2353,7 @@ const optionOf = (
 
     return credential === undefined
       ? { _tag: "Shown", text: showText(field.kind, value) }
-      : { _tag: "Credential", held: held?.has(credential), name: credential };
+      : { _tag: "Credential", held: heldOf(held, credential), name: credential };
   };
 
   return {
@@ -2365,7 +2385,7 @@ const memberOptions = (
   key: string,
   members: readonly Member[],
   value: Json | undefined,
-  held: ReadonlySet<string> | undefined
+  held: HeldNames
 ): readonly NetworkOption[] => {
   const inForce = isRecord(value) ? value : undefined;
   const own = members.find((member) => member.tag === inForce?._tag);
@@ -2402,7 +2422,7 @@ const memberOptions = (
 export const optionsOf = (
   network: NetworkId,
   configuration: Configuration,
-  held: ReadonlySet<string> | undefined
+  held: HeldNames
 ): readonly NetworkOption[] => {
   const plain: Record = configuration;
 
@@ -2500,8 +2520,8 @@ export interface Options {
   readonly ui: UiInForce | undefined;
   /** The options under `store`, `uploads`, and `previews`, as last read or followed, once they are. */
   readonly owner: OwnerInForce | undefined;
-  /** The names of the Credentials the Vault holds, once read. */
-  readonly held: ReadonlySet<string> | undefined;
+  /** The names of the Credentials the Vault holds, as far as is known. */
+  readonly held: HeldNames;
   /** What the last edit from the view came to, when it did not go as asked, in words. */
   readonly notice: string | undefined;
   /** How many changes were asked for, which numbers each as it is asked. */
@@ -2558,7 +2578,8 @@ export type Prompt = Asked & {
  * - `Asked`: the Owner asked for a change, which is on its way, and shows at once.
  * - `Answered`: the Daemon answered a change asked for, however it came out, so it is no longer
  *   on its way and what is in force shows.
- * - `Held`: the names of the Credentials the Vault holds.
+ * - `Held`, `HeldFailed`: the names of the Credentials the Vault holds, or they could not be
+ *   read, which leaves the names last read, if any.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
  * - `Confirming`: the Owner is asked to confirm unsetting an option, or is not.
@@ -2580,6 +2601,7 @@ export type OptionsEvent =
   | { readonly _tag: "Asked"; readonly change: Wanted }
   | { readonly _tag: "Answered"; readonly id: number }
   | { readonly _tag: "Held"; readonly names: readonly string[] }
+  | { readonly _tag: "HeldFailed" }
   | { readonly _tag: "Noticed"; readonly message: string | undefined }
   | { readonly _tag: "Editing"; readonly name: string | undefined }
   | { readonly _tag: "Confirming"; readonly name: string | undefined }
@@ -2631,6 +2653,49 @@ const readInto = (state: Options, network: NetworkId, reading: Reading): Options
     : { ...state, networks: new Map(state.networks).set(network, reading) };
 
 /**
+ * The view with the Networks listed, each keeping what was read of it, and each new one
+ * being read.
+ * @param state - The view.
+ * @param networks - The Networks, in the order listed.
+ * @returns The view after.
+ */
+const listedInto = (state: Options, networks: readonly NetworkId[]): Options => ({
+  ...state,
+  networks: new Map(
+    networks.map((network) => [network, state.networks?.get(network) ?? { _tag: "Reading" }])
+  ),
+});
+
+/**
+ * The view with a Network's Configuration read in, where an older read that lands late
+ * never replaces a newer one.
+ * @param state - The view.
+ * @param read - The read.
+ * @returns The view after.
+ */
+const configurationRead = (
+  state: Options,
+  read: Extract<OptionsEvent, { readonly _tag: "Read" }>
+): Options => {
+  const before = state.networks?.get(read.network);
+
+  return before?._tag === "Read" && before.sequence > read.sequence
+    ? state
+    : readInto(state, read.network, {
+        _tag: "Read",
+        configuration: read.configuration,
+        sequence: read.sequence,
+      });
+};
+
+/**
+ * The names held once a read of them failed: those last read, or not known.
+ * @param held - The names held before.
+ * @returns The names held after.
+ */
+const heldFailed = (held: HeldNames): HeldNames => held ?? "NotKnown";
+
+/**
  * The options view after an event.
  * @param state - The view before.
  * @param event - What happened.
@@ -2639,28 +2704,11 @@ const readInto = (state: Options, network: NetworkId, reading: Reading): Options
 export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
   switch (event._tag) {
     case "Listed": {
-      return {
-        ...state,
-        networks: new Map(
-          event.networks.map((network) => [
-            network,
-            state.networks?.get(network) ?? { _tag: "Reading" },
-          ])
-        ),
-      };
+      return listedInto(state, event.networks);
     }
 
     case "Read": {
-      const before = state.networks?.get(event.network);
-
-      // An older read that lands late never replaces a newer one.
-      return before?._tag === "Read" && before.sequence > event.sequence
-        ? state
-        : readInto(state, event.network, {
-            _tag: "Read",
-            configuration: event.configuration,
-            sequence: event.sequence,
-          });
+      return configurationRead(state, event);
     }
 
     case "ReadFailed": {
@@ -2705,6 +2753,10 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
 
     case "Held": {
       return { ...state, held: new Set(event.names) };
+    }
+
+    case "HeldFailed": {
+      return { ...state, held: heldFailed(state.held) };
     }
 
     case "Noticed": {
