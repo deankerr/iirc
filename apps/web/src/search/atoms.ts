@@ -10,9 +10,9 @@
 import type { TimelineItem } from "@iirc/api";
 import { contextOf } from "@iirc/frontend/composer";
 import { contained } from "@iirc/frontend/render";
-import { capped, foundOf, parseQuery } from "@iirc/frontend/search";
-import type { Day, Found } from "@iirc/frontend/search";
-import { reduceTimelines, resolve } from "@iirc/frontend/timelines";
+import { capped, foundOf, instantAt, parseQuery } from "@iirc/frontend/search";
+import type { Day, Found, Moment } from "@iirc/frontend/search";
+import { firstAt, reduceTimelines, resolve } from "@iirc/frontend/timelines";
 import type { TimelinesEvent } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -151,6 +151,25 @@ export const jumpTo = Atom.fnSync((item: Pick<TimelineItem, "position" | "timeli
   cancelCompletion(get.registry);
   navigated(get.registry, { _tag: "Jumped", position: item.position, timeline: item.timeline });
 }).pipe(Atom.keepAlive);
+
+/**
+ * Opens a Timeline read around a date or a time, as a jump to a result does, landing on its
+ * first item at or after it. A day begins at midnight in the Owner's time zone, as this
+ * browser keeps it.
+ */
+export const jumpToMoment = Atom.fnSync(
+  (
+    { moment, timeline }: { readonly moment: Moment; readonly timeline: TimelineItem["timeline"] },
+    get
+  ) => {
+    const at = instantAt(moment, dayStart);
+
+    if (at !== undefined) {
+      cancelCompletion(get.registry);
+      navigated(get.registry, { _tag: "Jumped", position: firstAt(at), timeline });
+    }
+  }
+).pipe(Atom.keepAlive);
 
 /** Lets go of the item jumped to, once the Owner scrolls away from it. */
 export const leaveTarget = Atom.fnSync((timeline: TimelineItem["timeline"], get) => {

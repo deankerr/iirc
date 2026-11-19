@@ -67,7 +67,7 @@ import { aliasesShown, arrange, arrangement, changeAliases, changeUi } from "../
 import { showSidebar } from "../page/sidebar.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
-import { showSearch } from "../search/atoms.ts";
+import { jumpToMoment, showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
@@ -429,6 +429,7 @@ type Local = Extract<
       | "PromptCredential"
       | "Open"
       | "Latest"
+      | "GoToDate"
       | "StartCommand"
       | "FocusComposer"
       | "ShowMembers"
@@ -450,6 +451,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "Draft",
   "FocusComposer",
   "Format",
+  "GoToDate",
   "ImportTheme",
   "Latest",
   "Look",
@@ -473,7 +475,7 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
  * Carries out an intent in the page: shows the options, the Uploads, the search, or a Timeline, jumps
- * to a Timeline's latest, opens the password prompt, focuses the composer, starting an
+ * to a Timeline's latest or to a date in it, opens the password prompt, focuses the composer, starting an
  * empty draft with text, or starting a command over any draft, with its list open, shows or
  * hides the members or the sidebar, changes the Panes, or starts a Lookup, which goes on
  * beside the composer's turn.
@@ -528,6 +530,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "Latest": {
       registry.set(latest, intent.timeline);
+      break;
+    }
+
+    case "GoToDate": {
+      registry.set(jumpToMoment, { moment: intent.moment, timeline: intent.timeline });
       break;
     }
 

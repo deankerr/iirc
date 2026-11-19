@@ -344,6 +344,26 @@
   gap: var(--space-3);
 }
 
+/* The day's words, which offer to go to another day, drawn as the words alone. */
+.dayGo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.dayGo[data-hovered] {
+  text-decoration: underline dotted var(--color-muted);
+}
+
+.dayGo[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
 .dayText::after {
   content: "";
   flex: 1;

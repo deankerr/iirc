@@ -321,32 +321,30 @@ const offsetOf = (zone: string): number | undefined => {
 };
 
 /**
- * Where `since:` or `until:` stands: a date, the start of that day in the Owner's time zone
- * for `since:`, and of the next for `until:`, so `until:` takes the whole day it names; or
- * an ISO time with its zone, exactly.
- * @param name - The filter, `since` or `until`.
- * @param value - What was written.
- * @param dayStart - When a day begins in the Owner's time zone.
- * @returns The instant, or why it cannot be read, in words.
+ * A moment as the Owner wrote it: a day, which begins at midnight in their time zone, which
+ * only the runtime knows, or an instant, given with its zone.
  */
-const boundOf = (
-  name: "since" | "until",
-  value: string,
-  dayStart: QueryContext["dayStart"]
-): Parsed<Instant> => {
-  const usage = `${name}: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.`;
+export type Moment =
+  | { readonly _tag: "Day"; readonly day: Day }
+  | { readonly _tag: "At"; readonly at: Instant };
+
+/**
+ * Reads a moment as `since:`, `until:`, and `/date` take one: a date, such as `2026-11-10`,
+ * or an ISO time with its zone, such as `2026-11-10T09:30Z`. A time with no zone is refused,
+ * since the core reads none.
+ * @param value - What was written.
+ * @param usage - What the words take, said after why the value cannot be read.
+ * @returns The moment, or why it cannot be read, in words.
+ */
+export const parseMoment = (value: string, usage: string): Parsed<Moment> => {
   const date = dayPattern.exec(value)?.groups;
 
   if (date !== undefined) {
     const day = dayOf(date);
 
-    if (day === undefined) {
-      return invalid(`${value} is no day of the calendar. ${usage}`);
-    }
-
-    const at = instantOf(dayStart(name === "since" ? day : nextDay(day)));
-
-    return at === undefined ? invalid(`${value} cannot be searched from. ${usage}`) : parsed(at);
+    return day === undefined
+      ? invalid(`${value} is no day of the calendar. ${usage}`)
+      : parsed({ _tag: "Day", day });
   }
 
   const time = timePattern.exec(value)?.groups;
@@ -383,6 +381,51 @@ const boundOf = (
       millis -
       offset
   );
+
+  return at === undefined
+    ? invalid(`${value} lies past any time kept. ${usage}`)
+    : parsed({ _tag: "At", at });
+};
+
+/**
+ * The instant a moment begins: a day's midnight in the Owner's time zone, or the instant
+ * itself.
+ * @param moment - The moment.
+ * @param dayStart - When a day begins in the Owner's time zone.
+ * @returns The instant, or none when the zone gives no instant that can be kept.
+ */
+export const instantAt = (
+  moment: Moment,
+  dayStart: QueryContext["dayStart"]
+): Instant | undefined => (moment._tag === "At" ? moment.at : instantOf(dayStart(moment.day)));
+
+/**
+ * Where `since:` or `until:` stands: a date, the start of that day in the Owner's time zone
+ * for `since:`, and of the next for `until:`, so `until:` takes the whole day it names; or
+ * an ISO time with its zone, exactly.
+ * @param name - The filter, `since` or `until`.
+ * @param value - What was written.
+ * @param dayStart - When a day begins in the Owner's time zone.
+ * @returns The instant, or why it cannot be read, in words.
+ */
+const boundOf = (
+  name: "since" | "until",
+  value: string,
+  dayStart: QueryContext["dayStart"]
+): Parsed<Instant> => {
+  const usage = `${name}: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.`;
+  const moment = parseMoment(value, usage);
+
+  if (moment._tag === "Invalid") {
+    return moment;
+  }
+
+  const bound: Moment =
+    name === "until" && moment.value._tag === "Day"
+      ? { _tag: "Day", day: nextDay(moment.value.day) }
+      : moment.value;
+
+  const at = instantAt(bound, dayStart);
 
   return at === undefined ? invalid(`${value} cannot be searched from. ${usage}`) : parsed(at);
 };

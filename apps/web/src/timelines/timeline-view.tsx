@@ -266,21 +266,24 @@ const Lines = ({
   // With nothing earlier, the first row says so to a screen reader alone, inside the list,
   // so it is anchored and measured as every row is, and takes no room. The items
   // `ui.activity` leaves out are not drawn, and are counted all the same.
-  const rows: readonly Shown[] = useMemo(() => {
+  const { rows, target } = useMemo(() => {
     const shows = showsIn(activity, kind, window.items, self);
     const drawn = rowsOf(window, divider, shows, zone, self);
+    const landed = targetKey(window, drawn);
 
     if (!window.earlier) {
-      return [start, ...drawn];
+      return { rows: [start, ...drawn] satisfies readonly Shown[], target: landed };
     }
 
     const held: Shown = { _tag: "Held", hidden: !window.items.some(shows), key: "held" };
 
-    return unasked ? drawn : [held, ...drawn];
+    return {
+      rows: unasked ? drawn : ([held, ...drawn] satisfies readonly Shown[]),
+      target: landed,
+    };
   }, [activity, divider, kind, self, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
-  const target = targetKey(window);
   const leave = useAtomSet(leaveTarget);
   const askOlder = useAtomSet(older);
   const askNewer = useAtomSet(newer);
@@ -640,7 +643,7 @@ const Lines = ({
     gestureAt.current = performance.now();
     inputAt.current = gestureAt.current;
 
-    if (target !== undefined) {
+    if (window.target !== undefined) {
       leave(timeline);
     }
   };

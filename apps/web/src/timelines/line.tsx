@@ -274,12 +274,15 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
 
 /**
  * Where the day changes: the day's words, as `ui.day` says, after a rule. Its time column is
- * there and empty, so the line shows and lines up whether or not any line's time does.
+ * there and empty, so the line shows and lines up whether or not any line's time does. The
+ * words offer to go to another day: pressed, they start `/date` with this day in the
+ * composer, to change and send, so the line keeps its height.
  * @param props - The instant of the first item of the day.
  * @returns The divider.
  */
 const DayLine = ({ at }: { readonly at: number }) => {
   const format = useAtomValue(timeShown);
+  const start = useAtomSet(perform);
   const written = dayWritten(useAtomValue(dayShown), at);
   const iso = dayIso(at);
 
@@ -288,7 +291,19 @@ const DayLine = ({ at }: { readonly at: number }) => {
       <span className={styles.time} data-sample={sampleOf(format)} />
       <span aria-hidden className={styles.rule} />
       <span className={styles.dayText}>
-        {written === undefined ? "an unknown day" : <time dateTime={iso}>{written}</time>}
+        {written === undefined ? (
+          "an unknown day"
+        ) : (
+          <AriaButton
+            aria-label={`${written}: go to another day`}
+            className={styles.dayGo}
+            onPress={() => {
+              start([{ _tag: "StartCommand", text: `/date ${iso ?? ""}` }]);
+            }}
+          >
+            <time dateTime={iso}>{written}</time>
+          </AriaButton>
+        )}
       </span>
     </p>
   );
