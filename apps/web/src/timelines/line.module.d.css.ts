@@ -6,6 +6,7 @@ declare const styles: {
   readonly context: string;
   readonly continued: string;
   readonly day: string;
+  readonly dayGo: string;
   readonly dayText: string;
   readonly delivery: string;
   readonly foldSummary: string;

@@ -11,7 +11,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
-import { olderUnasked, rowsOf, targetKey } from "@iirc/frontend/timelines";
+import { olderUnasked, pageSize, rowsOf, targetKey } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
@@ -266,21 +266,24 @@ const Lines = ({
   // With nothing earlier, the first row says so to a screen reader alone, inside the list,
   // so it is anchored and measured as every row is, and takes no room. The items
   // `ui.activity` leaves out are not drawn, and are counted all the same.
-  const rows: readonly Shown[] = useMemo(() => {
+  const { rows, target } = useMemo(() => {
     const shows = showsIn(activity, kind, window.items, self);
     const drawn = rowsOf(window, divider, shows, zone, self);
+    const landed = targetKey(window, drawn);
 
     if (!window.earlier) {
-      return [start, ...drawn];
+      return { rows: [start, ...drawn] satisfies readonly Shown[], target: landed };
     }
 
     const held: Shown = { _tag: "Held", hidden: !window.items.some(shows), key: "held" };
 
-    return unasked ? drawn : [held, ...drawn];
+    return {
+      rows: unasked ? drawn : ([held, ...drawn] satisfies readonly Shown[]),
+      target: landed,
+    };
   }, [activity, divider, kind, self, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
-  const target = targetKey(window);
   const leave = useAtomSet(leaveTarget);
   const askOlder = useAtomSet(older);
   const askNewer = useAtomSet(newer);
@@ -640,7 +643,7 @@ const Lines = ({
     gestureAt.current = performance.now();
     inputAt.current = gestureAt.current;
 
-    if (target !== undefined) {
+    if (window.target !== undefined) {
       leave(timeline);
     }
   };
@@ -657,16 +660,26 @@ const Lines = ({
   };
 
   /**
-   * Reads the page before without asking while what is drawn cannot be scrolled to reach
-   * it: no item drawn, or less than fills the view, as when `ui.activity` hides a whole
-   * page. Only in a view that can be seen, in the page and with a height.
+   * Reads on without asking while what is drawn cannot be scrolled to reach more: no item
+   * drawn, or less than fills the view, as when `ui.activity` hides a whole page. It reads
+   * the page before, except while a jump's window draws no item at all, as after a jump
+   * before a Timeline's first item onto Activity hidden: what it jumped to lies at or after
+   * its first item, so it reads the page after instead, until an item is drawn, and only
+   * while that drops nothing past the cap, so nothing held, a Gap's edge included, is let
+   * go. Only in a view that can be seen, in the page and with a height.
    * @param element - The scroller.
    */
   const fill = (element: HTMLDivElement) => {
     const drawsNoItem = !rows.some((row) => row._tag === "Item");
 
-    if (visible(element) && (drawsNoItem || total < element.clientHeight)) {
+    if (!visible(element) || !(drawsNoItem || total < element.clientHeight)) {
+      return;
+    }
+
+    if (!(drawsNoItem && window.target !== undefined && window.later)) {
       readOlder();
+    } else if (!window.newer && !window.reading && window.items.length + pageSize <= cap) {
+      askNewer(timeline);
     }
   };
 

@@ -59,6 +59,8 @@ import {
   starting,
 } from "./options.ts";
 import type { Asked, Configuration, Edit, Json } from "./options.ts";
+import { parseMoment } from "./search.ts";
+import type { Moment } from "./search.ts";
 import { parseThemeName, systemTheme } from "./theme.ts";
 import type { ThemeOption, ThemesEdit } from "./theme.ts";
 import type { PaneChange, SidebarNetwork } from "./timelines.ts";
@@ -257,6 +259,8 @@ export interface Act {
  *   composer, nor through an intent.
  * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
  * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
+ * - `GoToDate`: show a Timeline from its first item at or after a moment, which the runtime
+ *   places in the Owner's time zone when it is a day, as jumping to a search's result does.
  * - `StartCommand`: focus the composer under the main view and start `text` in it, with
  *   its list open, as a key that starts a command does. A draft with text in it is set
  *   aside, and comes back when the command runs or on Escape.
@@ -324,6 +328,7 @@ export type Intent =
   | ({ readonly _tag: "PromptCredential" } & Asked)
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
+  | { readonly _tag: "GoToDate"; readonly timeline: TimelineId; readonly moment: Moment }
   | { readonly _tag: "StartCommand"; readonly text: string }
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
@@ -2730,6 +2735,25 @@ export const commands: readonly Command[] = [
     parse: (args) =>
       args.trim() === "" ? parsed(undefined) : invalid("/latest takes nothing after it."),
     usage: "/latest",
+    when: focused,
+  }),
+  command({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Go to a date in the open Timeline, a day in your time zone, or a time with its zone: its first item at or after it, its beginning when before that, or its latest when after.",
+    id: "timeline.date",
+    intents: (moment: Moment, focus) => [{ _tag: "GoToDate", moment, timeline: focus.timeline }],
+    name: "date",
+    parse: (args) => {
+      const usage =
+        "/date takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
+
+      const value = args.trim();
+
+      return value === "" ? invalid(`Go to when? ${usage}`) : parseMoment(value, usage);
+    },
+    usage: "/date <date|time>",
     when: focused,
   }),
   command({

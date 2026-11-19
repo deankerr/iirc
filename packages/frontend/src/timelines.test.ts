@@ -32,6 +32,7 @@ import {
   draftsMetBetween,
   originOf,
   emptyView,
+  firstAt,
   followFrom,
   initialTimelines,
   keptLayout,
@@ -49,6 +50,7 @@ import {
   rowsOf,
   selfOf,
   sidebar,
+  targetKey,
   treeOf,
   timelinesWith,
   wanted,
@@ -3747,6 +3749,59 @@ describe("jumping to a result", () => {
       latest: ["Latest", undefined, true],
       left: undefined,
     });
+  });
+
+  it("lands on the first row at or after an instant jumped to, the first before them all, and the latest after them all", () => {
+    const items = [10, 20, 30, 40].map((at, index) => message(idOf(3), at, index + 1));
+
+    /**
+     * Where a jump to an instant reads around, and the item it lands on, by its time.
+     * @param at - The instant, as the time of an item.
+     * @returns The read's instant, and the item's.
+     */
+    const landing = (at: number) => {
+      let state = reduceTimelines(following(), {
+        _tag: "Jumped",
+        position: firstAt(message(idOf(3), at, 9).position.at),
+        timeline: three,
+      });
+
+      const around = wanted(state).find((one) => one._tag === "Around");
+
+      if (around === undefined || around._tag !== "Around") {
+        throw new Error("no read around the instant");
+      }
+
+      state = reduceTimelines(state, { _tag: "ReadStarted", read: around });
+      state = reduceTimelines(state, {
+        _tag: "WindowRead",
+        read: around,
+        window: decodeWindow({
+          earlier: false,
+          gaps: [],
+          items: encodedItems(items),
+          later: false,
+          network: "alpha",
+          through: 5,
+          timeline: idOf(3),
+          version: 1,
+        }),
+      });
+
+      const window = windowOf(state, three);
+      const rows = window === undefined ? [] : rowsOf(window);
+      const key = window === undefined ? undefined : targetKey(window, rows);
+      const row = rows.find((one) => one.key === key);
+
+      return [around.around.at, row?._tag === "Item" ? row.item.position.at : undefined];
+    };
+
+    expect([landing(25), landing(30), landing(5), landing(99)]).toStrictEqual([
+      [25, 30],
+      [30, 30],
+      [5, 10],
+      [99, 40],
+    ]);
   });
 
   it("jumps in the Pane that has the Timeline open, which takes the focus, leaving the search where it is", () => {

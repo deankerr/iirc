@@ -4594,13 +4594,36 @@ export const rowsOf = (
 };
 
 /**
- * The key of the row of the item the Owner jumped to, which a view brings into view and
- * marks, or none.
- * @param window - The window.
- * @returns The row's key, as `rowsOf` gives it.
+ * The earliest position at an instant, which a jump to a date or a time reads around: an
+ * item at or after the instant stands at or after it, and every item before it before, since
+ * a position orders by its instant first, a Journal's sequences begin at 1, and a step's
+ * indexes at 0. A cursor with a sequence below 1 is none the API takes.
+ * @param at - The instant.
+ * @returns The position.
  */
-export const targetKey = (window: Window): string | undefined =>
-  window.target === undefined ? undefined : cursorOf(window.target);
+export const firstAt = (at: Position["at"]): Position => ({ at, n: 0, sequence: 1 });
+
+/**
+ * The key of the row the Owner jumped to, which a view brings into view and marks, or none:
+ * the first item row at or after where they jumped, which is a search's result itself, or,
+ * with none, the last, as a date after a Timeline's end shows its latest. A run of joins
+ * and the like stands at its latest item, so a jump into it lands on it.
+ * @param window - The window.
+ * @param rows - The window's rows, as `rowsOf` gives them.
+ * @returns The row's key.
+ */
+export const targetKey = (window: Window, rows: readonly Row[]): string | undefined => {
+  const { target } = window;
+
+  if (target === undefined) {
+    return undefined;
+  }
+
+  const items = rows.filter((row) => row._tag === "Item");
+
+  return (items.find((row) => comparePositions(row.item.position, target) >= 0) ?? items.at(-1))
+    ?.key;
+};
 
 /** A Pane's open Timeline, as shown. */
 export type Opened =

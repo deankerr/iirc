@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { credentialRefusal, commands, interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, MarkRead, Unseen } from "./commands.ts";
+import type { Moment } from "./search.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
@@ -48,6 +49,15 @@ const say = (target: string, text: string, kind = "Privmsg", opens = false) => (
   target,
   text,
 });
+
+/**
+ * What going to a moment in the open Channel gives.
+ * @param moment - The moment.
+ * @returns The intents.
+ */
+const goes = (moment: Moment) => [
+  { _tag: "GoToDate", moment, timeline: inChannel.focus?.timeline },
+];
 
 const message = (line: string, context: CommandContext) => {
   const read = interpret(line, context);
@@ -434,6 +444,35 @@ describe("reading a line", () => {
       { _tag: "Parsed", value: [{ _tag: "Latest", timeline: inChannel.focus?.timeline }] },
       { _tag: "Invalid", message: "/latest takes nothing after it." },
       { _tag: "Invalid", message: "Open a Timeline first." },
+    ]);
+  });
+
+  it("goes to a date or a time with its zone in the open Timeline with /date, as search reads them", () => {
+    const run = (line: string) => chosen(line, inChannel);
+
+    const usage =
+      "/date takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
+
+    expect([
+      run("/date 2026-11-10"),
+      run("/date  2026-11-10T09:30:15.25+01:00 "),
+      run("/date 1969-12-31T23:59Z"),
+      run("/date"),
+      run("/date yesterday"),
+      run("/date 2026-02-30"),
+      run("/date 2026-11-10T09:30"),
+      run("/date 2026-11-10 09:30"),
+      chosen("/date 2026-11-10", nowhere),
+    ]).toStrictEqual([
+      goes({ _tag: "Day", day: { day: 10, month: 11, year: 2026 } }),
+      [{ _tag: "GoToDate", moment: { _tag: "At", at: 1_794_299_415_250 }, timeline }],
+      [{ _tag: "GoToDate", moment: { _tag: "At", at: -60_000 }, timeline }],
+      `Go to when? ${usage}`,
+      usage,
+      `2026-02-30 is no day of the calendar. ${usage}`,
+      `2026-11-10T09:30 needs its zone, such as Z or +01:00, or a date alone. ${usage}`,
+      usage,
+      "Open a Timeline first.",
     ]);
   });
 });
