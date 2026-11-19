@@ -149,12 +149,18 @@ const QuotedLine = Schema.String.check(
  */
 const OwnLines = Schema.Array(QuotedLine).check(Schema.isMaxLength(maxLines));
 
+/** The longest mode string, which fits a `MODE` on Self with any nick an Ircd allows. */
+const maxUserModes = 64;
+
 /**
- * User modes to set on Self, as one mode string: each `+` or `-` followed by the letters
- * it applies to, such as `+ix-w`, or empty for none. A user mode that takes a parameter
- * is set with a Line of the Owner's own instead.
+ * User modes to set on Self, as one mode string of at most 64 characters: each `+` or `-`
+ * followed by the letters it applies to, such as `+ix-w`, or empty for none. A user mode
+ * that takes a parameter is set with a Line of the Owner's own instead.
  */
-const UserModes = Schema.String.check(Schema.isPattern(/^(?:[+-][A-Za-z]+)*$/u));
+const UserModes = Schema.String.check(
+  Schema.isPattern(/^(?:[+-][A-Za-z]+)*$/u),
+  Schema.isMaxLength(maxUserModes)
+);
 
 /**
  * What the Owner wants to be true of one Network. It always arrives whole, and the
@@ -297,7 +303,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: "",
       description:
-        "User modes to set on Self as each Session begins, such as +ix-w, sent as one MODE before any of the Lines. Empty sets none.",
+        "User modes to set on Self as each Session begins, such as +ix-w, sent as one MODE before any of the Lines: at most 64 characters. Empty sets none.",
     }),
   username: Schema.String.annotate({
     description: "The username, the part of Self's mask before the @.",

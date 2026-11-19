@@ -201,7 +201,10 @@ describe("the Owner's Lines in Configuration", () => {
     expect(takes({ userModes })).toBeTruthy();
   });
 
-  it.each(["i", "+", "+i x", "+i,-w", "+1"])("refuses the user modes %j", (userModes) => {
-    expect(takes({ userModes })).toBeFalsy();
-  });
+  it.each(["i", "+", "+i x", "+i,-w", "+1", `+${"i".repeat(64)}`])(
+    "refuses the user modes %j",
+    (userModes) => {
+      expect(takes({ userModes })).toBeFalsy();
+    }
+  );
 });
