@@ -43,19 +43,23 @@ export const exportPath = (
 /**
  * Starts the download of a Timeline's export, as a press on a link to it would, placing a
  * day in the Owner's time zone as this browser keeps it. Nothing is downloaded when a bound
- * has no instant that can be kept, or the range holds none.
+ * has no instant that can be kept, or the range holds none, and why is said instead.
  * @param intent - The export asked for.
+ * @returns Why nothing was downloaded, or none when the download started.
  */
-export const exportTimeline = (intent: Export): void => {
+export const exportTimeline = (intent: Export): string | undefined => {
   const since = intent.since === undefined ? undefined : instantAt(intent.since, dayStart);
   const until = intent.until === undefined ? undefined : instantAt(intent.until, dayStart);
 
   if (
     (intent.since !== undefined && since === undefined) ||
-    (intent.until !== undefined && until === undefined) ||
-    (since !== undefined && until !== undefined && since >= until)
+    (intent.until !== undefined && until === undefined)
   ) {
-    return;
+    return "/export: that day has no time that can be kept in your time zone.";
+  }
+
+  if (since !== undefined && until !== undefined && since >= until) {
+    return "/export: the start must come before the end.";
   }
 
   const link = document.createElement("a");
@@ -66,4 +70,6 @@ export const exportTimeline = (intent: Export): void => {
   document.body.append(link);
   link.click();
   link.remove();
+
+  return undefined;
 };

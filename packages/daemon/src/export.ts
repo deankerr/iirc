@@ -12,8 +12,8 @@ import type { Item, Summary } from "@iirc/timeline-store";
 import type { Content } from "@iirc/timelines";
 
 // C0 and C1 controls, DEL, and the Unicode line and paragraph separators, which would
-// break a line or drive a terminal.
-const controls = /[\p{Cc}\u2028\u2029]/gu;
+// break a line or drive a terminal, and bidirectional controls, which would reorder it.
+const controls = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/gu;
 
 /**
  * Text from a Network as it is written out: its formatting stripped, and every control
@@ -447,7 +447,7 @@ export const exportLine = (item: Pick<Item, "position" | "content">): string =>
   `${timeOf(item.position.at)} ${contentText(item.content)}\n`;
 
 // What a file's name may not hold on any common system, besides controls and whitespace.
-const pathHostile = /[/\\:*?"<>|\p{Cc}\p{White_Space}\p{Cs}]/gu;
+const pathHostile = /[/\\:*?"<>|\p{Cc}\p{Bidi_Control}\p{White_Space}\p{Cs}]/gu;
 
 // What is not printable ASCII.
 const beyondAscii = /[^\u0020-\u007E]/gu;

@@ -1352,4 +1352,17 @@ describe("exporting a Timeline from the Composer", () => {
 
     expect(downloads).toStrictEqual([{ href: `/api/timelines/${iirc}/export`, saves: true }]);
   });
+
+  it("says why, and starts no download, when a day and a time make a range that ends before it starts", async () => {
+    const downloads = watchDownloads();
+    const { container } = await signedIn();
+
+    await typeIn(container, "/export 2026-11-03 2026-11-02T00:00Z");
+    await pressIn(container, "Enter");
+    await settled(() =>
+      (container.textContent ?? "").includes("the start must come before the end")
+    );
+
+    expect(downloads).toStrictEqual([]);
+  });
 });

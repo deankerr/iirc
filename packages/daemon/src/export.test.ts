@@ -79,6 +79,7 @@ describe("an export's line", () => {
       "<alice> one  two three [31m  four\n",
     ],
     ["a nick's formatting and controls", message("hi", "Privmsg", "\u0002ev\nil"), "<ev il> hi\n"],
+    ["bidirectional controls made spaces", message("a\u202Eb\u2066c\u200Fd"), "<alice> a b c d\n"],
   ])("writes %s", (_name, content, expected) => {
     expect(textOf(content)).toBe(expected);
   });
@@ -277,6 +278,11 @@ describe("an export's file name", () => {
       "what RFC 8187 does not allow in filename*, percent-encoded",
       { kind: "Channel", name: "#it's(ok)", network: "libera" },
       `attachment; filename="libera-#it's(ok).txt"; filename*=UTF-8''libera-%23it%27s%28ok%29.txt`,
+    ],
+    [
+      "a name that reorders itself, its bidirectional controls made safe",
+      { kind: "Channel", name: "#a\u202Etxt.exe", network: "libera" },
+      `attachment; filename="libera-#a_txt.exe.txt"; filename*=UTF-8''libera-%23a_txt.exe.txt`,
     ],
   ])("names %s", (_name, timeline, expected) => {
     expect(exportDisposition(timeline)).toBe(expected);

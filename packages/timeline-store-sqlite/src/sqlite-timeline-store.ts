@@ -1642,13 +1642,20 @@ export const makeSqliteTimelineStore = (
           }
 
           const { after, since, until } = each;
+          const from = since === undefined ? undefined : cursorsFrom(since);
+          const past = after === undefined ? undefined : cursorOf(after);
+
+          // Only the tighter lower bound is given, so a page read after another seeks to
+          // where it left off rather than to `since` and past every page before.
+          const afterWins = past !== undefined && (from === undefined || past >= from);
+          const fromBound = from === undefined ? sql`` : sql`AND cursor >= ${from}`;
+          const lower = afterWins ? sql`AND cursor > ${past}` : fromBound;
 
           const items = yield* sql`
             SELECT ${itemColumns} FROM items
             WHERE timeline = ${found.timeline} AND ignored IS NULL
-              ${since === undefined ? sql`` : sql`AND cursor >= ${cursorsFrom(since)}`}
+              ${lower}
               ${until === undefined ? sql`` : sql`AND cursor < ${cursorsFrom(until)}`}
-              ${after === undefined ? sql`` : sql`AND cursor > ${cursorOf(after)}`}
             ORDER BY cursor LIMIT ${Math.max(0, Math.floor(each.limit))}
           `.pipe(Effect.flatMap(decodeItems));
 

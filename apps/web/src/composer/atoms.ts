@@ -681,12 +681,12 @@ const changeOne = (
       return notifying(intent.on);
     }
 
-    // Saving starts a download in the browser and waits on nothing.
+    // Saving starts a download in the browser and waits on nothing, or says why it cannot.
     case "Export": {
       return Effect.sync((): Changed => {
-        exportTimeline(intent);
+        const refused = exportTimeline(intent);
 
-        return { _tag: "Done" };
+        return refused === undefined ? { _tag: "Done" } : { _tag: "NotDone", message: refused };
       });
     }
 

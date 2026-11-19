@@ -307,7 +307,7 @@ describe("exporting a Timeline", () => {
               return text;
             });
 
-          const first = yield* readUntil("", 1);
+          const first = yield* readUntil("", 256);
 
           // The next page has been asked of the store, which holds it back.
           yield* Deferred.await(reached);
