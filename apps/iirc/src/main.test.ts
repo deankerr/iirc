@@ -537,8 +537,11 @@ describe("iirc", () => {
 
       const proxied = await iircWith(
         {
+          // No exemption for loopback, which would pass without the fix.
           HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+          NO_PROXY: "",
           http_proxy: `http://127.0.0.1:${proxy.port}`,
+          no_proxy: "",
         },
         "health",
         "--listen",
