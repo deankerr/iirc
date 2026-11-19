@@ -70,8 +70,9 @@ export default defineConfig({
     },
   },
   // The options view's styles are read in its tests, which compare a value's box with its
-  // editor's. Every other module's styles stay unread there, as they cost a test its time.
-  test: { css: { include: [/options-view\.module\.css$/u] } },
+  // editor's, and the Timeline view's, which find the start of a Timeline drawn as nothing.
+  // Every other module's styles stay unread there, as they cost a test its time.
+  test: { css: { include: [/options-view\.module\.css$/u, /timeline-view\.module\.css$/u] } },
   // The theme reader's Worker is a module of its own, in `assets/`, from the page's origin.
   worker: { format: "es" },
 });
