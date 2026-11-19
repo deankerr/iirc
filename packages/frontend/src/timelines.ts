@@ -4554,7 +4554,10 @@ export const rowsOf = (
     drawGap(gap);
   }
 
-  return runs(folding(collapsed(rows), selfChurn(window.items, self)));
+  // With Self's nick unknown, any of them could be Self's, so none is folded away.
+  const shown = collapsed(rows);
+
+  return runs(self === undefined ? shown : folding(shown, selfChurn(window.items, self)));
 };
 
 /**

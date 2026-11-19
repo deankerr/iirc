@@ -696,7 +696,7 @@ const FoldedLines = ({
             const each = lineOf(item.content, item.network);
 
             return each._tag === "Description" ? (
-              <div className={styles.line} key={`${item.position.at}-${item.sequence}`}>
+              <div className={styles.line} key={`${item.position.sequence}-${item.position.n}`}>
                 <DescribedLine item={item} line={each} repeated={undefined} />
               </div>
             ) : null;

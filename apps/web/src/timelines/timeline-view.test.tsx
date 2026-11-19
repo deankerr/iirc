@@ -228,6 +228,14 @@ const signedIn = async (
   const fake = fakeDaemon();
 
   fake.daemon.sessions.set("libera", { _tag: "Registered", ircd: "ircd.test", since: 1, tags });
+  // In a Session, `known` names Self, as a Daemon's does.
+  fake.daemon.selves.set("libera", {
+    account: { _tag: "Unknown" },
+    away: { _tag: "Unknown" },
+    mask: { _tag: "Unknown" },
+    nick: "iirc",
+    realname: { _tag: "Unknown" },
+  });
   const last = Math.max(items.at(-1)?.sequence ?? 2, network.at(-1)?.sequence ?? 0);
 
   fake.daemon.signedIn = true;

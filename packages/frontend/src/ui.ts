@@ -280,6 +280,11 @@ export const showsIn = (
     return () => true;
   }
 
+  // With Self's nick unknown, any of them could be Self's, so `spoke` hides none.
+  if (activity === "spoke" && self === undefined) {
+    return () => true;
+  }
+
   const spoken = activity === "spoke" ? spokenComings(items, self) : undefined;
 
   return (item) => {

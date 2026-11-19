@@ -289,7 +289,7 @@ describe("which items a Timeline shows", () => {
 
     expect(
       (["all", "spoke", "quiet", "none"] as const).map((shown) => [
-        ...items.map(showsIn(shown, "Channel", items, undefined)),
+        ...items.map(showsIn(shown, "Channel", items, "iirc")),
         ...items.map(showsIn(shown, "Network", items, undefined)).slice(0, 1),
         ...items.map(showsIn(shown, "Direct", items, undefined)).slice(2, 3),
       ])
@@ -301,7 +301,7 @@ describe("which items a Timeline shows", () => {
     ]);
   });
 
-  it("under spoke, in a Channel's, shows a join, part, or quit only of Self's or of a User who spoke up to five minutes before it", () => {
+  it("under spoke, in a Channel's, shows a join, part, or quit only of Self's or of a User who spoke up to five minutes before it, and every one while Self's nick is unknown", () => {
     const items = [
       said(1, 0, "alice"),
       said(2, 0, "Bob", "Action"),
@@ -316,18 +316,14 @@ describe("which items a Timeline shows", () => {
       quit(10, 6 * minute, "Me"),
     ];
 
-    expect(items.map(showsIn("spoke", "Channel", items, "me"))).toStrictEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      false,
-      false,
-      true,
-    ]);
+    expect({
+      known: items.map(showsIn("spoke", "Channel", items, "me")),
+      // Any of them could be Self's, so none is hidden.
+      unknown: items.map(showsIn("spoke", "Channel", items, undefined)),
+    }).toStrictEqual({
+      known: [true, true, true, true, true, true, true, false, false, true],
+      unknown: items.map(() => true),
+    });
   });
 
   it("under spoke, follows a User across a change of nick, and measures from their latest Message", () => {
@@ -341,7 +337,7 @@ describe("which items a Timeline shows", () => {
       joined(6, 9 * minute, "bob"),
     ];
 
-    expect(items.map(showsIn("spoke", "Channel", items, undefined))).toStrictEqual([
+    expect(items.map(showsIn("spoke", "Channel", items, "me"))).toStrictEqual([
       true,
       true,
       true,

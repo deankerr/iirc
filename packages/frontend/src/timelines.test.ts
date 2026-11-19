@@ -5602,12 +5602,15 @@ const renames = (sequence: number, from: string, to: string) =>
  * The rows of a window of the open Channel holding these items, each as its key, the
  * sequence of the item it draws, and the sequences it folds, or the row's tag.
  * @param items - The items, in order.
- * @param options - Which items are drawn, and Self's nick.
+ * @param options - Which items are drawn, and Self's nick, `me` unless given, even as none.
  * @returns Each row.
  */
 const foldRows = (
   items: readonly TimelineItem[],
-  options: { readonly shows?: (item: TimelineItem) => boolean; readonly self?: string } = {}
+  options: {
+    readonly shows?: (item: TimelineItem) => boolean;
+    readonly self?: string | undefined;
+  } = {}
 ) => {
   const state = reduceTimelines(following(), {
     _tag: "WindowRead",
@@ -5628,7 +5631,13 @@ const foldRows = (
 
   const rows =
     shown._tag === "Shown"
-      ? rowsOf(shown.window, undefined, options.shows, undefined, options.self)
+      ? rowsOf(
+          shown.window,
+          undefined,
+          options.shows,
+          undefined,
+          "self" in options ? options.self : "me"
+        )
       : [];
 
   return rows.map((row) =>
@@ -5680,7 +5689,7 @@ describe("joins, parts, quits, and changes of nick in a row", () => {
     ]);
   });
 
-  it("are not folded where they are Self's, which split a run in two, as Self is known by an earlier nick too", () => {
+  it("are not folded where they are Self's, which split a run in two, as Self is known by an earlier nick too, and not at all while Self's nick is unknown", () => {
     const items = [
       joins(1, "alice"),
       joins(2, "amy"),
@@ -5695,7 +5704,7 @@ describe("joins, parts, quits, and changes of nick in a row", () => {
 
     expect({
       known: foldRows(items, { self: "bobby" }),
-      unknown: foldRows(items),
+      unknown: foldRows(items, { self: undefined }),
     }).toStrictEqual({
       known: [
         [cursor(10, 1), 2, [1, 2]],
@@ -5705,7 +5714,12 @@ describe("joins, parts, quits, and changes of nick in a row", () => {
         [cursor(70, 7), 8, [7, 8]],
         [cursor(90, 9), 9, undefined],
       ],
-      unknown: [[cursor(10, 1), 9, [1, 2, 3, 4, 5, 6, 7, 8, 9]]],
+      // Any of them could be Self's, so none is folded away.
+      unknown: items.map((item) => [
+        cursor(item.position.at, item.sequence),
+        item.sequence,
+        undefined,
+      ]),
     });
   });
 
