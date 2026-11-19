@@ -132,6 +132,29 @@ const joined = (sequence: number): typeof TimelineItem.Encoded => ({
 });
 
 /**
+ * A kick in `#iirc`, which `ui.activity none` hides, and which joins no run of joins, parts,
+ * quits, and changes of nick, so each stands as a row of its own.
+ * @param sequence - Its sequence.
+ * @returns The item.
+ */
+const kicked = (sequence: number): typeof TimelineItem.Encoded => ({
+  ...joined(sequence),
+  content: {
+    _tag: "Activity",
+    activity: {
+      _tag: "Kicked",
+      by: "op",
+      channel: "#iirc",
+      nick: `user${sequence}`,
+      reason: null,
+    },
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+});
+
+/**
  * A standard reply about `PRIVMSG` in `#iirc`, as an item.
  * @param sequence - Its sequence.
  * @param kind - Its kind.
@@ -496,6 +519,12 @@ const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
 const motdButton = () => logOf().querySelector<HTMLButtonElement>("button[aria-expanded]");
 
 /**
+ * What a run of joins shows as one line: its words, and whether it says it is open.
+ * @returns Both.
+ */
+const foldedText = () => [motdButton()?.textContent, motdButton()?.getAttribute("aria-expanded")];
+
+/**
  * The message of the day's text, while it is open.
  * @returns Its text.
  */
@@ -695,10 +724,10 @@ describe("what the view says it shows", () => {
   });
 
   it("keeps a row in view when ui.activity hides every row before it, anchoring to the next that shows", async () => {
-    // A Message long ago, joins 2 to 60, then Messages 61 to 120: the latest page begins
-    // with 40 joins, with more before it, read up to its latest so no divider shows.
+    // A Message long ago, kicks 2 to 60, then Messages 61 to 120: the latest page begins
+    // with 40 kicks, with more before it, read up to its latest so no divider shows.
     const items = Array.from({ length: 120 }, (_, index) =>
-      index === 0 || index >= 60 ? message(index + 1) : joined(index + 1)
+      index === 0 || index >= 60 ? message(index + 1) : kicked(index + 1)
     );
 
     const { registry } = await signedIn([], items, {
@@ -714,7 +743,7 @@ describe("what the view says it shows", () => {
     // machine, real time would end the run between one step and the next.
     vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
 
-    // Join 59, row 39, at the top of the view, and line 61 two rows below it.
+    // Kick 59, row 39, at the top of the view, and line 61 two rows below it.
     await scrollTo(780, 100_000);
 
     const offsetOf = (text: string) => {
@@ -733,7 +762,7 @@ describe("what the view says it shows", () => {
 
     await act(async () => {
       await act(async () => {
-        registry.set(deviceUi, { activity: "quiet" });
+        registry.set(deviceUi, { activity: "none" });
         await Promise.resolve();
       });
       await Promise.resolve();
@@ -1005,6 +1034,38 @@ describe("what the view says it shows", () => {
       ["\u25BE Message of the day, 2 lines, cut short", "true", "Welcome\n  spaced  out"],
       ["\u25B8 Message of the day, 2 lines, cut short", "false", undefined],
     ]);
+  });
+
+  it("shows joins in a row as one line that says how many and who, which a press opens to each and closes again", async () => {
+    const items = [message(1), joined(2), joined(3), joined(4), message(5)];
+    const { registry } = await signedIn([], items);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => motdButton() !== null);
+
+    const closed = foldedText();
+    const hidden = logOf().textContent?.includes("user2 joined #iirc");
+
+    await act(async () => {
+      motdButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settled(() => logOf().textContent?.includes("user2 joined #iirc"));
+
+    const opened = [
+      foldedText(),
+      ["user2", "user3", "user4"].map((nick) => logOf().textContent?.includes(`${nick} joined`)),
+    ];
+
+    expect({ closed, hidden, opened }).toStrictEqual({
+      closed: ["\u25B8 3 joined: user2, user3, user4", "false"],
+      hidden: false,
+      opened: [
+        ["\u25BE 3 joined: user2, user3, user4", "true"],
+        [true, true, true],
+      ],
+    });
   });
 
   it("shows what a reply answers above it, and goes to that Message when pressed", async () => {

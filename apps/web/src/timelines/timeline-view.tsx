@@ -13,7 +13,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
 import { olderUnasked, rowsOf, targetKey } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
-import { showsItem } from "@iirc/frontend/ui";
+import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
@@ -23,7 +23,7 @@ import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import { zone } from "../ui/dates.ts";
-import { following, latest, newer, older, paneTimeline, windowCapOf } from "./atoms.ts";
+import { following, latest, newer, older, paneTimeline, selfNick, windowCapOf } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
@@ -252,6 +252,7 @@ const Lines = ({
   readonly window: Window;
 }) => {
   const activity = useAtomValue(activityShown);
+  const self = useAtomValue(selfNick(window.network));
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);
   const line = useAtomValue(lineShown);
@@ -265,8 +266,8 @@ const Lines = ({
   // measured as every row is. The items `ui.activity` leaves out are not drawn, and are
   // counted all the same.
   const rows: readonly Shown[] = useMemo(() => {
-    const shows = (item: TimelineItem) => showsItem(activity, kind, item.content);
-    const drawn = rowsOf(window, divider, shows, zone);
+    const shows = showsIn(activity, kind, window.items, self);
+    const drawn = rowsOf(window, divider, shows, zone, self);
 
     if (!window.earlier) {
       return [start, ...drawn];
@@ -275,7 +276,7 @@ const Lines = ({
     const held: Shown = { _tag: "Held", hidden: !window.items.some(shows), key: "held" };
 
     return unasked ? drawn : [held, ...drawn];
-  }, [activity, divider, kind, unasked, window]);
+  }, [activity, divider, kind, self, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const target = targetKey(window);

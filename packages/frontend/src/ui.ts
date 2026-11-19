@@ -8,7 +8,7 @@
  *
  * @packageDocumentation
  */
-import type { ItemContent } from "@iirc/api";
+import type { TimelineItem } from "@iirc/api";
 import {
   FontShown,
   UiOptionName,
@@ -22,6 +22,8 @@ import {
 } from "@iirc/api/ui";
 import type { UiOptions, ActivityShown, ReadRule, UiInForce } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
+
+import { churnOf, foldNick, selfChurn } from "./churn.ts";
 
 /** The options this device overrides for itself, each with its own value. */
 export type DeviceUi = Partial<UiOptions>;
@@ -200,23 +202,97 @@ export const readRuleOf = (shared: UiInForce | undefined, device: DeviceUi): Rea
 /** The Activity `quiet` leaves out: a User coming or going. */
 const comings: ReadonlySet<string> = new Set(["Joined", "Parted", "Quit"]);
 
+/** How long before a join, part, or quit a User must have spoken for `spoke` to show it: five minutes. */
+export const spokeSpan = 300_000;
+
 /**
- * Whether a Timeline shows an item, as `activity` says: in a Channel's, all Activity,
- * all but joins, parts, and quits, or none. Every other item, and every item of another
- * kind of Timeline, shows. It decides what is drawn, never what is counted.
- * @param activity - Which Activity a Channel shows.
- * @param kind - The Timeline's kind.
- * @param content - What the item holds.
- * @returns Whether it shows.
+ * The comings and goings `spoke` shows: Self's own, and those of a User who said a Message
+ * in the window no more than {@link spokeSpan} before, by the items' own times, as the
+ * window's order has it. A User is followed across a change of nick.
+ * @param items - The window's items, in order.
+ * @param self - Self's nick, if known.
+ * @returns The items it shows.
  */
-export const showsItem = (
-  activity: ActivityShown,
-  kind: "Network" | "Channel" | "Direct" | undefined,
-  content: ItemContent
-): boolean => {
-  if (kind !== "Channel" || content._tag !== "Activity" || activity === "all") {
-    return true;
+const spokenComings = (
+  items: readonly TimelineItem[],
+  self: string | undefined
+): ReadonlySet<TimelineItem> => {
+  const ours = selfChurn(items, self);
+  const shown = new Set<TimelineItem>();
+  // When each User last spoke, by their nick folded.
+  const spoke = new Map<string, number>();
+
+  for (const item of items) {
+    const { content } = item;
+
+    if (content._tag === "Message") {
+      spoke.set(foldNick(content.sender), item.position.at);
+
+      continue;
+    }
+
+    const churn = churnOf(content);
+
+    if (churn === undefined) {
+      continue;
+    }
+
+    if (churn._tag === "NickChanged") {
+      const was = spoke.get(foldNick(churn.from));
+
+      if (was !== undefined) {
+        spoke.delete(foldNick(churn.from));
+        spoke.set(foldNick(churn.to), was);
+      }
+
+      continue;
+    }
+
+    const last = spoke.get(foldNick(churn.nick));
+
+    if (ours.has(item) || (last !== undefined && item.position.at - last <= spokeSpan)) {
+      shown.add(item);
+    }
   }
 
-  return activity === "quiet" && !comings.has(content.activity._tag);
+  return shown;
+};
+
+/**
+ * Which items of a Timeline's window it shows, as `activity` says: in a Channel's, all
+ * Activity, all but the joins, parts, and quits of Users who did not speak shortly before
+ * (Self's always shown), all but joins, parts, and quits, or none. Every other item, and
+ * every item of another kind of Timeline, shows. It decides what is drawn, never what is
+ * counted, and is worked out once for a window.
+ * @param activity - Which Activity a Channel shows.
+ * @param kind - The Timeline's kind.
+ * @param items - The window's items, in order.
+ * @param self - Self's nick, if known, which `spoke` shows the joins, parts, and quits of.
+ * @returns Whether each of the window's items shows.
+ */
+export const showsIn = (
+  activity: ActivityShown,
+  kind: "Network" | "Channel" | "Direct" | undefined,
+  items: readonly TimelineItem[],
+  self: string | undefined
+): ((item: TimelineItem) => boolean) => {
+  if (kind !== "Channel" || activity === "all") {
+    return () => true;
+  }
+
+  const spoken = activity === "spoke" ? spokenComings(items, self) : undefined;
+
+  return (item) => {
+    const { content } = item;
+
+    if (content._tag !== "Activity") {
+      return true;
+    }
+
+    if (!comings.has(content.activity._tag)) {
+      return activity !== "none";
+    }
+
+    return spoken?.has(item) === true;
+  };
 };

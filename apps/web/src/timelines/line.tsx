@@ -20,9 +20,10 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
+import { churnOf } from "@iirc/frontend/churn";
 import { replyOf } from "@iirc/frontend/composer";
 import type { Answering } from "@iirc/frontend/composer";
-import { lineOf, quotedOf } from "@iirc/frontend/render";
+import { churnLine, lineOf, quotedOf } from "@iirc/frontend/render";
 import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 import { Fragment, useRef, useState } from "react";
@@ -609,6 +610,103 @@ const MotdLine = ({
 };
 
 /**
+ * A description of an item, in the columns every row shares: its time, its marker, and its
+ * words, with how many times a failed Connection repeated when it did.
+ * @param props - The item, its line, and how often it repeated, if it did.
+ * @returns The line.
+ */
+const DescribedLine = ({
+  item,
+  line,
+  repeated,
+}: {
+  readonly item: TimelineItem;
+  readonly line: Extract<LineOfRow, { readonly _tag: "Description" }>;
+  readonly repeated: Extract<Row, { readonly _tag: "Item" }>["repeated"];
+}) => (
+  // An arrow says nothing a reader needs, but a numeric's number is its name.
+  <div className={toneClass[line.tone]}>
+    <Time at={item.position.at} />{" "}
+    <span aria-hidden={line.tone !== "Numeric"} className={styles.marker}>
+      {line.marker ?? ""}
+    </span>{" "}
+    <span className={styles.text}>
+      {line.parts.map((part, index) => (
+        // A description's pieces never move, so their order is their identity.
+        // oxlint-disable-next-line react/no-array-index-key
+        <Piece key={index} part={part} timeline={item.timeline} />
+      ))}
+      {repeated === undefined ? null : (
+        <RepeatedWords count={repeated.count} from={repeated.from} to={item.position.at} />
+      )}
+    </span>
+  </div>
+);
+
+/**
+ * A run of joins, parts, quits, and changes of nick as one dim line, as the message of the
+ * day is: how many of each and who, which a press, or Enter or Space, opens to each one's own
+ * line under it, and closes again. Whether it is open is this view's alone. The nicks on the
+ * folded line are only coloured, since a button holds them, and the lines under it open the
+ * menu on a nick as any do.
+ * @param props - The row, and the run's items, oldest first.
+ * @returns The lines.
+ */
+const FoldedLines = ({
+  items,
+  row,
+}: {
+  readonly items: readonly TimelineItem[];
+  readonly row: Extract<Row, { readonly _tag: "Item" }>;
+}) => {
+  const [open, setOpen] = useState(false);
+  const line = churnLine(items.flatMap((item) => churnOf(item.content) ?? []));
+
+  return (
+    <>
+      <div className={styles.motd}>
+        <Time at={items[0]?.position.at ?? row.item.position.at} />{" "}
+        <span aria-hidden className={styles.marker}>
+          {line.marker}
+        </span>{" "}
+        <span className={styles.motdText}>
+          <AriaButton
+            aria-expanded={open}
+            className={styles.motdSummary}
+            onPress={() => {
+              setOpen(!open);
+            }}
+          >
+            <Icon name={open ? "expanded" : "collapsed"} />{" "}
+            {line.parts.map((part, index) =>
+              part._tag === "Nick" ? (
+                // The words' pieces never move, so their order is their identity.
+                // oxlint-disable-next-line react/no-array-index-key
+                <Nick colour={part.colour} key={index} nick={part.nick} />
+              ) : (
+                // oxlint-disable-next-line react/no-array-index-key
+                <Piece key={index} part={part} timeline={row.item.timeline} />
+              )
+            )}
+          </AriaButton>
+        </span>
+      </div>
+      {open
+        ? items.map((item) => {
+            const each = lineOf(item.content, item.network);
+
+            return each._tag === "Description" ? (
+              <div className={styles.line} key={`${item.position.at}-${item.sequence}`}>
+                <DescribedLine item={item} line={each} repeated={undefined} />
+              </div>
+            ) : null;
+          })
+        : null}
+    </>
+  );
+};
+
+/**
  * One row's line, in the columns every row shares: the time, the sender or a marker, and
  * the text, so an Activity's or a Session's words start where a Message's text does.
  * @param props - The row.
@@ -631,6 +729,10 @@ const RowLine = ({ row }: { readonly row: Row }) => {
     );
   }
 
+  if (row.folded !== undefined) {
+    return <FoldedLines items={row.folded} row={row} />;
+  }
+
   const line = lineOf(row.item.content, row.item.network);
   const time = <Time at={row.item.position.at} />;
 
@@ -642,27 +744,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
   }
 
   if (line._tag === "Description") {
-    const { repeated } = row;
-
-    // An arrow says nothing a reader needs, but a numeric's number is its name.
-    return (
-      <div className={toneClass[line.tone]}>
-        {time}{" "}
-        <span aria-hidden={line.tone !== "Numeric"} className={styles.marker}>
-          {line.marker ?? ""}
-        </span>{" "}
-        <span className={styles.text}>
-          {line.parts.map((part, index) => (
-            // A description's pieces never move, so their order is their identity.
-            // oxlint-disable-next-line react/no-array-index-key
-            <Piece key={index} part={part} timeline={row.item.timeline} />
-          ))}
-          {repeated === undefined ? null : (
-            <RepeatedWords count={repeated.count} from={repeated.from} to={row.item.position.at} />
-          )}
-        </span>
-      </div>
-    );
+    return <DescribedLine item={row.item} line={line} repeated={row.repeated} />;
   }
 
   return <MessageLine continues={row.continues === true} item={row.item} line={line} />;

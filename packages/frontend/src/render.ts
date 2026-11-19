@@ -22,6 +22,8 @@ import { parseFormatting, stripFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
 import { linkSchemes as schemes, linksInRun } from "@iirc/protocol/links";
 
+import { churnNick, foldNick } from "./churn.ts";
+import type { Churn } from "./churn.ts";
 import { contained, embeddings, isolates, popEmbedding, popIsolate } from "./contained.ts";
 import { optionName, showText } from "./options.ts";
 import type { Kind } from "./options.ts";
@@ -1018,6 +1020,62 @@ const motdLine = (line: string): readonly Inline[] => {
   }
 
   return formatted(line.startsWith("- ") ? line.slice(2) : line);
+};
+
+/** How a run's line counts each kind of churn. */
+const churnWords = {
+  Joined: "joined",
+  NickChanged: "changed nick",
+  Parted: "left",
+  Quit: "quit",
+} as const;
+
+/** The most Users a folded run's line names, the rest counted. */
+const churnNamed = 5;
+
+/**
+ * A run of joins, parts, quits, and changes of nick as one line: how many of each, in that
+ * order and only those there were, then the Users, up to {@link churnNamed}, in the order
+ * they first appear, a change of nick being of the nick it had, and how many more there were.
+ * @param run - The run, oldest first.
+ * @returns The line.
+ */
+export const churnLine = (
+  run: readonly Churn[]
+): Extract<Line, { readonly _tag: "Description" }> => {
+  const counts = (["Joined", "Parted", "Quit", "NickChanged"] as const).flatMap((tag) => {
+    const count = run.filter((one) => one._tag === tag).length;
+
+    return count === 0 ? [] : [`${count} ${churnWords[tag]}`];
+  });
+
+  // Each User once, by their nick folded, as it was first written.
+  const first = new Map<string, string>();
+
+  for (const one of run) {
+    const nick = churnNick(one);
+
+    if (!first.has(foldNick(nick))) {
+      first.set(foldNick(nick), nick);
+    }
+  }
+
+  const users = [...first.values()];
+
+  const more = users.length - churnNamed;
+
+  return {
+    _tag: "Description",
+    marker: "--",
+    parts: [
+      words(`${counts.join(", ")}: `),
+      ...users
+        .slice(0, churnNamed)
+        .flatMap((nick, index) => [...(index === 0 ? [] : [words(", ")]), nickPart(nick)]),
+      ...(more > 0 ? [words(` and ${more} more`)] : []),
+    ],
+    tone: "Activity",
+  };
 };
 
 /**
