@@ -101,6 +101,15 @@ export type Action = typeof Action.Type;
 export const Lookup = Schema.TaggedUnion({
   /** A Channel's bans, by the `b` list of `CHANMODES`. */
   Bans: { channel: Schema.String },
+  /**
+   * `LIST`: the Channels on the Network, optionally only those whose names a glob `mask`
+   * matches, with `*` and `?`, and those with at least `least` members, an integer of 1 or
+   * more.
+   */
+  Channels: {
+    least: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+    mask: Schema.optionalKey(Schema.String),
+  },
   /** A Channel's ban exceptions, by the list mode `EXCEPTS` names. */
   Exceptions: { channel: Schema.String },
   /** A Channel's invitation masks, by the list mode `INVEX` names. */

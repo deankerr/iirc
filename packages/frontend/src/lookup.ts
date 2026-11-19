@@ -1,6 +1,7 @@
 /**
- * Lookups: what `/whois`, `/whowas`, `/names`, `/who`, and the commands of a Channel's lists
- * ask, a card for each Pane showing what came back, and that card as text for a view to draw. The runtime
+ * Lookups: what `/whois`, `/whowas`, `/names`, `/who`, `/list`, and the commands of a Channel's
+ * lists ask, a card for each Pane showing what came back, and that card as text for a view to
+ * draw. The runtime
  * asks the Daemon, under an intent it names, and folds each answer in. Every field a
  * Network wrote comes back contained, as text, and a time is formatted by a function the
  * caller gives, since the core reads no clock, locale, or time zone.
@@ -8,6 +9,7 @@
  * @packageDocumentation
  */
 import type {
+  ChannelEntry,
   ChannelHeader,
   LookResult,
   LookupRequest,
@@ -32,7 +34,8 @@ import type { Timelines } from "./timelines.ts";
 
 /**
  * Which Lookup: `WHOIS`, what the Network says of a User now, `WHOWAS`, who held a nick,
- * `NAMES`, a Channel's members, `WHO`, the Users a mask matches, or one of a Channel's lists.
+ * `NAMES`, a Channel's members, `WHO`, the Users a mask matches, `LIST`, the Network's
+ * Channels, or one of a Channel's lists.
  */
 export type LookupKind = LookupRequest["_tag"];
 
@@ -350,6 +353,98 @@ export const parseWhoMask = (args: string): Parsed<string> => {
   return { _tag: "Parsed", value: mask };
 };
 
+/** What `/list` asks of the Network's Channels: a mask of their names, and a least number of members. */
+export type Conditions = Omit<Extract<LookupRequest, { readonly _tag: "Channels" }>, "_tag">;
+
+/**
+ * The conditions of `/list`, with a key only for each given.
+ * @param mask - The mask, if given.
+ * @param least - The least number of members, if given.
+ * @returns The conditions.
+ */
+const conditionsOf = (mask: string | undefined, least: number | undefined): Conditions => {
+  if (mask !== undefined && least !== undefined) {
+    return { least, mask };
+  }
+
+  if (mask !== undefined) {
+    return { mask };
+  }
+
+  return least === undefined ? {} : { least };
+};
+
+/**
+ * What `/list` asks, the text after the command: at most one mask and one least number of
+ * members, in either order, where a word of digits alone is the least and any other the
+ * mask, or why it cannot be read, in words. Whether the Network applies them, the Client
+ * decides.
+ * @param args - The text after the command's name.
+ * @returns The conditions, or why there are none, in words.
+ */
+export const parseConditions = (args: string): Parsed<Conditions> => {
+  const usage = "/list [mask] [least]";
+  const words = args.trim() === "" ? [] : args.trim().split(/\s+/u);
+
+  const invalid = (why: string): Parsed<Conditions> => ({
+    _tag: "Invalid",
+    message: `${why} ${usage}`,
+  });
+
+  if (words.length > 2) {
+    return invalid("Give a mask, a least number of members, or both.");
+  }
+
+  const leasts = words.filter((word) => /^\d+$/u.test(word));
+  const masks = words.filter((word) => !/^\d+$/u.test(word));
+
+  if (leasts.length > 1) {
+    return invalid("Give one least number of members.");
+  }
+
+  if (masks.length > 1) {
+    return invalid("Give one mask.");
+  }
+
+  const [mask] = masks;
+  const least = leasts[0] === undefined ? undefined : Number(leasts[0]);
+
+  if (mask !== undefined && (mask.includes(",") || unsendable.test(mask))) {
+    return invalid(
+      mask.includes(",") ? "A mask holds no comma." : "A mask holds no line break or NUL."
+    );
+  }
+
+  if (least !== undefined && !Number.isSafeInteger(least)) {
+    return invalid("No Channel has that many members.");
+  }
+
+  if (least !== undefined && least < 1) {
+    return invalid("A Channel listed has at least 1 member.");
+  }
+
+  return { _tag: "Parsed", value: conditionsOf(mask, least) };
+};
+
+/**
+ * The intent `/list` comes to, once its conditions are read.
+ * @param conditions - The mask and least number of members, each where given.
+ * @param network - The Network in focus.
+ * @param timeline - The Timeline in focus.
+ * @returns The intent.
+ */
+export const directoryLookOf = (
+  conditions: Conditions,
+  network: NetworkId,
+  timeline: TimelineId
+): Look => ({
+  _tag: "Look",
+  lookup: { _tag: "Channels", ...conditions },
+  network,
+  ranks: rfcRanks,
+  timeline,
+});
+
 /**
  * The intent `/whois` or `/whowas` comes to, once its nick is read.
  * @param kind - The Lookup.
@@ -413,6 +508,10 @@ export interface Card {
    * until it is read or when it could not be: a Channel opens or joins only once known.
    */
   readonly naming: Naming | undefined;
+  /** The intent its Lookup was asked under, once it was, by which a later page is read. */
+  readonly intent: string | undefined;
+  /** Where the page of the Network's Channels being read begins, while one is. */
+  readonly reading: number | undefined;
 }
 
 /**
@@ -437,6 +536,11 @@ export const initialLookups: Lookups = { cards: new Map(), next: 1 };
  * What happened to the Lookups.
  *
  * - `Asked`: a Lookup was asked in a Pane, replacing its card.
+ * - `Sent`: its Lookup was asked of the Daemon under `intent`.
+ * - `Reading`: a page of the Network's Channels from `offset` is being read.
+ * - `Paged`: a page of the Network's Channels came, which follows on from those held only
+ *   when it begins where they end.
+ * - `PageFailed`: the page being read came to nothing, so it can be asked for again.
  * - `Removing`: the Owner is removing a mask of a card's list, by an act under `intent`.
  * - `Restored`: the act under `intent` was refused, or never left, so its mask shows again.
  * - `Changed`: a step of the changes stream, whose refused actions restore their masks.
@@ -454,6 +558,10 @@ export const initialLookups: Lookups = { cards: new Map(), next: 1 };
  */
 export type LookupsEvent =
   | { readonly _tag: "Asked"; readonly pane: string; readonly look: Look }
+  | { readonly _tag: "Sent"; readonly id: number; readonly intent: string }
+  | { readonly _tag: "Reading"; readonly id: number; readonly offset: number }
+  | { readonly _tag: "Paged"; readonly id: number; readonly result: LookResult }
+  | { readonly _tag: "PageFailed"; readonly id: number }
   | { readonly _tag: "Waited"; readonly id: number }
   | {
       readonly _tag: "Removing";
@@ -544,23 +652,140 @@ const restoring = (state: Lookups, intents: ReadonlySet<string>): Lookups => {
   return { ...state, cards };
 };
 
+/** How many of the Network's Channels a page holds. */
+export const pageLimit = 100;
+
+/** The page of a card's Channels to read next: by its Lookup's intent, from `offset`. */
+export interface Page {
+  readonly intent: string;
+  readonly offset: number;
+  readonly limit: number;
+}
+
 /**
- * Folds one event into the Lookups. An answer for a card no Pane holds any more changes
- * nothing, and a result, once it came, is never replaced.
+ * The Network's Channels a card holds so far, once its first page came.
+ * @param card - The card.
+ * @returns Them, or none.
+ */
+const directoryOf = (card: Card) =>
+  card.phase._tag === "Done" && card.phase.result._tag === "Channels"
+    ? card.phase.result
+    : undefined;
+
+/**
+ * The page of the Network's Channels a card reads next: the one after those it holds, while
+ * the Daemon kept more than that, its intent is known, and no page is being read.
+ * @param card - The card.
+ * @returns The page, or none.
+ */
+export const nextPage = (card: Card): Page | undefined => {
+  const held = directoryOf(card);
+
+  if (held === undefined || card.intent === undefined || card.reading !== undefined) {
+    return undefined;
+  }
+
+  const offset = held.offset + held.channels.length;
+
+  return offset < held.total ? { intent: card.intent, limit: pageLimit, offset } : undefined;
+};
+
+/**
+ * A card with a page of the Network's Channels folded in after those it holds, where it
+ * begins where they end, and no page being read any more.
+ * @param card - The card.
+ * @param page - The page.
+ * @returns The card.
+ */
+const paged = (card: Card, page: LookResult): Card => {
+  const held = directoryOf(card);
+
+  if (
+    held === undefined ||
+    page._tag !== "Channels" ||
+    page.offset !== held.offset + held.channels.length
+  ) {
+    return { ...card, reading: undefined };
+  }
+
+  return {
+    ...card,
+    phase: {
+      _tag: "Done",
+      result: { ...held, channels: [...held.channels, ...page.channels] },
+    },
+    reading: undefined,
+  };
+};
+
+/** What happened to a card's Lookup's intent and the pages of its Channels. */
+type PagingEvent = Extract<
+  LookupsEvent,
+  { readonly _tag: "Sent" | "Reading" | "Paged" | "PageFailed" }
+>;
+
+const pagingTags: ReadonlySet<LookupsEvent["_tag"]> = new Set([
+  "Sent",
+  "Reading",
+  "Paged",
+  "PageFailed",
+]);
+
+/**
+ * Whether an event is of a card's intent or the pages of its Channels.
+ * @param event - What happened.
+ * @returns Whether it is.
+ */
+const isPaging = (event: LookupsEvent): event is PagingEvent => pagingTags.has(event._tag);
+
+/**
+ * Folds into a card what happened to its Lookup's intent and the pages of its Channels.
+ * @param card - The card.
+ * @param event - What happened.
+ * @returns The card.
+ */
+const paging = (card: Card, event: PagingEvent): Card => {
+  switch (event._tag) {
+    case "Sent": {
+      return { ...card, intent: event.intent };
+    }
+
+    case "Reading": {
+      return nextPage(card)?.offset === event.offset ? { ...card, reading: event.offset } : card;
+    }
+
+    case "Paged": {
+      return paged(card, event.result);
+    }
+
+    case "PageFailed": {
+      return { ...card, reading: undefined };
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
+/**
+ * Folds into the Lookups an event of the cards themselves, rather than of a card's pages.
  * @param state - The Lookups.
  * @param event - What happened.
  * @returns The Lookups.
  */
-export const reduceLookups = (state: Lookups, event: LookupsEvent): Lookups => {
+const reduceCards = (state: Lookups, event: Exclude<LookupsEvent, PagingEvent>): Lookups => {
   switch (event._tag) {
     case "Asked": {
       const cards = new Map(state.cards);
 
       cards.set(event.pane, {
         id: state.next,
+        intent: undefined,
         look: event.look,
         naming: undefined,
         phase: { _tag: "Asking" },
+        reading: undefined,
         removing: new Map(),
       });
 
@@ -656,6 +881,18 @@ export const reduceLookups = (state: Lookups, event: LookupsEvent): Lookups => {
     }
   }
 };
+
+/**
+ * Folds one event into the Lookups. An answer for a card no Pane holds any more changes
+ * nothing, and a result, once it came, is never replaced.
+ * @param state - The Lookups.
+ * @param event - What happened.
+ * @returns The Lookups.
+ */
+export const reduceLookups = (state: Lookups, event: LookupsEvent): Lookups =>
+  isPaging(event)
+    ? changing(state, event.id, (card) => paging(card, event))
+    : reduceCards(state, event);
 
 /**
  * The card a Pane shows: its own, while the Pane still has open the Timeline it was asked
@@ -760,11 +997,29 @@ export interface UserShown {
   readonly realname: string | undefined;
 }
 
-/** What was looked up: a nick, in its colour, a Channel, by its name, or a mask. */
+/** One of the Network's Channels, as the card shows it. */
+export interface ListedShown {
+  /** Its name, contained. */
+  readonly name: string;
+  /** How many members the Network said it has, its digits grouped. */
+  readonly members: string;
+  /** Its topic, contained, or none when the Network gave none. */
+  readonly topic: string | undefined;
+  /** What a screen reader hears, such as `#iirc, 12 members`. */
+  readonly label: string;
+  /** What choosing it does, as for a Channel in a profile. */
+  readonly choose: Intent | undefined;
+}
+
+/**
+ * What was looked up: a nick, in its colour, a Channel, by its name, a mask, or the
+ * conditions the Network's Channels were listed by, in words.
+ */
 export type SubjectShown =
   | { readonly _tag: "Nick"; readonly nick: string; readonly colour: number }
   | { readonly _tag: "Channel"; readonly name: string }
-  | { readonly _tag: "Mask"; readonly mask: string };
+  | { readonly _tag: "Mask"; readonly mask: string }
+  | { readonly _tag: "Directory"; readonly words: string };
 
 /**
  * A card as a view draws it: what was looked up, and how it stands.
@@ -777,7 +1032,10 @@ export type SubjectShown =
  *   cut short.
  * - `Users`: the Users a mask matched, in the order the reply gave them, with a note when it
  *   was cut short.
- * - `Said`: no User, no mask, no member, or no match, in words.
+ * - `Directory`: the Network's Channels, most members first, as many as were read, with a
+ *   note when the reply was cut short, and `more` while the Daemon kept more: how many of
+ *   them are shown, and whether the next page is being read.
+ * - `Said`: no User, no mask, no member, no match, or no Channel, in words.
  *
  * `notes` are the `WARN` and `NOTE` replies the Network gave with its result, each as its
  * kind, command, code, context, and description, contained.
@@ -807,6 +1065,12 @@ export interface CardShown {
         readonly _tag: "Users";
         readonly users: readonly UserShown[];
         readonly note: string | undefined;
+      }
+    | {
+        readonly _tag: "Directory";
+        readonly channels: readonly ListedShown[];
+        readonly note: string | undefined;
+        readonly more: { readonly words: string; readonly reading: boolean } | undefined;
       }
     | { readonly _tag: "Said"; readonly words: string };
 }
@@ -1094,6 +1358,10 @@ const refusedWords: Readonly<Record<"Offline" | "Busy" | "NotOffered", string>> 
   Offline: "Not looked up: the Network is not connected.",
 };
 
+/** Why `/list` was not sent while an earlier one is still being answered, in words. */
+const busyListing =
+  "Not looked up: the Network is still listing its Channels for an earlier /list. Try again once it has.";
+
 /** Why a Lookup came to nothing on the Frontend's side, in words. */
 const lostWords: Readonly<Record<LookFailure, string>> = {
   NoAnswer: "No result came from the Daemon in time. Try again.",
@@ -1114,7 +1382,7 @@ const nothingFound = (
   name: string,
   result: Exclude<
     LookResult,
-    { readonly _tag: "Found" | "Partial" | "Listed" | "Members" | "Users" }
+    { readonly _tag: "Found" | "Partial" | "Listed" | "Members" | "Users" | "Channels" }
   >
 ): string => {
   switch (result._tag) {
@@ -1129,6 +1397,10 @@ const nothingFound = (
         return `The Network remembers no one who used the nick ${name} (${reply}).`;
       }
 
+      if (kind === "Channels") {
+        return `The Network listed no Channels (${reply}).`;
+      }
+
       return kind === "Who"
         ? `The Network has no one matching ${name} (${reply}).`
         : `The Network has no Channel ${name} (${reply}).`;
@@ -1139,6 +1411,10 @@ const nothingFound = (
     }
 
     case "Refused": {
+      if (kind === "Channels" && result.reason === "Busy") {
+        return busyListing;
+      }
+
       if (result.reason !== "Unsendable") {
         return refusedWords[result.reason];
       }
@@ -1147,7 +1423,7 @@ const nothingFound = (
         return "Not looked up: the Network cannot be asked about that nick.";
       }
 
-      return kind === "Who"
+      return kind === "Who" || kind === "Channels"
         ? "Not looked up: the Network cannot be asked about that mask."
         : "Not looked up: the Network cannot be asked about that Channel.";
     }
@@ -1266,6 +1542,111 @@ const peopleBody = (
 };
 
 /**
+ * A count with its digits grouped in threes by a narrow no-break space, as `23 412`, the same
+ * in every locale, since the core reads none.
+ * @param count - The count.
+ * @returns The digits.
+ */
+export const counted = (count: number): string =>
+  String(count).replaceAll(/\B(?=(?:\d{3})+$)/gu, "\u202F");
+
+/**
+ * The conditions `/list` asked, in words, such as "matching #linux* with at least 10
+ * members", or none for none.
+ * @param conditions - The conditions.
+ * @returns The words, the mask as given, which the caller contains.
+ */
+const conditionWords = (conditions: Conditions): string =>
+  [
+    conditions.mask === undefined ? undefined : `matching ${conditions.mask}`,
+    conditions.least === undefined
+      ? undefined
+      : `with at least ${counted(conditions.least)} members`,
+  ]
+    .filter((one) => one !== undefined)
+    .join(" ");
+
+/**
+ * One of the Network's Channels, as the card shows it.
+ * @param timelines - The Timelines.
+ * @param card - The card.
+ * @param entry - The Channel, as the reply gave it.
+ * @returns The Channel.
+ */
+const listedShown = (timelines: Timelines, card: Card, entry: ChannelEntry): ListedShown => {
+  const name = contained(entry.channel);
+  const members = counted(entry.members);
+
+  return {
+    choose: choosing(timelines, card, entry.channel),
+    label: `${name}, ${members} ${entry.members === 1 ? "member" : "members"}`,
+    members,
+    name,
+    topic: said(entry.topic),
+  };
+};
+
+/**
+ * Why a reply of the Network's Channels was cut short, in words: for one longer than a Lookup
+ * keeps, how many of how many it shows.
+ * @param result - The Channels.
+ * @returns The words, or none when it was not.
+ */
+const directoryNote = (
+  result: Extract<LookResult, { readonly _tag: "Channels" }>
+): string | undefined => {
+  if (result.cut === "Bounded") {
+    return `These are the ${counted(result.total)} largest of the ${counted(result.seen)} Channels the Network listed, as many as a Lookup keeps.`;
+  }
+
+  return result.cut === null ? undefined : partialWords[result.cut];
+};
+
+/**
+ * The body of a card of the Network's Channels: those read so far, why the reply was cut
+ * short, and how many more the Daemon kept, or in words when it listed none.
+ * @param timelines - The Timelines.
+ * @param card - The card.
+ * @param name - The conditions it was listed by, in words, contained.
+ * @param result - Its Channels so far.
+ * @returns The body.
+ */
+const directoryBody = (
+  timelines: Timelines,
+  card: Card,
+  name: string,
+  result: Extract<LookResult, { readonly _tag: "Channels" }>
+): CardShown["body"] => {
+  const note = directoryNote(result);
+
+  if (result.channels.length === 0) {
+    return {
+      _tag: "Said",
+      words:
+        note ??
+        (name === ""
+          ? "The Network listed no Channels."
+          : `The Network listed no Channels ${name}.`),
+    };
+  }
+
+  const shown = result.offset + result.channels.length;
+
+  return {
+    _tag: "Directory",
+    channels: result.channels.map((entry) => listedShown(timelines, card, entry)),
+    more:
+      shown < result.total && card.intent !== undefined
+        ? {
+            reading: card.reading !== undefined,
+            words: `${counted(shown)} of ${counted(result.total)}`,
+          }
+        : undefined,
+    note,
+  };
+};
+
+/**
  * What a Lookup is of, as the Owner gave it: a nick, a Channel's name, or a mask.
  * @param lookup - The Lookup.
  * @returns The text.
@@ -1279,6 +1660,10 @@ const subjectName = (lookup: LookupRequest): string => {
 
     case "Who": {
       return lookup.mask;
+    }
+
+    case "Channels": {
+      return conditionWords(lookup);
     }
 
     case "Bans":
@@ -1311,6 +1696,10 @@ const subjectOf = (lookup: LookupRequest, name: string): SubjectShown => {
       return { _tag: "Mask", mask: name };
     }
 
+    case "Channels": {
+      return { _tag: "Directory", words: name };
+    }
+
     case "Bans":
     case "Exceptions":
     case "Invitations":
@@ -1322,6 +1711,34 @@ const subjectOf = (lookup: LookupRequest, name: string): SubjectShown => {
       return lookup satisfies never;
     }
   }
+};
+
+/**
+ * The body of a card of a Channel's list: its masks, but those being removed, or in words
+ * when none is left.
+ * @param card - The card.
+ * @param name - The Channel's name, contained.
+ * @param result - The list.
+ * @param time - Formats an instant.
+ * @param head - The head of the list's Channel, as held live, if read.
+ * @returns The body.
+ */
+const masksBody = (
+  card: Card,
+  name: string,
+  result: Extract<LookResult, { readonly _tag: "Listed" }>,
+  time: (instant: number) => string | undefined,
+  head: ChannelHeader | undefined
+): CardShown["body"] => {
+  const { lookup } = card.look;
+  const note = result.cut === null ? undefined : partialWords[result.cut];
+  const remove = removing(card, head);
+  const masks = result.masks.filter((entry) => !card.removing.has(entry.mask));
+  const kind = isListLookup(lookup) ? listWords[lookup._tag] : "masks";
+
+  return masks.length === 0
+    ? { _tag: "Said", words: note ?? `${name} has no ${kind}.` }
+    : { _tag: "Masks", masks: masks.map((entry) => maskShown(entry, remove, time)), note };
 };
 
 /**
@@ -1370,25 +1787,15 @@ export const cardShown = (
       const { result } = phase;
 
       if (result._tag === "Listed") {
-        const note = result.cut === null ? undefined : partialWords[result.cut];
-        const remove = removing(card, head);
-        const masks = result.masks.filter((entry) => !card.removing.has(entry.mask));
-        const kind = isListLookup(lookup) ? listWords[lookup._tag] : "masks";
-
-        return masks.length === 0
-          ? { ...shown, body: { _tag: "Said", words: note ?? `${name} has no ${kind}.` } }
-          : {
-              ...shown,
-              body: {
-                _tag: "Masks",
-                masks: masks.map((entry) => maskShown(entry, remove, time)),
-                note,
-              },
-            };
+        return { ...shown, body: masksBody(card, name, result, time, head) };
       }
 
       if (result._tag === "Members" || result._tag === "Users") {
         return { ...shown, body: peopleBody(card, name, result) };
+      }
+
+      if (result._tag === "Channels") {
+        return { ...shown, body: directoryBody(timelines, card, name, result) };
       }
 
       if (result._tag !== "Found" && result._tag !== "Partial") {

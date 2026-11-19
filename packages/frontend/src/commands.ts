@@ -33,11 +33,13 @@ import {
   isLookupNick,
   listCommandNames,
   listLookOf,
+  directoryLookOf,
   listMode,
   listWords,
   lookOf,
   namesLookOf,
   nickRulesOf,
+  parseConditions,
   parseListChannel,
   parseLookupNick,
   parseWhoMask,
@@ -1689,6 +1691,34 @@ const whoCommand = (): Command => ({
   when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
 });
 
+/**
+ * `/list`: the Network's Channels, most members first, those whose names match a mask and
+ * with at least a number of members, each where given, on the open Timeline's Network.
+ * @returns The command.
+ */
+const directoryCommand = (): Command => ({
+  aliases: [],
+  arguments: "Optional",
+  description: "List the Channels on the open Timeline's Network, the largest first, to join one.",
+  id: "lookup.list",
+  name: "list",
+  run: (args, context) => {
+    const { focus } = context;
+
+    if (focus === undefined) {
+      return invalid("Open a Timeline first.");
+    }
+
+    const conditions = parseConditions(args);
+
+    return conditions._tag === "Invalid"
+      ? conditions
+      : parsed([directoryLookOf(conditions.value, focus.network, focus.timeline)]);
+  },
+  usage: "/list [mask] [least]",
+  when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
+});
+
 const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }];
 const anywhereActing = anywhere;
 const focused: readonly Condition[] = [{ _tag: "Focused" }];
@@ -2961,6 +2991,7 @@ export const commands: readonly Command[] = [
   lookupCommand("Whowas", "Look up who used a nick on the open Timeline's Network before."),
   namesCommand(),
   whoCommand(),
+  directoryCommand(),
   listCommand("Bans", [], "List a Channel's bans, the open one or another, and lift them."),
   listCommand(
     "Exceptions",

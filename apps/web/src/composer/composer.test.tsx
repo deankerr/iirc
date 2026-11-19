@@ -580,8 +580,8 @@ describe("the Composer's list", () => {
         active: true,
         controls: true,
         highlighted: -1,
-        // `/invexes` is found by its description, which says "join".
-        names: ["/join", "/invexes"],
+        // `/invexes` and `/list` are found by their descriptions, which say "join".
+        names: ["/join", "/invexes", "/list"],
         texts: undefined,
       },
     });
@@ -698,7 +698,7 @@ describe("the Composer's list", () => {
       escape: false,
       escaped: "/jo",
       moved: { controls: null, list: undefined },
-      open: ["/join", "/invexes"],
+      open: ["/join", "/invexes", "/list"],
       recalled: "said before",
     });
   });

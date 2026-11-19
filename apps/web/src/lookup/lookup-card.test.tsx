@@ -397,6 +397,82 @@ describe("the Lookup card", () => {
     });
   });
 
+  it("lists the Network's Channels a page at a time, joins or opens each, and reads more when asked", async () => {
+    // `#iirc`, then 149 more, fewest members last, the first with a hostile topic.
+    const channels = [
+      { channel: "#iirc", members: 500, topic: `${override}<b>home</b>` },
+      ...Array.from({ length: 149 }, (_, index) => ({
+        channel: `#c${index}`,
+        members: 148 - index,
+        topic: "",
+      })),
+    ];
+
+    const { container, daemon } = await signedIn({
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "Channels",
+        channels,
+        cut: null,
+        notes: [],
+        offset: 0,
+        seen: 150,
+        total: 150,
+      },
+    });
+
+    const rows = () => [...(card()?.querySelectorAll('ul[aria-label="Channels"] > li') ?? [])];
+
+    const moreButton = () =>
+      [...(card()?.querySelectorAll("button") ?? [])].find(
+        (one) => one.textContent === "More Channels"
+      );
+
+    await inComposer(container, "/list 2", "Enter");
+    await settled(() => rows().length === 100 && buttons().includes("Join #c0, 148 members"));
+
+    const first = {
+      bold: card()?.querySelectorAll("b").length,
+      heading: card()?.querySelector("h3")?.textContent,
+      iirc: rows()[0]?.textContent,
+      looks: daemon.looks.map((one) => one.lookup),
+      open: buttons().includes("Open #iirc, 500 members"),
+      pages: [...daemon.lookedPages],
+      shown: card()?.textContent.includes("100 of 150 shown"),
+    };
+
+    await act(async () => {
+      moreButton()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => rows().length === 150);
+
+    const paged = {
+      last: rows().at(-1)?.textContent,
+      more: moreButton() ?? null,
+      pages: [...daemon.lookedPages],
+    };
+
+    await press("Join #c0, 148 members");
+
+    expect({
+      ...first,
+      composer: container.querySelector("textarea")?.value,
+      paged,
+    }).toStrictEqual({
+      bold: 0,
+      composer: "/join #c0",
+      heading: "channels with at least 2 members",
+      iirc: `#iirc500${override}<b>home</b>\u202C`,
+      looks: [{ _tag: "Channels", least: 2 }],
+      open: true,
+      paged: { last: "#c1480", more: null, pages: [{ limit: "100", offset: "100" }] },
+      pages: [],
+      shown: true,
+    });
+  });
+
   it("shows what /who matched as a row each, user@host, away, and realname, hostile text kept as text", async () => {
     const { container, daemon } = await signedIn({
       answer: "LookedUp",

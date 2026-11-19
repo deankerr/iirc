@@ -1,6 +1,7 @@
 /**
- * Lookups, as atoms: each Pane's card, as the core folds it, what carries out a `Look`, and
- * removing a mask from a card's list. A Lookup is asked once, under an intent the runtime names, and never sent again: when
+ * Lookups, as atoms: each Pane's card, as the core folds it, what carries out a `Look`,
+ * removing a mask from a card's list, and reading the next page of the Network's Channels
+ * when the Owner asks for more. A Lookup is asked once, under an intent the runtime names, and never sent again: when
  * the Daemon answers `Pending`, the Network stops, or no answer comes, the runtime asks
  * `GET …/lookups/{intent}`, soon and then less often, until its result comes or `lookup`,
  * two minutes, has passed. It runs beside the composer's turn, so a Say never waits behind
@@ -13,7 +14,7 @@ import type { LookedAnswer, NetworkId, TimeShown } from "@iirc/api";
 import { channelIn } from "@iirc/frontend/channel";
 import type { Act } from "@iirc/frontend/commands";
 import { panesOf } from "@iirc/frontend/layout";
-import { cardShown, cardWithId, listTimeline, shownCard } from "@iirc/frontend/lookup";
+import { cardShown, cardWithId, listTimeline, nextPage, shownCard } from "@iirc/frontend/lookup";
 import type { Look, LookFailure, LookupsEvent } from "@iirc/frontend/lookup";
 import { paneOf } from "@iirc/frontend/timelines";
 import { Duration, Effect, Option, Stream } from "effect";
@@ -102,6 +103,56 @@ export const removeMask = runtime
 
         if (Option.isNone(answer) || answer.value._tag !== "Acted") {
           happened(registry, { _tag: "Restored", intent });
+        }
+      }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
+
+/**
+ * Reads the next page of the Network's Channels a Pane's card lists, by its Lookup's intent,
+ * when the Owner asks for more, and folds it in after those shown. Nothing is read while a
+ * page is, or when the Daemon kept no more. A page that fails, or has no answer within
+ * `lookRequest`, can be asked for again.
+ */
+export const moreChannels = runtime
+  .fn(
+    (pane: string, get) =>
+      Effect.gen(function* () {
+        const { registry } = get;
+        const card = registry.get(lookupsState).cards.get(pane);
+        const page = card === undefined ? undefined : nextPage(card);
+
+        if (card === undefined || page === undefined) {
+          return;
+        }
+
+        const { id } = card;
+        const client = yield* DaemonClient;
+        const { lookRequest } = yield* Waits;
+
+        happened(registry, { _tag: "Reading", id, offset: page.offset });
+
+        const answer = yield* client.networks
+          .looked({
+            params: { intent: decodeIntent(page.intent), network: card.look.network },
+            query: { limit: page.limit, offset: page.offset },
+          })
+          .pipe(
+            Effect.timeoutOption(lookRequest),
+            Effect.catch((error) => {
+              if (error._tag === "Unauthorized") {
+                signedOut(registry);
+              }
+
+              return Effect.succeedNone;
+            })
+          );
+
+        if (Option.isSome(answer) && answer.value._tag === "LookedUp") {
+          happened(registry, { _tag: "Paged", id, result: answer.value.result });
+        } else {
+          happened(registry, { _tag: "PageFailed", id });
         }
       }),
     { concurrent: true }
@@ -216,7 +267,7 @@ const askAfter = (
     const client = yield* DaemonClient;
     const { longest, lookRequest, retry } = yield* Waits;
 
-    const once = client.networks.looked({ params: { intent, network } }).pipe(
+    const once = client.networks.looked({ params: { intent, network }, query: {} }).pipe(
       Effect.timeoutOption(lookRequest),
       Effect.map((answer) =>
         Option.isSome(answer) ? foldAnswer(registry, id, answer.value, settled) : false
@@ -279,7 +330,11 @@ const ask = (
     const { lookRequest } = yield* Waits;
 
     return yield* client.networks
-      .look({ params: { network: look.network }, payload: { intent, lookup: look.lookup } })
+      .look({
+        params: { network: look.network },
+        payload: { intent, lookup: look.lookup },
+        query: {},
+      })
       .pipe(
         Effect.timeoutOption(lookRequest),
         Effect.map((answered): Asked => {
@@ -388,6 +443,8 @@ const looking = runtime
         const { look } = found.card;
         const names = yield* IntentNames;
         const intent = decodeIntent(names());
+
+        happened(registry, { _tag: "Sent", id, intent });
 
         const { lookup: deadline } = yield* Waits;
 

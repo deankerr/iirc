@@ -41,6 +41,7 @@ import {
   windowLimit,
 } from "@iirc/api";
 import type {
+  LookQuery,
   NewsEvent,
   OptionsEvent,
   PreviewsEvent,
@@ -124,8 +125,19 @@ import {
   versionOf,
   windowGap,
 } from "./wire.ts";
+import type { LookPage } from "./wire.ts";
 
 /** The largest request body the API reads. Anything larger is refused before it is read. */
+/**
+ * Which page of a `Channels` result a request asked for, or the first without one.
+ * @param query - The request's query.
+ * @returns The page.
+ */
+const lookPage = (query: LookQuery): LookPage => ({
+  limit: query.limit ?? windowLimit.default,
+  offset: query.offset ?? 0,
+});
+
 export const maxBodySize = ByteSize.mebibytes(1);
 
 /** How often a stream a Frontend follows says it is alive while nothing happens. */
@@ -477,14 +489,14 @@ const networks = HttpApiBuilder.group(
           Effect.mapError(journalFailed)
         )
       )
-      .handle("look", ({ params, payload }) =>
+      .handle("look", ({ params, payload, query }) =>
         Effect.gen(function* () {
           const intent = payload.intent ?? (yield* intentId);
 
           return yield* runtime
             .look(NetworkId.make(params.network), { intent, lookup: payload.lookup })
             .pipe(
-              Effect.map(looked),
+              Effect.map((outcome) => looked(outcome, lookPage(query))),
               Effect.catchTags({
                 NetworkStopped: (error) =>
                   Effect.fail(networkStopped(params.network, error, intent)),
@@ -493,12 +505,12 @@ const networks = HttpApiBuilder.group(
             );
         })
       )
-      .handle("looked", ({ params }) =>
+      .handle("looked", ({ params, query }) =>
         runtime.looked(NetworkId.make(params.network), params.intent).pipe(
           Effect.map(
             Option.match({
               onNone: () => ({ _tag: "NotJournaled" }) as const,
-              onSome: looked,
+              onSome: (outcome) => looked(outcome, lookPage(query)),
             })
           ),
           Effect.mapError(journalFailed)

@@ -45,6 +45,7 @@ export type {
   ActionWhere,
   Activity,
   Attempted,
+  ChannelEntry,
   Ctcp,
   CtcpAnswer,
   EndReason,

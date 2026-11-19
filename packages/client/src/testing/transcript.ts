@@ -73,7 +73,8 @@ export type Owner =
   | { readonly _tag: "Act"; readonly action: Action }
   /**
    * `!! whois peer`, `!! whowas peer`, `!! bans #iirc`, `!! exceptions #iirc`,
-   * `!! invitations #iirc`, `!! names #iirc`, or `!! who *.test`: a Lookup. Its intent id is given in order with a `Say`'s.
+   * `!! invitations #iirc`, `!! names #iirc`, `!! who *.test`, or `!! list mask=*iirc* least=5`,
+   * each condition of a `list` optional: a Lookup. Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Look"; readonly lookup: Lookup }
   /** `!! retry`. */
@@ -809,11 +810,26 @@ const writeAction = (action: Action): string => {
 };
 
 /**
- * What a Lookup looked for, as a transcript writes it: its nick, Channel, or mask.
+ * The conditions of a `Channels` Lookup, as a transcript writes them: `mask=` and `least=`,
+ * each only when it was asked.
  * @param lookup - The Lookup.
+ * @param write - How the mask is written.
+ * @returns Its conditions, in order.
+ */
+export const listConditions = (
+  lookup: Extract<Lookup, { readonly _tag: "Channels" }>,
+  write: (mask: string) => string = (mask) => mask
+): readonly string[] => [
+  ...(lookup.mask === undefined ? [] : [`mask=${write(lookup.mask)}`]),
+  ...(lookup.least === undefined ? [] : [`least=${lookup.least}`]),
+];
+
+/**
+ * What a Lookup looked for, as a transcript writes it: its nick, Channel, or mask.
+ * @param lookup - The Lookup, any but a `Channels`, which {@link listConditions} writes.
  * @returns What it looked for.
  */
-export const lookedFor = (lookup: Lookup): string => {
+export const lookedFor = (lookup: Exclude<Lookup, { readonly _tag: "Channels" }>): string => {
   switch (lookup._tag) {
     case "Whois":
     case "Whowas": {
@@ -844,6 +860,24 @@ const maskLists: ReadonlyMap<string, "Bans" | "Exceptions" | "Invitations"> = ne
   ["invitations", "Invitations"],
 ] as const);
 
+// `list [mask=<mask>] [least=<count>]`. The mask may be empty, to write one that is.
+const readChannels = (text: string): Owner | undefined => {
+  const read = /^list(?: mask=(?<mask>\S*))?(?: least=(?<least>\d+))?$/u.exec(text)?.groups;
+
+  if (read === undefined) {
+    return undefined;
+  }
+
+  const { mask, least } = read;
+  const asked = { _tag: "Channels" } as const;
+  const masked = mask === undefined ? asked : { ...asked, mask };
+
+  return {
+    _tag: "Look",
+    lookup: least === undefined ? masked : { ...masked, least: Number(least) },
+  };
+};
+
 // `names <channel>` or `who <mask>`.
 const readMembers = (text: string): Owner | undefined => {
   const named = /^names (?<channel>\S+)$/u.exec(text)?.groups?.channel;
@@ -857,8 +891,8 @@ const readMembers = (text: string): Owner | undefined => {
 };
 
 // `retry`, `remove [keep]`, `whois <nick>`, `whowas <nick>`, `bans <channel>`,
-// `exceptions <channel>`, `invitations <channel>`, `names <channel>`, and `who <mask>`,
-// which take no more than a word.
+// `exceptions <channel>`, `invitations <channel>`, `names <channel>`, `who <mask>`, and
+// `list`, which take no more than a word each.
 const readSimple = (text: string): Owner | undefined => {
   if (text === "retry") {
     return { _tag: "Retry" };
@@ -874,7 +908,7 @@ const readSimple = (text: string): Owner | undefined => {
     return { _tag: "Close", target: closing };
   }
 
-  const members = readMembers(text);
+  const members = readMembers(text) ?? readChannels(text);
 
   if (members !== undefined) {
     return members;
@@ -999,7 +1033,11 @@ const writeOwner = (owner: Owner): string => {
     }
 
     case "Look": {
-      return `${owner.lookup._tag.toLowerCase()} ${lookedFor(owner.lookup)}`;
+      const { lookup } = owner;
+
+      return lookup._tag === "Channels"
+        ? ["list", ...listConditions(lookup)].join(" ")
+        : `${lookup._tag.toLowerCase()} ${lookedFor(lookup)}`;
     }
 
     case "Act": {

@@ -6,8 +6,10 @@
  * numerics read for nothing, dimly. Each mask of a list with who set it and when, and,
  * while Self may, a button that removes it. Every text a Network sent is a text node in its
  * own isolate. Each member `/names` found as a wrapped nick with its prefix symbols, and each
- * User `/who` matched as one row of nick, `user@host`, away, and realname, dimly. Escape, in the card or in the composer with nothing else to let go of, or
- * its close button, puts it away.
+ * User `/who` matched as one row of nick, `user@host`, away, and realname, dimly. Each Channel
+ * `/list` found as a row of its name, which opens its Timeline or starts `/join`, its members,
+ * and its topic, dimly, a page at a time, with a button that reads the next. Escape, in the
+ * card or in the composer with nothing else to let go of, or its close button, puts it away.
  *
  * @packageDocumentation
  */
@@ -15,6 +17,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId } from "@iirc/api";
 import type {
   ChannelShown,
+  ListedShown,
   MaskShown,
   MemberShown,
   ProfileShown,
@@ -29,7 +32,7 @@ import { NickButton } from "../nick/nick-menu.tsx";
 import { paneTimeline } from "../timelines/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
-import { dismissCard, paneCard, removeMask } from "./atoms.ts";
+import { dismissCard, moreChannels, paneCard, removeMask } from "./atoms.ts";
 
 import styles from "./lookup-card.module.css";
 
@@ -248,20 +251,74 @@ const Matched = ({
 );
 
 /**
+ * One of the Network's Channels, in a row: its name, which opens its Timeline or starts
+ * `/join` when chosen, or is text while it cannot be, its members, and its topic, dimly.
+ * @param props - The Channel.
+ * @returns The Channel.
+ */
+const Listed = ({ listed }: { readonly listed: ListedShown }) => {
+  const run = useAtomSet(perform);
+  const { choose } = listed;
+
+  return (
+    <li className={styles.listed}>
+      {choose === undefined ? (
+        <bdi aria-label={listed.label} className={styles.name}>
+          {listed.name}
+        </bdi>
+      ) : (
+        <Button
+          aria-label={`${choose._tag === "Open" ? "Open" : "Join"} ${listed.label}`}
+          className={styles.name}
+          onPress={() => {
+            run([choose]);
+          }}
+          variant="text"
+        >
+          <bdi>{listed.name}</bdi>
+        </Button>
+      )}
+      <span className={`${styles.count} ${styles.dim}`}>{listed.members}</span>
+      {listed.topic === undefined ? null : (
+        <bdi className={`${styles.topic} ${styles.dim}`}>{listed.topic}</bdi>
+      )}
+    </li>
+  );
+};
+
+/**
  * What a card looked up: a nick in its colour, a Channel's name, or a mask.
  * @param props - What it looked up.
  * @returns It.
  */
-const Subject = ({ subject }: { readonly subject: SubjectShown }) =>
-  subject._tag === "Nick" ? (
-    <Nick colour={subject.colour} nick={subject.nick} />
-  ) : (
-    <bdi>{subject._tag === "Mask" ? subject.mask : subject.name}</bdi>
-  );
+const Subject = ({ subject }: { readonly subject: SubjectShown }) => {
+  switch (subject._tag) {
+    case "Nick": {
+      return <Nick colour={subject.colour} nick={subject.nick} />;
+    }
+
+    case "Mask": {
+      return <bdi>{subject.mask}</bdi>;
+    }
+
+    case "Directory": {
+      return <bdi>{subject.words}</bdi>;
+    }
+
+    case "Channel": {
+      return <bdi>{subject.name}</bdi>;
+    }
+
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
 
 /** What each Lookup is called in its card's heading. */
 const kindWords = {
   Bans: "bans",
+  Channels: "channels",
   Exceptions: "exceptions",
   Invitations: "invitation masks",
   Names: "names",
@@ -281,6 +338,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const timeline = "timeline" in opened ? opened.timeline : undefined;
   const dismiss = useAtomSet(dismissCard);
   const run = useAtomSet(perform);
+  const more = useAtomSet(moreChannels);
   const headingId = useId();
 
   if (shown === undefined) {
@@ -366,6 +424,32 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
                 <Matched key={index} timeline={timeline} user={user} />
               ))}
             </ul>
+          </>
+        ) : null}
+        {body._tag === "Directory" ? (
+          <>
+            {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
+            <ul aria-label="Channels" className={styles.directory}>
+              {body.channels.map((listed, index) => (
+                // A Channel's place in the list tells two apart, and a page only adds after it.
+                // oxlint-disable-next-line react/no-array-index-key
+                <Listed key={index} listed={listed} />
+              ))}
+            </ul>
+            {body.more === undefined ? null : (
+              <p className={styles.more}>
+                <Button
+                  isPending={body.more.reading}
+                  onPress={() => {
+                    more(pane);
+                  }}
+                  size="small"
+                >
+                  More Channels
+                </Button>
+                <span className={styles.dim}>{body.more.words} shown</span>
+              </p>
+            )}
           </>
         ) : null}
         {body._tag === "Waiting" || body._tag === "Said" ? (

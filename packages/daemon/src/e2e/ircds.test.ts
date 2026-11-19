@@ -250,7 +250,7 @@ const masksOn = (ircd: Ircd) =>
 
     const look = (lookup: LookupRequest) =>
       api.networks
-        .look({ params: { network }, payload: { lookup } })
+        .look({ params: { network }, payload: { lookup }, query: {} })
         .pipe(Effect.map((looked) => (looked._tag === "LookedUp" ? looked.result : looked)));
 
     const bans = yield* look({ _tag: "Bans", channel: ours });
@@ -324,7 +324,7 @@ const peopleOn = (ircd: Ircd) =>
 
     const look = (lookup: LookupRequest) =>
       api.networks
-        .look({ params: { network }, payload: { lookup } })
+        .look({ params: { network }, payload: { lookup }, query: {} })
         .pipe(Effect.map((looked) => (looked._tag === "LookedUp" ? looked.result : looked)));
 
     const names = yield* look({ _tag: "Names", channel: ours });
@@ -362,6 +362,109 @@ const peopleOn = (ircd: Ircd) =>
       nobody,
     };
   });
+
+// The Channels two Users hold between them, as a directory: the one with more members first,
+// narrowed by a mask, and by the least members.
+const directoryOn = (ircd: Ircd) =>
+  Effect.gen(function* () {
+    const big = "#iirc-dir-big";
+    const small = "#iirc-dir-small";
+    const dataDir = yield* temporaryDirectory;
+    const key = yield* makeKey(dataDir);
+    const daemon = yield* startDaemon({ dataDir }, key);
+    const { api } = daemon;
+
+    const peers = yield* Effect.promise(
+      async () =>
+        await Promise.all([
+          connectPeer({ host: ircd.host, nick: "dira", port: ircd.plainPort }),
+          connectPeer({ host: ircd.host, nick: "dirb", port: ircd.plainPort }),
+        ])
+    );
+
+    const [first, second] = peers;
+
+    first.send(`JOIN ${small}`);
+    first.send(`JOIN ${big}`);
+    second.send(`JOIN ${big}`);
+
+    yield* Effect.promise(async () => {
+      await first.waitFor((line) => line.command === "JOIN" && line.params[0] === big, "JOIN");
+      await second.waitFor((line) => line.command === "JOIN" && line.params[0] === big, "JOIN");
+    });
+
+    yield* api.networks.configure({
+      params: { network },
+      payload: configured({
+        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
+        nicks: ["lister"],
+      }),
+      query: {},
+    });
+
+    yield* eventually(
+      api.networks.known({ params: { network } }),
+      (known) => known.session._tag === "Registered"
+    );
+
+    const look = (lookup: LookupRequest) =>
+      api.networks.look({ params: { network }, payload: { lookup }, query: {} }).pipe(
+        Effect.map((looked) => {
+          if (looked._tag !== "LookedUp" || looked.result._tag !== "Channels") {
+            return looked;
+          }
+
+          const { channels, cut, offset, seen, total } = looked.result;
+
+          return {
+            channels: channels.map((one) => ({ channel: one.channel, members: one.members })),
+            cut,
+            offset,
+            seen,
+            total,
+          };
+        })
+      );
+
+    const both = yield* look({ _tag: "Channels", mask: "#iirc-dir-*" });
+    const narrowed = yield* look({ _tag: "Channels", mask: "#iirc-dir-s*" });
+    const crowded = yield* look({ _tag: "Channels", least: 2, mask: "#iirc-dir-*" });
+
+    for (const peer of peers) {
+      peer.close();
+    }
+
+    yield* daemon.stop;
+
+    return { both, crowded, narrowed };
+  });
+
+const directoried = {
+  both: {
+    channels: [
+      { channel: "#iirc-dir-big", members: 2 },
+      { channel: "#iirc-dir-small", members: 1 },
+    ],
+    cut: null,
+    offset: 0,
+    seen: 2,
+    total: 2,
+  },
+  crowded: {
+    channels: [{ channel: "#iirc-dir-big", members: 2 }],
+    cut: null,
+    offset: 0,
+    seen: 1,
+    total: 1,
+  },
+  narrowed: {
+    channels: [{ channel: "#iirc-dir-small", members: 1 }],
+    cut: null,
+    offset: 0,
+    seen: 1,
+    total: 1,
+  },
+};
 
 describe("ngircd, on the floor", () => {
   let ngircd: Ircd;
@@ -641,7 +744,7 @@ describe("ngircd, on the floor", () => {
         yield* joined(api);
 
         const look = (lookup: LookupRequest) =>
-          api.networks.look({ params: { network }, payload: { lookup } });
+          api.networks.look({ params: { network }, payload: { lookup }, query: {} });
 
         const whois = yield* look({ _tag: "Whois", nick: "seen" });
         // ngircd keeps no history of a connection as short as a test's, so this one is
@@ -654,7 +757,10 @@ describe("ngircd, on the floor", () => {
             ? whois.result.profiles[0]
             : undefined;
 
-        const stored = yield* api.networks.looked({ params: { intent: whois.intent, network } });
+        const stored = yield* api.networks.looked({
+          params: { intent: whois.intent, network },
+          query: {},
+        });
 
         peer.close();
         yield* daemon.stop;
@@ -694,6 +800,12 @@ describe("ngircd, on the floor", () => {
       ],
       nobody: { _tag: "Members", cut: null, members: [], notes: [] },
     });
+  }, 60_000);
+
+  it("lists the Network's Channels with the most members first, narrowed by a mask and a least", async () => {
+    const result = await run(directoryOn(ngircd));
+
+    expect(result).toStrictEqual(directoried);
   }, 60_000);
 
   it("sets a ban and reads it back, and a Channel's lists as one of its members only", async () => {
@@ -1184,11 +1296,13 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         const self = yield* api.networks.look({
           params: { network },
           payload: { lookup: { _tag: "Whois", nick: "iirc" } },
+          query: {},
         });
 
         const other = yield* api.networks.look({
           params: { network },
           payload: { lookup: { _tag: "Whois", nick: "peer" } },
+          query: {},
         });
 
         const leaving = yield* Effect.promise(
@@ -1203,6 +1317,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         const left = yield* api.networks.look({
           params: { network },
           payload: { lookup: { _tag: "Whowas", nick: "leaver" } },
+          query: {},
         });
 
         const profileOf = (looked: typeof self) =>
@@ -1265,6 +1380,12 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       ],
       nobody: { _tag: "Members", cut: null, members: [], notes: [] },
     });
+  }, 90_000);
+
+  it("lists the Network's Channels with the most members first, narrowed by a mask and a least", async () => {
+    const result = await run(directoryOn(ergo));
+
+    expect(result).toStrictEqual(directoried);
   }, 90_000);
 
   it("sets a ban and reads it back, and a Channel's lists as one of its members only", async () => {
@@ -1354,6 +1475,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         const self = yield* api.networks.look({
           params: { network },
           payload: { lookup: { _tag: "Whois", nick: "servicenick" } },
+          query: {},
         });
 
         peer.close();
@@ -1457,6 +1579,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         const whois = yield* api.networks.look({
           params: { network },
           payload: { lookup: { _tag: "Whois", nick: "member" } },
+          query: {},
         });
 
         for (const peer of [anon, member, late]) {

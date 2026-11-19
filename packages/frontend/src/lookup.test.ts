@@ -21,13 +21,16 @@ import { contextOf } from "./composer.ts";
 import {
   cardShown,
   cardWithId,
+  directoryLookOf,
   idleText,
   initialLookups,
   isLookupNick,
   listedChannels,
   listLookOf,
   namesLookOf,
+  nextPage,
   nickRulesOf,
+  pageLimit,
   parseLookupNick,
   reduceLookups,
   rfcRanks,
@@ -1316,6 +1319,266 @@ describe("a card of the Users a mask matched", () => {
     }).toStrictEqual({
       empty: "No one matches *!*@Host.",
       notFound: "The Network has no one matching *!*@Host (401).",
+      unsendable: "Not looked up: the Network cannot be asked about that mask.",
+    });
+  });
+});
+
+/**
+ * A command read as a Look of the Network's Channels, from `#iirc`.
+ * @param conditions - The mask and least number of members asked for.
+ * @returns What it reads as.
+ */
+const channelsOf = (conditions: { readonly mask?: string; readonly least?: number }) => ({
+  _tag: "Parsed",
+  value: [
+    {
+      _tag: "Look",
+      lookup: { _tag: "Channels", ...conditions },
+      network,
+      ranks: rfcRanks,
+      timeline: timelineId(iirc),
+    },
+  ],
+});
+
+describe("/list", () => {
+  it("takes a mask, a least number of members, both in either order, or neither", () => {
+    expect({
+      both: interpret("/list #linux* 10", inIirc()),
+      least: interpret("/list 10", inIirc()),
+      mask: interpret("/list #linux*", inIirc()),
+      neither: interpret("/list", inIirc()),
+      reversed: interpret("/list 10 #linux*", inIirc()),
+    }).toStrictEqual({
+      both: channelsOf({ least: 10, mask: "#linux*" }),
+      least: channelsOf({ least: 10 }),
+      mask: channelsOf({ mask: "#linux*" }),
+      neither: channelsOf({}),
+      reversed: channelsOf({ least: 10, mask: "#linux*" }),
+    });
+  });
+
+  it("says in words why it cannot read a mask or a least number of members", () => {
+    expect({
+      comma: refusalOf("/list #a,#b"),
+      huge: refusalOf("/list 99999999999999999999"),
+      leasts: refusalOf("/list 3 4"),
+      masks: refusalOf("/list #a #b"),
+      three: refusalOf("/list #a 3 #b"),
+      zero: refusalOf("/list 0"),
+    }).toStrictEqual({
+      comma: "A mask holds no comma. /list [mask] [least]",
+      huge: "No Channel has that many members. /list [mask] [least]",
+      leasts: "Give one least number of members. /list [mask] [least]",
+      masks: "Give one mask. /list [mask] [least]",
+      three: "Give a mask, a least number of members, or both. /list [mask] [least]",
+      zero: "A Channel listed has at least 1 member. /list [mask] [least]",
+    });
+  });
+
+  it("needs a Timeline open and its Network's Session", () => {
+    const when = commandNamed("list")?.when ?? [];
+    const offline = { ...contextOf(world(iirc)), session: false };
+
+    expect([unmet(when, contextOf(world(undefined))), unmet(when, offline)]).not.toContain(
+      undefined
+    );
+  });
+});
+
+const listNamed: LookupsEvent = { _tag: "Named", chantypes: "#&", declared: "rfc1459", id: 1 };
+const listSent: LookupsEvent = { _tag: "Sent", id: 1, intent: "look-1" };
+
+const page = (
+  offset: number,
+  channels: readonly { readonly channel: string; readonly members: number }[],
+  fields: Partial<typeof LookResult.Encoded & { readonly _tag: "Channels" }> = {}
+) =>
+  decodeResult({
+    _tag: "Channels",
+    channels: channels.map((one) => ({ ...one, topic: "" })),
+    cut: null,
+    notes: [],
+    offset,
+    seen: 3,
+    total: 3,
+    ...fields,
+  });
+
+const answeredWith = (result: LookResult): LookupsEvent => ({ _tag: "Answered", id: 1, result });
+
+const first = page(0, [
+  { channel: "#big", members: 12_345 },
+  { channel: "#mid", members: 40 },
+]);
+
+const directory = (look: Look = directoryLookOf({}, network, timelineId(iirc))) => look;
+
+const directoryBodyOf = (card: Card) => cardShown(world(iirc), card, time).body;
+
+const listedNames = (card: Card) => {
+  const shown = directoryBodyOf(card);
+
+  return shown._tag === "Directory" ? shown.channels.map((one) => one.name) : [];
+};
+
+const moreOf = (card: Card) => {
+  const shown = directoryBodyOf(card);
+
+  return shown._tag === "Directory" ? shown.more : undefined;
+};
+
+describe("a card of the Network's Channels", () => {
+  it("shows each Channel's name, members and topic, contained, and opens or joins each", () => {
+    const card = cardAfter(
+      [
+        listNamed,
+        listSent,
+        answeredWith(
+          decodeResult({
+            _tag: "Channels",
+            channels: [
+              { channel: "#iirc", members: 1, topic: "‮home" },
+              { channel: "#new", members: 1234, topic: "  " },
+              { channel: "#‮evil", members: 0, topic: "" },
+            ],
+            cut: null,
+            notes: [],
+            offset: 0,
+            seen: 3,
+            total: 3,
+          })
+        ),
+      ],
+      directoryLookOf({ least: 2, mask: "#*" }, network, timelineId(iirc))
+    );
+
+    expect(cardShown(world(iirc), card, time)).toStrictEqual({
+      body: {
+        _tag: "Directory",
+        channels: [
+          {
+            choose: { _tag: "Open", timeline: timelineId(iirc) },
+            label: "#iirc, 1 member",
+            members: "1",
+            name: "#iirc",
+            topic: "‮home‬",
+          },
+          {
+            choose: { _tag: "FocusComposer", text: "/join #new" },
+            label: "#new, 1 234 members",
+            members: "1 234",
+            name: "#new",
+            topic: undefined,
+          },
+          {
+            choose: undefined,
+            label: "#‮evil‬, 0 members",
+            members: "0",
+            name: "#‮evil‬",
+            topic: undefined,
+          },
+        ],
+        more: undefined,
+        note: undefined,
+      },
+      kind: "Channels",
+      notes: [],
+      subject: { _tag: "Directory", words: "matching #* with at least 2 members" },
+    });
+  });
+
+  it("reads a later page only when asked, one at a time, and folds it in after the first", () => {
+    const look = directory();
+    const asked = cardAfter([listSent, answeredWith(first)], look);
+
+    const reading = cardAfter(
+      [listSent, answeredWith(first), { _tag: "Reading", id: 1, offset: 2 }],
+      look
+    );
+
+    const paged = cardAfter(
+      [
+        listSent,
+        answeredWith(first),
+        { _tag: "Reading", id: 1, offset: 2 },
+        { _tag: "Paged", id: 1, result: page(2, [{ channel: "#small", members: 2 }]) },
+      ],
+      look
+    );
+
+    const misplaced = cardAfter(
+      [
+        listSent,
+        answeredWith(first),
+        { _tag: "Reading", id: 1, offset: 2 },
+        { _tag: "Paged", id: 1, result: page(0, [{ channel: "#big", members: 12_345 }]) },
+      ],
+      look
+    );
+
+    const failed = cardAfter(
+      [
+        listSent,
+        answeredWith(first),
+        { _tag: "Reading", id: 1, offset: 2 },
+        { _tag: "PageFailed", id: 1 },
+      ],
+      look
+    );
+
+    expect({
+      asked: [nextPage(asked), moreOf(asked)],
+      failed: [nextPage(failed), listedNames(failed)],
+      misplaced: [nextPage(misplaced), listedNames(misplaced)],
+      paged: [nextPage(paged), moreOf(paged), listedNames(paged)],
+      reading: [nextPage(reading), moreOf(reading)],
+      unsent: nextPage(cardAfter([answeredWith(first)], look)),
+    }).toStrictEqual({
+      asked: [
+        { intent: "look-1", limit: pageLimit, offset: 2 },
+        { reading: false, words: "2 of 3" },
+      ],
+      failed: [{ intent: "look-1", limit: pageLimit, offset: 2 }, ["#big", "#mid"]],
+      misplaced: [{ intent: "look-1", limit: pageLimit, offset: 2 }, ["#big", "#mid"]],
+      paged: [undefined, undefined, ["#big", "#mid", "#small"]],
+      reading: [undefined, { reading: true, words: "2 of 3" }],
+      unsent: undefined,
+    });
+  });
+
+  it("says in words when the reply was cut short, held no Channel, or was refused", () => {
+    const look = directory();
+    const masked = directoryLookOf({ mask: "#x*" }, network, timelineId(iirc));
+    const one = [{ channel: "#a", members: 2 }];
+
+    const noteOf = (result: LookResult, of: Look = look) => {
+      const shown = directoryBodyOf(cardAfter([listSent, answeredWith(result)], of));
+
+      if (shown._tag === "Said") {
+        return shown.words;
+      }
+
+      return "note" in shown ? shown.note : shown;
+    };
+
+    expect({
+      bounded: noteOf(page(0, one, { cut: "Bounded", seen: 23_412, total: 1000 })),
+      busy: noteOf(decodeResult({ _tag: "Refused", reason: "Busy" })),
+      empty: noteOf(page(0, [], { seen: 0, total: 0 })),
+      emptyMasked: noteOf(page(0, [], { seen: 0, total: 0 }), masked),
+      ended: noteOf(page(0, one, { cut: "Ended" })),
+      timedOut: noteOf(page(0, [], { cut: "TimedOut", seen: 0, total: 0 })),
+      unsendable: noteOf(decodeResult({ _tag: "Refused", reason: "Unsendable" }), masked),
+    }).toStrictEqual({
+      bounded:
+        "These are the 1 000 largest of the 23 412 Channels the Network listed, as many as a Lookup keeps.",
+      busy: "Not looked up: the Network is still listing its Channels for an earlier /list. Try again once it has.",
+      empty: "The Network listed no Channels.",
+      emptyMasked: "The Network listed no Channels matching #x*.",
+      ended: "The connection ended before the reply did, so this is what had come.",
+      timedOut: "The Network had not finished replying after 30 seconds, so this is what had come.",
       unsendable: "Not looked up: the Network cannot be asked about that mask.",
     });
   });

@@ -148,6 +148,9 @@ export type SayRequest = typeof SayRequest.Type;
 /** A Channel's or a nick's name, or a mode, as the Owner gives one: one or more characters, no line break or NUL. */
 const OwnerName = SayText.check(Schema.isNonEmpty());
 
+/** The least number of members a Channel a `LIST` gives has: a whole number, at least 1. */
+const Least = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
 /** One mode to set or unset, with its parameter, or `null` for none. */
 export const ModeRequest = Schema.Struct({
   mode: OwnerName,
@@ -210,14 +213,19 @@ export type ActRequest = typeof ActRequest.Type;
 
 /**
  * What the Owner looks up on a Network: a `WHOIS` or a `WHOWAS` of one nick, one of a
- * Channel's lists of masks, a Channel's members by `NAMES`, or the Users a mask matches by
- * `WHO`. The Client checks the nick, the Channel's name, or the mask against the Network's
+ * Channel's lists of masks, a Channel's members by `NAMES`, the Users a mask matches by
+ * `WHO`, or the Network's directory of Channels by `LIST`. The Client checks the nick, the Channel's name, or the mask against the Network's
  * rules, and that it keeps the list, before it sends anything, so the wire checks only that
  * no line break or NUL is in it.
  */
 export const LookupRequest = Schema.TaggedUnion({
   /** A Channel's bans. */
   Bans: { channel: OwnerName },
+  /**
+   * The Channels the Network lists, by `LIST`: those whose name matches `mask`, a glob where
+   * `*` is any run of characters and `?` any one, and with at least `least` members.
+   */
+  Channels: { least: Schema.optionalKey(Least), mask: Schema.optionalKey(OwnerName) },
   /** A Channel's ban exceptions, where the Network keeps them, by `EXCEPTS`. */
   Exceptions: { channel: OwnerName },
   /** A Channel's invitation masks, where the Network keeps them, by `INVEX`. */
@@ -690,9 +698,10 @@ const RefusedAction = Schema.Struct({
 /** A client-only tag on a Message, such as `+reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
-/** What was looked up: a `WHOIS` or a `WHOWAS` and the nick, a Channel's list or `NAMES` and its name, or a `WHO` and its mask, as the Owner gave it. */
+/** What was looked up: a `WHOIS` or a `WHOWAS` and the nick, a Channel's list or `NAMES` and its name, a `WHO` and its mask, or a `LIST` and its conditions, as the Owner gave it. */
 export const Lookup = Schema.TaggedUnion({
   Bans: { channel: Untrusted },
+  Channels: { least: Schema.optionalKey(Least), mask: Schema.optionalKey(Untrusted) },
   Exceptions: { channel: Untrusted },
   Invitations: { channel: Untrusted },
   Names: { channel: Untrusted },
@@ -786,6 +795,19 @@ export const WhoEntry = Schema.Struct({
 /** The decoded form of {@link WhoEntry}. */
 export type WhoEntry = typeof WhoEntry.Type;
 
+/**
+ * One Channel a `LIST` reply lists: its name, how many members the Network said it has, and
+ * its topic, `""` when the Network gave none.
+ */
+export const ChannelEntry = Schema.Struct({
+  channel: Untrusted,
+  members: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  topic: Untrusted,
+});
+
+/** The decoded form of {@link ChannelEntry}. */
+export type ChannelEntry = typeof ChannelEntry.Type;
+
 /** Why a Lookup ended with only part of its reply. */
 const PartialReason = Schema.Literals(["TimedOut", "Ended", "Bounded"]);
 
@@ -795,8 +817,10 @@ const PartialReason = Schema.Literals(["TimedOut", "Ended", "Bounded"]);
  * (`Ended`), or the reply ran past the Lines one Lookup keeps (`Bounded`); `Listed`, a
  * Channel's masks, with `cut` saying why it stopped short, as `Partial` does, or `null`
  * when it did not; `Members`, a Channel's members, and `Users`, the Users a mask matched,
- * each with `cut` as `Listed` has it, and an empty list a whole answer; `NotFound`, no such User or Channel, by `401`, `403`, `406`, or an end
- * with no User; `Failed`, another error, such as `482`, by its numeric or a `FAIL`'s code,
+ * each with `cut` as `Listed` has it, and an empty list a whole answer; `Channels`, a page
+ * of the Network's directory of Channels, most members first, which `offset` places in the
+ * `total` the Daemon kept, of the `seen` the reply held; `NotFound`, no such User or
+ * Channel, by `401`, `403`, `406`, or an end with no User; `Failed`, another error, such as `482`, by its numeric or a `FAIL`'s code,
  * or a labelled answer that said nothing readable, by its command; `Refused`, not sent,
  * `Offline`, `Unsendable`, `Busy` with too many Lookups at once, or `NotOffered` for a list
  * the Network does not keep; or `Unsent`, its Line never left. One the Network answered
@@ -804,6 +828,14 @@ const PartialReason = Schema.Literals(["TimedOut", "Ended", "Bounded"]);
  * `notes`.
  */
 export const LookResult = Schema.TaggedUnion({
+  Channels: {
+    channels: Schema.Array(ChannelEntry),
+    cut: Schema.NullOr(PartialReason),
+    notes: Notes,
+    offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    seen: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  },
   Failed: { notes: Notes, reply: Untrusted },
   Found: { notes: Notes, profiles: Schema.Array(Profile) },
   Listed: {
@@ -1158,6 +1190,24 @@ export const Limit = Schema.FiniteFromString.check(
   Schema.isInt(),
   Schema.isBetween({ maximum: windowLimit.maximum, minimum: 1 })
 );
+
+/** Where a page of a `Channels` Lookup's result begins, as text in a query: a whole number, at least 0. */
+export const Offset = Schema.FiniteFromString.check(
+  Schema.isInt(),
+  Schema.isGreaterThanOrEqualTo(0)
+);
+
+/**
+ * Which page of a `Channels` Lookup's result a `look` or a `looked` gives: `limit` Channels
+ * from `offset`, of the most members first. Every other result is whole, and ignores it.
+ */
+export const LookQuery = Schema.Struct({
+  limit: Schema.optionalKey(Limit),
+  offset: Schema.optionalKey(Offset),
+});
+
+/** The decoded form of {@link LookQuery}. */
+export type LookQuery = typeof LookQuery.Type;
 
 /** A page of a step's items: those after `after`, up to `limit`. */
 export const LocateQuery = Schema.Struct({
