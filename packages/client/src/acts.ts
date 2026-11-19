@@ -22,7 +22,6 @@ import {
   kick,
   mode,
   nick,
-  parse,
   part,
   quote,
   topic,
@@ -36,6 +35,7 @@ import type { Action, Input, ModeRequest } from "./input.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
 import { parseChannel, parseNick } from "./names.ts";
 import type { ActionWhere, Attempted, ModeChange, RefusedAction } from "./news.ts";
+import { quoted } from "./quoted.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, refuseIntent, send, updateOpen } from "./run.ts";
 import type { Acting, Awaiting, Pinged } from "./state.ts";
@@ -339,17 +339,6 @@ const modeLines = (run: Run, { target, changes }: Of<"Mode">) => {
 };
 
 /**
- * Commands a Line written as text may not carry. Cap negotiation is the Client's own,
- * and an `ACK` it did not ask for is ignored, so the Ircd and the Client would disagree.
- * `PASS`, `AUTHENTICATE`, and `OPER` carry a Credential, and a Line written as text is
- * journaled as it was written. `OPER` is sent from the Configuration instead, as each
- * Session begins.
- */
-const unquotable: ReadonlySet<string> = new Set(["AUTHENTICATE", "CAP", "OPER", "PASS"]);
-
-// Only client-only tags may go on a Line written as text. `label` and `batch` are the
-// Client's own, which it ties answers by.
-/**
  * Whether a raw `JOIN` or `PART` names a Channel the Configuration wants, which joining
  * and parting through Configuration own: a raw `PART` of one would be undone as a kick
  * is, and a raw `JOIN 0` leaves every one. A raw `JOIN` of a Channel the Configuration
@@ -377,21 +366,15 @@ const touchesWanted = (run: Run, line: Line): boolean => {
 };
 
 const rawLines = (run: Run, { line: text }: Of<"Raw">): readonly Planned[] | undefined => {
-  const line = quote(text);
-  const read = parse(utf8.encode(text), { _tag: "Utf8Only" });
+  const written = quoted(text);
 
-  if (
-    isRejected(line) ||
-    read._tag === "Unparseable" ||
-    unquotable.has(line.command) ||
-    touchesWanted(run, read.line) ||
-    !Object.keys(line.tags).every((key) => key.startsWith("+"))
-  ) {
+  if (written === undefined || touchesWanted(run, written.read)) {
     return undefined;
   }
 
+  const { line, read } = written;
   // An `AWAY` sent this way is one a `306` confirms, as any other.
-  const [message = ""] = read.line.params;
+  const [message = ""] = read.params;
 
   return [
     line.command === "AWAY"
@@ -702,6 +685,48 @@ const away = (run: Run, intent: IntentId, action: Of<"Away">): void => {
 };
 
 /**
+ * Sends the Lines of an action in order, each carrying the intent, if there is one, and
+ * stops at one a Feature refuses at egress.
+ * @param run - The step.
+ * @param planned - Its Lines.
+ * @param intent - The intent, or `undefined` for Lines of the Configuration's own.
+ */
+const carryOut = (run: Run, planned: readonly Planned[], intent: IntentId | undefined): void => {
+  for (const { line, names, targets, away: message, ctcp } of planned) {
+    const sent = send(
+      run,
+      line,
+      line.command,
+      intent === undefined ? undefined : { _tag: "Acted", intent }
+    );
+
+    // A Feature refused it at egress, and `send` reported it.
+    if (sent === undefined) {
+      return;
+    }
+
+    // Whatever Line of the Owner's changes Self's nick makes the nick theirs.
+    if (line.command === "NICK") {
+      chose(run);
+    }
+
+    if (message !== undefined) {
+      asked(run, message);
+    }
+
+    if (ctcp !== undefined) {
+      requested(run, ctcp);
+    }
+
+    // A CTCP request waits for no error numeric: a `PRIVMSG` to a nick that is gone gets a
+    // `401` no parameter ties to it rather than to a later `Say`. Only its label does.
+    if (!sent.echo && ctcp === undefined && intent !== undefined) {
+      awaitAnswer(run, intent, line, names, targets);
+    }
+  }
+};
+
+/**
  * The Owner acts on the Network. Away is kept at any time. Anything else needs a
  * Session, and is `Refused` as `Offline` without one, or as `Unsendable` when it cannot
  * be sent whole. Every Line of it carries its intent.
@@ -732,32 +757,36 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
   }
 
   remember(run, intent, action);
+  carryOut(run, planned, intent);
+};
 
-  for (const { line, names, targets, away: message, ctcp } of planned) {
-    const sent = send(run, line, line.command, { _tag: "Acted", intent });
+/**
+ * Sends the Owner's own start to a Session, after the welcome and any service login, and
+ * before any Channel is joined: the Configuration's user modes as one `MODE` on Self, then
+ * its Lines in order, each as `/quote` would send it now. One `/quote` would refuse now,
+ * such as a `PART` of a Channel the Configuration wants, is `Ignored` as `Unsendable`.
+ * They carry no intent, so what the Ircd answers is shown as it comes.
+ * @param run - The step.
+ */
+export const sendOwnStart = (run: Run): void => {
+  const { configuration } = run.state;
+  const session = sessionOf(run.state);
 
-    // A Feature refused it at egress, and `send` reported it.
-    if (sent === undefined) {
-      return;
-    }
+  if (configuration === undefined || session === undefined || !online(run)) {
+    return;
+  }
 
-    // Whatever Line of the Owner's changes Self's nick makes the nick theirs.
-    if (line.command === "NICK") {
-      chose(run);
-    }
+  if (configuration.userModes !== "") {
+    send(run, mode(session.nick, [configuration.userModes]), "MODE");
+  }
 
-    if (message !== undefined) {
-      asked(run, message);
-    }
+  for (const text of configuration.lines) {
+    const planned = rawLines(run, { _tag: "Raw", line: text });
 
-    if (ctcp !== undefined) {
-      requested(run, ctcp);
-    }
-
-    // A CTCP request waits for no error numeric: a `PRIVMSG` to a nick that is gone gets a
-    // `401` no parameter ties to it rather than to a later `Say`. Only its label does.
-    if (!sent.echo && ctcp === undefined) {
-      awaitAnswer(run, intent, line, names, targets);
+    if (planned === undefined) {
+      ignore(run, { _tag: "Unsendable", command: quoted(text)?.line.command ?? "" });
+    } else {
+      carryOut(run, planned, undefined);
     }
   }
 };

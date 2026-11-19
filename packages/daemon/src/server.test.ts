@@ -11,6 +11,7 @@ import {
   TimelineList,
   TimelineWindow,
 } from "@iirc/api";
+import type { NetworkConfiguration } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
 import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
@@ -222,6 +223,22 @@ const talk = (served: Served, texts: readonly string[]) =>
     }
 
     return call;
+  });
+
+/**
+ * PUTs `libera`'s Configuration with some fields changed.
+ * @param served - The server.
+ * @param fields - The fields to change.
+ * @returns The status and the body.
+ */
+const putConfiguration = (served: Served, fields: Partial<typeof NetworkConfiguration.Encoded>) =>
+  Effect.gen(function* () {
+    const response = yield* served.request("/api/networks/libera", {
+      method: "PUT",
+      ...json(JSON.stringify({ ...floor, ...fields })),
+    });
+
+    return [response.status, yield* Effect.promise(async () => await response.text())] as const;
   });
 
 // Every `happened` event decodes as the contract says.
@@ -706,6 +723,32 @@ describe("the API over a real server", () => {
     expect(
       [result.credential[1], result.notJson[1]].map((body) => String(body).includes(secret))
     ).toStrictEqual([false, false]);
+  });
+
+  it("refuses a Configuration whose Lines /quote would refuse, or whose user modes are no mode string, with 400, never quoting the Line", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        return {
+          kept: (yield* putConfiguration(served, {
+            lines: ["PRIVMSG HostServ :ON"],
+            userModes: "+ix-w",
+          }))[0],
+          modes: (yield* putConfiguration(served, { userModes: "ix" }))[0],
+          pass: yield* putConfiguration(served, { lines: ["PING a", "PASS correct-horse"] }),
+          tooMany: (yield* putConfiguration(served, {
+            lines: Array.from({ length: 17 }, () => "PING a"),
+          }))[0],
+        };
+      })
+    );
+
+    expect([result.kept, result.modes, result.pass[0], result.tooMany]).toStrictEqual([
+      200, 400, 400, 400,
+    ]);
+    expect(JSON.parse(result.pass[1])).toMatchObject({
+      issues: [{ path: ["payload", "lines", 1] }],
+    });
+    expect(result.pass[1].includes("correct-horse")).toBeFalsy();
   });
 
   it("sets a ui option over the wire, refuses an option it has not and a value it cannot take, and streams the options", async () => {
