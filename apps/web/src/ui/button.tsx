@@ -91,7 +91,7 @@ export const ToggleButton = ({ className, size, variant, ...props }: ToggleButto
  * @param command - The command's id in the registry.
  * @returns The keys.
  */
-const useKeysOf = (command: string | undefined): string | undefined => {
+export const useKeysOf = (command: string | undefined): string | undefined => {
   const keymap = useAtomValue(keymapState);
   const chords = command === undefined ? [] : chordsFor(keymap, command);
 

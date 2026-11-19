@@ -17,7 +17,6 @@ import { composerFocus } from "../composer/atoms.ts";
 import { timeShown } from "../options/ui.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { Nick } from "../timelines/line.tsx";
-import { IconButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { dateOf } from "../ui/dates.ts";
 import {
@@ -162,9 +161,27 @@ export const SearchView = ({ pane }: { readonly pane: string }) => {
     },
   });
 
-  // The field takes the focus as the search shows, and each time it is shown again.
+  // The field takes the focus as the search shows, and each time it is shown again. Shown
+  // from the sidebar's drawer, the page is still covered as it renders, so the field takes
+  // it in the next frame, once the drawer has gone and before it gives the focus back to
+  // its button.
   useLayoutEffect(() => {
-    field.current?.focus();
+    const input = field.current;
+
+    input?.focus();
+
+    const frame =
+      input === null || document.activeElement === input
+        ? undefined
+        : requestAnimationFrame(() => {
+            input.focus();
+          });
+
+    return () => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+    };
   }, [focusAsked]);
 
   /** Gives the composer the focus, as the search goes. */
@@ -249,22 +266,7 @@ export const SearchView = ({ pane }: { readonly pane: string }) => {
 
   return (
     <section aria-label="Search" className={styles.view}>
-      <PaneBar
-        end={
-          <IconButton
-            icon="close"
-            keys="Esc"
-            label="Close the search"
-            onPress={() => {
-              close();
-              toComposer();
-            }}
-            size="small"
-          />
-        }
-        name="search"
-        pane={pane}
-      />
+      <PaneBar name="search" pane={pane} />
       <search>
         <form
           className={styles.header}

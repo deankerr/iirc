@@ -146,20 +146,46 @@
   color: var(--color-muted);
 }
 
-/* The options, signing out, and hiding the sidebar, at its foot. */
+/* The views' rows, signing out, and hiding the sidebar, at its foot. */
 .footer {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2) calc(var(--space-1) + var(--safe-bottom));
+  padding: var(--space-1) 0 calc(var(--space-1) + var(--safe-bottom));
   border-top: var(--border-width) solid var(--color-border);
 }
 
+/* The views' rows, drawn as a Timeline's are. */
+.views {
+  outline: none;
+}
+
+/* A view's keys, dim at its row's end where there is a keyboard to press them, give way
+   to its name in a narrow sidebar, before the name itself is cut. */
+.keys {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item[data-selected] .keys {
+  color: inherit;
+}
+
+/* Signing out, under the views' rows, its word lined up with their names, with hiding the
+   sidebar at the line's end. */
 .controls {
+  --sign-out-inset: calc(var(--control-pad-inline) / 2 + var(--border-width));
+
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
+  padding: 0 var(--space-2) 0 calc(var(--space-3) + 2ch + var(--space-2) - var(--sign-out-inset));
 }
 
 .hide {
@@ -220,6 +246,14 @@
   .network,
   .item {
     min-height: var(--target-size);
+  }
+
+  .keys {
+    display: none;
+  }
+
+  .controls {
+    padding-left: calc(var(--target-size) - var(--sign-out-inset));
   }
 
   .network {

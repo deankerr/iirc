@@ -777,23 +777,6 @@ describe("the Panes", () => {
 });
 
 /**
- * The button named so.
- * @param label - Its accessible name.
- * @returns It.
- */
-const buttonNamed = (label: string) => {
-  const found = [...document.querySelectorAll<HTMLElement>("button")].find(
-    (one) => one.getAttribute("aria-label") === label || one.textContent === label
-  );
-
-  if (found === undefined) {
-    throw new Error(`no button ${label}`);
-  }
-
-  return found;
-};
-
-/**
  * The sidebar's row of a Timeline, by its name.
  * @param name - Its name.
  * @returns The row.
@@ -820,7 +803,7 @@ describe("what stands in front of a Timeline", () => {
     }
   });
 
-  it("closes the options by Escape or their close button, back to the Timeline behind them", async () => {
+  it("closes the options by Escape, back to the Timeline behind them", async () => {
     const { registry } = await signedIn();
 
     await act(async () => {
@@ -832,23 +815,8 @@ describe("what stands in front of a Timeline", () => {
 
     await press(grid ?? composer(), { key: "Escape" });
     await settled(() => logNamed("#iirc") !== null);
-    const escaped = mainTag(registry);
 
-    await act(async () => {
-      await run(registry, openOptions, "");
-    });
-    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
-
-    await act(async () => {
-      buttonNamed("Close the options").click();
-      await Promise.resolve();
-    });
-    await settled(() => logNamed("#iirc") !== null);
-
-    expect({ closed: mainTag(registry), escaped }).toStrictEqual({
-      closed: "Timeline",
-      escaped: "Timeline",
-    });
+    expect(mainTag(registry)).toBe("Timeline");
   });
 
   it("marks only what the focused Pane shows, and shows the Timeline behind the options when it is chosen", async () => {
@@ -861,7 +829,9 @@ describe("what stands in front of a Timeline", () => {
 
     const marked = {
       iirc: rowNamed("#iirc")?.getAttribute("aria-selected"),
-      options: buttonNamed("Options").getAttribute("aria-current"),
+      options: document
+        .querySelector('nav [role="option"][data-key="Options"]')
+        ?.getAttribute("aria-selected"),
     };
 
     await act(async () => {
@@ -874,12 +844,14 @@ describe("what stands in front of a Timeline", () => {
       after: {
         iirc: rowNamed("#iirc")?.getAttribute("aria-selected"),
         main: mainTag(registry),
-        options: buttonNamed("Options").getAttribute("aria-current"),
+        options: document
+          .querySelector('nav [role="option"][data-key="Options"]')
+          ?.getAttribute("aria-selected"),
       },
       marked,
     }).toStrictEqual({
       after: { iirc: "true", main: "Timeline", options: "false" },
-      marked: { iirc: "false", options: "page" },
+      marked: { iirc: "false", options: "true" },
     });
   });
 

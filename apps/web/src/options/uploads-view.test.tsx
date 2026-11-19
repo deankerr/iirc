@@ -467,7 +467,7 @@ describe("the Uploads view", () => {
     writeChoice(layoutKey, undefined);
   });
 
-  it("shows in the focused Pane, with a status bar that names it, and closes back with its button", async () => {
+  it("shows in the focused Pane, with a status bar that names it, and closes back with Escape", async () => {
     const fake = signedIn(cat);
     const { container, registry } = await page(fake);
 
@@ -476,7 +476,14 @@ describe("the Uploads view", () => {
     const bar = container.querySelector('section[aria-label="Uploads"] header');
     const shown = mainOf(registry.get(timelinesState))._tag;
 
-    await press(container, "Close the Uploads");
+    await act(async () => {
+      container
+        .querySelector('section[aria-label="Uploads"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
+        );
+      await Promise.resolve();
+    });
 
     expect({
       bar: bar?.querySelector("h2")?.textContent,

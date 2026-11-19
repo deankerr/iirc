@@ -279,7 +279,9 @@ const searchFor = async (
     await Promise.resolve();
   });
   await settled(() => registry.get(searchState).results.length === count);
-  await settled(() => container.querySelectorAll('[role="option"]').length > 0);
+  await settled(
+    () => container.querySelectorAll('section[aria-label="Search"] [role="option"]').length > 0
+  );
 };
 
 /**
@@ -288,7 +290,9 @@ const searchFor = async (
  * @returns It.
  */
 const resultsOf = (container: HTMLElement) => {
-  const list = container.querySelector<HTMLElement>('[role="listbox"]');
+  const list = container.querySelector<HTMLElement>(
+    'section[aria-label="Search"] [role="listbox"]'
+  );
 
   if (list === null) {
     throw new Error("no results");
@@ -401,12 +405,16 @@ describe("the search view", () => {
     });
 
     await settled(() => registry.get(searchState).results.length === 60);
-    await settled(() => container.querySelectorAll('[role="option"]').length > 0);
+    await settled(
+      () => container.querySelectorAll('section[aria-label="Search"] [role="option"]').length > 0
+    );
 
     const status = container.querySelector("output")?.textContent;
-    const first = container.querySelector('[role="option"]');
+    const first = container.querySelector('section[aria-label="Search"] [role="option"]');
 
-    const list = container.querySelector<HTMLElement>('[role="listbox"]');
+    const list = container.querySelector<HTMLElement>(
+      'section[aria-label="Search"] [role="listbox"]'
+    );
 
     if (list === null) {
       throw new Error("no results");
@@ -420,14 +428,14 @@ describe("the search view", () => {
       await Promise.resolve();
     });
     await settled(() =>
-      [...container.querySelectorAll('[role="option"]')].some((row) =>
+      [...container.querySelectorAll('section[aria-label="Search"] [role="option"]')].some((row) =>
         row.textContent?.includes("ten")
       )
     );
 
-    const hostileRow = [...container.querySelectorAll('[role="option"]')].find((row) =>
-      row.textContent?.includes("ten")
-    );
+    const hostileRow = [
+      ...container.querySelectorAll('section[aria-label="Search"] [role="option"]'),
+    ].find((row) => row.textContent?.includes("ten"));
 
     const shown = {
       first: first?.querySelector("mark")?.textContent,
@@ -508,7 +516,8 @@ describe("the search view", () => {
         await Promise.resolve();
       });
 
-      return container.querySelector('[role="option"] time')?.textContent;
+      return container.querySelector('section[aria-label="Search"] [role="option"] time')
+        ?.textContent;
     };
 
     const written = (options: Intl.DateTimeFormatOptions) =>
@@ -615,16 +624,16 @@ describe("the search view", () => {
       await Promise.resolve();
     });
     await settled(() =>
-      [...container.querySelectorAll('[role="option"]')].some((row) =>
+      [...container.querySelectorAll('section[aria-label="Search"] [role="option"]')].some((row) =>
         row.textContent?.includes("word 1")
       )
     );
 
     const active = list.getAttribute("aria-activedescendant") ?? "";
 
-    const drawn = [...container.querySelectorAll<HTMLElement>('[role="option"]')].map(
-      (row) => row.dataset.index ?? ""
-    );
+    const drawn = [
+      ...container.querySelectorAll<HTMLElement>('section[aria-label="Search"] [role="option"]'),
+    ].map((row) => row.dataset.index ?? "");
 
     expect({
       active: container.querySelector(`[id="${active}"]`)?.getAttribute("aria-selected"),

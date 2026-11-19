@@ -708,7 +708,7 @@ describe("the Composer's list", () => {
     composerOf(container).focus();
     await typeIn(container, "/set ");
 
-    const [, option] = container.querySelectorAll<HTMLElement>('[role="option"]');
+    const [, option] = container.querySelectorAll<HTMLElement>('main [role="option"]');
     const name = option?.querySelector("bdi")?.textContent;
     const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
 
@@ -897,7 +897,7 @@ describe("the Composer's list of everything it can complete", () => {
     await pressIn(container, "ArrowDown");
     const highlighted = [composerOf(container).value, alertdialog() === null];
 
-    const [option] = container.querySelectorAll<HTMLElement>('[role="option"]');
+    const [option] = container.querySelectorAll<HTMLElement>('main [role="option"]');
 
     await act(async () => {
       option?.click();

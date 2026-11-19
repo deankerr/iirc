@@ -670,8 +670,8 @@ export const readOptions = runtime
 /**
  * Shows the options in the main view, filtered as given, with nothing edited or asked.
  * Showing them reads what they show, by `optionsSync`, and asking again while they show
- * reads it again. Opening any Timeline, Escape, or their close button shows what the Pane
- * showed before.
+ * reads it again. Opening any Timeline, or Escape, shows what the Pane showed
+ * before.
  */
 export const openOptions = runtime
   .fn((filter: string, get) =>

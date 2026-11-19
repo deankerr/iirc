@@ -1,9 +1,10 @@
 /**
  * The sidebar: a tree of the Networks, each its own Timeline's row with how its connection
  * stands, and their Channels and Direct Messages under them, each coloured by what is
- * unread in it with small counts of what calls for the Owner, and a footer with the options
- * and signing out. Choosing a row opens its Timeline in the focused Pane, and Options
- * opens the options view there, each closing the sidebar's drawer on a compact screen. What
+ * unread in it with small counts of what calls for the Owner, and a footer with a row for
+ * each view of iirc's own, the search, the Uploads, and the options, and signing out.
+ * Choosing a row opens its Timeline or its view in the focused Pane, each closing the
+ * sidebar's drawer on a compact screen. What
  * the focused Pane shows is chosen, in the accent, and what another Pane shows is marked
  * dimly, with its number, as the Panes' status bars accent the focused one and dim the rest. React Aria's Tree gives it its keyboard: arrows move and expand, and
  * Enter or Space opens. Every Timeline's row has a menu, a Network's own too, opened by its
@@ -44,7 +45,7 @@ import { endReason } from "@iirc/frontend/render";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 import { chosenOf, elsewhereOf, treeOf } from "@iirc/frontend/timelines";
-import type { Connection, SidebarNetwork } from "@iirc/frontend/timelines";
+import type { Connection, OwnView, SidebarNetwork } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import { useRef, useState } from "react";
 import type { MouseEvent, ReactNode, RefObject } from "react";
@@ -52,6 +53,8 @@ import {
   Button as AriaButton,
   DropIndicator,
   Header,
+  ListBox,
+  ListBoxItem,
   Menu,
   MenuItem,
   MenuSection,
@@ -64,12 +67,13 @@ import {
 import type { DropTarget, Key, Selection } from "react-aria-components";
 
 import { perform } from "../composer/atoms.ts";
-import { openOptions } from "../options/atoms.ts";
+import { openOptions, openUploads } from "../options/atoms.ts";
 import { arrangedSidebar, arrangement } from "../options/ui.ts";
 import { compact, drawerState } from "../page/drawer.ts";
 import { previewsModes } from "../previews/atoms.ts";
+import { showSearch } from "../search/atoms.ts";
 import { SignOutButton } from "../sign-in/sign-out-button.tsx";
-import { Button, IconButton } from "../ui/button.tsx";
+import { IconButton, useKeysOf } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
 import { listedNetworks, open, sidebarNetworks, timelinesState } from "./atoms.ts";
@@ -80,13 +84,13 @@ import styles from "./sidebar.module.css";
 const collapsed = Atom.make<readonly string[]>([]).pipe(Atom.keepAlive);
 
 /**
- * What the focused Pane shows, as the sidebar marks it: the options, or its Timeline, but
- * not a Timeline open behind the options, the search, or a Direct Message not yet begun,
- * so choosing that Timeline shows it.
+ * What the focused Pane shows, as the sidebar marks it: a view of iirc's own, or its
+ * Timeline, but not a Timeline open behind a view or a Direct Message not yet begun, so
+ * choosing that Timeline shows it.
  */
 const selected = Atom.make((get) => chosenOf(get(timelinesState)));
 
-/** What the other Panes show, each Timeline with its Pane's number. */
+/** What the other Panes show, each Timeline or view with its Pane's number. */
 const elsewhere = Atom.make((get) => elsewhereOf(get(timelinesState)));
 
 // A Network with no Timeline of its own yet has a row with an id no Timeline's can have,
@@ -529,43 +533,115 @@ const NetworkRow = ({
   );
 };
 
+/** The views of iirc's own, in the order their rows stack, each with its command. */
+const ownViews: readonly { readonly view: OwnView; readonly command: string }[] = [
+  { command: "search.open", view: "Search" },
+  { command: "uploads.open", view: "Uploads" },
+  { command: "options.set", view: "Options" },
+];
+
 /**
- * The foot of the sidebar: the options, signing out, and, beside the Panes, hiding the
- * sidebar. A failed sign-out is said in words above it.
- * @param props - The attempt to sign out, and whether the options show in the focused Pane.
+ * A view's row: its name, and its keys, dim, where the keymap binds any.
+ * @param props - The view, its command, and the number of the other Pane that shows it, if
+ * one does.
+ * @returns The row.
+ */
+const ViewItem = ({
+  command,
+  pane,
+  view,
+}: {
+  readonly view: OwnView;
+  readonly command: string;
+  readonly pane: number | undefined;
+}) => {
+  const keys = useKeysOf(command);
+
+  return (
+    <ListBoxItem
+      aria-label={pane === undefined ? view : `${view}, in Pane ${pane}`}
+      className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
+      id={view}
+      textValue={view}
+    >
+      <span aria-hidden className={`${styles.gutter} ${styles.pane}`}>
+        {pane}
+      </span>
+      <span className={styles.name}>{view}</span>
+      {keys === undefined ? null : (
+        <kbd className={styles.keys} title={keys}>
+          {keys}
+        </kbd>
+      )}
+    </ListBoxItem>
+  );
+};
+
+/**
+ * The foot of the sidebar: a row for each view of iirc's own, which opens it in the focused
+ * Pane as a Timeline's row does, and is marked as one is, then signing out and, beside the
+ * Panes, hiding the sidebar. A failed sign-out is said in words above them.
+ * @param props - The attempt to sign out.
  * @returns The footer.
  */
-const Footer = ({
-  attempt,
-  optionsShown,
-}: {
-  readonly attempt: Attempt;
-  readonly optionsShown: boolean;
-}) => {
+const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
+  const chosen = useAtomValue(selected);
+  const others = useAtomValue(elsewhere);
+  const showSearchNow = useAtomSet(showSearch);
+  const showUploads = useAtomSet(openUploads);
   const showOptions = useAtomSet(openOptions);
   const setDrawer = useAtomSet(drawerState);
   const carryOut = useAtomSet(perform);
   const drawer = useAtomValue(compact);
+  const shown = ownViews.find(({ view }) => view === chosen._tag)?.view;
+
+  const opening: Readonly<Record<OwnView, () => void>> = {
+    Options: () => {
+      showOptions("");
+    },
+    Search: () => {
+      showSearchNow(undefined);
+    },
+    Uploads: () => {
+      showUploads();
+    },
+  };
+
+  // Choosing a row opens its view and closes the drawer on a compact screen. Choosing the
+  // view already shown, which React Aria gives as an empty selection, opens it again, as
+  // the options then read again and clear their filter. Escape leaves the selection alone,
+  // so only a press or Enter or Space does either.
+  const onSelectionChange = (selection: Selection) => {
+    const [key] = selection === "all" ? [] : selection;
+    const view = ownViews.find((one) => one.view === key)?.view ?? shown;
+
+    if (view !== undefined) {
+      opening[view]();
+    }
+
+    setDrawer("None");
+  };
 
   return (
     <footer className={styles.footer}>
+      <ListBox
+        aria-label="Views"
+        className={styles.views}
+        escapeKeyBehavior="none"
+        onSelectionChange={onSelectionChange}
+        selectedKeys={shown === undefined ? [] : [shown]}
+        selectionMode="single"
+      >
+        {ownViews.map(({ command, view }) => (
+          <ViewItem command={command} key={view} pane={others.get(view)} view={view} />
+        ))}
+      </ListBox>
       {attempt._tag === "Failed" ? (
         <p className={styles.failure} role="alert">
           {explain(attempt.failure)}
         </p>
       ) : null}
       <div className={styles.controls}>
-        <Button
-          aria-current={optionsShown ? "page" : false}
-          onPress={() => {
-            showOptions("");
-            setDrawer("None");
-          }}
-          size="small"
-          variant="quiet"
-        >
-          Options
-        </Button>
         <SignOutButton attempt={attempt} size="small" />
         {drawer ? null : (
           <IconButton
@@ -924,7 +1000,6 @@ const NetworkTrees = ({
 export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
   const { networks, pinned } = useAtomValue(arrangedSidebar);
   const listed = useAtomValue(listedNetworks);
-  const chosen = useAtomValue(selected);
   const live = networks.filter((network) => !network.removed);
   const removed = networks.filter((network) => network.removed);
 
@@ -954,7 +1029,7 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
           </>
         )}
       </div>
-      <Footer attempt={attempt} optionsShown={chosen._tag === "Options"} />
+      <Footer attempt={attempt} />
     </nav>
   );
 };

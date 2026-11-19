@@ -62,9 +62,7 @@
   cursor: progress;
 }
 
-/* What the focused Pane shows, as the options at the sidebar's foot say they are, and a
-   toggle while it is on. */
-.button[aria-current="page"],
+/* A toggle while it is on. */
 .button[data-selected] {
   color: var(--color-accent);
 }

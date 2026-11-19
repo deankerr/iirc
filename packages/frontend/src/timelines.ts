@@ -2712,12 +2712,28 @@ export const openOf = (state: Timelines): TimelineId | undefined => focusedView(
 export const mainOf = (state: Timelines): MainView => focusedView(state).main;
 
 /**
- * What the sidebar marks as chosen: what the focused Pane shows, the options or its
- * Timeline, or nothing, as for the search or a Direct Message not yet begun, which have no
- * row. A Timeline open behind something else is not chosen, so choosing it shows it.
+ * A view of iirc's own, which a Pane shows in front of its Timeline, and the sidebar lists
+ * as a row, as it does a Timeline. Each shows in one Pane at most.
+ */
+export type OwnView = "Search" | "Uploads" | "Options";
+
+/**
+ * Which view of iirc's own a Pane shows, if one.
+ * @param main - What it shows.
+ * @returns The view, or none.
+ */
+const ownViewOf = (main: MainView): OwnView | undefined =>
+  main._tag === "Search" || main._tag === "Uploads" || main._tag === "Options"
+    ? main._tag
+    : undefined;
+
+/**
+ * What the sidebar marks as chosen: what the focused Pane shows, a view of iirc's own or
+ * its Timeline, or nothing, as for a Direct Message not yet begun, which has no row. A
+ * Timeline open behind something else is not chosen, so choosing it shows it.
  */
 export type Chosen =
-  | { readonly _tag: "Options" }
+  | { readonly _tag: OwnView }
   | { readonly _tag: "Timeline"; readonly timeline: TimelineId }
   | { readonly _tag: "Nothing" };
 
@@ -2728,9 +2744,10 @@ export type Chosen =
  */
 export const chosenOf = (state: Timelines): Chosen => {
   const view = focusedView(state);
+  const own = ownViewOf(view.main);
 
-  if (view.main._tag === "Options") {
-    return { _tag: "Options" };
+  if (own !== undefined) {
+    return { _tag: own };
   }
 
   return view.main._tag === "Timeline" && view.open !== undefined
@@ -2739,20 +2756,30 @@ export const chosenOf = (state: Timelines): Chosen => {
 };
 
 /**
- * What the sidebar marks, more quietly than what is chosen: each Timeline a Pane other
- * than the focused one shows, with that Pane's number, counted as the Panes lie. A
- * Timeline behind something else is not shown, as for `chosenOf`.
+ * What the sidebar marks, more quietly than what is chosen: each Timeline, and each view of
+ * iirc's own, that a Pane other than the focused one shows, with that Pane's number, counted
+ * as the Panes lie. A Timeline behind something else is not shown, as for `chosenOf`.
  * @param state - The state.
- * @returns Each Timeline shown elsewhere, with its Pane's number.
+ * @returns Each Timeline or view shown elsewhere, with its Pane's number.
  */
-export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId, number> =>
+export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId | OwnView, number> =>
   new Map(
-    panesOf(state.layout.root).flatMap((pane, index) =>
-      pane.id === state.layout.focused ||
-      pane.view.main._tag !== "Timeline" ||
-      pane.view.open === undefined
-        ? []
-        : [[resolve(state, pane.view.open), index + 1] as const]
+    panesOf(state.layout.root).flatMap(
+      (pane, index): (readonly [TimelineId | OwnView, number])[] => {
+        const own = ownViewOf(pane.view.main);
+
+        if (pane.id === state.layout.focused) {
+          return [];
+        }
+
+        if (own !== undefined) {
+          return [[own, index + 1] as const];
+        }
+
+        return pane.view.main._tag !== "Timeline" || pane.view.open === undefined
+          ? []
+          : [[resolve(state, pane.view.open), index + 1] as const];
+      }
     )
   );
 
