@@ -78,7 +78,7 @@ Then open `http://127.0.0.1:7667` and sign in with the key, as for the service. 
 `compose.yaml` runs `iirc daemon --data-dir /var/lib/iirc --listen 0.0.0.0:7667 --web`, and holds no secret.
 
 - **It runs as `iirc`, uid 1000, never root,** with every capability dropped, no way to gain privileges, and a read-only root with no writable directory but the data directory.
-- **The data directory is a named volume,** which Docker gives the ownership of `/var/lib/iirc` in the image, owner-only and `iirc`'s, so a fresh one needs no `chown`. To keep it in a directory of the machine instead, mount that over `/var/lib/iirc` and name its owner as `user:`, such as `user: "1000:1000"`, and the Daemon runs under that uid.
+- **The data directory is a named volume,** which Docker gives the ownership of `/var/lib/iirc` in the image, owner-only and `iirc`'s, so a fresh one needs no `chown`. To keep it in a directory of the machine instead, mount that over `/var/lib/iirc` with `:Z`, which labels it for SELinux and does nothing where SELinux is off, and name its owner as `user:`, such as `user: "1000:1000"`, and the Daemon runs under that uid.
 - **The API is published on the machine's loopback alone,** `127.0.0.1:7667`, as the service listens. Inside the container the Daemon listens on every address.
 - **Port 7668 is published for the Link listener,** on every address, and nothing answers there until Uploads are on and `uploads.listen` is `0.0.0.0:7668`.
 - **The container is `unhealthy` while the Daemon says it is unwell,** by a health check that runs `iirc health`. Nothing restarts it for that.

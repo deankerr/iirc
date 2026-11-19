@@ -14,11 +14,12 @@ services:
     # Docker mounts /dev/shm and /dev/mqueue writable, even over a read-only root. The Daemon
     # needs neither, so the one is left out and the other is masked by an empty read-only one.
     ipc: none
-    # A directory of the machine instead of the named volume runs under its owner:
+    # A directory of the machine instead of the named volume runs under its owner, and :Z
+    # labels it for SELinux, which does nothing where SELinux is off:
     # user: "1000:1000"
     volumes:
       - data:/var/lib/iirc
-      # - ./data:/var/lib/iirc
+      # - ./data:/var/lib/iirc:Z
       - type: tmpfs
         target: /dev/mqueue
         read_only: true
