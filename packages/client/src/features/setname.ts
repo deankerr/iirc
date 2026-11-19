@@ -8,7 +8,7 @@
  */
 import type { Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName } from "../ids.ts";
-import { userSource } from "./user-source.ts";
+import { wholeSource } from "./user-source.ts";
 
 /** The `setname` Feature. */
 export const setname: Feature = {
@@ -20,10 +20,10 @@ export const setname: Feature = {
       return { value: meant };
     }
 
-    const source = userSource(line);
-    const [realname] = line.params;
+    const source = wholeSource(line);
+    const [realname, ...more] = line.params;
 
-    if (source === undefined || realname === undefined || realname === "") {
+    if (source === undefined || realname === undefined || realname === "" || more.length > 0) {
       return {
         value: [{ _tag: "Ignored", reason: { _tag: "Malformed", command: line.command } }],
       };

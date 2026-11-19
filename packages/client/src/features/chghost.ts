@@ -9,7 +9,7 @@
  */
 import type { Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName } from "../ids.ts";
-import { maskOf, userSource } from "./user-source.ts";
+import { maskOf, wholeSource } from "./user-source.ts";
 
 /** The `chghost` Feature. */
 export const chghost: Feature = {
@@ -21,7 +21,7 @@ export const chghost: Feature = {
       return { value: meant };
     }
 
-    const source = userSource(line);
+    const source = wholeSource(line);
     const [user, host, ...more] = line.params;
 
     const mask =

@@ -149,10 +149,10 @@ const nickLines = (run: Run, { nick: name }: Of<"Nick">) =>
 
 const setnameCap = CapName.make("setname");
 
-// A realname is changed only where the Network offers `setname`, and is sent as the Ircd
-// relays it to everyone who shares a Channel with Self.
+// A realname is changed only where the Network offers `setname`, within `NAMELEN`, and is
+// sent as the Ircd relays it to everyone who shares a Channel with Self.
 const setnameLines = (run: Run, { realname }: Of<"Setname">) =>
-  negotiated(openOf(run.state)?.caps).enabled.has(setnameCap)
+  negotiated(openOf(run.state)?.caps).enabled.has(setnameCap) && within(run, "NAMELEN", realname)
     ? one(run, setname(realname), [])
     : undefined;
 

@@ -41,3 +41,18 @@ export const maskOf = (
   host: string
 ): { readonly user: string; readonly host: string } | undefined =>
   Schema.is(IgnoreMask)(`${nick}!${user}@${host}`) ? { host, user } : undefined;
+
+/**
+ * A Line's source, when it is a User's whole mask, `nick!user@host`, as {@link maskOf}
+ * accepts it: the source a Line that changes what is known of a User must have.
+ * @param line - The Line.
+ * @returns The source, or `undefined` when it is not a User's whole mask.
+ */
+export const wholeSource = (line: Line): Source | undefined => {
+  const source = userSource(line);
+
+  return source !== undefined &&
+    maskOf(source.nick, source.user ?? "", source.host ?? "") !== undefined
+    ? source
+    : undefined;
+};

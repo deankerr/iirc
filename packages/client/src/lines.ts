@@ -325,10 +325,18 @@ const settled = (run: Run, activity: Activity): void => {
       break;
     }
 
+    // Self's own new realname answers the oldest `SETNAME` still awaiting one.
+    case "RealnameChanged": {
+      if (isSelf(run, activity.nick)) {
+        answered(run, "SETNAME", []);
+      }
+
+      break;
+    }
+
     case "Joined":
     case "AccountChanged":
     case "HostChanged":
-    case "RealnameChanged":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
@@ -345,7 +353,10 @@ const settled = (run: Run, activity: Activity): void => {
 
 const none: ReadonlySet<string> = new Set();
 
-const memberKey = (channel: string, nick: string): string => `${channel} ${nick}`;
+// A member's nick as `userhost-in-names` leaves it, bare, whether the core read it with
+// the mask or not, so the core's reading and a Feature's refining name the same member.
+const memberKey = (channel: string, nick: string): string =>
+  `${channel} ${nick.split("!", 1)[0] ?? nick}`;
 
 // The members of a listing whose prefixes the core knew only in part, and a Feature made
 // known in full.

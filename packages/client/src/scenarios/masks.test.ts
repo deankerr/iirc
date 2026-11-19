@@ -169,6 +169,9 @@ describe("chghost", () => {
     ["a user with a !", "<< :new!old@oldhost CHGHOST a!b h"],
     ["a host with an @", "<< :new!old@oldhost CHGHOST u a@b"],
     ["a host with a comma", "<< :new!old@oldhost CHGHOST u a,b"],
+    ["a source with no user", "<< :new@oldhost CHGHOST u h"],
+    ["a source with no host", "<< :new!old CHGHOST u h"],
+    ["a source with an empty host", "<< :new!old@ CHGHOST u h"],
   ])("reads %s as malformed, and changes nothing", (_name, row) => {
     const run = played([...inChannels(caps), lines(row, "?? ignored Malformed CHGHOST")]);
 
@@ -320,6 +323,18 @@ describe("userhost-in-names", () => {
     expect(userOf(run, "plain")?.mask).toStrictEqual({ _tag: "Unknown" });
   });
 
+  it("makes the prefixes multi-prefix completed stale on its CAP DEL, masks or not", () => {
+    const run = played([
+      registered(base, { offered: ["cap-notify", ...both] }),
+      joinedWith("iirc!~iirc@iirc.test", "@+peer!pu@ph"),
+      lines("+1s", "<< :irc.test CAP iirc DEL :multi-prefix"),
+    ]);
+
+    expect(
+      client.known(run.state).channels.get("#iirc")?.members.get("peer")?.prefixes
+    ).toMatchObject({ _tag: "Stale" });
+  });
+
   it("is right about prefixes and masks together with multi-prefix", () => {
     const run = played(joinedAs(both, "iirc!~iirc@iirc.test", "@+peer!pu@ph", "~weird!wu@wh"));
     const channel = client.known(run.state).channels.get("#iirc");
@@ -452,6 +467,8 @@ describe("setname", () => {
     ["a server's source", "<< :irc.test SETNAME :x"],
     ["no realname", "<< :peer!u@h SETNAME"],
     ["an empty realname", "<< :peer!u@h SETNAME :"],
+    ["two parameters", "<< :peer!u@h SETNAME ignored extra"],
+    ["a source with no user", "<< :peer@h SETNAME :x"],
   ])("reads %s as malformed, and changes nothing", (_name, row) => {
     const run = played([...inChannel(), lines(row, "?? ignored Malformed SETNAME")]);
 
@@ -517,6 +534,39 @@ describe("setname", () => {
         "?? refused i1 Unsendable setname in=network",
         `!! setname :${"x".repeat(600)}`,
         "?? refused i2 Unsendable setname in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is refused as unsendable when the realname is longer than NAMELEN", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "<< :irc.test 005 iirc NAMELEN=4 :are supported by this server",
+        "!! setname :Name",
+        ">> SETNAME Name",
+        "!! setname :Names",
+        "?? refused i2 Unsendable setname in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("ties a FAIL to the SETNAME it answers, not one the Ircd already took", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! setname :One",
+        ">> SETNAME One",
+        "<< :iirc!u@h SETNAME :One",
+        "?? activity RealnameChanged iirc in=network :One",
+        "!! setname :Two",
+        ">> SETNAME Two",
+        "<< :irc.test FAIL SETNAME INVALID_REALNAME :That realname is not allowed",
+        "?? refused i2 Rejected INVALID_REALNAME setname in=network"
       ),
     ]);
 
