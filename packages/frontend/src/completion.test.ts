@@ -943,6 +943,7 @@ const networkOf = (
   complete: true,
   connection: { _tag: "Unknown" },
   listed: true,
+  muted: new Set(),
   network: on,
   removed,
   running: undefined,

@@ -7,6 +7,7 @@ import {
   TimelineList,
   TimelineReset,
   TimelineWindow,
+  mutedCap,
 } from "@iirc/api";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -19,6 +20,7 @@ import {
   levelOf,
   markDue,
   markLatest,
+  muting,
   networkActivity,
   saidLevel,
   titleOf,
@@ -419,6 +421,132 @@ describe("what is unread", () => {
   });
 });
 
+const sidebarOf = (held: readonly (typeof Timeline.Encoded)[], muted: readonly string[]) =>
+  sidebar(world(held, undefined), new Set(), new Set(muted.map((id) => timelineId(id))));
+
+const view = (held: readonly (typeof Timeline.Encoded)[], muted: readonly string[]) => {
+  const networks = sidebarOf(held, muted);
+
+  return [titleOf(networks), saidLevel(networks)];
+};
+
+describe("a muted Timeline", () => {
+  const timelines = [
+    described({ id: own, kind: "Network", name: "libera", unread: { activity: 4 } }),
+    described({ id: iirc, name: "#iirc", unread: { activity: 2, direct: 1, messages: 5 } }),
+    described({ id: other, name: "#other", unread: { highlights: 3, messages: 7 } }),
+    described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 2 } }),
+  ];
+
+  const timelineOf = (id: string) =>
+    decodeTimeline(timelines.find((one) => one.id === id) ?? described({ id, name: id }));
+
+  it("shows no count of Messages, Direct Messages or Activity, and no level, without a Highlight", () => {
+    const [network] = sidebarOf(timelines, [iirc, peer, own]);
+
+    expect({
+      direct: activityOf(timelineOf(peer), true),
+      messages: activityOf(timelineOf(iirc), true),
+      // Only #other, which is not muted, is counted.
+      network: network === undefined ? undefined : networkActivity(network),
+      own: activityOf(timelineOf(own), true),
+      unmuted: activityOf(timelineOf(iirc)),
+    }).toStrictEqual({
+      direct: { level: undefined, unread: nothing },
+      messages: { level: undefined, unread: nothing },
+      network: { level: "Highlight", unread: { ...nothing, highlights: 3, messages: 7 } },
+      own: { level: undefined, unread: nothing },
+      unmuted: { level: "Direct", unread: { ...nothing, activity: 2, direct: 1, messages: 5 } },
+    });
+  });
+
+  it("still marks a Highlight, with its count and its level, and drops only the rest of its counts", () => {
+    const [network] = sidebarOf(timelines, [other]);
+
+    expect({
+      activity: activityOf(timelineOf(other), true),
+      network: network === undefined ? undefined : networkActivity(network).unread,
+    }).toStrictEqual({
+      activity: { level: "Highlight", unread: { ...nothing, highlights: 3 } },
+      network: { activity: 6, direct: 3, highlights: 3, messages: 5 },
+    });
+  });
+
+  it("says muted in a row's label, after any count it still has", () => {
+    expect({
+      highlight: labelOf("#other", activityOf(timelineOf(other), true), true),
+      loud: labelOf("#iirc", activityOf(timelineOf(iirc))),
+      quiet: labelOf("#iirc", activityOf(timelineOf(iirc), true), true),
+    }).toStrictEqual({
+      highlight: "#other, 3 unread, 3 highlights, muted",
+      loud: "#iirc, 6 unread",
+      quiet: "#iirc, muted",
+    });
+  });
+
+  it("counts nothing toward the page's title or its sidebar button but a Highlight", () => {
+    const said = [
+      described({ id: iirc, name: "#iirc", unread: { messages: 5 } }),
+      described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 2 } }),
+    ];
+
+    expect({
+      allMuted: view(timelines, [own, iirc, other, peer]),
+      noHighlight: view(said, [iirc, peer]),
+      // Muting one Timeline leaves the level of the rest.
+      onlyOne: view(
+        [
+          described({ id: iirc, name: "#iirc", unread: { messages: 5 } }),
+          described({ id: other, name: "#other", unread: { messages: 1 } }),
+        ],
+        [iirc]
+      ),
+      unmuted: view(timelines, []),
+    }).toStrictEqual({
+      allMuted: ["(3) iirc", "Highlight"],
+      noHighlight: ["iirc", undefined],
+      onlyOne: ["iirc", "Message"],
+      unmuted: ["(6) iirc", "Highlight"],
+    });
+  });
+});
+
+describe("the list of muted Timelines", () => {
+  const a = timelineId(idOf(10));
+  const b = timelineId(idOf(11));
+
+  it("adds a Timeline last, takes one away, and changes nothing when it already is as wanted", () => {
+    expect({
+      add: muting([a], b, true),
+      alreadyLoud: muting([a], b, false),
+      alreadyMuted: muting([a], a, true),
+      emptied: muting([a], a, false),
+      removed: muting([a, b], a, false),
+    }).toStrictEqual({
+      add: { _tag: "Parsed", value: [a, b] },
+      alreadyLoud: { _tag: "Parsed", value: undefined },
+      alreadyMuted: { _tag: "Parsed", value: undefined },
+      emptied: { _tag: "Parsed", value: [] },
+      removed: { _tag: "Parsed", value: [b] },
+    });
+  });
+
+  it("refuses to mute past the cap in words, though a Timeline there may still be unmuted", () => {
+    const full = Array.from({ length: mutedCap }, (_, at) => timelineId(idOf(100 + at)));
+    const [first] = full;
+
+    expect({
+      past: muting(full, b, true)._tag,
+      remains: first === undefined ? undefined : muting(full, first, true),
+      unmute: first === undefined ? undefined : muting(full, first, false),
+    }).toStrictEqual({
+      past: "Invalid",
+      remains: { _tag: "Parsed", value: undefined },
+      unmute: { _tag: "Parsed", value: full.slice(1) },
+    });
+  });
+});
+
 describe("marking the open Timeline read", () => {
   it("marks only forward, and only up to the last item held, for any marker and items", () => {
     fc.assert(
@@ -748,12 +876,21 @@ describe("notifications", () => {
 
   const state = world(timelines, iirc, [said({ at: 10, sequence: 1 })]);
 
-  const notified = (item: typeof TimelineItem.Encoded, page: Page = seeing, before = state) => {
+  const notified = (
+    item: typeof TimelineItem.Encoded,
+    page: Page = seeing,
+    before = state,
+    muted: readonly string[] = []
+  ) => {
     const event = changed(11, { items: [item] });
 
-    return notificationsOf(before, reduceTimelines(before, event), event.change, page).map(
-      (one) => one.timeline
-    );
+    return notificationsOf(
+      before,
+      reduceTimelines(before, event),
+      event.change,
+      page,
+      new Set(muted.map((id) => timelineId(id)))
+    ).map((one) => one.timeline);
   };
 
   const highlight = (timeline: string, more: Partial<Said> = {}) =>
@@ -766,6 +903,18 @@ describe("notifications", () => {
       hidden: notified(highlight(iirc), { compact: false, focused: true, visible: false }),
       unfocused: notified(highlight(iirc), { compact: false, focused: false, visible: true }),
     }).toStrictEqual({ direct: [peer], elsewhere: [other], hidden: [iirc], unfocused: [iirc] });
+  });
+
+  it("notifies of a Highlight in a muted Timeline, and of nothing else there", () => {
+    const direct = said({ at: 50, level: "Direct", sequence: 11, timeline: peer });
+
+    expect({
+      direct: notified(direct, seeing, state, [peer]),
+      highlight: notified(highlight(other), seeing, state, [other]),
+      // Muting one Timeline leaves the others as they were.
+      others: notified(direct, seeing, state, [other]),
+      unmuted: notified(highlight(other)),
+    }).toStrictEqual({ direct: [], highlight: [other], others: [peer], unmuted: [other] });
   });
 
   it("never notifies of what the Owner sees, a Message, history, ours, read, or given before", () => {

@@ -21,7 +21,7 @@ import type {
 import type { Aliases } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
-import { levelOf, markLatest } from "./activity.ts";
+import { levelOf, markLatest, unreadShown } from "./activity.ts";
 import { arranged, shownOrder, unarranged } from "./arrangement.ts";
 import type { Arrangement } from "./arrangement.ts";
 import { channelIn, initialChannels } from "./channel.ts";
@@ -347,18 +347,28 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
   withDraft(state, state.carried.get(timeline) ?? timeline, (draft) => ({ ...draft, notice }));
 
 /**
- * The Timelines with something unread, as a command sees them.
+ * The Timelines with something unread, as a command sees them. A muted one is listed while
+ * the Daemon counts anything unread in it, so `/read all` still marks it, but its level is
+ * the one shown, so navigation passes it over unless a Highlight is unread there.
  * @param timelines - The Timelines.
+ * @param muted - The Timelines the Owner muted.
  * @returns Those with something unread, in their order.
  */
-const unseenIn = (timelines: readonly Timeline[]): readonly Unseen[] =>
-  timelines.flatMap((timeline) => {
-    const level = levelOf(timeline.unread);
-
-    return level === undefined
+const unseenIn = (
+  timelines: readonly Timeline[],
+  muted: ReadonlySet<TimelineId>
+): readonly Unseen[] =>
+  timelines.flatMap((timeline) =>
+    levelOf(timeline.unread) === undefined
       ? []
-      : [{ level, mark: markLatest(timeline), timeline: timeline.id }];
-  });
+      : [
+          {
+            level: levelOf(unreadShown(timeline.unread, muted.has(timeline.id))),
+            mark: markLatest(timeline),
+            timeline: timeline.id,
+          },
+        ]
+  );
 
 /**
  * Whether a Network has a Session: not while the Daemon stops it, and not known while it is
@@ -387,19 +397,21 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
  * @param channels - The Channels the Panes show, as read.
  * @param arrangement - The Owner's order of the sidebar.
  * @param aliases - The aliases the Owner made.
+ * @param muted - The Timelines the Owner muted.
  * @returns The context.
  */
 export const contextOf = (
   timelines: Timelines,
   channels: Channels = initialChannels,
   arrangement: Arrangement = unarranged,
-  aliases: Aliases = []
+  aliases: Aliases = [],
+  muted: ReadonlySet<TimelineId> = new Set()
 ): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
   const main = mainOf(timelines);
 
-  const networks = sidebar(timelines);
+  const networks = sidebar(timelines, new Set(), muted);
   const shownAs = arranged(networks, arrangement);
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
@@ -425,8 +437,8 @@ export const contextOf = (
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
     timelines: shownOrder(shownAs),
-    unread: unseenIn(calling),
-    unreadClosed: unseenIn(closed),
+    unread: unseenIn(calling, muted),
+    unreadClosed: unseenIn(closed, muted),
   };
 
   // A Direct Message not yet begun stands in front of any Timeline, and has no focus of its

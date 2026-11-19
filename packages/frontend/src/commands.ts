@@ -167,8 +167,11 @@ export interface CommandContext {
 /** A Timeline with something unread, as a command sees it. */
 export interface Unseen {
   readonly timeline: TimelineId;
-  /** The highest level unread in it. */
-  readonly level: Level;
+  /**
+   * The highest level unread in it as shown, or none when it is muted and has no Highlight
+   * unread, which `/next-unread` passes over.
+   */
+  readonly level: Level | undefined;
   /** Marking it read up to its latest item, unless that would change nothing. */
   readonly mark: MarkRead | undefined;
 }
@@ -282,6 +285,8 @@ export interface Act {
  *   replaced: the composer says what was not put in.
  * - `MarkRead`: mark a Timeline read, above.
  * - `CloseTimeline`: close a Timeline, above.
+ * - `Mute`: mute a Timeline, or unmute it, for every device, which the runtime writes as
+ *   `ui.muted`, the whole list, as `muting` gives it.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
  *   to turn them on.
  * - `ShowMembers`: show or hide the open Channel's members on this device, or turn them
@@ -347,6 +352,7 @@ export type Intent =
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
   | CloseTimeline
+  | { readonly _tag: "Mute"; readonly timeline: TimelineId; readonly muted: boolean }
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
   | { readonly _tag: "ShowSidebar"; readonly shown: boolean | undefined }
@@ -1723,6 +1729,30 @@ const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }, {
 const anywhereActing = anywhere;
 const focused: readonly Condition[] = [{ _tag: "Focused" }];
 
+/**
+ * The command that mutes the open Timeline, or unmutes it, whatever it is, a Network's own
+ * included.
+ * @param muted - Whether it mutes.
+ * @returns The command.
+ */
+const muteCommand = (muted: boolean): Command => {
+  const name = muted ? "mute" : "unmute";
+
+  return command({
+    aliases: [],
+    arguments: "None",
+    description: muted
+      ? "Mute the open Timeline, which then shows no count of unread Messages and notifies of nothing but a Highlight, for every device."
+      : "Unmute the open Timeline, for every device.",
+    id: `timeline.${name}`,
+    intents: (_none: undefined, focus) => [{ _tag: "Mute", muted, timeline: focus.timeline }],
+    name,
+    parse: nothingAfter(name),
+    usage: `/${name}`,
+    when: focused,
+  });
+};
+
 /** A Timeline in focus whose Network can still be changed. */
 const live: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }];
 
@@ -2872,6 +2902,8 @@ export const commands: readonly Command[] = [
     usage: "/move up|down",
     when: focused,
   }),
+  muteCommand(true),
+  muteCommand(false),
   unfocused({
     aliases: [],
     arguments: "None",

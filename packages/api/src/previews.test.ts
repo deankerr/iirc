@@ -14,7 +14,7 @@ import {
   PreviewsRequest,
   PressRequest,
 } from "./previews.ts";
-import { PlayerHost, UiOptions, uiDefaults, uiSharedOnly } from "./ui.ts";
+import { PlayerHost, UiOptions, mutedCap, uiDefaults, uiSharedOnly } from "./ui.ts";
 
 const id = "0123456789abcdef0123456789abcdef";
 
@@ -251,6 +251,7 @@ describe("ui.previews", () => {
     }).toStrictEqual({
       sharedOnly: [
         "aliases",
+        "muted",
         "previews",
         "previews.players",
         "previews.timelines",
@@ -392,6 +393,31 @@ describe("ui.sidebar", () => {
       default: [[], [], []],
       gone: true,
       twice: [false, false, false],
+    });
+  });
+});
+
+const ids = (count: number) =>
+  Array.from(
+    { length: count },
+    (_, at) => `00000000000001-${String(at).padStart(8, "0")}-00000000`
+  );
+
+describe("ui.muted", () => {
+  it("starts empty, names ids that may have gone, and refuses one named twice or past the cap", () => {
+    const options = Schema.decodeUnknownOption(UiOptions);
+    const decodes = (muted: readonly string[]) => Option.isSome(options({ ...uiDefaults, muted }));
+
+    expect({
+      cap: [decodes(ids(mutedCap)), decodes(ids(mutedCap + 1))],
+      default: uiDefaults.muted,
+      gone: decodes(ids(2)),
+      twice: decodes([...ids(1), ...ids(1)]),
+    }).toStrictEqual({
+      cap: [true, false],
+      default: [],
+      gone: true,
+      twice: false,
     });
   });
 });

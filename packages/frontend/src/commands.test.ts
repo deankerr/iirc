@@ -451,6 +451,22 @@ describe("reading a line", () => {
     });
   });
 
+  it("mutes or unmutes the open Timeline with /mute and /unmute, a Network's own included, and refuses anything after them or no Timeline", () => {
+    expect({
+      mute: chosen("/mute", inChannel),
+      muteNetwork: chosen("/mute", inNetwork),
+      nowhere: [message("/mute", nowhere), message("/unmute", nowhere)],
+      trailing: [message("/mute now", inChannel), message("/unmute now", inChannel)],
+      unmute: chosen("/unmute", inChannel),
+    }).toStrictEqual({
+      mute: [{ _tag: "Mute", muted: true, timeline }],
+      muteNetwork: [{ _tag: "Mute", muted: true, timeline }],
+      nowhere: ["Open a Timeline first.", "Open a Timeline first."],
+      trailing: ["/mute takes nothing after it.", "/unmute takes nothing after it."],
+      unmute: [{ _tag: "Mute", muted: false, timeline }],
+    });
+  });
+
   it("jumps to the open Timeline's latest with /latest, and takes nothing after it", () => {
     const run = (line: string) => interpret(line, inChannel);
 

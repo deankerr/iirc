@@ -1382,6 +1382,7 @@ describe("the options under ui", () => {
       leading: 1.45,
       light: "light",
       line: "columns",
+      muted: [],
       previews: "off",
       "previews.animate": false,
       "previews.folded": "summary",
@@ -1481,7 +1482,7 @@ describe("the options under ui", () => {
     expect({
       first: listed(state, "")
         .map((option) => option.name)
-        .slice(0, 28),
+        .slice(0, 29),
       kept: state.ui,
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
@@ -1496,6 +1497,7 @@ describe("the options under ui", () => {
         "ui.leading",
         "ui.light",
         "ui.line",
+        "ui.muted",
         "ui.previews",
         "ui.previews.animate",
         "ui.previews.folded",
