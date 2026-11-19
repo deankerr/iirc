@@ -1039,6 +1039,14 @@ export const watch = (modifier: "+" | "-", nicks: readonly string[]): OutboundLi
 export const away = (reason?: string): OutboundLine | Rejected =>
   outbound("AWAY", reason === undefined || reason === "" ? [] : [reason]);
 
+/**
+ * `SETNAME`, to change Self's realname.
+ * @param realname - The new realname, which may hold spaces and may not be empty.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const setname = (realname: string): OutboundLine | Rejected =>
+  realname === "" ? rejected("EmptyText") : outbound("SETNAME", [realname]);
+
 // Credentials
 
 /**

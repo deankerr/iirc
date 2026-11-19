@@ -300,6 +300,14 @@ const changeText = (activity: Exclude<Activity, Movement | CtcpActivity | FromIr
         : `-- ${plain(activity.nick)} logged in as ${plain(activity.account)}`;
     }
 
+    case "HostChanged": {
+      return `-- ${plain(activity.nick)} is now ${plain(activity.user)}@${plain(activity.host)}`;
+    }
+
+    case "RealnameChanged": {
+      return `-- ${plain(activity.nick)} set their real name to ${plain(activity.realname)}`;
+    }
+
     default: {
       return activity satisfies never;
     }
@@ -351,6 +359,10 @@ const attemptedText = (attempted: Attempted): string => {
 
     case "Away": {
       return attempted.away ? "Marking you away" : "Marking you back";
+    }
+
+    case "Setname": {
+      return "Your real name change";
     }
 
     case "Raw": {

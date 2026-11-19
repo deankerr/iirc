@@ -200,6 +200,11 @@ export const ActionRequest = Schema.TaggedUnion({
   Ping: { nick: OwnerName },
   /** A Line written as text, sent as it reads, as `/quote` sends it. */
   Raw: { line: OwnerName },
+  /**
+   * Change Self's realname for this Session, where the Network offers `setname`; refused as
+   * `Unsendable` otherwise.
+   */
+  Setname: { realname: SayText.check(Schema.isNonEmpty()) },
   /** Set a Channel's topic, or clear it with `""`. */
   Topic: { channel: OwnerName, text: SayText },
 });
@@ -526,7 +531,9 @@ const NumericReply = Schema.String.check(
  * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`. An
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
  * `channel`, which it may join. An `AccountChanged` is a User logging in to `account`, or
- * out of theirs with `null`. `CameOnline` and `WentOffline` are a monitored Direct Message
+ * out of theirs with `null`. A `HostChanged` is a User's user and host changing, with no
+ * quit or join, and a `RealnameChanged` a User setting their realname, each told where the
+ * User is, or in the Network's own Timeline for Self. `CameOnline` and `WentOffline` are a monitored Direct Message
  * partner coming onto the Network or leaving it, in their Direct Message Timeline. A
  * `Numeric` is a numeric the Ircd sent that nothing else reports, such as its welcome or its
  * counts of Users, in the Network's own Timeline: its three digits, and its `params` after
@@ -546,6 +553,7 @@ export const Activity = Schema.TaggedUnion({
   CtcpRequest: { ...ctcp, answer: CtcpAnswer },
   CtcpSent: { args: Untrusted, command: Untrusted, nick: Untrusted },
   CtcpUnsent: { command: Untrusted, nick: Untrusted, target: Untrusted },
+  HostChanged: { host: Untrusted, nick: Untrusted, user: Untrusted },
   Invited: { by: Untrusted, channel: Untrusted },
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
@@ -557,6 +565,7 @@ export const Activity = Schema.TaggedUnion({
   OperRefused: { nick: Untrusted, reply: Schema.Literals(["461", "464", "491"]) },
   Parted: { channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   Quit: { nick: Untrusted, reason: Schema.NullOr(Untrusted) },
+  RealnameChanged: { nick: Untrusted, realname: Untrusted },
   StandardReply: standardReply,
   TopicChanged: { by: Untrusted, channel: Untrusted, topic: Schema.NullOr(Topic) },
   WentOffline: { nick: Untrusted },
@@ -703,6 +712,7 @@ export const Attempted = Schema.TaggedUnion({
   Part: { channel: Untrusted },
   Ping: { nick: Untrusted },
   Raw: { command: Schema.NullOr(Untrusted) },
+  Setname: {},
   Topic: { channel: Untrusted },
 });
 
