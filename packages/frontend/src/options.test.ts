@@ -157,6 +157,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.highlights",
         "network.libera.ignores",
         "network.libera.ircds",
+        "network.libera.lines",
         "network.libera.login",
         "network.libera.login.account",
         "network.libera.login.credential",
@@ -169,6 +170,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.oper.name",
         "network.libera.password",
         "network.libera.realname",
+        "network.libera.userModes",
         "network.libera.username",
         "network.libera.whoOnJoin",
       ],
@@ -201,6 +203,7 @@ describe("the options, derived from the Schema", () => {
       highlights: { starts: "", value: { _tag: "Shown", text: "" } },
       ignores: { starts: "", value: { _tag: "Shown", text: "" } },
       ircds: { starts: undefined, value: { _tag: "Shown", text: "irc.libera.chat/6697" } },
+      lines: { starts: "", value: { _tag: "Shown", text: "" } },
       login: { starts: "none", value: { _tag: "Shown", text: "sasl" } },
       "login.account": { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
       "login.credential": {
@@ -219,6 +222,7 @@ describe("the options, derived from the Schema", () => {
         value: { _tag: "Credential", held: false, name: "libera.password" },
       },
       realname: { starts: "the first nick", value: { _tag: "Shown", text: "Dean" } },
+      userModes: { starts: "", value: { _tag: "Shown", text: "" } },
       username: { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
       whoOnJoin: { starts: "on", value: { _tag: "Shown", text: "on" } },
     });
