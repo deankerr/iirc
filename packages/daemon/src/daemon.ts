@@ -24,6 +24,7 @@ import { Digest, SecureRandom } from "effect/crypto";
 import { HttpRouter } from "effect/http";
 import type { HttpPlatform } from "effect/http";
 
+import { layerAwayWhenClosed } from "./away-when-closed.ts";
 import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
 import { layerLinkListener } from "./link-listener.ts";
@@ -213,10 +214,12 @@ const layerCore = (options: DaemonOptions) => {
   );
 
   // The `ui` options are folded from the Journal's Changes, beside the Runtime, and so are
-  // the Uploads. The options under `store`, `uploads`, and `previews` are folded before it starts, since
+  // the Uploads, and the aways marked when no Frontend is open. The options beyond `ui` are folded before it starts, since
   // it spares the Credentials they name, even as it finishes a removal cut short.
   const owned = previews.pipe(
-    Layer.provideMerge(Layer.mergeAll(timelines, layerUiConfiguration, uploads)),
+    Layer.provideMerge(
+      Layer.mergeAll(timelines, layerUiConfiguration, uploads, layerAwayWhenClosed)
+    ),
     Layer.provideMerge(shared)
   );
 

@@ -31,3 +31,5 @@ export { StoreBytes, layerStoreBytes } from "./store-bytes.ts";
 export { layerLinkListener } from "./link-listener.ts";
 
 export { Previews, layerPreviews } from "./previews/previews.ts";
+
+export { Following, layerAwayWhenClosed } from "./away-when-closed.ts";
