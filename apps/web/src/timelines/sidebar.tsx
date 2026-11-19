@@ -98,12 +98,12 @@ const readingKey = (network: string) => `reading:${network}`;
 
 /**
  * How a Network's connection stands: a symbol whose shape differs by standing as well as
- * its colour, the word a screen reader hears, and why, when it is offline or stopped.
+ * its colour, none while connected, as a mark at a row's end reads as something to clear,
+ * the word a screen reader hears, and why, when it is offline or stopped.
  */
 interface Standing {
-  readonly icon: IconName;
+  readonly mark: { readonly icon: IconName; readonly className: string } | undefined;
   readonly word: string;
-  readonly className: string;
   readonly why: string | undefined;
 }
 
@@ -114,13 +114,16 @@ interface Standing {
  */
 const standingOf = (network: SidebarNetwork): Standing => {
   if (network.removed) {
-    return { className: styles.offline, icon: "removed", why: undefined, word: "removed" };
+    return {
+      mark: { className: styles.offline, icon: "removed" },
+      why: undefined,
+      word: "removed",
+    };
   }
 
   if (network.running?._tag === "Stopped") {
     return {
-      className: styles.offline,
-      icon: "stopped",
+      mark: { className: styles.offline, icon: "stopped" },
       why: network.running.reason,
       word: "stopped",
     };
@@ -130,13 +133,12 @@ const standingOf = (network: SidebarNetwork): Standing => {
 
   switch (connection._tag) {
     case "Connected": {
-      return { className: styles.connected, icon: "connected", why: undefined, word: "connected" };
+      return { mark: undefined, why: undefined, word: "connected" };
     }
 
     case "Connecting": {
       return {
-        className: styles.connecting,
-        icon: "connecting",
+        mark: { className: styles.connecting, icon: "connecting" },
         why: undefined,
         word: "connecting",
       };
@@ -144,8 +146,7 @@ const standingOf = (network: SidebarNetwork): Standing => {
 
     case "Offline": {
       return {
-        className: styles.offline,
-        icon: "offline",
+        mark: { className: styles.offline, icon: "offline" },
         why: connection.reason === undefined ? undefined : endReason(connection.reason),
         word: "offline",
       };
@@ -153,8 +154,7 @@ const standingOf = (network: SidebarNetwork): Standing => {
 
     case "Unknown": {
       return {
-        className: styles.connecting,
-        icon: "unknown",
+        mark: { className: styles.connecting, icon: "unknown" },
         why: undefined,
         word: "not known yet",
       };
@@ -478,7 +478,7 @@ const networkUnread = (
 
 /**
  * A Network's row: its chevron, which expands and collapses it without choosing, its id,
- * coloured by what is unread, how its connection stands, as a symbol, and, once it has its
+ * coloured by what is unread, how its connection stands, as a symbol unless connected, and, once it has its
  * own Timeline, the button that opens that Timeline's menu.
  * @param props - The Network, its own Timeline, whether its Timelines are shown, and what
  * opens the menu.
@@ -518,9 +518,11 @@ const NetworkRow = ({
       </bdi>
       <Counts activity={activity} calling={calling} />
       <PaneMark pane={pane} />
-      <span className={styles.standing} title={standingWords(standing)}>
-        <Icon className={standing.className} name={standing.icon} />
-      </span>
+      {standing.mark === undefined ? null : (
+        <span className={styles.standing} title={standingWords(standing)}>
+          <Icon className={standing.mark.className} name={standing.mark.icon} />
+        </span>
+      )}
       {own === undefined ? null : <MoreButton name={own.name} onMenu={onMenu} />}
       <DragButton />
     </>

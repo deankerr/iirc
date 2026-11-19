@@ -197,6 +197,21 @@ const row = (name: string) => {
 };
 
 /**
+ * How a Network's row says its connection stands: to a screen reader, and as a mark.
+ * @param name - The Network.
+ * @returns Its label, and the mark's symbol and title, if one is drawn.
+ */
+const standing = (name: string) => {
+  const mark = row(name).querySelector<HTMLElement>("[title]");
+
+  return {
+    label: row(name).getAttribute("aria-label"),
+    symbol: mark?.textContent ?? null,
+    title: mark?.title ?? null,
+  };
+};
+
+/**
  * A button, by its label or its text.
  * @param name - Its label or text.
  * @returns It, or none.
@@ -367,15 +382,22 @@ describe("the sidebar", () => {
     });
   });
 
-  it("says how a connection stands as a symbol, keeping the word in its label and title", async () => {
-    await signedIn();
-    const standing = row("libera").querySelector<HTMLElement>("[title]");
+  it("marks a Network's connection only when it is not connected, saying both to a screen reader", async () => {
+    const fake = fakeDaemon();
 
-    expect({
-      label: row("libera").getAttribute("aria-label"),
-      symbol: standing?.textContent,
-      title: standing?.title,
-    }).toStrictEqual({ label: "libera, connected", symbol: "●", title: "connected" });
+    fake.daemon.timelines.set("oftc", [
+      {
+        gaps: [],
+        items: [],
+        timeline: { ...describeTimeline(idOf(10), "oftc", "Network"), network: "oftc" },
+      },
+    ]);
+    await signedIn({ listed: 1, timelines: [] }, fake);
+
+    expect([standing("libera"), standing("oftc")]).toStrictEqual([
+      { label: "libera, connected", symbol: null, title: null },
+      { label: "oftc, offline", symbol: "○", title: "offline" },
+    ]);
   });
 
   it("marks a Timeline another Pane shows, more quietly, with that Pane's number", async () => {

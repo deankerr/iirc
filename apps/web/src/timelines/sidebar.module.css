@@ -122,14 +122,10 @@
   white-space: nowrap;
 }
 
-/* How a Network's connection stands, as a symbol whose shape says it too. */
+/* How a Network's connection stands, unless connected, as a symbol whose shape says it too. */
 .standing {
   display: inline-flex;
   flex-shrink: 0;
-}
-
-.connected {
-  color: var(--color-ok);
 }
 
 .connecting {
