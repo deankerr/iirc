@@ -130,22 +130,6 @@ describe("a numeric shown once", () => {
     expect(numericsOf(played)).toStrictEqual(["001", "002", "003", "004"]);
   });
 
-  it("never shows the message of the day, which is shown whole", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base),
-        lines(
-          "<< :irc.test 375 iirc :- irc.test Message of the Day -",
-          "<< :irc.test 372 iirc :- hello",
-          "<< :irc.test 376 iirc :End of /MOTD command."
-        ),
-      ],
-    });
-
-    expect(numericsOf(played)).toStrictEqual(["001", "002", "003", "004"]);
-  });
-
   it("never shows what a Lookup collected", () => {
     const played = play(client, {
       configuration: base,

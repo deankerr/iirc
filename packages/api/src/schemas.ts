@@ -510,7 +510,10 @@ const NumericReply = Schema.String.check(
  * partner coming onto the Network or leaving it, in their Direct Message Timeline. A
  * `Numeric` is a numeric the Ircd sent that nothing else reports, such as its welcome or its
  * counts of Users, in the Network's own Timeline: its three digits, and its `params` after
- * the one that names Self, in order, as they came. It never counts as unread.
+ * the one that names Self, in order, as they came. It never counts as unread. A `Motd` is
+ * the Ircd's message of the day, in the Network's own Timeline: the text of each of its lines
+ * as they came, and `cut`, whether it was cut short, by its bound, by another beginning, or by
+ * its Connection ending. It never counts as unread.
  */
 export const Activity = Schema.TaggedUnion({
   AccountChanged: { account: Schema.NullOr(Untrusted), nick: Untrusted },
@@ -527,6 +530,7 @@ export const Activity = Schema.TaggedUnion({
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },
+  Motd: { cut: Schema.Boolean, lines: Schema.Array(Untrusted) },
   NickChanged: { from: Untrusted, to: Untrusted },
   Numeric: { numeric: NumericReply, params: Schema.Array(Untrusted) },
   OperGranted: { nick: Untrusted },

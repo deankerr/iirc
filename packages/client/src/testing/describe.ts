@@ -389,6 +389,13 @@ const writeNetworkOnly = (activity: NetworkOnly): ActivityParts => {
       return writeNumeric(activity);
     }
 
+    case "Motd": {
+      return {
+        head: [`lines=${activity.lines.length}`, ...(activity.cut ? ["cut"] : [])],
+        tail: [],
+      };
+    }
+
     default: {
       return activity satisfies never;
     }

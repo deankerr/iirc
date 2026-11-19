@@ -203,7 +203,21 @@ type LinkPhase =
       readonly pingsSent: number;
       /** What `MONITOR` or `WATCH` has asked of the Ircd on this Connection, and what it told. */
       readonly monitoring: Monitoring;
+      /** The message of the day this Connection is receiving, or `undefined` outside one. */
+      readonly motd: MotdCollecting | undefined;
     };
+
+/**
+ * A message of the day between its `375` and its `376`: its lines so far, at most
+ * {@link maxMotdLines}, and when its `375` came, or `Spent` once it ran past its bound
+ * and was shown cut, when its lines are dropped until its `376`.
+ */
+export type MotdCollecting =
+  | { readonly _tag: "Collecting"; readonly at: Fact<Instant>; readonly lines: readonly string[] }
+  | { readonly _tag: "Spent" };
+
+/** How many lines of a message of the day are kept. Past it, the rest is cut. */
+export const maxMotdLines = 200;
 
 /** The commands that keep a monitor list: `MONITOR`, or the older `WATCH` where only it is offered. */
 export type MonitorCommand = "MONITOR" | "WATCH";

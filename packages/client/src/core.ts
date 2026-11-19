@@ -39,6 +39,7 @@ import { endLookups, expireLookup, look, removedLookups, unsentLookups } from ".
 import { read } from "./markers.ts";
 import { modesQueryOver } from "./modes-query.ts";
 import { monitorAfter } from "./monitor.ts";
+import { endMotd } from "./motd.ts";
 import type { EndReason } from "./news.ts";
 import { operUnsent } from "./oper.ts";
 import {
@@ -220,6 +221,7 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
 
   run.state = rescheduled(run.state, link, run.at);
   endLookups(run, link);
+  endMotd(run, link);
 
   const session =
     phase._tag === "Open" && phase.presence._tag === "Session" ? phase.presence : undefined;

@@ -24,6 +24,7 @@
 .numeric,
 .refused,
 .session,
+.motd,
 .gap,
 .day {
   display: grid;
@@ -70,7 +71,8 @@
 
 .activity,
 .refused,
-.session {
+.session,
+.motd {
   color: var(--color-muted);
 }
 
@@ -80,6 +82,50 @@
   color: var(--color-muted);
   text-align: right;
   white-space: nowrap;
+}
+
+/*
+ * The message of the day: its folded line, a press of which opens its block. The block is in
+ * the monospace font whatever the text's is, keeps every space, wraps nothing, and scrolls
+ * sideways within itself, so the Pane never does.
+ */
+.motdText {
+  display: block;
+  min-width: 0;
+}
+
+.motdSummary {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motdSummary[data-hovered] {
+  text-decoration: underline dotted var(--color-muted);
+}
+
+.motdSummary[data-focus-visible],
+.motdBlock:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+.motdBlock {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  overflow-wrap: normal;
+  white-space: pre;
 }
 
 /* An action of ours the Ircd refused, or that never left: calm, as Activity is, and set apart. */
@@ -343,9 +389,17 @@
   .numeric,
   .refused,
   .session,
+  .motd,
   .gap,
   .day {
     display: block;
+  }
+
+  /* The folded line runs on after its time and marker, as an Activity's words do. */
+  .motdText,
+  .motdSummary {
+    display: inline;
+    width: auto;
   }
 
   /*
@@ -422,8 +476,13 @@
 
 /* The same rules, as `ui.line` inline or stacked asks for them at any width. */
 :global([data-line])
-  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .gap, .day) {
+  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .motd, .gap, .day) {
   display: block;
+}
+
+:global([data-line]) :is(.motdText, .motdSummary) {
+  display: inline;
+  width: auto;
 }
 
 :global([data-line]) :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session) {

@@ -330,8 +330,12 @@ const reply = (kind: "FAIL" | "WARN" | "NOTE", context: readonly string[], descr
  * @param line - The line.
  * @returns Its words.
  */
-const read = (line: Line): string =>
-  line._tag === "Message"
+const read = (line: Line): string => {
+  if (line._tag === "Motd") {
+    return line.summary;
+  }
+
+  return line._tag === "Message"
     ? `<${line.nick}> ${texts(line.text)}`
     : line.parts
         .map((part) => {
@@ -363,6 +367,7 @@ const read = (line: Line): string =>
           }
         })
         .join("");
+};
 
 /** An action refused, as the wire carries it. */
 type ActionRefusedOnWire = Extract<typeof ItemContent.Encoded, { readonly _tag: "ActionRefused" }>;
@@ -542,6 +547,38 @@ describe("lines", () => {
         line.parts.some(
           (part) => part._tag === "Said" && part.inlines.some((inline) => inline._tag === "Link")
         )
+    ).toBeTruthy();
+  });
+
+  it.each([
+    [[], "Message of the day, 0 lines", false, []],
+    [["- Welcome"], "Message of the day, 1 line", false, ["Welcome"]],
+    [
+      ["-", "-   indented  twice", "no prefix", "-- two dashes"],
+      "Message of the day, 4 lines, cut short",
+      true,
+      ["", "  indented  twice", "no prefix", "-- two dashes"],
+    ],
+  ])(
+    "gives the message of the day %j as a folded summary and its lines without their RFC prefix, spaces kept",
+    (lines, summary, cut, shown) => {
+      const line = lineOf(activity({ _tag: "Motd", cut, lines }));
+
+      expect(line._tag === "Motd" && [line.marker, line.summary]).toStrictEqual(["--", summary]);
+      expect(line._tag === "Motd" && line.lines.map(texts)).toStrictEqual(shown);
+    }
+  );
+
+  it("draws the formatting and links in a message of the day as a Message's text has them", () => {
+    const line = lineOf(
+      activity({ _tag: "Motd", cut: false, lines: ["- \u0002see\u0002 https://example.test/x"] })
+    );
+
+    expect(line._tag === "Motd" && line.lines).toStrictEqual([
+      formatted("\u0002see\u0002 https://example.test/x"),
+    ]);
+    expect(
+      line._tag === "Motd" && line.lines[0]?.some((inline) => inline._tag === "Link")
     ).toBeTruthy();
   });
 

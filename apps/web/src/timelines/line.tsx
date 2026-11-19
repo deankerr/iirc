@@ -25,8 +25,8 @@ import type { Answering } from "@iirc/frontend/composer";
 import { lineOf, quotedOf } from "@iirc/frontend/render";
 import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
-import { useRef, useState } from "react";
-import type { MouseEvent, RefObject } from "react";
+import { Fragment, useRef, useState } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
 
 import { chooseReply, perform } from "../composer/atoms.ts";
@@ -557,6 +557,58 @@ const MessageLine = ({
 };
 
 /**
+ * An Ircd's message of the day: one dim line that says what it is and how many lines it
+ * has, and whether it was cut short, which a press, or Enter or Space, opens to a block of
+ * its text and closes again. The block is monospace in any font, keeps every space, wraps
+ * no line, and scrolls sideways within itself when a line is wider than the Pane. Whether it
+ * is open is this view's alone.
+ * @param props - Its time, and its line.
+ * @returns The line.
+ */
+const MotdLine = ({
+  line,
+  time,
+}: {
+  readonly line: Extract<LineOfRow, { readonly _tag: "Motd" }>;
+  readonly time: ReactNode;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={styles.motd}>
+      {time}{" "}
+      <span aria-hidden className={styles.marker}>
+        {line.marker}
+      </span>{" "}
+      <span className={styles.motdText}>
+        <AriaButton
+          aria-expanded={open}
+          className={styles.motdSummary}
+          onPress={() => {
+            setOpen(!open);
+          }}
+        >
+          <Icon name={open ? "expanded" : "collapsed"} /> {line.summary}
+        </AriaButton>
+        {open ? (
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a block that scrolls sideways is reached by keyboard.
+          <pre className={styles.motdBlock} tabIndex={0}>
+            {line.lines.map((inlines, index) => (
+              // A message's lines never move, so their order is their identity.
+              // oxlint-disable-next-line react/no-array-index-key
+              <Fragment key={index}>
+                {index === 0 ? null : "\n"}
+                <Inlines inlines={inlines} />
+              </Fragment>
+            ))}
+          </pre>
+        ) : null}
+      </span>
+    </div>
+  );
+};
+
+/**
  * One row's line, in the columns every row shares: the time, the sender or a marker, and
  * the text, so an Activity's or a Session's words start where a Message's text does.
  * @param props - The row.
@@ -584,6 +636,10 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 
   // The spaces between a row's parts are ignored while they are the grid's columns, and
   // are what its words, as one run of text, are read and copied by when they are not.
+
+  if (line._tag === "Motd") {
+    return <MotdLine line={line} time={time} />;
+  }
 
   if (line._tag === "Description") {
     const { repeated } = row;

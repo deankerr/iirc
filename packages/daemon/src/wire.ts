@@ -253,9 +253,39 @@ const presence = (source: Presence): WireActivity => {
   return wire;
 };
 
+type IrcdReport = Extract<Activity, { readonly _tag: "Numeric" | "Motd" }>;
+
+const isIrcdReport = (source: Activity): source is IrcdReport =>
+  source._tag === "Numeric" || source._tag === "Motd";
+
+// What an Ircd said as it went about its business: a numeric, or its message of the day.
+const ircdReport = (source: IrcdReport): WireActivity => {
+  if (source._tag === "Motd") {
+    const wire: Case<Activity, WireActivity, "Motd"> = {
+      _tag: "Motd",
+      cut: source.cut,
+      lines: source.lines,
+    };
+
+    return wire;
+  }
+
+  const wire: Case<Activity, WireActivity, "Numeric"> = {
+    _tag: "Numeric",
+    numeric: source.numeric,
+    params: source.params,
+  };
+
+  return wire;
+};
+
 const activity = (source: Activity): WireActivity => {
   if (isPresence(source)) {
     return presence(source);
+  }
+
+  if (isIrcdReport(source)) {
+    return ircdReport(source);
   }
 
   switch (source._tag) {
@@ -349,16 +379,6 @@ const activity = (source: Activity): WireActivity => {
         _tag: "Invited",
         by: source.by,
         channel: source.channel,
-      };
-
-      return wire;
-    }
-
-    case "Numeric": {
-      const wire: Case<Activity, WireActivity, "Numeric"> = {
-        _tag: "Numeric",
-        numeric: source.numeric,
-        params: source.params,
       };
 
       return wire;

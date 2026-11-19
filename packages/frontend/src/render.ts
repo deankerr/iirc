@@ -200,7 +200,8 @@ export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rej
 /**
  * One item as a line: a Message, by its sender, with its text and, for one of ours, its
  * delivery, or a description of an Activity, a Session's start or end, or an action of
- * ours that was refused, whose tone is `Refused`, as a `FAIL`'s is.
+ * ours that was refused, whose tone is `Refused`, as a `FAIL`'s is, or an Ircd's message of
+ * the day, which a view draws folded to one line and opens to its text.
  */
 export type Line =
   | {
@@ -230,6 +231,18 @@ export type Line =
        */
       readonly marker: Marker | undefined;
       readonly parts: readonly Part[];
+    }
+  | {
+      readonly _tag: "Motd";
+      /** `--`, as an Activity that is not a numeric is marked. */
+      readonly marker: Marker;
+      /** What the folded line says: that it is the message of the day, its lines, and if it was cut short. */
+      readonly summary: string;
+      /**
+       * Each line of it, its RFC 2812 `- ` prefix dropped, as a Message's text is drawn, for
+       * a view to show in monospace with every space kept and none wrapped.
+       */
+      readonly lines: readonly (readonly Inline[])[];
     };
 
 /**
@@ -239,12 +252,12 @@ export type Line =
 export type Marker = string;
 
 /**
- * What marks an Activity that is not a numeric: `-->` for a join or a partner coming online,
+ * What marks an Activity that is not a numeric or the message of the day: `-->` for a join or a partner coming online,
  * `<--` for a part, a quit, a kick, or a partner going offline, and `--` for anything else.
  * @param activity - The Activity.
  * @returns Its marker.
  */
-const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" }>): Marker => {
+const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" | "Motd" }>): Marker => {
   switch (activity._tag) {
     case "Joined":
     case "CameOnline": {
@@ -285,8 +298,13 @@ const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" }>): Mar
  * @param activity - The Activity.
  * @returns Its marker.
  */
-const markerOf = (activity: Activity): Marker =>
-  activity._tag === "Numeric" ? activity.numeric : arrowOf(activity);
+const markerOf = (activity: Activity): Marker => {
+  if (activity._tag === "Numeric") {
+    return activity.numeric;
+  }
+
+  return activity._tag === "Motd" ? "--" : arrowOf(activity);
+};
 
 const words = (text: string): Part => ({ _tag: "Words", text });
 
@@ -436,7 +454,7 @@ const describePresence = (activity: Presence): readonly Part[] => {
  * @returns Its parts.
  */
 const describeOtherActivity = (
-  activity: Exclude<Activity, OperAnswer | { readonly _tag: "Invited" }>
+  activity: Exclude<Activity, OperAnswer | { readonly _tag: "Invited" | "Motd" }>
 ): readonly Part[] => {
   if (isPresence(activity)) {
     return describePresence(activity);
@@ -578,7 +596,10 @@ const describeOtherActivity = (
  * @param network - The Network it belongs to.
  * @returns Its parts.
  */
-const describeActivity = (activity: Activity, network: NetworkId): readonly Part[] => {
+const describeActivity = (
+  activity: Exclude<Activity, { readonly _tag: "Motd" }>,
+  network: NetworkId
+): readonly Part[] => {
   if (isOperAnswer(activity)) {
     return describeOperAnswer(activity);
   }
@@ -970,6 +991,36 @@ const toneOf = (activity: Activity): "Activity" | "Refused" | "Numeric" => {
 };
 
 /**
+ * How the message of the day reads folded: that it is one, how many lines it has, and that
+ * it was cut short, if it was.
+ * @param motd - The message of the day.
+ * @returns The words.
+ */
+const motdSummary = (motd: {
+  readonly cut: boolean;
+  readonly lines: readonly string[];
+}): string => {
+  const count = motd.lines.length;
+  const lines = count === 1 ? "1 line" : `${count} lines`;
+
+  return `Message of the day, ${lines}${motd.cut ? ", cut short" : ""}`;
+};
+
+/**
+ * One line of the message of the day as drawn: without the `- ` RFC 2812 puts before each,
+ * or all of a lone `-`, and as it came otherwise. Every other space is kept.
+ * @param line - The text of a `372`.
+ * @returns Its inlines.
+ */
+const motdLine = (line: string): readonly Inline[] => {
+  if (line === "-") {
+    return formatted("");
+  }
+
+  return formatted(line.startsWith("- ") ? line.slice(2) : line);
+};
+
+/**
  * An item as a line.
  * @param content - What the item shows.
  * @param network - The Network it belongs to, which a command it suggests names.
@@ -997,6 +1048,15 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
 
     case "Activity": {
       const { activity } = content;
+
+      if (activity._tag === "Motd") {
+        return {
+          _tag: "Motd",
+          lines: activity.lines.map(motdLine),
+          marker: markerOf(activity),
+          summary: motdSummary(activity),
+        };
+      }
 
       return {
         _tag: "Description",

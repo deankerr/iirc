@@ -29,7 +29,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 17;
+export const projectionVersion = 18;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -375,7 +375,7 @@ const kindOf = (where: Where): Kind => {
 const levelOf = (news: Routed, kind: Kind): Level | undefined => {
   if (news._tag === "Activity") {
     // What an Ircd says as it goes about its business calls for no one: it never counts.
-    if (news.activity._tag === "Numeric") {
+    if (news.activity._tag === "Numeric" || news.activity._tag === "Motd") {
       return undefined;
     }
 

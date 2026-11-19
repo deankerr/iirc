@@ -46,6 +46,7 @@ import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./mean
 import { askModes, modesQueryOver, queryAnswered, queryByCommand } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
 import { isMonitorReply, left, monitorRefused, monitorReply } from "./monitor.ts";
+import { collectMotd } from "./motd.ts";
 import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { answersOper, oper, operAnswered } from "./oper.ts";
@@ -881,8 +882,7 @@ const floor = (run: Run, line: Line): boolean => {
 
 /**
  * The numerics never shown as they came, by number alone: those the Client reads into what
- * it knows with no word to show, those another News already reports, and the message of the
- * day, which is shown as a whole. A numeric that answers a Lookup or an action is found by
+ * it knows with no word to show, and those another News already reports. A numeric that answers a Lookup or an action is found by
  * what waits for it, not listed here.
  *
  * - `005`: the Ircd's ISUPPORT tokens.
@@ -892,7 +892,6 @@ const floor = (run: Run, line: Line): boolean => {
  * - `331`, `332`, `333`: a Channel's topic, read into the Channel.
  * - `341`: an invite went out, which settles the Owner's `INVITE`.
  * - `353`, `366`: a Channel's members, read into the Channel.
- * - `372`, `375`, `376`: the message of the day.
  *
  * What `MONITOR` tells is taken before this always, and what `WATCH` tells while the Client
  * keeps its list.
@@ -912,9 +911,6 @@ const unshown: ReadonlySet<string> = new Set([
   "353",
   "354",
   "366",
-  "372",
-  "375",
-  "376",
 ]);
 
 /**
@@ -1156,7 +1152,8 @@ const liveLine = (
   // History is reported, and moves no machine: it says what was, not what is.
   protocolLine(run, line, raw);
 
-  if (shown) {
+  // The message of the day is shown whole, once it ends, rather than Line by Line.
+  if (shown && !collectMotd(run, arrival)) {
     reportNumeric(run, arrival);
   }
 };
