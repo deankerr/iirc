@@ -672,7 +672,7 @@ const FoldedLines = ({
         <span className={styles.motdText}>
           <AriaButton
             aria-expanded={open}
-            className={styles.motdSummary}
+            className={`${styles.motdSummary} ${styles.foldSummary}`}
             onPress={() => {
               setOpen(!open);
             }}
