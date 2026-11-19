@@ -30,6 +30,7 @@ type Held = (typeof ChannelHeader.Encoded)["held"];
  */
 const headOf = (held: Held) =>
   Schema.decodeSync(ChannelHeader)({
+    accountBan: null,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held,

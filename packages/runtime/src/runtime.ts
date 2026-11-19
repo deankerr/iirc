@@ -223,8 +223,11 @@ const closeRefusalIn = (news: readonly News[]): CloseRefusal | undefined => {
   return { _tag: "NoTimeline" };
 };
 
-/** Why the Client refused a `Say` or an `Act` in the step that took it: no Session, or no Line can carry it. */
-export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
+/**
+ * Why the Client refused a `Say` or an `Act` in the step that took it: no Session, no Line
+ * can carry it, or for a ban by account, the User's account is not known or is none.
+ */
+export type StepRefusal = Exclude<RefusedReason, { readonly _tag: "Rejected" | "Unsent" }>;
 
 /**
  * What a `say` answers: the `Say` stepped and its Message reported, or refused by the
@@ -251,7 +254,8 @@ const refusalIn = (news: readonly News[], intent: IntentId): StepRefusal | undef
     if (
       one._tag === "Refused" &&
       one.intent === intent &&
-      (one.reason._tag === "Offline" || one.reason._tag === "Unsendable")
+      one.reason._tag !== "Rejected" &&
+      one.reason._tag !== "Unsent"
     ) {
       return one.reason;
     }

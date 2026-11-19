@@ -25,6 +25,7 @@ const fold = (nick: string) =>
 const channelOf = (
   members: readonly (readonly [string, Fact<ReadonlySet<string>>])[]
 ): ChannelView => ({
+  accountExtban: undefined,
   casemapping: "rfc1459",
   chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
   channel: {

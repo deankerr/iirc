@@ -506,6 +506,8 @@ const refusedReason = (source: RefusedReason): WireRefusedReason => {
       return wire;
     }
 
+    case "AccountUnknown":
+    case "NoAccount":
     case "Offline":
     case "Unsendable":
     case "Unsent": {
@@ -1357,6 +1359,12 @@ const sessionKnowledge = (source: Knowledge["session"]): WireSessionKnowledge =>
   }
 };
 
+// How a ban names an account, when the Network offers it.
+const accountBan = (view: ChannelView | undefined): WireChannelHeader["accountBan"] =>
+  view?.accountExtban === undefined
+    ? null
+    : { names: view.accountExtban.names, prefix: view.accountExtban.prefix };
+
 /**
  * A Channel's head, as the contract says it: the Channel as the Client knows it now, or,
  * when it holds none by the Timeline's name, the Timeline's name with nothing known.
@@ -1368,6 +1376,7 @@ export const channelHeader = (
   timeline: Summary,
   view: ChannelView | undefined
 ): WireChannelHeader => ({
+  accountBan: accountBan(view),
   chanmodes:
     view === undefined
       ? null

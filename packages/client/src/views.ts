@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { chantypesOf } from "@iirc/protocol/isupport";
+import { accountExtbanOf, chantypesOf } from "@iirc/protocol/isupport";
 
 import type { Inspection } from "./client.ts";
 import { declinedOf } from "./configuration.ts";
@@ -316,6 +316,7 @@ export const channelViewOf = (
   const rules = rulesOf(isupport);
 
   return {
+    accountExtban: accountExtbanOf(isupport.get("EXTBAN"), isupport.get("ACCOUNTEXTBAN")),
     casemapping: state.casemapping,
     chanmodes: rules.channel,
     channel: known,

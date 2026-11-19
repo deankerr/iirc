@@ -1,5 +1,5 @@
 /**
- * The Owner's actions beyond saying: a topic, a kick, a part, modes, an invite, a nick, away, a
+ * The Owner's actions beyond saying: a topic, a kick, a part, modes, a ban by account, an invite, a nick, away, a
  * CTCP request or `PING` to a User, and a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
  * checked against what the Client knows of the Network, by `CHANTYPES`, `PREFIX`,
  * `CHANMODES`, `MODES`, `TARGMAX`, and the lengths ISUPPORT gives. One that cannot be
@@ -13,7 +13,7 @@
  */
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { CtcpText, ctcpRequest, ctcpText, parseReplyTarget } from "@iirc/protocol/ctcp";
-import { limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
+import { accountExtbanOf, limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
 import {
   away as awayLine,
   encode,
@@ -28,18 +28,21 @@ import {
   upperCaseAscii,
 } from "@iirc/protocol/line";
 import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
+import { accountBanMask } from "@iirc/protocol/mask";
 import { Schema } from "effect";
 
 import type { IntentId } from "./ids.ts";
 import type { Action, Input, ModeRequest } from "./input.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
+import { maskListsOf } from "./modes.ts";
 import { parseChannel, parseNick } from "./names.ts";
-import type { ActionWhere, Attempted, ModeChange, RefusedAction } from "./news.ts";
+import type { ActionWhere, Attempted, ModeChange, RefusedAction, RefusedReason } from "./news.ts";
 import { quoted } from "./quoted.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, refuseIntent, send, updateOpen } from "./run.ts";
 import type { Acting, Awaiting, Pinged } from "./state.ts";
 import { maxActing, maxActions } from "./state.ts";
+import { userIn } from "./users.ts";
 import { openOf, sessionOf } from "./views.ts";
 import { byPartner } from "./where.ts";
 
@@ -383,9 +386,71 @@ const rawLines = (run: Run, { line: text }: Of<"Raw">): readonly Planned[] | und
   ];
 };
 
+// The account a nick is logged in to, as the Client knows it: `undefined` when it does
+// not, which includes a User it knows nothing of and a fact it no longer keeps up to date,
+// since a ban must name the account a User holds now, and `null` when they are logged out.
+const accountOf = (run: Run, nick: string): string | null | undefined => {
+  const session = sessionOf(run.state);
+  const key = folder(run.state)(nick);
+
+  const account =
+    session !== undefined && folder(run.state)(session.nick) === key
+      ? session.account
+      : userIn(openOf(run.state)?.users ?? new Map(), key)?.account;
+
+  return account?._tag === "Known" ? account.value : undefined;
+};
+
+/** What a ban by account comes to: its Line, or why it is refused. */
+type Banning =
+  | { readonly _tag: "Planned"; readonly planned: readonly Planned[] }
+  | { readonly _tag: "Refused"; readonly reason: Exclude<Refusing, "Offline"> };
+
+/**
+ * A ban by account: the `MODE` `+b` of the mask that names the account the Client knows the
+ * User holds. Checked for what the Network offers before who, so a Network that offers no
+ * ban by account refuses it whoever is asked about.
+ * @param run - The step.
+ * @param action - The action.
+ * @returns Its Line, or why it is refused.
+ */
+const banAccountLines = (run: Run, { channel, nick: name }: Of<"BanAccount">): Banning => {
+  const isupport = openOf(run.state)?.isupport ?? new Map<string, string>();
+  const extban = accountExtbanOf(isupport.get("EXTBAN"), isupport.get("ACCOUNTEXTBAN"));
+
+  if (
+    extban === undefined ||
+    maskListsOf(isupport).Bans === undefined ||
+    !isChannel(run, channel) ||
+    !isNick(run, name)
+  ) {
+    return { _tag: "Refused", reason: "Unsendable" };
+  }
+
+  const account = accountOf(run, name);
+
+  if (account === undefined) {
+    return { _tag: "Refused", reason: "AccountUnknown" };
+  }
+
+  if (account === null) {
+    return { _tag: "Refused", reason: "NoAccount" };
+  }
+
+  const banned = accountBanMask(extban, account);
+  const line = banned === undefined ? undefined : mode(channel, ["+b", banned]);
+
+  return line !== undefined && fits(run, line)
+    ? {
+        _tag: "Planned",
+        planned: [{ line, names: [channel], targets: [{ mode: "+b", name: banned }] }],
+      }
+    : { _tag: "Refused", reason: "Unsendable" };
+};
+
 const plan = (
   run: Run,
-  action: Exclude<Action, { readonly _tag: "Away" }>
+  action: Exclude<Action, { readonly _tag: "Away" | "BanAccount" }>
 ): readonly Planned[] | undefined => {
   switch (action._tag) {
     case "Topic": {
@@ -469,6 +534,10 @@ const attemptedOf = (action: Action): Attempted => {
       return { _tag: "Invite", channel: action.channel, nick: action.nick };
     }
 
+    case "BanAccount": {
+      return { _tag: "Mode", modes: "+b", target: action.channel };
+    }
+
     case "Nick": {
       return { _tag: "Nick", nick: action.nick };
     }
@@ -512,6 +581,7 @@ const actionWhere = (run: Run, action: Action): ActionWhere => {
     action._tag === "Topic" ||
     action._tag === "Kick" ||
     action._tag === "Invite" ||
+    action._tag === "BanAccount" ||
     action._tag === "Part"
   ) {
     name = action.channel;
@@ -551,12 +621,13 @@ const remember = (run: Run, intent: IntentId, action: Action): void => {
   run.state = { ...run.state, actions };
 };
 
-const refuse = (
-  run: Run,
-  intent: IntentId,
-  action: Action,
-  reason: "Offline" | "Unsendable"
-): void => {
+/** Why the Client itself refuses an action, as it is refused in the step that took it. */
+type Refusing = Extract<
+  RefusedReason["_tag"],
+  "Offline" | "Unsendable" | "AccountUnknown" | "NoAccount"
+>;
+
+const refuse = (run: Run, intent: IntentId, action: Action, reason: Refusing): void => {
   run.news.push({
     _tag: "Refused",
     action: actionOf(run, action),
@@ -729,7 +800,7 @@ const carryOut = (run: Run, planned: readonly Planned[], intent: IntentId | unde
 /**
  * The Owner acts on the Network. Away is kept at any time. Anything else needs a
  * Session, and is `Refused` as `Offline` without one, or as `Unsendable` when it cannot
- * be sent whole. Every Line of it carries its intent.
+ * be sent whole. A ban by account is also `Refused` as `AccountUnknown` or `NoAccount`. Every Line of it carries its intent.
  * @param run - The step.
  * @param input - The action.
  */
@@ -744,6 +815,19 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
 
   if (!online(run)) {
     refuse(run, intent, action, "Offline");
+
+    return;
+  }
+
+  if (action._tag === "BanAccount") {
+    const banning = banAccountLines(run, action);
+
+    if (banning._tag === "Refused") {
+      refuse(run, intent, action, banning.reason);
+    } else {
+      remember(run, intent, action);
+      carryOut(run, banning.planned, intent);
+    }
 
     return;
   }

@@ -123,6 +123,7 @@ const member = (nick: string, prefixes: readonly string[] = []): typeof Member.E
  */
 const headOf = (timeline: string, name: string, held: readonly string[]) =>
   ({
+    accountBan: null,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held: { _tag: "Known", at: 1, from: "ircd", value: [...held] },

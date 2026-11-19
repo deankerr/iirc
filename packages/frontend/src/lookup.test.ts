@@ -181,6 +181,7 @@ const world = (open: string | undefined): Timelines => {
 
 /** `#iirc`'s head, on a Network whose `PREFIX` is `(qov)~@+` and `CHANTYPES` `#&`. */
 const head = decodeHeader({
+  accountBan: null,
   chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
   chantypes: "#&",
   held: null,

@@ -1056,6 +1056,7 @@ const headOf = (
   } = {}
 ) =>
   Schema.decodeSync(ChannelHeader)({
+    accountBan: null,
     chanmodes: options.chanmodes ?? { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: options.chantypes ?? "#&",
     held: null,

@@ -759,6 +759,14 @@ export const refusal = (reason: StepRefusal, target: string, action?: ActionRequ
       return `${what}: the Network had no Session when it arrived.`;
     }
 
+    case "AccountUnknown": {
+      return `${what}: their account is not known.`;
+    }
+
+    case "NoAccount": {
+      return `${what}: they are logged in to no account.`;
+    }
+
     case "Unsendable": {
       return action === undefined
         ? `${what}: no IRC Line can carry it there.`

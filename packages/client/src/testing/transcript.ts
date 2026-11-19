@@ -67,7 +67,7 @@ export type Owner =
     }
   /**
    * An action: `!! topic #iirc :text`, `!! kick #iirc a,b :reason`, `!! mode #iirc +o=peer -l`,
-   * `!! invite peer #iirc`, `!! nick new`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
+   * `!! invite peer #iirc`, `!! ban-account peer #iirc`, `!! nick new`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
    * Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Act"; readonly action: Action }
@@ -730,6 +730,13 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
         ? undefined
         : { _tag: "Invite", channel, nick },
   ],
+  [
+    "ban-account",
+    ({ words: [nick = "", channel, ...more], trailing }) =>
+      channel === undefined || more.length > 0 || trailing !== null
+        ? undefined
+        : { _tag: "BanAccount", channel, nick },
+  ],
   ["kick", readKick],
   ["mode", readMode],
   [
@@ -783,6 +790,10 @@ const writeAction = (action: Action): string => {
 
     case "Invite": {
       return `invite ${action.nick} ${action.channel}`;
+    }
+
+    case "BanAccount": {
+      return `ban-account ${action.nick} ${action.channel}`;
     }
 
     case "Nick": {

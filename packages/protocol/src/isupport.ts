@@ -299,3 +299,49 @@ export const targetLimitsOf = (
   value: string | undefined
 ): ReadonlyMap<string, number | undefined> =>
   new Map(pairsOf(value).map(({ limit, of }) => [upperCaseAscii(of), limit]));
+
+/** How a ban names an account: what starts an extended ban, and what the Network calls the type that matches an account. */
+export interface AccountExtban {
+  /** What starts an extended ban mask, from `EXTBAN`: one punctuation character, or `""` for none. */
+  readonly prefix: string;
+  /** The names of the type that matches an account name, from `ACCOUNTEXTBAN`, in the Ircd's order. The first builds a mask. */
+  readonly names: readonly [string, ...string[]];
+}
+
+// `EXTBAN=[<prefix>],<types>`: the prefix is one printable ASCII character that is not a
+// letter or a digit, or none, then exactly one comma, then letters.
+const extbanGrammar = /^(?<prefix>[!-/:-@[-`{-~]?),(?<types>[A-Za-z]*)$/u;
+
+// A prefix cannot be one a mask would read otherwise: a separator, the colon that ends the
+// type's name, or a wildcard.
+const notPrefix = /^[,:*?]$/u;
+
+const extbanName = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+
+/**
+ * Reads `EXTBAN` and `ACCOUNTEXTBAN` together: how a ban names an account. Hostile input,
+ * so a token that does not follow its grammar to the letter means nothing is offered,
+ * never a guessed mask.
+ * @param extban - `EXTBAN`'s value, or `undefined` if it was not sent.
+ * @param accountExtban - `ACCOUNTEXTBAN`'s value, or `undefined` if it was not sent.
+ * @returns How a ban names an account, or `undefined` when either token is missing or
+ * malformed.
+ */
+export const accountExtbanOf = (
+  extban: string | undefined,
+  accountExtban: string | undefined
+): AccountExtban | undefined => {
+  const prefix = extban === undefined ? undefined : extbanGrammar.exec(extban)?.groups?.prefix;
+  const [first, ...rest] = (accountExtban ?? "").split(",");
+
+  if (
+    prefix === undefined ||
+    notPrefix.test(prefix) ||
+    first === undefined ||
+    ![first, ...rest].every((name) => extbanName.test(name))
+  ) {
+    return undefined;
+  }
+
+  return { names: [first, ...rest], prefix };
+};

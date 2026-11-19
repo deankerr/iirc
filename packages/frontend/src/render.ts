@@ -647,6 +647,10 @@ export const requested = (action: ActionRequest): Attempted => {
       return { _tag: "Invite", channel: action.channel, nick: action.nick };
     }
 
+    case "BanAccount": {
+      return { _tag: "Mode", modes: "+b", target: action.channel };
+    }
+
     case "Nick": {
       return { _tag: "Nick", nick: action.nick };
     }

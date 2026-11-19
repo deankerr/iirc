@@ -57,6 +57,14 @@ export const Action = Schema.TaggedUnion({
   /** Mark Self away with a message, or back with `null`. It outlives Sessions. */
   Away: { message: Schema.NullOr(Schema.String) },
   /**
+   * Ban a User from a Channel by the account the Client knows them to be logged in to, where
+   * the Ircd offers `ACCOUNTEXTBAN`: a `MODE` `+b` of the mask that names the account. It is
+   * refused as `AccountUnknown` when the Client does not know the User's account, and as
+   * `NoAccount` when they are known to be logged out, so it never falls back to a mask of
+   * their nick.
+   */
+  BanAccount: { channel: Schema.String, nick: Schema.String },
+  /**
    * Send a CTCP request to a User, never a Channel: its command, upper-cased as it goes,
    * and its arguments, which may be empty. `ACTION` is a `Say`, and `DCC` is never sent.
    */

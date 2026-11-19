@@ -8,6 +8,7 @@ import { Schema } from "effect";
 
 import { casefold } from "./casemapping.ts";
 import type { Casemapping } from "./casemapping.ts";
+import type { AccountExtban } from "./isupport.ts";
 
 // The most characters a mask may have, which bounds the work of matching it.
 const maxMaskLength = 255;
@@ -148,3 +149,42 @@ export const matches = (casemapping: Casemapping, mask: IgnoreMask, who: Matchab
     characters(casefold(casemapping, mask)),
     characters(casefold(casemapping, `${who.nick}!${who.user ?? ""}@${who.host ?? ""}`))
   );
+
+// What may not be in an account named by a ban: what ends a mask, or a list of them, and
+// what a mask reads as a wildcard.
+const isUnsafeAccount = (character: string): boolean =>
+  isUnsafe(character) || character === "*" || character === "?";
+
+/**
+ * The mask that bans an account, as `ACCOUNTEXTBAN` says to write it: the prefix, the
+ * type's first name, a colon, and the account. An account a mask could not carry as one
+ * exact name is refused: empty, starting with a colon, or holding a space, comma, `*`,
+ * `?`, or control character, so a hostile Network cannot make a ban match everyone or a
+ * `MODE` that breaks.
+ * @param extban - How the Network's bans name an account.
+ * @param account - The account's name, as the Network gave it.
+ * @returns The mask, or `undefined` when the account cannot be banned by name.
+ */
+export const accountBanMask = (extban: AccountExtban, account: string): string | undefined =>
+  account === "" || account.startsWith(":") || characters(account).some(isUnsafeAccount)
+    ? undefined
+    : `${extban.prefix}${extban.names[0]}:${account}`;
+
+/**
+ * The account a ban on a list names, read back: a mask of the prefix, any one of the type's
+ * names exactly, a colon, and a non-empty rest.
+ * @param extban - How the Network's bans name an account.
+ * @param mask - An entry of a ban list.
+ * @returns The account, or `undefined` when the mask is not one by account.
+ */
+export const bannedAccount = (extban: AccountExtban, mask: string): string | undefined => {
+  for (const name of extban.names) {
+    const head = `${extban.prefix}${name}:`;
+
+    if (mask.startsWith(head) && mask.length > head.length) {
+      return mask.slice(head.length);
+    }
+  }
+
+  return undefined;
+};

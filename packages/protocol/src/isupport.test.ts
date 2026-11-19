@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { casefold, casemappingOf, sameName } from "./casemapping.ts";
 import {
+  accountExtbanOf,
   channelModesOf,
   chantypesOf,
   defaultChannelModes,
@@ -249,6 +250,56 @@ describe("token values", () => {
         ["JOIN", undefined],
       ])
     );
+  });
+});
+
+describe(accountExtbanOf, () => {
+  it.each([
+    ["the spec's short name", "$,ARar", "R", { names: ["R"], prefix: "$" }],
+    [
+      "long names, in the Ircd's order",
+      "~,a",
+      "a,account",
+      { names: ["a", "account"], prefix: "~" },
+    ],
+    ["no prefix", ",a", "a", { names: ["a"], prefix: "" }],
+    ["no types", "~,", "account", { names: ["account"], prefix: "~" }],
+    [
+      "a name with a dash and an underscore",
+      "~,a",
+      "my-ban_1",
+      { names: ["my-ban_1"], prefix: "~" },
+    ],
+  ])("reads %s", (_why, extban, account, expected) => {
+    expect(accountExtbanOf(extban, account)).toStrictEqual(expected);
+  });
+
+  it.each([
+    ["no EXTBAN", undefined, "a"],
+    ["no ACCOUNTEXTBAN", "~,a", undefined],
+    ["neither", undefined, undefined],
+    ["an EXTBAN with no comma", "~a", "a"],
+    ["an EXTBAN with two commas", "~,a,b", "a"],
+    ["an empty EXTBAN", "", "a"],
+    ["a prefix of two characters", "~~,a", "a"],
+    ["an alphanumeric prefix", "a,a", "a"],
+    ["a digit prefix", "1,a", "a"],
+    ["a `:` prefix", ":,a", "a"],
+    ["a `*` prefix", "*,a", "a"],
+    ["a `?` prefix", "?,a", "a"],
+    ["a space prefix", " ,a", "a"],
+    ["a non-ASCII prefix", "é,a", "a"],
+    ["a control prefix", "\u0001,a", "a"],
+    ["types that are not letters", "~,a1", "a"],
+    ["an empty ACCOUNTEXTBAN", "~,a", ""],
+    ["an empty name in the list", "~,a", "a,,b"],
+    ["a trailing comma", "~,a", "a,"],
+    ["a bad name in the list", "~,a", "a,b c"],
+    ["a name that starts with a dash", "~,a", "-a"],
+    ["a name with a colon", "~,a", "a:b"],
+    ["a name with a control", "~,a", "a\r\nMODE"],
+  ])("reads nothing for %s", (_why, extban, account) => {
+    expect(accountExtbanOf(extban, account)).toBeUndefined();
   });
 });
 
