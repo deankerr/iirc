@@ -108,6 +108,11 @@
   white-space: nowrap;
 }
 
+/* A folded run's words name who came and went, so they wrap rather than end in an ellipsis. */
+.foldSummary {
+  white-space: normal;
+}
+
 .motdSummary[data-hovered] {
   text-decoration: underline dotted var(--color-muted);
 }

@@ -10,8 +10,10 @@ import {
   TimelineItem,
   TimelineList,
   TimelineWindow,
+  UserKnowledge,
   WindowGap,
 } from "@iirc/api";
+import type { Activity, ItemContent } from "@iirc/api";
 import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -43,6 +45,7 @@ import {
   reduceTimelines,
   resolve,
   rowsOf,
+  selfOf,
   sidebar,
   treeOf,
   timelinesWith,
@@ -2412,7 +2415,7 @@ describe("the Timelines' state", () => {
       stale,
     }).toStrictEqual({
       after: { _tag: "Offline", reason: { _tag: "Error" }, since: 70 },
-      known: { _tag: "Connected", nick: undefined, since: 1, tags: false },
+      known: { _tag: "Connected", since: 1, tags: false },
       stale: "Connected",
     });
   });
@@ -5567,5 +5570,267 @@ describe("a run of Messages under one nick", () => {
         divider: { read: said(1, at).position.at, timeline: three },
       })
     ).toStrictEqual([1, "new", 2]);
+  });
+});
+
+// An Activity of a User coming or going in the open Channel, at an instant.
+const churned = (sequence: number, at: number, activity: typeof Activity.Encoded) =>
+  decodeItem({
+    answered: null,
+    changed: sequence,
+    content: { _tag: "Activity", activity, at: unknown, id: unknown, live: true },
+    level: "Activity",
+    network: "alpha",
+    position: cursor(at, sequence),
+    sequence,
+    timeline: idOf(3),
+  });
+
+const joins = (sequence: number, nick: string) =>
+  churned(sequence, sequence * 10, { _tag: "Joined", channel: "#c", nick });
+
+const parts = (sequence: number, nick: string) =>
+  churned(sequence, sequence * 10, { _tag: "Parted", channel: "#c", nick, reason: null });
+
+const quits = (sequence: number, nick: string) =>
+  churned(sequence, sequence * 10, { _tag: "Quit", nick, reason: null });
+
+const renames = (sequence: number, from: string, to: string) =>
+  churned(sequence, sequence * 10, { _tag: "NickChanged", from, to });
+
+/**
+ * The rows of a window of the open Channel holding these items, each as its key, the
+ * sequence of the item it draws, and the sequences it folds, or the row's tag.
+ * @param items - The items, in order.
+ * @param options - Which items are drawn, and Self's nick, `me` unless given, even as none.
+ * @returns Each row.
+ */
+const foldRows = (
+  items: readonly TimelineItem[],
+  options: {
+    readonly shows?: (item: TimelineItem) => boolean;
+    readonly self?: string | undefined;
+  } = {}
+) => {
+  const state = reduceTimelines(following(), {
+    _tag: "WindowRead",
+    read: latestOf(three, 0),
+    window: decodeWindow({
+      earlier: false,
+      gaps: [],
+      items: encodedItems(items),
+      later: false,
+      network: "alpha",
+      through: 5,
+      timeline: idOf(3),
+      version: 1,
+    }),
+  });
+
+  const shown = opened(state);
+
+  const rows =
+    shown._tag === "Shown"
+      ? rowsOf(
+          shown.window,
+          undefined,
+          options.shows,
+          undefined,
+          "self" in options ? options.self : "me"
+        )
+      : [];
+
+  return rows.map((row) =>
+    row._tag === "Item"
+      ? [row.key, row.item.sequence, row.folded?.map((item) => item.sequence)]
+      : [row._tag]
+  );
+};
+
+describe("joins, parts, quits, and changes of nick in a row", () => {
+  it("are one row: the latest, under the first's key, holding every item", () => {
+    expect(
+      foldRows([joins(1, "alice"), parts(2, "bob"), quits(3, "carol"), renames(4, "dave", "dan")])
+    ).toStrictEqual([[cursor(10, 1), 4, [1, 2, 3, 4]]]);
+  });
+
+  it("end at a Message, each run its own row, and a lone one is a plain row", () => {
+    expect(
+      foldRows([
+        joins(1, "alice"),
+        joins(2, "bob"),
+        said(3, 30),
+        joins(4, "carol"),
+        said(5, 50),
+        joins(6, "dave"),
+        joins(7, "erin"),
+      ])
+    ).toStrictEqual([
+      [cursor(10, 1), 2, [1, 2]],
+      [cursor(30, 3), 3, undefined],
+      [cursor(40, 4), 4, undefined],
+      [cursor(50, 5), 5, undefined],
+      [cursor(60, 6), 7, [6, 7]],
+    ]);
+  });
+
+  it("do not take a kick, which stands as its own row", () => {
+    expect(
+      foldRows([
+        joins(1, "alice"),
+        churned(2, 20, { _tag: "Kicked", by: "op", channel: "#c", nick: "bob", reason: null }),
+        joins(3, "carol"),
+        joins(4, "dave"),
+      ])
+    ).toStrictEqual([
+      [cursor(10, 1), 1, undefined],
+      [cursor(20, 2), 2, undefined],
+      [cursor(30, 3), 4, [3, 4]],
+    ]);
+  });
+
+  it("are not folded where they are Self's, which split a run in two, as Self is known by an earlier nick too, and not at all while Self's nick is unknown", () => {
+    const items = [
+      joins(1, "alice"),
+      joins(2, "amy"),
+      joins(3, "bob"),
+      parts(4, "carol"),
+      parts(5, "cat"),
+      renames(6, "bob", "bobby"),
+      joins(7, "dave"),
+      joins(8, "dee"),
+      quits(9, "BOBBY"),
+    ];
+
+    expect({
+      known: foldRows(items, { self: "bobby" }),
+      unknown: foldRows(items, { self: undefined }),
+    }).toStrictEqual({
+      known: [
+        [cursor(10, 1), 2, [1, 2]],
+        [cursor(30, 3), 3, undefined],
+        [cursor(40, 4), 5, [4, 5]],
+        [cursor(60, 6), 6, undefined],
+        [cursor(70, 7), 8, [7, 8]],
+        [cursor(90, 9), 9, undefined],
+      ],
+      // Any of them could be Self's, so none is folded away.
+      unknown: items.map((item) => [
+        cursor(item.position.at, item.sequence),
+        item.sequence,
+        undefined,
+      ]),
+    });
+  });
+
+  it("are not parted by an item a view hides, which ends nothing", () => {
+    const items = [joins(1, "alice"), said(2, 20), joins(3, "bob")];
+
+    expect({
+      hidden: foldRows(items, { shows: (item) => item.sequence !== 2 }),
+      shown: foldRows(items),
+    }).toStrictEqual({
+      hidden: [[cursor(10, 1), 3, [1, 3]]],
+      shown: [
+        [cursor(10, 1), 1, undefined],
+        [cursor(20, 2), 2, undefined],
+        [cursor(30, 3), 3, undefined],
+      ],
+    });
+  });
+});
+
+const statusOf = (state: Timelines, self: string | null) =>
+  reduceTimelines(reduceTimelines(state, { _tag: "ReadStarted", read: statusOfAlpha }), {
+    _tag: "StatusRead",
+    life: 1,
+    network: alpha,
+    partners: [],
+    self:
+      self === null
+        ? null
+        : Schema.decodeSync(UserKnowledge)({
+            account: { _tag: "Unknown" },
+            away: { _tag: "Unknown" },
+            mask: { _tag: "Unknown" },
+            nick: self,
+            realname: { _tag: "Unknown" },
+          }),
+    session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1, tags: false }),
+  });
+
+const network = (sequence: number, content: typeof ItemContent.Encoded, timeline = idOf(1)) =>
+  changed(sequence, {
+    items: [
+      {
+        ...Schema.encodeSync(TimelineItem)(message(timeline, sequence * 10, sequence)),
+        content,
+      },
+    ],
+  });
+
+const beganAs = (sequence: number, nick: string) =>
+  network(sequence, { _tag: "SessionBegan", at: sequence * 10, nick });
+
+const ended = (sequence: number) =>
+  network(sequence, { _tag: "SessionEnded", at: sequence * 10, reason: { _tag: "Error" } });
+
+const renamed = (sequence: number, from: string, to: string, timeline = idOf(1)) =>
+  network(
+    sequence,
+    {
+      _tag: "Activity",
+      activity: { _tag: "NickChanged", from, to },
+      at: unknown,
+      id: unknown,
+      live: true,
+    },
+    timeline
+  );
+
+describe("Self's nick", () => {
+  it("is what known said, which a Session that began after it replaces, and a change of nick in the Network's own Timeline moves", () => {
+    let state = statusOf(following(), "me");
+    const known = selfOf(state, alpha);
+
+    state = reduceTimelines(state, beganAs(6, "me2"));
+    const began2 = selfOf(state, alpha);
+
+    state = reduceTimelines(state, renamed(7, "ME2", "me3"));
+    const renamedOwn = selfOf(state, alpha);
+
+    // Another User's change, or one in a Channel, is not Self's.
+    state = reduceTimelines(state, renamed(8, "peer", "other"));
+    state = reduceTimelines(state, renamed(9, "me3", "me4", idOf(3)));
+
+    expect({
+      began: began2,
+      known,
+      renamed: renamedOwn,
+      unrelated: selfOf(state, alpha),
+    }).toStrictEqual({ began: "me2", known: "me", renamed: "me3", unrelated: "me3" });
+  });
+
+  it("is kept after the Session ends, and is not unknown again by a read that says none", () => {
+    let state = statusOf(following(), "me");
+
+    state = reduceTimelines(state, ended(6));
+    const offline = state.networks.get(alpha)?.connection._tag;
+    const kept = selfOf(state, alpha);
+
+    state = statusOf(state, null);
+
+    expect({ kept, later: selfOf(state, alpha), offline }).toStrictEqual({
+      kept: "me",
+      later: "me",
+      offline: "Offline",
+    });
+  });
+
+  it("is not unknown for a Network not held, or before it is told", () => {
+    expect({
+      held: selfOf(following(), alpha),
+      none: selfOf(following(), networkId("beta")),
+    }).toStrictEqual({ held: undefined, none: undefined });
   });
 });

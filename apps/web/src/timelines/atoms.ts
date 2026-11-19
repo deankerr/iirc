@@ -28,6 +28,7 @@ import {
   opened,
   openOf,
   reduceTimelines,
+  selfOf,
   sidebar,
   wanted,
 } from "@iirc/frontend/timelines";
@@ -84,6 +85,11 @@ export const openTimeline = Atom.make((get) => opened(get(timelinesState)));
 /** Whether a Network's Session carries tags, so a Message there can answer another. */
 export const tagsOn = Atom.family((network: NetworkId) =>
   Atom.make((get) => carriesTags(get(timelinesState), network))
+);
+
+/** Self's nick on a Network, once known: what tells which joins, parts, and quits are Self's. */
+export const selfNick = Atom.family((network: NetworkId | undefined) =>
+  Atom.make((get) => (network === undefined ? undefined : selfOf(get(timelinesState), network)))
 );
 
 /** Each Pane's open Timeline, as shown, by the Pane's id. */

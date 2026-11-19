@@ -858,11 +858,13 @@ export const standingText = (standing: Standing | null): string | undefined => {
  * How a Network's connection stands, in words.
  * @param running - Whether the Daemon runs it.
  * @param connection - How its connection stands.
+ * @param self - Self's nick on it, if known.
  * @returns The words.
  */
 export const connectionText = (
   running: { readonly _tag: "Running" } | { readonly _tag: "Stopped"; readonly reason: string },
-  connection: Connection
+  connection: Connection,
+  self: string | undefined
 ): string => {
   if (running._tag === "Stopped") {
     return `stopped: ${running.reason}`;
@@ -870,7 +872,7 @@ export const connectionText = (
 
   switch (connection._tag) {
     case "Connected": {
-      return connection.nick === undefined ? "connected" : `connected as ${connection.nick}`;
+      return self === undefined ? "connected" : `connected as ${self}`;
     }
 
     case "Connecting": {
@@ -1012,7 +1014,11 @@ export const headerOf = (
       if (removed) {
         status = "removed";
       } else if (network !== undefined) {
-        status = connectionText(network.running ?? { _tag: "Running" }, network.connection);
+        status = connectionText(
+          network.running ?? { _tag: "Running" },
+          network.connection,
+          network.self
+        );
       }
 
       return { _tag: "Network", name, status, timeline };
