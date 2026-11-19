@@ -422,6 +422,9 @@ describe("the Lookup card", () => {
       },
     });
 
+    // Self is in `#iirc`, so it opens; a Channel with no Timeline is joined.
+    daemon.joined.set("libera", ["#iirc"]);
+
     const rows = () => [...(card()?.querySelectorAll('ul[aria-label="Channels"] > li') ?? [])];
 
     const moreButton = () =>

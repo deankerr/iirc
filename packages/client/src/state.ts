@@ -411,6 +411,11 @@ export interface Looking {
   /** How many Channels a `LIST` reply has described that match what was asked, kept or not. */
   readonly seen: number;
   /**
+   * Whether a `LIST` reply's rows have begun, with a `321` or a `322`, after which nothing
+   * but its `323` or its Connection's end ends it.
+   */
+  readonly begun: boolean;
+  /**
    * What a `LIST` asked that the Ircd was not asked to filter by, which the Client does:
    * a glob of the Channels' names, and the least members.
    */

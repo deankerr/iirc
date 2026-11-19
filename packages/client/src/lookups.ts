@@ -127,9 +127,10 @@ const only: Readonly<Record<UserLookup["_tag"], ReadonlySet<string>>> = {
 
 /**
  * Reply numerics the Client reads for something else, which name a nick second as a
- * Lookup's reply does, so none is taken for part of one.
+ * Lookup's reply does, so none is taken for part of one: a `LIST`'s `321`, `322`, and
+ * `323` among them, whatever their second parameter says.
  */
-const readElsewhere: ReadonlySet<string> = new Set(["341", "353"]);
+const readElsewhere: ReadonlySet<string> = new Set(["321", "322", "323", "341", "353"]);
 
 /** Error numerics that answer a Lookup by naming its nick, or naming nothing, as `431` does. */
 const errors: ReadonlySet<string> = new Set(["401", "402", "406", "431"]);
@@ -164,8 +165,9 @@ interface Listing {
 
 /**
  * What a `LIST` asks of the Ircd, as its `ELIST` allows, by letters in any case: the mask
- * by `M`, and the least members by `U`, as `>N` for one fewer, but never `>0`. What the
- * Ircd is not asked, the Client filters by itself.
+ * by `M`, unless it starts with `!`, which an Ircd with `N` reads as its negation, and the
+ * least members by `U`, as `>N` for one fewer, so `>0` leaves out Channels with none. What
+ * the Ircd is not asked, the Client filters by itself.
  * @param run - The step.
  * @param lookup - The Lookup.
  * @returns The conditions to send, and what is left to filter.
@@ -176,12 +178,12 @@ const listingOf = (run: Run, lookup: ChannelsLookup): Listing => {
   const conditions: string[] = [];
   let sift: Listing["sift"] = { least, mask };
 
-  if (mask !== undefined && elist.includes("M")) {
+  if (mask !== undefined && !mask.startsWith("!") && elist.includes("M")) {
     conditions.push(mask);
     sift = { ...sift, mask: undefined };
   }
 
-  if (least !== undefined && least >= 2 && elist.includes("U")) {
+  if (least !== undefined && elist.includes("U")) {
     conditions.push(`>${least - 1}`);
     sift = { ...sift, least: undefined };
   }
@@ -269,7 +271,11 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
     return;
   }
 
-  const sent = send(run, line, line.command, { _tag: "Looked", intent: input.intent });
+  const sent = send(run, line, line.command, {
+    _tag: "Looked",
+    byLabel: lookup._tag !== "Channels",
+    intent: input.intent,
+  });
 
   // A Feature refused it at egress.
   if (sent === undefined) {
@@ -280,6 +286,7 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
 
   updateOpen(run, (phase) => {
     const looking: Looking = {
+      begun: false,
       bounded: false,
       channels: [],
       deadline: Instant.make(run.at + lookupTime),
@@ -701,18 +708,20 @@ const entriesResultOf = (
   return isNames ? { _tag: "Members", cut, members, notes } : { _tag: "Users", cut, notes, users };
 };
 
-// What a `LIST` found, cut short as a `NAMES` is, and `Bounded` once it saw more than it
-// kept.
-const channelsResultOf = (looking: Looking, ending: Ending, reply: string): LookResult => {
+// What a `LIST` found: `Bounded` only when it saw more Channels than it kept, however many
+// notes it held, and otherwise cut short by its time or its Connection. It is never
+// labelled, so it never ends with a labelled answer.
+const channelsResultOf = (looking: Looking, ending: Ending): LookResult => {
   const { channels, notes, seen } = looking;
-  const unended = ending === "End" && looking.labelled && !looking.ended;
   const stopped = ending === "End" ? undefined : ending;
-  const bounded = looking.bounded || seen > channels.length;
-  const cut = bounded ? "Bounded" : (stopped ?? (unended ? "Ended" : undefined));
 
-  return unended && seen === 0
-    ? { _tag: "Failed", notes, reply }
-    : { _tag: "Channels", channels, cut, notes, seen };
+  return {
+    _tag: "Channels",
+    channels,
+    cut: seen > channels.length ? "Bounded" : stopped,
+    notes,
+    seen,
+  };
 };
 
 const resultOf = (looking: Looking, ending: Ending, reply: string): LookResult => {
@@ -723,7 +732,7 @@ const resultOf = (looking: Looking, ending: Ending, reply: string): LookResult =
   }
 
   if (looking.lookup._tag === "Channels") {
-    return channelsResultOf(looking, ending, reply);
+    return channelsResultOf(looking, ending);
   }
 
   if (isEntries(looking.lookup)) {
@@ -812,10 +821,16 @@ const rejectionOf = (looking: Looking, line: Line): Looking["error"] => {
     : { _tag: "Failed", reply: command };
 };
 
+// Whether a `LIST`'s rows have begun, so it holds until its `323` or its Connection's end.
+const holds = (looking: Looking): boolean => looking.lookup._tag === "Channels" && looking.begun;
+
 // A `WARN` or a `NOTE` says something of the Lookup, and ends nothing, and neither does a
-// `FAIL` after the one that gave its result, which is kept beside them so none is lost.
+// `FAIL` after the one that gave its result, or one of a `LIST` whose rows have begun, which
+// is kept beside them so none is lost.
 const isNote = (looking: Looking, command: string): boolean =>
-  command === "WARN" || command === "NOTE" || (command === "FAIL" && looking.error !== undefined);
+  command === "WARN" ||
+  command === "NOTE" ||
+  (command === "FAIL" && (looking.error !== undefined || holds(looking)));
 
 // Keeps a note in the Lookup's notes. Past the Lines one Lookup keeps, it is not kept.
 const keepNote = (run: Run, looking: Looking, line: Line): void => {
@@ -1030,18 +1045,29 @@ const takeEnd = (run: Run, looking: Looking, line: Line): void => {
 };
 
 // Whether a `LIST`'s reply is a `263`, which asks to try again later, and ends it as an
-// error would.
+// error would, before its rows begin.
 const refusesList = (looking: Looking, command: string): boolean =>
-  looking.lookup._tag === "Channels" && command === "263";
+  looking.lookup._tag === "Channels" && command === "263" && !looking.begun;
 
 // Whether a Line of a Lookup's reply refuses it: an error numeric, a `FAIL`, or a `263` of a
 // `LIST`.
 const isRejection = (looking: Looking, command: string): boolean =>
   isError(command) || command === "FAIL" || refusesList(looking, command);
 
-// A `322` of a `LIST` that has neither its error nor run out of time.
+// A `321` or `322` of a `LIST` begins its rows, and a `322` is kept while it has neither its
+// error nor run out of time.
 const takeListed = (run: Run, looking: Looking, line: Line): void => {
-  if (line.command === "322" && looking.error === undefined && !looking.lapsed) {
+  const { command } = line;
+
+  if (command !== "321" && command !== "322") {
+    return;
+  }
+
+  if (!looking.begun) {
+    change(run, looking.intent, (each) => ({ ...each, begun: true }));
+  }
+
+  if (command === "322" && looking.error === undefined && !looking.lapsed) {
     keepChannel(run, looking, line);
   }
 };
@@ -1209,9 +1235,10 @@ const answersUser = (run: Run, lookup: UserLookup, line: Line): boolean => {
 };
 
 // Whether a numeric is part of a `LIST`'s reply on the floor: a `321`, `322`, or `323`,
-// which name nothing it asked, so belong to the one `LIST` that awaits, or an error or a
-// `263` naming `LIST`.
-const answersChannels = (line: Line): boolean => {
+// which name nothing it asked, so belong to the one `LIST` that awaits, or, before its rows
+// begin, a `263` or `421`, which name the command they refuse second. No other error is
+// taken, since one naming a nick could name one called `List`.
+const answersChannels = (looking: Looking, line: Line): boolean => {
   const { command, params } = line;
   const [, named] = params;
 
@@ -1220,7 +1247,8 @@ const answersChannels = (line: Line): boolean => {
   }
 
   return (
-    (isError(command) || command === "263") &&
+    (command === "263" || command === "421") &&
+    !looking.begun &&
     named !== undefined &&
     upperCaseAscii(named) === "LIST"
   );
@@ -1244,7 +1272,7 @@ const answers = (run: Run, looking: Looking, line: Line): boolean => {
   }
 
   if (lookup._tag === "Channels") {
-    return answersChannels(line);
+    return answersChannels(looking, line);
   }
 
   return isList(lookup) ? answersList(run, looking, lookup, line) : answersUser(run, lookup, line);
@@ -1406,7 +1434,7 @@ export const collectFloor = (run: Run, looking: Looking, line: Line): void => {
     ((isList(looking.lookup) || isEntries(looking.lookup) || looking.lookup._tag === "Channels") &&
       isError(line.command));
 
-  if (final && looking.error === undefined) {
+  if (final && looking.error === undefined && !holds(looking)) {
     finish(run, looking.intent, "End", line.command);
   }
 };

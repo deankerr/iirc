@@ -104,8 +104,9 @@ describe("a Channels Lookup", () => {
   });
 
   // Catches: a condition sent to an Ircd that never offered it, a filter the Client
-  // leaves undone when the Ircd was not asked to do it, or `>0` sent for at least one. The
-  // Ircd here sends every Channel, so what is kept is what the Client filtered.
+  // leaves undone when the Ircd was not asked to do it, Channels with no members dropped
+  // for at least one, or a mask an Ircd with `N` would read as its negation. The Ircd here
+  // sends every Channel, so what is kept is what the Client filtered.
   it.each([
     [
       "mask and count by ELIST=CMNTU",
@@ -136,12 +137,13 @@ describe("a Channels Lookup", () => {
       ["#iirc", "#IIRC-dev"],
     ],
     [
-      "no count for at least one",
+      "a count of none for at least one",
       "ELIST=U",
       "list least=1",
-      "LIST",
-      ["#iirc", "#other", "#IIRC-dev", "#tiny"],
+      "LIST >0",
+      ["#iirc", "#other", "#IIRC-dev", "#tiny", "#empty"],
     ],
+    ["no mask that starts with !, by ELIST=MNU", "ELIST=MNU", "list mask=!*iirc*", "LIST", []],
   ] as const)("sends %s, and filters the rest itself", (_name, elist, asked, sent, kept) => {
     const run = played([
       online(elist === undefined ? [] : [elist]),
@@ -269,22 +271,106 @@ describe("a Channels Lookup", () => {
     expect.assertions(0);
   });
 
-  // Catches: a labelled reply read on the floor, or ended at its 323 before its batch ends.
-  it("is collected by label", () => {
+  // Catches: a LIST label evicted by later labelled Lines, so its answer's end is never
+  // read and every later LIST is Busy until the Connection ends.
+  it("is never labelled, so any number of labelled Lines while it awaits leaves it whole", () => {
+    const says = Array.from({ length: 70 }, (_, index) => [
+      "!! say #iirc :hi",
+      `>> @label=l${index + 1} PRIVMSG #iirc hi`,
+    ]).flat();
+
     const run = played([
       online([], echo),
       lines(
         "!! list",
-        ">> @label=l1 LIST",
-        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
-        "<< @batch=b1 :irc.test 321 iirc Channel :Users  Name",
-        "<< @batch=b1 :irc.test 322 iirc #iirc 4 :hello",
-        "<< @batch=b1 :irc.test 323 iirc :End of /LIST",
-        "<< :irc.test BATCH -b1",
-        "?? looked-up i1 list channels count=1 seen=1"
+        ">> LIST",
+        ...says,
+        "<< :irc.test 321 iirc Channel :Users  Name",
+        listed("#iirc", 4, "hello"),
+        end,
+        "?? looked-up i1 list channels count=1 seen=1",
+        "!! list",
+        ">> LIST"
       ),
     ]);
 
     expect(channelsOf(run)).toStrictEqual([{ channel: "#iirc", members: 4, topic: "hello" }]);
+  });
+
+  // Catches: an older WHOIS taking a 323 that names its nick as part of its reply, or a LIST
+  // taking a WHOIS's error because the nick it names reads as LIST.
+  it("keeps 321 to 323 to itself, and takes no error that names a nick", () => {
+    played([
+      online(),
+      lines(
+        "!! whois alice",
+        ">> WHOIS alice",
+        "!! list",
+        ">> LIST",
+        "<< :irc.test 323 iirc alice",
+        "?? looked-up i2 list channels count=0 seen=0",
+        "<< :irc.test 318 iirc alice :End of /WHOIS list.",
+        "?? looked-up i1 whois=alice not-found=318",
+        "!! list",
+        ">> LIST",
+        "!! whois List",
+        ">> WHOIS List",
+        "<< :irc.test 401 iirc List :No such nick",
+        "<< :irc.test 318 iirc List :End of /WHOIS list.",
+        "?? looked-up i4 whois=List not-found=401",
+        end,
+        "?? looked-up i3 list channels count=0 seen=0"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  // Catches: a try-again after the rows began ending the Lookup, so the rest of the rows
+  // fall to the next one.
+  it("holds to its 323 once its rows have begun, whatever refuses it after", () => {
+    const run = played([
+      online(),
+      lines(
+        "!! list",
+        ">> LIST",
+        listed("#early", 3),
+        "+30s",
+        "?? looked-up i1 list channels=TimedOut count=1 seen=1",
+        "<< :irc.test 263 iirc LIST :Please wait a while and try again.",
+        "?? activity Numeric 263 LIST in=network :Please wait a while and try again.",
+        "!! list",
+        "?? looked-up i2 list refused=Busy",
+        listed("#late", 7),
+        end,
+        "!! list",
+        ">> LIST",
+        listed("#fresh", 2),
+        end,
+        "?? looked-up i3 list channels count=1 seen=1"
+      ),
+    ]);
+
+    expect(namesOf(run, 2)).toStrictEqual(["#fresh"]);
+  });
+
+  // Catches: a directory of one Channel called Bounded because its reply held many notes.
+  it("is cut short only by Channels it did not keep, not by its notes", () => {
+    const notes = Array.from({ length: 70 }, () => "<< :irc.test NOTE LIST SLOW :Busy server");
+    const kept = Array.from({ length: 64 }, () => "note=NOTE:SLOW").join(" ");
+
+    played([
+      online(),
+      lines(
+        "!! list",
+        ">> LIST",
+        ...notes,
+        listed("#one", 1),
+        end,
+        `?? looked-up i1 list channels count=1 seen=1 ${kept}`
+      ),
+    ]);
+
+    expect.assertions(0);
   });
 });

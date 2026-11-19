@@ -521,6 +521,8 @@ export interface Card {
 export interface Naming {
   readonly casemapping: Casemapping;
   readonly chantypes: string;
+  /** The Channels Self is in now, as `known` said, each folded by `casemapping`. */
+  readonly joined: ReadonlySet<string>;
 }
 
 /** Each Pane's card, at most one, by the Pane's id. */
@@ -551,7 +553,8 @@ export const initialLookups: Lookups = { cards: new Map(), next: 1 };
  * - `Answered`: its result came.
  * - `Failed`: it came to nothing.
  * - `Named`: how its Network names Channels, as `known` said: the casemapping it declared,
- *   `null` for none, and its `CHANTYPES`, `null` while unsaid.
+ *   `null` for none, its `CHANTYPES`, `null` while unsaid, and the names of the Channels
+ *   Self is in now.
  * - `Dismissed`: the Owner closed the Pane's card.
  * - `Kept`: the Panes there are now: the card of any other is let go of.
  * - `Cleared`: the page signed out, so every card is let go of.
@@ -579,6 +582,7 @@ export type LookupsEvent =
       readonly id: number;
       readonly declared: Casemapping | null;
       readonly chantypes: string | null;
+      readonly joined: readonly string[];
     }
   | { readonly _tag: "Dismissed"; readonly pane: string }
   | { readonly _tag: "Kept"; readonly panes: readonly string[] }
@@ -841,11 +845,14 @@ const reduceCards = (state: Lookups, event: Exclude<LookupsEvent, PagingEvent>):
     }
 
     case "Named": {
+      const casemapping = event.declared ?? defaultCasemapping;
+
       return changing(state, event.id, (card) => ({
         ...card,
         naming: {
-          casemapping: event.declared ?? defaultCasemapping,
+          casemapping,
           chantypes: event.chantypes ?? rfcChantypes,
+          joined: new Set(event.joined.map((name) => casefold(casemapping, name))),
         },
       }));
     }
@@ -1162,6 +1169,30 @@ const choosing = (timelines: Timelines, card: Card, name: string): Intent | unde
   }
 
   const found = channelTimeline(timelines, card, name);
+
+  return found === undefined
+    ? { _tag: "FocusComposer", text: `/join ${name}` }
+    : { _tag: "Open", timeline: found };
+};
+
+/**
+ * What choosing one of the Network's Channels does: opens its Timeline while Self is in it,
+ * or starts `/join <name>` in the composer, though a Timeline kept from before shows it.
+ * @param timelines - The Timelines.
+ * @param card - The card.
+ * @param name - The Channel's name, as the Network said it.
+ * @returns The intent, or none.
+ */
+const joining = (timelines: Timelines, card: Card, name: string): Intent | undefined => {
+  const { naming } = card;
+
+  if (naming === undefined || !joinable(naming, name)) {
+    return undefined;
+  }
+
+  const found = naming.joined.has(casefold(naming.casemapping, name))
+    ? channelTimeline(timelines, card, name)
+    : undefined;
 
   return found === undefined
     ? { _tag: "FocusComposer", text: `/join ${name}` }
@@ -1578,7 +1609,7 @@ const listedShown = (timelines: Timelines, card: Card, entry: ChannelEntry): Lis
   const members = counted(entry.members);
 
   return {
-    choose: choosing(timelines, card, entry.channel),
+    choose: joining(timelines, card, entry.channel),
     label: `${name}, ${members} ${entry.members === 1 ? "member" : "members"}`,
     members,
     name,

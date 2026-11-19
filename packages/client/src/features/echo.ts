@@ -28,7 +28,8 @@
  *   until it is gone, a Message from Self is an echo nothing can tie to what we sent, so
  *   it is `Ignored`. When `labeled-response` is left without `echo-message`, the Feature
  *   is off, and gives it up the same way. `batch` is the `batch` Feature's own.
- * - **Lookups.** The Line of a Lookup is labelled the same way, and every Line of its
+ * - **Lookups.** The Line of a Lookup is labelled the same way, unless it is one whose
+ *   reply is tied by structure alone, such as a `LIST`, and every Line of its
  *   answer, the labelled Line on its own or each Line of the batch that carries the
  *   label, is marked `within` its intent, rejections included, so the core collects the
  *   reply by label and never by the names it holds. The Line that ends the answer, the
@@ -198,7 +199,13 @@ export const echo: Feature<Echoes> = {
       ? { drop: [labeledResponse] }
       : {},
   egress: (departure, context) => {
-    if (departure.for._tag === "Protocol" || !labelling(context)) {
+    const { for: purpose } = departure;
+
+    if (
+      purpose._tag === "Protocol" ||
+      (purpose._tag === "Looked" && !purpose.byLabel) ||
+      !labelling(context)
+    ) {
       return { value: departure };
     }
 
@@ -210,10 +217,10 @@ export const echo: Feature<Echoes> = {
     }
 
     const pending = new Map(context.own.pending).set(label, {
-      intent: departure.for.intent,
-      looked: departure.for._tag === "Looked",
+      intent: purpose.intent,
+      looked: purpose._tag === "Looked",
       reported: false,
-      said: departure.for._tag === "Said",
+      said: purpose._tag === "Said",
       settled: false,
     });
 

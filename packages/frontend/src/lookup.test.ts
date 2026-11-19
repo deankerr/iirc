@@ -422,12 +422,13 @@ describe("the Lookups", () => {
   it("put a card away, and name Channels as `known` said", () => {
     const state = fold([
       { _tag: "Asked", look: whois(), pane: "p0" },
-      { _tag: "Named", chantypes: null, declared: null, id: 1 },
+      { _tag: "Named", chantypes: null, declared: null, id: 1, joined: [] },
     ]);
 
     expect(state.cards.get("p0")?.naming).toStrictEqual({
       casemapping: "rfc1459",
       chantypes: "#&+!",
+      joined: new Set(),
     });
     expect(reduceLookups(state, { _tag: "Dismissed", pane: "p0" }).cards.size).toBe(0);
     expect(reduceLookups(state, { _tag: "Dismissed", pane: "p1" })).toBe(state);
@@ -478,7 +479,13 @@ describe("how long a User was idle", () => {
 });
 
 describe("a card as a view draws it", () => {
-  const named: LookupsEvent = { _tag: "Named", chantypes: "#&", declared: "rfc1459", id: 1 };
+  const named: LookupsEvent = {
+    _tag: "Named",
+    chantypes: "#&",
+    declared: "rfc1459",
+    id: 1,
+    joined: [],
+  };
 
   it("shows a User whole, with the signon in the time format given", () => {
     const card = cardAfter(
@@ -880,7 +887,14 @@ describe("/bans, /exceptions, and /invexes", () => {
 });
 
 describe("a card of a Channel's list", () => {
-  const named: LookupsEvent = { _tag: "Named", chantypes: "#&", declared: "rfc1459", id: 1 };
+  const named: LookupsEvent = {
+    _tag: "Named",
+    chantypes: "#&",
+    declared: "rfc1459",
+    id: 1,
+    joined: [],
+  };
+
   const bans = listLookOf("Bans", "#IIRC", network, timelineId(iirc));
 
   const listed = result({
@@ -982,7 +996,13 @@ describe("a card of a Channel's list", () => {
     let named2 = state;
 
     for (const id of [1, 2, 3, 4]) {
-      named2 = reduceLookups(named2, { _tag: "Named", chantypes: "#&", declared: "rfc1459", id });
+      named2 = reduceLookups(named2, {
+        _tag: "Named",
+        chantypes: "#&",
+        declared: "rfc1459",
+        id,
+        joined: [],
+      });
     }
 
     expect([listedChannels(state, world(iirc)), listedChannels(named2, world(iirc))]).toStrictEqual(
@@ -1387,7 +1407,14 @@ describe("/list", () => {
   });
 });
 
-const listNamed: LookupsEvent = { _tag: "Named", chantypes: "#&", declared: "rfc1459", id: 1 };
+const listNamed: LookupsEvent = {
+  _tag: "Named",
+  chantypes: "#&",
+  declared: "rfc1459",
+  id: 1,
+  joined: ["#iirc"],
+};
+
 const listSent: LookupsEvent = { _tag: "Sent", id: 1, intent: "look-1" };
 
 const page = (
@@ -1486,6 +1513,31 @@ describe("a card of the Network's Channels", () => {
       kind: "Channels",
       notes: [],
       subject: { _tag: "Directory", words: "matching #* with at least 2 members" },
+    });
+  });
+
+  it("opens a Channel's Timeline only while Self is in it, and offers to join it otherwise", () => {
+    const look = directoryLookOf({}, network, timelineId(iirc));
+    const listed = answeredWith(page(0, [{ channel: "#iirc", members: 3 }], { seen: 1, total: 1 }));
+
+    const chosen = (joined: readonly string[]) => {
+      const shown = directoryBodyOf(
+        cardAfter(
+          [
+            { _tag: "Named", chantypes: "#&", declared: "rfc1459", id: 1, joined },
+            listSent,
+            listed,
+          ],
+          look
+        )
+      );
+
+      return shown._tag === "Directory" ? shown.channels[0]?.choose : undefined;
+    };
+
+    expect({ joined: chosen(["#IIRC"]), parted: chosen([]) }).toStrictEqual({
+      joined: { _tag: "Open", timeline: timelineId(iirc) },
+      parted: { _tag: "FocusComposer", text: "/join #iirc" },
     });
   });
 

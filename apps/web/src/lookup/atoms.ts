@@ -420,6 +420,9 @@ const name = (registry: AtomRegistry.AtomRegistry, id: number, network: NetworkI
       chantypes: known.chantypes,
       declared: known.declared,
       id,
+      joined: known.channels.flatMap((channel) =>
+        channel.standing === "Joined" ? [channel.name] : []
+      ),
     });
   }).pipe(Effect.ignore);
 
