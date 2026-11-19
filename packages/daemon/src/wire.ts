@@ -726,7 +726,7 @@ export interface LookPage {
 }
 
 /** The page News gives of a `Channels` result, and a request that names none. */
-export const firstLookPage: LookPage = { limit: windowLimit.default, offset: 0 };
+const firstLookPage: LookPage = { limit: windowLimit.default, offset: 0 };
 
 /**
  * A Lookup's result, as the contract says it. Only a `Channels` result is paged: its entries

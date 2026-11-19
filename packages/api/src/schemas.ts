@@ -1192,10 +1192,7 @@ export const Limit = Schema.FiniteFromString.check(
 );
 
 /** Where a page of a `Channels` Lookup's result begins, as text in a query: a whole number, at least 0. */
-export const Offset = Schema.FiniteFromString.check(
-  Schema.isInt(),
-  Schema.isGreaterThanOrEqualTo(0)
-);
+const Offset = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * Which page of a `Channels` Lookup's result a `look` or a `looked` gives: `limit` Channels
