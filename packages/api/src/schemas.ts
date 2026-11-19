@@ -349,6 +349,12 @@ export const StepRefusal = Schema.TaggedUnion({
 /** The decoded form of {@link StepRefusal}. */
 export type StepRefusal = typeof StepRefusal.Type;
 
+/** Why the Client refused a `say` in the step that took it: `Offline` or `Unsendable`. */
+export const SayRefusal = Schema.TaggedUnion({ Offline: {}, Unsendable: {} });
+
+/** The decoded form of {@link SayRefusal}. */
+export type SayRefusal = typeof SayRefusal.Type;
+
 /**
  * What a `say` answers, once it is journaled and stepped under its intent: `Said`, its
  * Message reported, or `Refused`, by the Client in that same step. A refusal that comes
@@ -356,7 +362,7 @@ export type StepRefusal = typeof StepRefusal.Type;
  */
 export const Said = Schema.Union([
   Schema.TaggedStruct("Said", { intent: IntentId, sequence: Sequence }),
-  Schema.TaggedStruct("Refused", { intent: IntentId, reason: StepRefusal, sequence: Sequence }),
+  Schema.TaggedStruct("Refused", { intent: IntentId, reason: SayRefusal, sequence: Sequence }),
 ]);
 
 /** The decoded form of {@link Said}. */

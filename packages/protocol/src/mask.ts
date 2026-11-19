@@ -159,14 +159,17 @@ const isUnsafeAccount = (character: string): boolean =>
  * The mask that bans an account, as `ACCOUNTEXTBAN` says to write it: the prefix, the
  * type's first name, a colon, and the account. An account a mask could not carry as one
  * exact name is refused: empty, starting with a colon, or holding a space, comma, `*`,
- * `?`, or control character, so a hostile Network cannot make a ban match everyone or a
- * `MODE` that breaks.
+ * `?`, or control character, as given or once compatibility forms are folded (NFKC), as an
+ * Ircd may fold them, so a hostile Network cannot make a ban match everyone or a `MODE`
+ * that breaks.
  * @param extban - How the Network's bans name an account.
  * @param account - The account's name, as the Network gave it.
  * @returns The mask, or `undefined` when the account cannot be banned by name.
  */
 export const accountBanMask = (extban: AccountExtban, account: string): string | undefined =>
-  account === "" || account.startsWith(":") || characters(account).some(isUnsafeAccount)
+  [account, account.normalize("NFKC")].some(
+    (form) => form === "" || form.startsWith(":") || characters(form).some(isUnsafeAccount)
+  )
     ? undefined
     : `${extban.prefix}${extban.names[0]}:${account}`;
 

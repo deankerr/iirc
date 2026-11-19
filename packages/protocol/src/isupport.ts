@@ -313,35 +313,40 @@ export interface AccountExtban {
 const extbanGrammar = /^(?<prefix>[!-/:-@[-`{-~]?),(?<types>[A-Za-z]*)$/u;
 
 // A prefix cannot be one a mask would read otherwise: a separator, the colon that ends the
-// type's name, or a wildcard.
-const notPrefix = /^[,:*?]$/u;
+// type's name, a wildcard, or the `!` that inverts an extended ban on some Ircds, so a ban
+// by account never matches everyone but that account.
+const notPrefix = /^[,:*?!]$/u;
 
 const extbanName = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 
 /**
  * Reads `EXTBAN` and `ACCOUNTEXTBAN` together: how a ban names an account. Hostile input,
  * so a token that does not follow its grammar to the letter means nothing is offered,
- * never a guessed mask.
+ * never a guessed mask. A name of one letter is the type's letter, so it is kept only where
+ * `EXTBAN` lists it, and a longer name, which `EXTBAN` cannot list, is kept as given.
  * @param extban - `EXTBAN`'s value, or `undefined` if it was not sent.
  * @param accountExtban - `ACCOUNTEXTBAN`'s value, or `undefined` if it was not sent.
  * @returns How a ban names an account, or `undefined` when either token is missing or
- * malformed.
+ * malformed, or no name is left.
  */
 export const accountExtbanOf = (
   extban: string | undefined,
   accountExtban: string | undefined
 ): AccountExtban | undefined => {
-  const prefix = extban === undefined ? undefined : extbanGrammar.exec(extban)?.groups?.prefix;
-  const [first, ...rest] = (accountExtban ?? "").split(",");
+  const groups = extban === undefined ? undefined : extbanGrammar.exec(extban)?.groups;
+  const prefix = groups?.prefix;
+  const types = groups?.types ?? "";
+  const given = (accountExtban ?? "").split(",");
 
   if (
     prefix === undefined ||
     notPrefix.test(prefix) ||
-    first === undefined ||
-    ![first, ...rest].every((name) => extbanName.test(name))
+    !given.every((name) => extbanName.test(name))
   ) {
     return undefined;
   }
 
-  return { names: [first, ...rest], prefix };
+  const [first, ...rest] = given.filter((name) => name.length > 1 || types.includes(name));
+
+  return first === undefined ? undefined : { names: [first, ...rest], prefix };
 };

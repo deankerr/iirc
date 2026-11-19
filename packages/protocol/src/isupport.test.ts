@@ -265,6 +265,12 @@ describe(accountExtbanOf, () => {
     ["no prefix", ",a", "a", { names: ["a"], prefix: "" }],
     ["no types", "~,", "account", { names: ["account"], prefix: "~" }],
     [
+      "only the names EXTBAN can carry, a letter it does not list left out",
+      "~,a",
+      "R,account",
+      { names: ["account"], prefix: "~" },
+    ],
+    [
       "a name with a dash and an underscore",
       "~,a",
       "my-ban_1",
@@ -285,6 +291,8 @@ describe(accountExtbanOf, () => {
     ["an alphanumeric prefix", "a,a", "a"],
     ["a digit prefix", "1,a", "a"],
     ["a `:` prefix", ":,a", "a"],
+    ["a `!` prefix, which inverts a ban", "!,a", "a"],
+    ["a letter EXTBAN does not list", "$,a", "R"],
     ["a `*` prefix", "*,a", "a"],
     ["a `?` prefix", "?,a", "a"],
     ["a space prefix", " ,a", "a"],

@@ -314,16 +314,21 @@ export const channelViewOf = (
 
   const isupport = open?.isupport ?? new Map<string, string>();
   const rules = rulesOf(isupport);
+  const lists = maskListsOf(isupport);
 
   return {
-    accountExtban: accountExtbanOf(isupport.get("EXTBAN"), isupport.get("ACCOUNTEXTBAN")),
+    // Offered only where a ban can be set at all, as the action checks.
+    accountExtban:
+      lists.Bans === undefined
+        ? undefined
+        : accountExtbanOf(isupport.get("EXTBAN"), isupport.get("ACCOUNTEXTBAN")),
     casemapping: state.casemapping,
     chanmodes: rules.channel,
     channel: known,
     chantypes: chantypesOf(isupport.get("CHANTYPES")),
     held: selfKey === undefined ? undefined : known.members.get(selfKey)?.prefixes,
     key,
-    lists: maskListsOf(isupport),
+    lists,
     ranks: rules.prefix,
     users,
   };

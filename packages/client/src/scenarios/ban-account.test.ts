@@ -183,5 +183,6 @@ describe("a Channel's view", () => {
     expect(viewOffering(long)).toStrictEqual({ names: ["account", "a"], prefix: "~" });
     expect(viewOffering([...floorIsupport, "EXTBAN=~,a"])).toBeUndefined();
     expect(viewOffering(floorIsupport)).toBeUndefined();
+    expect(viewOffering([...long, "CHANMODES=eI,k,l,imnst"])).toBeUndefined();
   });
 });

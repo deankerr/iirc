@@ -155,6 +155,10 @@ describe("a ban by account", () => {
     ["NUL", "bo\0b"],
     ["a C0 control", "bo\u0007b"],
     ["DEL", "bo\u007Fb"],
+    ["a fullwidth star, which an Ircd may normalize to `*`", "\uFF0A"],
+    ["a fullwidth comma", "a\uFF0Cb"],
+    ["an ideographic space", "a\u3000b"],
+    ["starting with a fullwidth colon", "\uFF1Abob"],
   ])("refuses an account that is %s", (_why, account) => {
     expect(accountBanMask(long, account)).toBeUndefined();
   });
