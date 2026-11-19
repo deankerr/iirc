@@ -2653,6 +2653,20 @@ const actions: readonly Command[] = [
     usage: "/nick <nick>",
     when: anywhereActing,
   }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Change Self's real name on the open Timeline's Network for this Session, where the Network offers setname.",
+    id: "act.setname",
+    name: "setname",
+    parse: (args) =>
+      args.trim() === ""
+        ? invalid("Set it to what? /setname <real name>")
+        : parsed({ _tag: "Setname", realname: args }),
+    usage: "/setname <real name>",
+    when: anywhereActing,
+  }),
   quoteCommand,
 ];
 
