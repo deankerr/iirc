@@ -17,6 +17,7 @@ import type {
   Folded,
   Item,
   Overflowed,
+  Range,
   Search,
   Summary,
   TimelineStoreService,
@@ -468,6 +469,11 @@ const decodeHead = Schema.decodeUnknownExit(
 );
 
 const decodeInto = Schema.decodeUnknownExit(Schema.Struct({ into: Schema.NullOr(TimelineId) }));
+
+const decodeNamed = decodeAll(
+  Schema.Struct({ network: Schema.String, timeline: TimelineId }),
+  "a Timeline"
+);
 
 const decodeRows = decodeAll(Schema.Struct({ id: Schema.Int }), "an item's row");
 const decodeHidden = decodeAll(HiddenRow, "a hidden item");
@@ -1614,6 +1620,49 @@ export const makeSqliteTimelineStore = (
         );
       });
 
+    // A page of a range of a Timeline, or the one a merged id went to, in one transaction
+    // with finding it: one seek on `items_shown` to where the range or the page before
+    // ended, and a walk of the page alone.
+    const range = (timeline: TimelineId, each: Range) =>
+      reading(
+        "a range of a Timeline",
+        Effect.gen(function* () {
+          const into = yield* sql`SELECT into_id AS "into" FROM tombstones WHERE id = ${timeline}`;
+
+          const merged = yield* Effect.suspend(() => decodeInto(into[0] ?? { into: null })).pipe(
+            Effect.mapError(failed("cannot decode a tombstone"))
+          );
+
+          const [found] = yield* sql`
+            SELECT id AS timeline, network FROM timelines WHERE id = ${merged.into ?? timeline}
+          `.pipe(Effect.flatMap(decodeNamed));
+
+          if (found === undefined) {
+            return Option.none();
+          }
+
+          const { after, since, until } = each;
+          const from = since === undefined ? undefined : cursorsFrom(since);
+          const past = after === undefined ? undefined : cursorOf(after);
+
+          // Only the tighter lower bound is given, so a page read after another seeks to
+          // where it left off rather than to `since` and past every page before.
+          const afterWins = past !== undefined && (from === undefined || past >= from);
+          const fromBound = from === undefined ? sql`` : sql`AND cursor >= ${from}`;
+          const lower = afterWins ? sql`AND cursor > ${past}` : fromBound;
+
+          const items = yield* sql`
+            SELECT ${itemColumns} FROM items
+            WHERE timeline = ${found.timeline} AND ignored IS NULL
+              ${lower}
+              ${until === undefined ? sql`` : sql`AND cursor < ${cursorsFrom(until)}`}
+            ORDER BY cursor LIMIT ${Math.max(0, Math.floor(each.limit))}
+          `.pipe(Effect.flatMap(decodeItems));
+
+          return Option.some({ items, network: found.network, timeline: found.timeline });
+        })
+      );
+
     // One Timeline, or the one a merged id went to, in one transaction with finding it.
     const timeline = (id: TimelineId) =>
       reading(
@@ -1759,6 +1808,7 @@ export const makeSqliteTimelineStore = (
           ${page.limit === undefined ? sql`` : sql`LIMIT ${Math.max(0, Math.floor(page.limit))}`}
         `
         ).pipe(Effect.flatMap(decodeItems)),
+      range,
       reset: (version) =>
         Effect.uninterruptible(
           sql.withTransaction(

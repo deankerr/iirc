@@ -80,7 +80,7 @@ const navigated = (registry: AtomRegistry.AtomRegistry, event: TimelinesEvent) =
  * @param day - The day.
  * @returns The instant, in milliseconds since the epoch.
  */
-const dayStart = ({ day, month, year }: Day): number => {
+export const dayStart = ({ day, month, year }: Day): number => {
   const start = new Date(0);
 
   // `setFullYear` reads a year below 100 as written, where the constructor adds 1900.

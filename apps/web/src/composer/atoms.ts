@@ -72,6 +72,7 @@ import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
+import { exportTimeline } from "../timelines/export.ts";
 import { cancelCompletion } from "./completion-state.ts";
 import { composerState, ranState } from "./composer-state.ts";
 import { composerInput } from "./input.ts";
@@ -678,6 +679,15 @@ const changeOne = (
 
     case "Notify": {
       return notifying(intent.on);
+    }
+
+    // Saving starts a download in the browser and waits on nothing, or says why it cannot.
+    case "Export": {
+      return Effect.sync((): Changed => {
+        const refused = exportTimeline(intent);
+
+        return refused === undefined ? { _tag: "Done" } : { _tag: "NotDone", message: refused };
+      });
     }
 
     case "Query": {

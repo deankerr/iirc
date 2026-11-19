@@ -72,6 +72,7 @@ import {
   CredentialNames,
   CredentialPathName,
   CredentialValue,
+  ExportQuery,
   IfSequence,
   Journaled,
   Knowledge,
@@ -265,7 +266,8 @@ export class NewsGroup extends HttpApiGroup.make("news")
  * Each read says the projection version and the last step folded into what it gave, to
  * follow the changes after. A Channel's Timeline also gives its head and its members, a
  * page at a time, as the Client knows them now. A search finds Messages by their text, a
- * page at a time, newest first. Whether the Timelines are being folded at all is followed
+ * page at a time, newest first. A Timeline, or a range of time in it, is exported as plain
+ * text, one line an item, read from the store as it is sent. Whether the Timelines are being folded at all is followed
  * as Server-Sent Events too, since a failure stops the folding until the Daemon restarts.
  */
 export class TimelinesGroup extends HttpApiGroup.make("timelines")
@@ -306,6 +308,12 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
       params: { network: NetworkId, sequence: SequenceFromString },
       query: LocateQuery,
       success: Located,
+    }),
+    HttpApiEndpoint.get("export", "/timelines/:timeline/export", {
+      error: [UnknownTimeline, TimelinesFailed],
+      params: { timeline: TimelineId },
+      query: ExportQuery,
+      success: HttpApiSchema.StreamUint8Array({ contentType: "text/plain; charset=utf-8" }),
     }),
     HttpApiEndpoint.get("search", "/search", {
       error: [UnknownNetwork, UnknownTimeline, TimelinesFailed],

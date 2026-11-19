@@ -60,7 +60,7 @@ import { Vault } from "@iirc/runtime/vault";
 import type { VaultFailed as RuntimeVaultFailed } from "@iirc/runtime/vault";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { Anchor, Changed, Item, TimelineStoreFailed, Window } from "@iirc/timeline-store";
-import type { TimelineId } from "@iirc/timelines";
+import type { Position, TimelineId } from "@iirc/timelines";
 import {
   ByteSize,
   Context,
@@ -88,6 +88,7 @@ import {
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 
 import { Following } from "./away-when-closed.ts";
+import { exportDisposition, exportLine } from "./export.ts";
 import { ApiKeys } from "./keys.ts";
 import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
@@ -581,6 +582,25 @@ export class ChangesPage extends Context.Reference<number>("@iirc/daemon/Changes
   defaultValue: () => 500,
 }) {}
 
+/** How many items an export reads from the store at a time. */
+const exportPage = 256;
+
+const encoder = new TextEncoder();
+
+/**
+ * Where the export's next page is read after: the last position of a full page, or none
+ * when the page was not full, since then nothing follows it.
+ * @param items - The page.
+ * @returns The position, or none.
+ */
+const nextAfter = (items: readonly Item[]) => {
+  const last = items.at(-1);
+
+  return items.length < exportPage || last === undefined
+    ? Option.none<Position>()
+    : Option.some(last.position);
+};
+
 /**
  * Where a window is read from: the one place a query gives, or the latest without one.
  * @param query - The window's query, which gives at most one place.
@@ -921,6 +941,62 @@ const timelines = HttpApiBuilder.group(
             through: throughOf(read.through),
             version: versionOf(read.version),
           };
+        })
+      )
+      .handle("export", ({ params, query }) =>
+        Effect.gen(function* () {
+          // The Timeline is found and its first page read before the body begins, so an id never
+          // given is `UnknownTimeline`. Each page after is read only once the one before is sent.
+          const found = yield* store
+            .timeline(params.timeline)
+            .pipe(Effect.mapError(timelinesFailed));
+
+          if (Option.isNone(found)) {
+            return yield* new UnknownTimeline({ timeline: params.timeline });
+          }
+
+          const timeline = found.value;
+
+          const pageAfter = (after: Position | undefined) =>
+            store
+              .range(timeline.id, {
+                after,
+                limit: exportPage,
+                since: query.since,
+                until: query.until,
+              })
+              .pipe(
+                Effect.map(Option.match({ onNone: () => [], onSome: ({ items }) => items })),
+                Effect.mapError(timelinesFailed)
+              );
+
+          const first = yield* pageAfter(undefined);
+
+          const pages = Stream.make(first).pipe(
+            Stream.concat(
+              Option.match(nextAfter(first), {
+                onNone: () => Stream.empty,
+                onSome: (after) =>
+                  Stream.paginate(after, (each: Position) =>
+                    Effect.map(pageAfter(each), (items) => [[items], nextAfter(items)] as const)
+                  ),
+              })
+            )
+          );
+
+          return HttpServerResponse.stream(
+            pages.pipe(
+              Stream.filter((items) => items.length > 0),
+              Stream.map((items) => encoder.encode(items.map(exportLine).join("")))
+            ),
+            {
+              contentType: "text/plain; charset=utf-8",
+              headers: {
+                "content-disposition": exportDisposition(timeline),
+                "x-content-type-options": "nosniff",
+              },
+            }
+          );
         })
       )
       .handle("search", ({ query }) =>

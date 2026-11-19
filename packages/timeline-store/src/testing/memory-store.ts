@@ -29,6 +29,8 @@ import type {
   Gap,
   NetworkRemoval,
   Item,
+  Range,
+  Ranged,
   Search,
   Summary,
   TimelineStoreService,
@@ -815,6 +817,20 @@ const collapse = (
     });
 };
 
+// The items of a Timeline, in position order, that a range reads.
+const ranged = (items: readonly Item[], { after, limit, since, until }: Range) => {
+  const from = after === undefined ? undefined : cursorOf(after);
+
+  return items
+    .filter(
+      ({ position: where }) =>
+        (since === undefined || where.at >= since) &&
+        (until === undefined || where.at < until) &&
+        (from === undefined || textOrder(cursorOf(where), from) > 0)
+    )
+    .slice(0, Math.max(0, Math.floor(limit)));
+};
+
 /**
  * The Messages a search finds, by walking every item, as no adapter that must stay bounded
  * may: newest first, by position and then Timeline id, each later one first.
@@ -911,6 +927,19 @@ export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effe
             )
             .toSorted(byPosition)
             .slice(0, page.limit);
+        }),
+      range: (timeline, range) =>
+        read((now) => {
+          const id = now.timelines.has(timeline) ? timeline : now.merged.get(timeline)?.into;
+          const found = id === undefined ? undefined : now.timelines.get(id);
+
+          return id === undefined || found === undefined
+            ? Option.none<Ranged>()
+            : Option.some({
+                items: ranged(sortedItems(now, id), range),
+                network: found.descriptor.network,
+                timeline: id,
+              });
         }),
       reset: (version) => Ref.set(memory, empty(version)).pipe(turn.withPermits(1)),
       search: (search) => read((now) => searched(now, search)),

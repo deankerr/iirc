@@ -7,12 +7,13 @@ import type { DeviceUi } from "@iirc/frontend/ui";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { channelSync } from "../channel/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { check } from "../sign-in/atoms.ts";
+import { watchDownloads } from "../testing/downloads.ts";
 import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake-daemon.ts";
 import { drawnTheme, watchTheme } from "../theme/atoms.ts";
 import { open, sync } from "../timelines/atoms.ts";
@@ -1299,5 +1300,69 @@ describe("the Composer's aliases of the Owner's own", () => {
       listed: false,
       shared: [],
     });
+  });
+});
+
+describe("exporting a Timeline from the Composer", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    vi.restoreAllMocks();
+  });
+
+  it("lists /export with its usage, and /export with two days starts a download of that Timeline between the start of the first and the start of the day after the second", async () => {
+    const downloads = watchDownloads();
+    const { container } = await signedIn();
+
+    await typeIn(container, "/exp");
+    const listed = listIn(container);
+
+    await typeIn(container, "/export 2026-11-01 2026-11-02");
+    await pressIn(container, "Enter");
+    await settled(() => downloads.length === 1);
+
+    const since = new Date(2026, 10, 1).getTime();
+    const until = new Date(2026, 10, 3).getTime();
+
+    expect({
+      downloads,
+      listed: [
+        listed.names?.[0],
+        /^\/export\[since\] \[until\].*Save/su.test(listed.texts?.[0] ?? ""),
+      ],
+    }).toStrictEqual({
+      downloads: [
+        { href: `/api/timelines/${iirc}/export?since=${since}&until=${until}`, saves: true },
+      ],
+      listed: ["/export", true],
+    });
+  });
+
+  it("starts the download of the whole Timeline with /export alone, and none for a range that ends before it starts", async () => {
+    const downloads = watchDownloads();
+    const { container } = await signedIn();
+
+    await typeIn(container, "/export 2026-11-03 2026-11-02");
+    await pressIn(container, "Enter");
+    await typeIn(container, "/export");
+    await pressIn(container, "Enter");
+    await settled(() => downloads.length === 1);
+
+    expect(downloads).toStrictEqual([{ href: `/api/timelines/${iirc}/export`, saves: true }]);
+  });
+
+  it("says why, and starts no download, when a day and a time make a range that ends before it starts", async () => {
+    const downloads = watchDownloads();
+    const { container } = await signedIn();
+
+    await typeIn(container, "/export 2026-11-03 2026-11-02T00:00Z");
+    await pressIn(container, "Enter");
+    await settled(() =>
+      (container.textContent ?? "").includes("the start must come before the end")
+    );
+
+    expect(downloads).toStrictEqual([]);
   });
 });

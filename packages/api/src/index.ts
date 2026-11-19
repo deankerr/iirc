@@ -121,6 +121,7 @@ export {
   StepRefusal,
   SaidAnswer,
   SayRequest,
+  ExportQuery,
   SearchQuery,
   SearchResults,
   Sequence,

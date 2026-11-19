@@ -350,8 +350,8 @@ const previewsChoices: readonly {
 
 /**
  * What can be done with a Timeline from its row: choosing its own Previews, the choice in
- * force marked, pinning it or unpinning it, unless it is a Network's own, and closing it,
- * when it can be closed.
+ * force marked, exporting it as text, pinning it or unpinning it, unless it is a Network's
+ * own, and closing it, when it can be closed.
  * @param props - The Timeline, whether it is pinned, its row, and what closes the menu.
  * @returns The menu, placed under its row.
  */
@@ -423,6 +423,21 @@ const TimelineMenu = ({
               )}
             </MenuItem>
           ))}
+        </MenuSection>
+        <MenuSection className={styles.section}>
+          <MenuItem
+            className={styles.action}
+            id="export"
+            onAction={() => {
+              onClose();
+              carryOut([
+                { _tag: "Export", since: undefined, timeline: timeline.id, until: undefined },
+              ]);
+            }}
+            textValue="Export as text"
+          >
+            Export as text
+          </MenuItem>
         </MenuSection>
         {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
         {timeline.kind === "Network" ? null : (
