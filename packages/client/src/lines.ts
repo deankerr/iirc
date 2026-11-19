@@ -255,31 +255,14 @@ const nickSettled = (run: Run, from: string, to: string): void => {
   }
 };
 
-// What Self did, live, answers the Line of an action that asked for it, Self's own
-// `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to them, and
-// a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
-const settled = (run: Run, activity: Activity): void => {
-  if (changesNothingHere(activity)) {
-    return;
-  }
-
+// Self's own `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to
+// them, and a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants
+// back.
+const userSettled = (
+  run: Run,
+  activity: Activity & { readonly _tag: "NickChanged" | "AwayChanged" | "Quit" }
+): void => {
   switch (activity._tag) {
-    case "TopicChanged":
-    case "Kicked":
-    case "Parted": {
-      channelSettled(run, activity);
-
-      break;
-    }
-
-    case "ModeChanged": {
-      if (isSelf(run, activity.by)) {
-        modesAnswered(run, activity.target, activity.changes);
-      }
-
-      break;
-    }
-
     case "NickChanged": {
       nickSettled(run, activity.from, activity.to);
 
@@ -304,8 +287,48 @@ const settled = (run: Run, activity: Activity): void => {
       break;
     }
 
+    default: {
+      activity satisfies never;
+    }
+  }
+};
+
+// What Self did, live, answers the Line of an action that asked for it, and what a User
+// did is settled by {@link userSettled}.
+const settled = (run: Run, activity: Activity): void => {
+  if (changesNothingHere(activity)) {
+    return;
+  }
+
+  switch (activity._tag) {
+    case "TopicChanged":
+    case "Kicked":
+    case "Parted": {
+      channelSettled(run, activity);
+
+      break;
+    }
+
+    case "ModeChanged": {
+      if (isSelf(run, activity.by)) {
+        modesAnswered(run, activity.target, activity.changes);
+      }
+
+      break;
+    }
+
+    case "NickChanged":
+    case "AwayChanged":
+    case "Quit": {
+      userSettled(run, activity);
+
+      break;
+    }
+
     case "Joined":
     case "AccountChanged":
+    case "HostChanged":
+    case "RealnameChanged":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
@@ -343,7 +366,14 @@ const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): Read
 
 // What a live Line said of a User who shares a Channel with Self: each fact it gave.
 const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
-  const { account, realname } = meant;
+  const { account, mask, realname } = meant;
+
+  // Self's own mask is known as a Line from Self shows it, and `see` is for other Users.
+  if (mask !== undefined && isSelf(run, meant.nick)) {
+    ownMask(run, mask.user, mask.host);
+
+    return;
+  }
 
   see(run, meant.nick, (seen) => ({
     ...seen,
@@ -351,6 +381,7 @@ const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" 
       account === undefined
         ? seen.account
         : { _tag: "Known", at: run.at, from: "ircd", value: account },
+    mask: mask === undefined ? seen.mask : { _tag: "Known", at: run.at, from: "ircd", value: mask },
     realname:
       realname === undefined
         ? seen.realname
@@ -459,7 +490,13 @@ const fold = (
 
   const { user, host } = source ?? {};
 
-  if (source === undefined || user === undefined || host === undefined) {
+  // A `CHGHOST`'s source is the mask the User had, which it has just replaced.
+  if (
+    source === undefined ||
+    user === undefined ||
+    host === undefined ||
+    activity._tag === "HostChanged"
+  ) {
     return;
   }
 

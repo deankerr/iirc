@@ -1,5 +1,5 @@
 /**
- * The Owner's actions beyond saying: a topic, a kick, a part, modes, a ban by account, an invite, a nick, away, a
+ * The Owner's actions beyond saying: a topic, a kick, a part, modes, a ban by account, an invite, a nick, a realname, away, a
  * CTCP request or `PING` to a User, and a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
  * checked against what the Client knows of the Network, by `CHANTYPES`, `PREFIX`,
  * `CHANMODES`, `MODES`, `TARGMAX`, and the lengths ISUPPORT gives. One that cannot be
@@ -24,6 +24,7 @@ import {
   nick,
   part,
   quote,
+  setname,
   topic,
   upperCaseAscii,
 } from "@iirc/protocol/line";
@@ -31,6 +32,7 @@ import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
 import { accountBanMask } from "@iirc/protocol/mask";
 import { Schema } from "effect";
 
+import { CapName } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import type { Action, Input, ModeRequest } from "./input.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
@@ -43,7 +45,7 @@ import { folder, ignore, linkOf, refuseIntent, send, updateOpen } from "./run.ts
 import type { Acting, Awaiting, Pinged } from "./state.ts";
 import { maxActing, maxActions } from "./state.ts";
 import { userIn } from "./users.ts";
-import { openOf, sessionOf } from "./views.ts";
+import { negotiated, openOf, sessionOf } from "./views.ts";
 import { byPartner } from "./where.ts";
 
 const utf8 = new TextEncoder();
@@ -143,6 +145,15 @@ const partLines = (run: Run, { channel, reason }: Of<"Part">) =>
 const nickLines = (run: Run, { nick: name }: Of<"Nick">) =>
   isNick(run, name) && within(run, "NICKLEN", name, rfcNickLength)
     ? one(run, nick(name), [name])
+    : undefined;
+
+const setnameCap = CapName.make("setname");
+
+// A realname is changed only where the Network offers `setname`, and is sent as the Ircd
+// relays it to everyone who shares a Channel with Self.
+const setnameLines = (run: Run, { realname }: Of<"Setname">) =>
+  negotiated(openOf(run.state)?.caps).enabled.has(setnameCap)
+    ? one(run, setname(realname), [])
     : undefined;
 
 /** CTCP the Owner never sends as a request: `ACTION` is a `Say`, and `DCC` is not sent. */
@@ -477,6 +488,10 @@ const plan = (
       return nickLines(run, action);
     }
 
+    case "Setname": {
+      return setnameLines(run, action);
+    }
+
     case "Raw": {
       return rawLines(run, action);
     }
@@ -546,6 +561,10 @@ const attemptedOf = (action: Action): Attempted => {
       return { _tag: "Away", away: action.message !== null && action.message !== "" };
     }
 
+    case "Setname": {
+      return { _tag: "Setname" };
+    }
+
     case "Raw": {
       const line = quote(action.line);
 
@@ -569,7 +588,7 @@ const attemptedOf = (action: Action): Attempted => {
 /**
  * Where an action belongs: the Channel it is about, when the Client holds that Channel,
  * wanted or joined, keyed as `where` keys it, and otherwise the Network's own Timeline. A
- * nick, away, a raw Line, and Self's own modes belong to the Network.
+ * nick, a realname, away, a raw Line, and Self's own modes belong to the Network.
  * @param run - The step.
  * @param action - The action.
  * @returns Where it belongs.

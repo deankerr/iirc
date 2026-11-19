@@ -94,6 +94,12 @@ export const Action = Schema.TaggedUnion({
   Ping: { nick: Schema.String },
   /** A Line written as text, sent as it reads, as `/quote` sends it. */
   Raw: { line: Schema.String },
+  /**
+   * Change Self's realname for this Session, where the Network offers `setname`. It is
+   * refused as `Unsendable` where it does not, when the realname is empty, or when it does
+   * not fit.
+   */
+  Setname: { realname: Schema.String },
   /** Set a Channel's topic, or clear it with `""`. */
   Topic: { channel: Schema.String, text: Schema.String },
 });
