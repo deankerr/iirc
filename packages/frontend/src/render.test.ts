@@ -520,9 +520,24 @@ describe("lines", () => {
       markerOf(activity({ _tag: "TopicChanged", by: "op", channel: "#iirc", topic: null })),
       markerOf(activity({ _tag: "AwayChanged", away: null, nick: "peer" })),
       markerOf(activity({ _tag: "AccountChanged", account: "peerly", nick: "peer" })),
+      markerOf(activity({ _tag: "HostChanged", host: "h", nick: "peer", user: "u" })),
+      markerOf(activity({ _tag: "RealnameChanged", nick: "peer", realname: "Peer" })),
       markerOf(content({ _tag: "SessionBegan", at: 0, nick: "iirc" })),
       markerOf(message("peer", "hi")),
-    ]).toStrictEqual(["-->", "<--", "<--", "<--", "--", "--", "--", "--", undefined, "a Message"]);
+    ]).toStrictEqual([
+      "-->",
+      "<--",
+      "<--",
+      "<--",
+      "--",
+      "--",
+      "--",
+      "--",
+      "--",
+      "--",
+      undefined,
+      "a Message",
+    ]);
   });
 
   it("marks a numeric by its number, and draws its parameters as said text with links", () => {
@@ -611,6 +626,8 @@ describe("lines", () => {
       activity({ _tag: "AwayChanged", away: null, nick: "peer" }),
       activity({ _tag: "AccountChanged", account: "peerly", nick: "peer" }),
       activity({ _tag: "AccountChanged", account: null, nick: "peer" }),
+      activity({ _tag: "HostChanged", host: "staff.example", nick: "peer", user: "~p" }),
+      activity({ _tag: "RealnameChanged", nick: "peer", realname: "Peer \u0002Person" }),
     ].map((content) => read(lineOf(content)));
 
     expect(described).toStrictEqual([
@@ -626,6 +643,8 @@ describe("lines", () => {
       "<peer> is back",
       "<peer> logged in as peerly",
       "<peer> logged out",
+      "<peer> is now ~p@staff.example",
+      "<peer> set their real name to Peer Person",
     ]);
   });
 
@@ -834,6 +853,7 @@ describe("lines", () => {
       ),
       refused({ _tag: "Ping", nick: "peer" }, { _tag: "Unsent" }),
       refused({ _tag: "Part", channel: "#iirc" }, { _tag: "Unsent" }),
+      refused({ _tag: "Setname" }, { _tag: "Rejected", reply: "INVALID_REALNAME" }),
     ];
 
     expect(
@@ -852,6 +872,7 @@ describe("lines", () => {
       ["Refused", "Your CTCP VERSION to <nobody> was refused (401)"],
       ["Refused", "Your PING of <peer> was not sent: its connection ended first"],
       ["Refused", "Your leaving of #iirc was not sent: its connection ended first"],
+      ["Refused", "Your real name change was refused (INVALID_REALNAME)"],
     ]);
   });
 
@@ -873,6 +894,7 @@ describe("lines", () => {
       attemptedText(requested({ _tag: "Ctcp", args: "secret", command: "finger", nick: "peer" })),
       attemptedText(requested({ _tag: "Ping", nick: "peer" })),
       attemptedText(requested({ _tag: "Part", channel: "#iirc", reason: "secret" })),
+      attemptedText(requested({ _tag: "Setname", realname: "secret" })),
     ]).toStrictEqual([
       "Your mode change +ov-k on #iirc",
       "Your raw WHOIS",
@@ -880,6 +902,7 @@ describe("lines", () => {
       "Your CTCP FINGER to peer",
       "Your PING of peer",
       "Your leaving of #iirc",
+      "Your real name change",
     ]);
   });
 });

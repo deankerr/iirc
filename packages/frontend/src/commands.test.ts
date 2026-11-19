@@ -1421,6 +1421,20 @@ describe("acting on a Network", () => {
     });
   });
 
+  it("sets Self's real name for the Session, the rest of the line as typed, and only with a Session", () => {
+    expect({
+      none: words("/setname   "),
+      offline: message("/setname Someone", offline),
+      setname: interpret("/setname  Some  One ", inNetwork),
+      setnameInChannel: interpret("/setname Someone", acting),
+    }).toStrictEqual({
+      none: "Set it to what? /setname <real name>",
+      offline: "libera is not connected, so nothing can be said there now.",
+      setname: act({ _tag: "Setname", realname: " Some  One " }),
+      setnameInChannel: act({ _tag: "Setname", realname: "Someone" }),
+    });
+  });
+
   it("sends a CTCP request to a nick, the rest of the line its text, and a PING", () => {
     expect({
       ctcp: interpret("/ctcp peer version", inNetwork),
