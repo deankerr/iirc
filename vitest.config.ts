@@ -30,8 +30,9 @@ const differing = new Map<string, typeof endToEnd | typeof pure>([
 ]);
 
 // One Vitest run, so one worker pool serves every package, rather than a pool per package
-// competing for the same cores. Each package is a project, so it keeps its own root, its own
-// config file where it has one (`apps/web` has its plugins), and its own `bun run test`.
+// competing for the same cores. Each package is a project, so it keeps its own root, and
+// `apps/web` its own config file for its plugins. A package's own `bun run test` finds none of
+// this, and runs with Vitest's defaults.
 export default defineConfig({
   test: {
     maxWorkers,
