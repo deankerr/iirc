@@ -545,7 +545,8 @@ const folding = Schema.fromJsonString(
 describe("a process with nowhere to make a temporary file", () => {
   // SQLite takes `SQLITE_TMPDIR` first, and cannot name a file in a directory whose path is
   // this long, so the store has nowhere to make one but beside its own file. SQLite reads it
-  // once per process, so the store runs in one of its own.
+  // once per process, so the store runs in one of its own. SQLite then fails as `SQLITE_ERROR`
+  // rather than `SQLITE_IOERR_GETTEMPPATH`, but on the same request for a temporary file.
   it("folds every step, past the inserts that split the items' indexes", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -561,12 +562,21 @@ describe("a process with nowhere to make a temporary file", () => {
             path.join(directory, "views.sqlite"),
             "300",
           ],
-          { env: { ...process.env, SQLITE_TMPDIR: unnamable }, stderr: "ignore", stdout: "pipe" }
+          { env: { ...process.env, SQLITE_TMPDIR: unnamable }, stderr: "pipe", stdout: "pipe" }
         );
 
-        const printed = yield* Effect.promise(async () => await new Response(child.stdout).text());
+        const [printed, said] = yield* Effect.promise(
+          async () =>
+            await Promise.all([
+              new Response(child.stdout).text(),
+              new Response(child.stderr).text(),
+            ])
+        );
 
-        return yield* Schema.decodeEffect(folding)(printed);
+        // A fixture that dies prints nothing, so what it said instead is the failure.
+        return yield* Schema.decodeEffect(folding)(printed).pipe(
+          Effect.orElseSucceed(() => ({ reason: said }))
+        );
       })
     );
 
