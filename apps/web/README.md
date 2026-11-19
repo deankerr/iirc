@@ -44,13 +44,14 @@ The core decides and this package draws and does the I/O.
 - **Sends a CTCP request to a User,** with `/ctcp <nick> <command> [text]`, or `/ping <nick>`, which shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
 - **Offers to join a Channel Self was invited to,** with a button on the invitation in the Network's Timeline that does what `/join` does. Nothing joins until it is pressed.
 - **Notifies, when the Owner asks,** with `/notify on`: a Highlight, a Direct Message, or an invitation in a Timeline they are not looking at.
+- **Says when the Daemon stopped folding the Timelines,** across the top of the page: that it hit a fatal error, that the Timelines stay behind until it restarts, and what the Daemon said of why. It follows `GET /api/timelines/projection` while signed in, and the notice goes once the Daemon, restarted, says it folds them again.
 - **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the sidebar's button and the Panes' switcher, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
 
 ## How it is built
 
 | Folder | Holds |
 | --- | --- |
-| `src/app/` | The shell, the one Effect runtime, the Daemon's client, and how intents are named |
+| `src/app/` | The shell, the one Effect runtime, the Daemon's client, how intents are named, and whether the Daemon still folds the Timelines |
 | `src/sign-in/` | The sign-in screen and its commands |
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the sidebar, closing a Timeline, and the Timeline view |
 | `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |

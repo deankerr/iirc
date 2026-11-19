@@ -38,6 +38,7 @@ Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and 
 | --- | --- | --- |
 | `journal_mode` | `WAL` | Appends are one small write each, and readers (an inspector with `sqlite3`, for instance) never block the Daemon's writes. Set only once the file is known to be a Journal, because it persists in the file. |
 | `synchronous` | `FULL` | Every commit syncs the WAL to the disk before it returns. With `NORMAL` the last commits could be lost on power failure, which would break "durable before `append` returns". |
+| `temp_store` | `MEMORY` | SQLite's temporary files, such as a statement's journal, stay in memory, so the Journal needs no writable directory but its own. |
 | `busy_timeout` | 5 seconds | The default of `@effect/sql-sqlite-bun`. One Daemon owns the file, so it matters only if something else holds a write lock. |
 | One connection | serialised by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, one at a time. That orders statements, not appends: the scheduler can still yield between an append's insert and its signal, so appends take a lock of our own. |
 
@@ -67,7 +68,7 @@ The file is opened without changing anything that persists in it, so a file that
 
 ## Failure
 
-`JournalFailed` is any failure to open, read, or write that is not a version mismatch: a path that cannot be opened, a file that is not a database, a full disk, or a record that is damaged or no longer decodes as a `JournalRecord`. A stream that reaches a damaged record gives the Entries before it, even those in the same page, then fails. The `reason` carries what SQLite itself said, as in `cannot open /data/journal.sqlite: unable to open database file`, for the Owner and agents to read. It is taken from the native error that `@effect/sql-sqlite-bun` keeps in the SQL error's cause, because the SQL error's own message is generic. Nothing decides from its text. None of these is a defect.
+`JournalFailed` is any failure to open, read, or write that is not a version mismatch: a path that cannot be opened, a file that is not a database, a full disk, or a record that is damaged or no longer decodes as a `JournalRecord`. A stream that reaches a damaged record gives the Entries before it, even those in the same page, then fails. The `reason` carries what SQLite itself said, with its extended result code, as in `cannot open /data/journal.sqlite: unable to open database file (SQLITE_CANTOPEN)`, for the Owner and agents to read. It is taken from the native error that `@effect/sql-sqlite-bun` keeps in the SQL error's cause, because the SQL error's own message is generic. Nothing decides from its text. None of these is a defect.
 
 ## Choices
 

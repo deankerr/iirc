@@ -16,6 +16,25 @@
   white-space: nowrap;
 }
 
+/* Across the top, once the Daemon stopped folding the Timelines: why, in the danger colour. */
+.stopped {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-danger);
+  background: var(--color-surface);
+  color: var(--color-danger);
+}
+
+.stopped p {
+  margin: 0;
+}
+
+/* What the Daemon said, as it said it, quieter. */
+.reason {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 /* One slim bar, on a compact screen alone: the sidebar's button and the Panes' switcher. */
 .bar {
   display: flex;

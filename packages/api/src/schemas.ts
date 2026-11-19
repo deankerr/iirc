@@ -1430,6 +1430,24 @@ export const Projection = Schema.TaggedUnion({
 export type Projection = typeof Projection.Type;
 
 /**
+ * One event of the stream of whether the Timelines are being folded: `projection` says it
+ * as the stream opens and again when it changes, and `heartbeat` says the stream is alive.
+ */
+export const ProjectionEvent = Schema.Union([
+  Schema.Struct({
+    data: Schema.fromJsonString(Projection),
+    event: Schema.Literal("projection"),
+  }),
+  Schema.Struct({
+    data: Schema.fromJsonString(Schema.Struct({})),
+    event: Schema.Literal("heartbeat"),
+  }),
+]);
+
+/** The decoded form of {@link ProjectionEvent}. */
+export type ProjectionEvent = typeof ProjectionEvent.Type;
+
+/**
  * The last step folded into the Timelines a read gave, or `null` before any was. Follow
  * `GET /api/timelines/changes` after it to miss nothing since.
  */

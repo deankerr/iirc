@@ -35,6 +35,7 @@ import type {
   WindowGap,
   OwnerInForce,
   PreviewItem,
+  Projection,
   UiInForce,
   Upload,
   UploadsStatus,
@@ -495,6 +496,12 @@ const heldUntilReleased = async (releases: (() => void)[], init: RequestInit) =>
  * starts takes every status, not this one alone.
  * @returns The status.
  */
+/**
+ * The projection while the Timelines are folded.
+ * @returns It, as the wire carries it.
+ */
+const folding = (): typeof Projection.Encoded => ({ _tag: "Running" });
+
 const uploadsOn = (): typeof UploadsStatus.Encoded => ({
   _tag: "On",
   maxSize: 100 * 1024 * 1024,
@@ -557,6 +564,7 @@ export const fakeDaemon = () => {
   const uploadEditRefusals: { readonly status: number; readonly body: object }[] = [];
   const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
   const previewFollowers: Follower[] = [];
+  const projectionFollowers: Follower[] = [];
 
   const presses: {
     readonly timeline: string;
@@ -721,6 +729,10 @@ export const fakeDaemon = () => {
      * is not `off`; a Message with none is unknown.
      */
     previews: new Map<string, (typeof PreviewItem.Encoded)[]>(),
+    /** Whether the Timelines are folded, as the projection's stream says it as it opens. */
+    projection: folding(),
+    /** Each follower of whether the Timelines are folded. */
+    projectionFollowers,
     /** Each `PUT` of Configuration, with the sequence it was made from. */
     puts,
     /** How many of the next marks read get no answer. */
@@ -846,6 +858,24 @@ export const fakeDaemon = () => {
 
     for (const follower of followers) {
       follower.controller.enqueue(encoder.encode(text));
+    }
+  };
+
+  /**
+   * Whether the Timelines are folded, as one event of the projection's stream.
+   * @returns The event, as the wire carries it.
+   */
+  const projectionEvent = () => `event: projection\ndata: ${JSON.stringify(daemon.projection)}\n\n`;
+
+  /**
+   * Stops the projection, as a failure does, and says so to every follower of it.
+   * @param reason - Why.
+   */
+  const stopProjection = (reason: string) => {
+    daemon.projection = { _tag: "Stopped", reason };
+
+    for (const follower of projectionFollowers) {
+      follower.controller.enqueue(encoder.encode(projectionEvent()));
     }
   };
 
@@ -1135,6 +1165,12 @@ export const fakeDaemon = () => {
 
     if (url.pathname === "/api/timelines/changes") {
       return signedInOnly(() => following(followers, url, headers, init));
+    }
+
+    if (url.pathname === "/api/timelines/projection") {
+      return signedInOnly(() =>
+        following(projectionFollowers, url, headers, init, [projectionEvent()])
+      );
     }
 
     if (url.pathname === "/api/search") {
@@ -2269,7 +2305,18 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, expire, fetch, lose, send, sendPreview, sendUi, upload };
+  return {
+    daemon,
+    endStreams,
+    expire,
+    fetch,
+    lose,
+    send,
+    sendPreview,
+    sendUi,
+    stopProjection,
+    upload,
+  };
 };
 
 /**

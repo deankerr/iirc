@@ -42,6 +42,7 @@ import { sidebarNetworks } from "../timelines/atoms.ts";
 import { LeaveDialog } from "../timelines/leave-dialog.tsx";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { IconButton } from "../ui/button.tsx";
+import { projectionStopped } from "./projection.ts";
 
 import styles from "./shell.module.css";
 
@@ -297,6 +298,25 @@ const SidebarDrawer = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
 };
 
 /**
+ * What the shell says across its top once the Daemon stopped folding the Timelines: that it
+ * hit a fatal error, that what the page shows stays behind until it restarts, and why.
+ * @returns The notice, or nothing while the Timelines are folded.
+ */
+const StoppedNotice = () => {
+  const reason = useAtomValue(projectionStopped);
+
+  return reason === undefined ? null : (
+    <div className={styles.stopped} role="alert">
+      <p>
+        <strong>The Daemon hit a fatal error.</strong> The Timelines stopped updating, and stay
+        behind until the Daemon restarts.
+      </p>
+      <p className={styles.reason}>{reason}</p>
+    </div>
+  );
+};
+
+/**
  * The shell, with the attempt to sign out.
  * @param props - The attempt to sign out.
  * @returns The shell.
@@ -316,6 +336,7 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
   return (
     <div className={styles.shell} ref={shell}>
       <h1 className={styles.title}>iirc</h1>
+      <StoppedNotice />
       {drawn ? (
         <header className={styles.bar}>
           <SidebarButton />

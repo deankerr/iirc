@@ -18,6 +18,13 @@ import { SqlError } from "effect/sql/SqlError";
  */
 const layoutVersion = 4;
 
+const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
+
+// SQLite's extended result code, such as `SQLITE_IOERR_GETTEMPPATH`, which names the cause
+// where the message says only `disk I/O error`. Carried to be read, never decided from.
+const codeOf = (native: Error) =>
+  Option.match(decodeCode(native), { onNone: () => "", onSome: ({ code }) => ` (${code})` });
+
 // What SQLite itself said, when the error carries it. An SQL error's own message is generic,
 // and keeps SQLite's error in its reason's cause. Another error may keep one in its cause.
 const failed =
@@ -25,7 +32,7 @@ const failed =
     const native = error instanceof SqlError ? error.reason.cause : error.cause;
 
     return new PreviewCacheFailed({
-      reason: `${what}: ${native instanceof Error ? native.message : error.message}`,
+      reason: `${what}: ${native instanceof Error ? `${native.message}${codeOf(native)}` : error.message}`,
     });
   };
 
@@ -171,6 +178,9 @@ export const makeSqlitePreviewCache = (
 
     // Losing the last commits to a power failure loses only fetches.
     yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
+    // SQLite's temporary files, such as a statement's journal, are kept in memory, so the
+    // cache asks for no directory but its own.
+    yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
     yield* sql
       .withTransaction(
         inspect(sql).pipe(
