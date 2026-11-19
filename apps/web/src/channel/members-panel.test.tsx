@@ -96,6 +96,7 @@ const signedIn = async (
   ]);
   fake.daemon.channels.set(iirc, {
     header: {
+      accountBan: null,
       chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
       chantypes: "#&",
       held: held === null ? null : { _tag: "Known", at: 1, from: "ircd", value: [...held] },

@@ -2531,6 +2531,130 @@ describe("a Channel's head and members", () => {
     expect(result.looked).toStrictEqual(result.answered);
   });
 
+  it("says how a ban names an account where the Network offers it, and null where it does not", async () => {
+    const heads = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(
+          world,
+          api,
+          ["iirc"],
+          "CASEMAPPING=rfc1459 PREFIX=(qov)~@+ EXTBAN=~,a ACCOUNTEXTBAN=account,a"
+        );
+
+        return yield* api.timelines.channel({ params: { timeline } });
+      })
+    );
+
+    const plain = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(world, api, ["iirc"]);
+
+        return yield* api.timelines.channel({ params: { timeline } });
+      })
+    );
+
+    const malformed = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(
+          world,
+          api,
+          ["iirc"],
+          "CASEMAPPING=rfc1459 PREFIX=(qov)~@+ EXTBAN=~,a ACCOUNTEXTBAN=account,"
+        );
+
+        return yield* api.timelines.channel({ params: { timeline } });
+      })
+    );
+
+    expect(heads.accountBan).toStrictEqual({ names: ["account", "a"], prefix: "~" });
+    expect(plain.accountBan).toBeNull();
+    expect(malformed.accountBan).toBeNull();
+  });
+
+  it("bans a User by the account the Client knows, and says why it cannot when it does not know one", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call } = yield* inChannel(
+          world,
+          api,
+          ["@iirc", "peer"],
+          "CASEMAPPING=rfc1459 PREFIX=(qov)~@+ EXTBAN=~,a ACCOUNTEXTBAN=account,a"
+        );
+
+        // The Client's own `MODE` query is answered, so an error that follows is the ban's.
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
+
+        const act = (nick: string, intent: string) =>
+          api.networks.act({
+            params: { network: libera },
+            payload: {
+              action: { _tag: "BanAccount", channel: "#iirc", nick },
+              intent: CallerIntent.make(intent),
+            },
+          });
+
+        // Nothing has said which account `peer` holds, so there is none to ban.
+        const unknown = yield* act("peer", "unknown");
+
+        const looking = yield* Effect.forkChild(
+          api.networks.look({
+            params: { network: libera },
+            payload: { lookup: { _tag: "Whois", nick: "peer" } },
+            query: {},
+          })
+        );
+
+        // Registration and the join spent the burst, so the WHOIS waits its turn.
+        yield* settle;
+        yield* TestClock.adjust(2000);
+        const asked = yield* heard(call);
+
+        yield* say(call, ":irc.test 311 iirc peer ~u peer.test * :Peer");
+        yield* say(call, ":irc.test 330 iirc peer bob :is logged in as");
+        yield* say(call, ":irc.test 318 iirc peer :End of WHOIS list");
+        yield* Fiber.join(looking);
+
+        const banned = yield* act("peer", "ban");
+
+        yield* TestClock.adjust(2000);
+        const sent = yield* heard(call);
+
+        yield* say(call, ":irc.test 482 iirc #iirc :You're not channel operator");
+        yield* settle;
+
+        const stream = yield* api.news.follow({ headers: {}, query: {} });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) =>
+              event.event === "happened" &&
+              event.data.news.some((one) => one._tag === "Refused" && one.intent === "ban")
+          ),
+          Stream.runCollect
+        );
+
+        const refused = happenings(events).flatMap((event) =>
+          event.data.news.flatMap((one) =>
+            one._tag === "Refused" ? [[one.intent, one.reason, one.action?.attempted]] : []
+          )
+        );
+
+        return { asked, banned: banned._tag, refused, sent, unknown };
+      })
+    );
+
+    expect(result).toMatchObject({
+      asked: "WHOIS peer",
+      banned: "Acted",
+      refused: [
+        ["unknown", { _tag: "AccountUnknown" }, { _tag: "Mode", modes: "+b", target: "#iirc" }],
+        ["ban", { _tag: "Rejected", reply: "482" }, { _tag: "Mode", modes: "+b", target: "#iirc" }],
+      ],
+      sent: "MODE #iirc +b ~account:bob",
+      unknown: { _tag: "Refused", reason: { _tag: "AccountUnknown" } },
+    });
+  });
+
   it("asks a Channel's modes on joining, and tells a follower of the changes to read its head again", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

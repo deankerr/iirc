@@ -223,8 +223,14 @@ const closeRefusalIn = (news: readonly News[]): CloseRefusal | undefined => {
   return { _tag: "NoTimeline" };
 };
 
-/** Why the Client refused a `Say` or an `Act` in the step that took it: no Session, or no Line can carry it. */
-export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
+/**
+ * Why the Client refused a `Say` or an `Act` in the step that took it: no Session, no Line
+ * can carry it, or for a ban by account, the User's account is not known or is none.
+ */
+export type StepRefusal = Exclude<RefusedReason, { readonly _tag: "Rejected" | "Unsent" }>;
+
+/** Why the Client refused a `Say` in the step that took it: no Session, or no Line can carry it. */
+export type SayRefusal = Extract<StepRefusal, { readonly _tag: "Offline" | "Unsendable" }>;
 
 /**
  * What a `say` answers: the `Say` stepped and its Message reported, or refused by the
@@ -237,11 +243,14 @@ export type SayOutcome =
       readonly _tag: "Refused";
       readonly intent: IntentId;
       readonly sequence: Sequence;
-      readonly reason: StepRefusal;
+      readonly reason: SayRefusal;
     };
 
+const isSayRefusal = (reason: StepRefusal): reason is SayRefusal =>
+  reason._tag === "Offline" || reason._tag === "Unsendable";
+
 /**
- * The refusal of a `Say` in its own step's News, if any.
+ * The refusal of a `Say` or an `Act` in its own step's News, if any.
  * @param news - The step's News.
  * @param intent - The `Say`'s intent.
  * @returns Its refusal, or none.
@@ -251,7 +260,8 @@ const refusalIn = (news: readonly News[], intent: IntentId): StepRefusal | undef
     if (
       one._tag === "Refused" &&
       one.intent === intent &&
-      (one.reason._tag === "Offline" || one.reason._tag === "Unsendable")
+      one.reason._tag !== "Rejected" &&
+      one.reason._tag !== "Unsent"
     ) {
       return one.reason;
     }
@@ -1062,7 +1072,9 @@ export const makeRuntime = <S>(
             return answers === undefined ? say : { ...say, answers };
           });
 
-          const reason = refusalIn(news, intent);
+          const refused = refusalIn(news, intent);
+          // The Client refuses a `Say` only as `Offline` or `Unsendable`.
+          const reason = refused !== undefined && isSayRefusal(refused) ? refused : undefined;
 
           return reason === undefined
             ? ({ _tag: "Said", intent, sequence } as const)

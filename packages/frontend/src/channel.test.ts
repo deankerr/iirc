@@ -243,6 +243,7 @@ const header = (
   topic?: (typeof ChannelHeader.Encoded)["topic"]
 ) =>
   decodeHeader({
+    accountBan: null,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held: null,

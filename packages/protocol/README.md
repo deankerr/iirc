@@ -12,7 +12,7 @@ Each subpath is its own module, and there is no root export.
 | `@iirc/protocol/ctcp` | CTCP read out of a Message's text, and CTCP text and Lines to send |
 | `@iirc/protocol/format` | mIRC formatting codes as spans of text and style, written from spans, or stripped |
 | `@iirc/protocol/links` | The links a Message holds, in order, and the first three that may be previewed |
-| `@iirc/protocol/mask` | A `nick!user@host` mask with wildcards, and whether it matches a User |
+| `@iirc/protocol/mask` | A `nick!user@host` mask with wildcards, whether it matches a User, and the mask that bans an account |
 
 ## Features, from the floor up
 
@@ -26,7 +26,7 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, `ctcpRequest`, and `ctcpReply` build CTCP that is safe to send, and a request or a reply only ever to a User.
 7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, `formatSpans` writes spans back as codes, and `stripFormatting` removes exactly the codes `parseFormatting` reads. Spans are data for a Frontend to draw, never markup.
 8. **Links.** `linksOf` finds the links in a Message's text, and `previewableLinksOf` the first three distinct `http` or `https` ones, so the Daemon and every Frontend agree on which they are.
-9. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
+9. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, `targetLimitsOf`, and `accountExtbanOf` read the values whose shape the protocol fixes, each with its default when the token is not sent, where it has one.
 10. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
 11. **Masks.** `IgnoreMask` is a `nick!user@host` mask that can always be matched, and `matches` says whether it matches a User under a casemapping, so the Client and every Frontend agree on who a mask names.
 12. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
@@ -101,11 +101,14 @@ modesOf(value?): number | undefined                    // 3 when not sent, undef
 limitOf(value?): number | undefined                    // NICKLEN, TOPICLEN, and the other lengths
 limitsOf(value?): readonly Limit[]                     // CHANLIMIT and MAXLIST pairs
 targetLimitsOf(value?): ReadonlyMap<string, number | undefined>   // TARGMAX
+accountExtbanOf(extban?, accountExtban?): AccountExtban | undefined   // { prefix, names }, from EXTBAN and ACCOUNTEXTBAN
 ```
 
 `prefixOf` reads `PREFIX` as its membership prefixes, most privileged first, and gives `undefined` for a value that is malformed: one not of the form `(modes)symbols`, one whose modes and symbols do not pair one to one, or one that repeats a mode or a symbol, such as `(oov)@%+`, since each names one rank and a repeat leaves the order unclear. A caller then uses `defaultPrefix`, `(ov)@+`, as the Client does, so a symbol only the malformed value named reads as a prefix that cannot be named.
 
 `exceptsOf` and `invexOf` read whether the Network keeps ban exceptions and invitation masks, and the mode each is. A value that is not one mode letter reads as not offered. Whether that mode is a list in `CHANMODES` is the caller's to check.
+
+`accountExtbanOf` reads `EXTBAN` and `ACCOUNTEXTBAN` together, to the letter, because a ban built from a guess could ban everyone. `EXTBAN` is `[<prefix>],<types>` with exactly one comma, a prefix of none or one printable ASCII character that is not a letter, a digit, `,`, `:`, `*`, `?`, `!`, which some Ircds read as inverting a ban, or a space, and letters for the types. `ACCOUNTEXTBAN` is a comma-separated list of names, each a letter or digit then letters, digits, `_`, or `-`. A token missing, or with anything else, such as an empty name in the list, means `undefined`, and no ban by account is offered. A name of one character is kept only where `EXTBAN`'s types list it, and a longer name as given, and with none left nothing is offered. `names` keep the Ircd's order, and the first builds a mask.
 
 `isupportTokens` takes all of a `005`'s parameters. The first is Self and the last is text for people, so neither is read. Which tokens a Session holds is the caller's to keep, and to bound.
 
@@ -162,9 +165,13 @@ A link starts at `http://`, `https://`, `irc://`, or `ircs://`, in any case, and
 IgnoreMask: Schema<IgnoreMask>   // a branded string, checked on decoding
 canonicalMask(casemapping: Casemapping, mask: IgnoreMask): IgnoreMask
 matches(casemapping: Casemapping, mask: IgnoreMask, who: { nick, user?, host? }): boolean
+accountBanMask(extban: AccountExtban, account: string): string | undefined
+bannedAccount(extban: AccountExtban, mask: string): string | undefined
 ```
 
 A mask is a non-empty nick, user, and host, joined by exactly one `!` and then exactly one `@`, of at most 255 characters, with no space, comma, or control character. `*` stands for any run of characters, none included, and `?` for any one character, and either may cross the `!` and the `@`. `matches` folds the mask and `nick!user@host` by the casemapping and compares them whole, with a missing user or host as empty. It uses no regular expression and never takes more than the mask's length times the text's. `canonicalMask` is the form two spellings of one mask share.
+
+`accountBanMask` writes `<prefix><first name>:<account>`, and refuses an account that is empty, starts with `:`, or holds a space, comma, `*`, `?`, or control character, as given or once its compatibility forms are folded (NFKC), as an Ircd may fold a fullwidth `＊` to `*`, so a hostile Network cannot make a ban match everyone or a `MODE` that does not parse. `bannedAccount` reads an entry of a ban list back: the prefix, any one of the names exactly, a colon, and a non-empty account, and nothing else is a ban by account.
 
 ## Invariants
 

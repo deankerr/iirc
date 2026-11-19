@@ -162,6 +162,13 @@ export interface ChannelView {
    * `EXCEPTS`, and `INVEX`, or `undefined` for one it does not.
    */
   readonly lists: Readonly<Record<MaskList, string | undefined>>;
+  /**
+   * How a ban names an account, from `EXTBAN` and `ACCOUNTEXTBAN`, or `undefined` when the
+   * Network offers none.
+   */
+  readonly accountExtban:
+    | { readonly prefix: string; readonly names: readonly [string, ...string[]] }
+    | undefined;
   /** The prefix modes Self holds in it, or `undefined` while Self is no member. */
   readonly held: Fact<ReadonlySet<string>> | undefined;
   readonly channel: ChannelKnowledge;

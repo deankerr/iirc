@@ -166,6 +166,7 @@ const inChannel = async (
 
   fake.daemon.channels.set(iirc, {
     header: {
+      accountBan: null,
       chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
       chantypes: "#&",
       held: null,

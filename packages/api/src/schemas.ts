@@ -167,6 +167,12 @@ export const ActionRequest = Schema.TaggedUnion({
   /** Away with a message, or back with `null` or `""`. It outlives Sessions. */
   Away: { message: Schema.NullOr(SayText) },
   /**
+   * Ban a nick from a Channel by the account the Client knows it is logged in to, where the
+   * Network offers a ban by account, as the Channel's header says. It is refused as
+   * `AccountUnknown` or `NoAccount` when the Client knows no account to ban.
+   */
+  BanAccount: { channel: OwnerName, nick: OwnerName },
+  /**
    * Send a CTCP request to a nick, never a Channel, as `VERSION` or `FINGER`: its command,
    * upper-cased as it goes, and its arguments, which may be empty. Never `ACTION`, which is
    * a Say, or `DCC`.
@@ -329,12 +335,25 @@ export const ConfigurationInForce = Schema.Struct({
 
 /**
  * Why the Client refused a `say` or an `act` in the step that took it: `Offline`, with no
- * Session, or `Unsendable`, when no Line can carry it.
+ * Session, or `Unsendable`, when no Line can carry it. A ban by account is also refused as
+ * `AccountUnknown`, when the Client does not know the User's account, or `NoAccount`, when
+ * the User is known to be logged in to none.
  */
-export const StepRefusal = Schema.TaggedUnion({ Offline: {}, Unsendable: {} });
+export const StepRefusal = Schema.TaggedUnion({
+  AccountUnknown: {},
+  NoAccount: {},
+  Offline: {},
+  Unsendable: {},
+});
 
 /** The decoded form of {@link StepRefusal}. */
 export type StepRefusal = typeof StepRefusal.Type;
+
+/** Why the Client refused a `say` in the step that took it: `Offline` or `Unsendable`. */
+export const SayRefusal = Schema.TaggedUnion({ Offline: {}, Unsendable: {} });
+
+/** The decoded form of {@link SayRefusal}. */
+export type SayRefusal = typeof SayRefusal.Type;
 
 /**
  * What a `say` answers, once it is journaled and stepped under its intent: `Said`, its
@@ -343,7 +362,7 @@ export type StepRefusal = typeof StepRefusal.Type;
  */
 export const Said = Schema.Union([
   Schema.TaggedStruct("Said", { intent: IntentId, sequence: Sequence }),
-  Schema.TaggedStruct("Refused", { intent: IntentId, reason: StepRefusal, sequence: Sequence }),
+  Schema.TaggedStruct("Refused", { intent: IntentId, reason: SayRefusal, sequence: Sequence }),
 ]);
 
 /** The decoded form of {@link Said}. */
@@ -562,6 +581,10 @@ export type EndReason = typeof EndReason.Type;
 
 /** Why the Client did not carry out something the Owner asked for. */
 export const RefusedReason = Schema.TaggedUnion({
+  /** A ban by account, where the Client does not know the User's account. */
+  AccountUnknown: {},
+  /** A ban by account, where the User is known to be logged in to no account. */
+  NoAccount: {},
   Offline: {},
   Rejected: { reply: Untrusted },
   Unsendable: {},
@@ -1792,6 +1815,14 @@ export type Rank = typeof Rank.Type;
  * and modes are `Unknown`.
  */
 export const ChannelHeader = Schema.Struct({
+  /**
+   * How a ban names an account, from `EXTBAN` and `ACCOUNTEXTBAN`: what starts the mask, and
+   * the names of the type that matches an account, in the Network's order. `null` when the
+   * Network offers none or the Client holds no such Channel.
+   */
+  accountBan: Schema.NullOr(
+    Schema.Struct({ names: Schema.NonEmptyArray(Untrusted), prefix: Untrusted })
+  ),
   /**
    * How the Network's Channel modes other than membership take a parameter, from
    * `CHANMODES`: a `list` mode and an `always` mode whenever changed, a `whenSet` mode only

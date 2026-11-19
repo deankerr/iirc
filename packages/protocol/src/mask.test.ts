@@ -1,7 +1,8 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { canonicalMask, IgnoreMask, matches } from "./mask.ts";
+import type { AccountExtban } from "./isupport.ts";
+import { accountBanMask, bannedAccount, canonicalMask, IgnoreMask, matches } from "./mask.ts";
 
 const parse = Schema.decodeUnknownResult(IgnoreMask);
 const mask = (text: string) => IgnoreMask.make(text);
@@ -123,5 +124,67 @@ describe(matches, () => {
     expect(
       matches("rfc1459", pattern, { host: "h", nick: "a".repeat(400), user: "u" })
     ).toBeFalsy();
+  });
+});
+
+describe("a ban by account", () => {
+  const long: AccountExtban = { names: ["account", "a"], prefix: "~" };
+  const short: AccountExtban = { names: ["R"], prefix: "$" };
+  const bare: AccountExtban = { names: ["a"], prefix: "" };
+
+  it.each([
+    [long, "bob", "~account:bob"],
+    [short, "bob", "$R:bob"],
+    [bare, "bob", "a:bob"],
+    [long, "a:b", "~account:a:b"],
+    [long, "bob\u00E9", "~account:bob\u00E9"],
+  ])("builds the mask of %o for %s", (extban, account, expected) => {
+    expect(accountBanMask(extban, account)).toBe(expected);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["starting with a colon", ":bob"],
+    ["a space", "bo b"],
+    ["a comma", "a,b"],
+    ["a star, which would ban everyone", "*"],
+    ["a star inside", "b*b"],
+    ["a question mark", "b?b"],
+    ["CR", "bob\r"],
+    ["LF", "bob\nMODE #c +o me"],
+    ["NUL", "bo\0b"],
+    ["a C0 control", "bo\u0007b"],
+    ["DEL", "bo\u007Fb"],
+    ["a fullwidth star, which an Ircd may normalize to `*`", "\uFF0A"],
+    ["a fullwidth comma", "a\uFF0Cb"],
+    ["an ideographic space", "a\u3000b"],
+    ["starting with a fullwidth colon", "\uFF1Abob"],
+  ])("refuses an account that is %s", (_why, account) => {
+    expect(accountBanMask(long, account)).toBeUndefined();
+  });
+
+  it("reads the account back from a mask it built, whichever name was used", () => {
+    for (const extban of [long, short, bare]) {
+      expect(bannedAccount(extban, accountBanMask(extban, "bob") ?? "")).toBe("bob");
+    }
+
+    expect(bannedAccount(long, "~a:bob")).toBe("bob");
+  });
+
+  it.each([
+    ["an ordinary mask", "bob!*@*"],
+    ["a different prefix", "$account:bob"],
+    ["a prefix with a name the Ircd did not give", "~other:bob"],
+    ["no account", "~account:"],
+    ["no colon", "~account"],
+    ["a name that only starts like one", "~accounts:bob"],
+    ["no prefix, where one is needed", "account:bob"],
+    ["empty", ""],
+  ])("reads no account from %s", (_why, mask) => {
+    expect(bannedAccount(long, mask)).toBeUndefined();
+  });
+
+  it("keeps a colon inside the account", () => {
+    expect(bannedAccount(long, "~account:a:b")).toBe("a:b");
   });
 });

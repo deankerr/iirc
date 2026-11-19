@@ -231,11 +231,14 @@ export type EndReason =
  * sending, when the Ircd's reply is tied to the intent, as `labeled-response` ties it:
  * `reply` is the numeric, or a standard reply's code, never the reply's text. `Unsent`
  * comes after the Message was reported: at least part of it never left, because its
- * Connection ended first.
+ * Connection ended first. `AccountUnknown` and `NoAccount` refuse a ban by account: the Client
+ * does not know the User's account, or knows they are logged in to none.
  */
 export type RefusedReason =
   | { readonly _tag: "Offline" }
   | { readonly _tag: "Unsendable" }
+  | { readonly _tag: "AccountUnknown" }
+  | { readonly _tag: "NoAccount" }
   | { readonly _tag: "Unsent" }
   | { readonly _tag: "Rejected"; readonly reply: string };
 
@@ -248,6 +251,7 @@ export type RefusedReason =
  * - `Topic`: a Channel's topic.
  * - `Kick`: nicks from a Channel.
  * - `Mode`: a Channel's or Self's modes, as each change's sign and letter, such as `+o-v`.
+ *   A ban by account is one too, as `+b` on its Channel.
  * - `Invite`: a nick to a Channel.
  * - `Nick`: Self's nick.
  * - `Away`: away, or back with `away` false.
