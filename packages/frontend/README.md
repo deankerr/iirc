@@ -227,6 +227,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `ChoiceByKey`      | `key=choice`, comma-separated, a choice by its first word too |
 
 - **The syntax reads back what it shows,** for every value the Schema admits.
+- **An option whose kind lists its choices is chosen from a menu** (`menuOf`): a `Choice`, a `Tagged` by its tags, and a `ChoiceOrText` or `IntegerOrChoice`, whose menu ends in "Custom…" for text of the Owner's own. It marks the choice in force, or "Custom…" for a value that is none of them. A `ChoiceByKey` is a list, which no one menu holds.
 - **An edit is a pure function of the Configuration** (`apply`), parsed again by the Schema, so the runtime applies the same edit again after a conflict.
 - **A change asked for shows at once, until it is answered.** `Asked` holds it, never a copy of the options, and `Answered` lets it go, however it came out. `uiShown`, `ownerShown`, and `configurationShown` derive what shows from what is in force and what is on its way, and `listed` lists that. Nothing is applied before what is in force is read.
 - **What is still being read is a value of its own, never a default.** An option under `store`, `uploads`, or `previews` is `Reading` until they are read, a Credential's `held` is unknown until the names held are, and `NotKnown` whenever a read of them fails, never the names last read, and `networksReading` names the Networks not listed or not yet read, so a view draws each as a wait.

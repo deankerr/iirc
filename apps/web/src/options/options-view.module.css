@@ -218,3 +218,65 @@
     min-height: var(--target-size);
   }
 }
+
+/* What an option's menu is placed under: its value's box. */
+.anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* An option's menu, under its value, as dense as the view. Its width is its own, never the
+   value's, which on a phone would widen the page it is placed in. */
+.popover {
+  min-width: 16ch;
+  max-width: calc(100vw - 2 * var(--space-4));
+  max-height: 60vh;
+  overflow-y: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-4) var(--color-shadow);
+  outline: none;
+}
+
+.menu {
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+/* Each choice, the one in force marked by a dot before it. */
+.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.entry::before {
+  content: "";
+  width: 1ch;
+  text-align: center;
+}
+
+.entry[data-selected]::before {
+  /* The mark is drawn, never read: the entry is checked already. */
+  content: "•" / "";
+  color: var(--color-accent);
+}
+
+.entry[data-hovered],
+.entry[data-focused] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  color: var(--color-accent);
+}
+
+@media (pointer: coarse) {
+  .entry {
+    min-height: var(--target-size);
+  }
+}

@@ -1095,6 +1095,77 @@ export const showText = (kind: Kind, value: Json): string => {
   }
 };
 
+/**
+ * The menu an option is chosen from: its choices in their text syntax, whether it ends in
+ * "Custom…" for text of the Owner's own, and which entry is in force: a choice by its
+ * place, `Custom` for a value that is none of them, or none while the value is not known
+ * or unset.
+ */
+export interface Menu {
+  readonly choices: readonly string[];
+  readonly custom: boolean;
+  readonly chosen: number | "Custom" | undefined;
+}
+
+/**
+ * The menu an option of a kind is chosen from, if its kind lists its choices: a choice, a
+ * choice or text, a number or a choice, or a member by its tag. A choice for each key is
+ * a list, which no one menu holds.
+ * @param kind - The option's kind.
+ * @param value - Its value, as the view shows it.
+ * @returns The menu, or none.
+ */
+export const menuOf = (kind: Kind, value: Value): Menu | undefined => {
+  const listed = (choices: readonly string[], custom: boolean): Menu => {
+    if (value._tag !== "Shown") {
+      return { choices, chosen: undefined, custom };
+    }
+
+    const wanted = lower(value.text.trim());
+    const index = choices.findIndex((one) => lower(one) === wanted);
+
+    if (index !== -1) {
+      return { choices, chosen: index, custom };
+    }
+
+    return { choices, chosen: custom ? "Custom" : undefined, custom };
+  };
+
+  switch (kind._tag) {
+    case "Choice": {
+      return listed(kind.choices, false);
+    }
+
+    case "ChoiceOrText":
+    case "IntegerOrChoice": {
+      return listed(kind.choices, true);
+    }
+
+    case "Tagged": {
+      return listed(
+        kind.members.map((one) => lower(one.tag)),
+        false
+      );
+    }
+
+    case "Toggle":
+    case "Text":
+    case "Integer":
+    case "Decimal":
+    case "Credential":
+    case "Texts":
+    case "Ircds":
+    case "Names":
+    case "ChoiceByKey": {
+      return undefined;
+    }
+
+    default: {
+      return kind satisfies never;
+    }
+  }
+};
+
 // Names.
 
 /** What a name that names no option is told, of how options are named. */

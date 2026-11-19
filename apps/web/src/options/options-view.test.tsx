@@ -1028,3 +1028,219 @@ describe("an option edited in place", () => {
     ]);
   });
 });
+
+/**
+ * A page showing the options, once it has read those under `ui`.
+ * @param fake - The fake Daemon.
+ * @returns The page.
+ */
+const uiShown = async (fake: ReturnType<typeof fakeDaemon>) => {
+  const shown = await page(fake);
+
+  shown.registry.mount(uiSync);
+  await shown.type("/set ui.");
+  await settled(() => rowOf(shown.container, "ui.time")?.[1] === "HH:mm");
+
+  return shown;
+};
+
+/**
+ * An option's row.
+ * @param container - The page.
+ * @param name - The option.
+ * @returns The row.
+ */
+const rowElement = (container: HTMLElement, name: string) => {
+  const row = container.querySelector<HTMLElement>(`[data-key="${name}"]`);
+
+  if (row === null) {
+    throw new Error(`no row for ${name}`);
+  }
+
+  return row;
+};
+
+/**
+ * Presses Enter on an element, as a keyboard does: down, then up.
+ * @param element - The element.
+ */
+const enter = async (element: Element) => {
+  await press(element, "Enter");
+  await doing(() => {
+    element.dispatchEvent(
+      new KeyboardEvent("keyup", { bubbles: true, code: "Enter", key: "Enter" })
+    );
+  });
+};
+
+/**
+ * Opens an option's menu by Enter on its focused row.
+ * @param container - The page.
+ * @param name - The option.
+ * @returns The menu.
+ */
+const menuFor = async (container: HTMLElement, name: string) => {
+  const row = rowElement(container, name);
+
+  await doing(() => {
+    row.focus();
+  });
+  await enter(row);
+
+  const selector = `[role="menu"][aria-label="Value of ${name}"]`;
+
+  await settled(() => document.querySelector(selector) !== null);
+
+  const menu = document.querySelector<HTMLElement>(selector);
+  // The entry the menu focuses as it opens, which happy-dom does not move the focus to
+  // itself, so it is focused here, as a browser does.
+  const first = menu?.querySelector<HTMLElement>('[tabindex="0"]');
+
+  await doing(() => {
+    first?.focus();
+  });
+
+  return document.querySelector<HTMLElement>(selector);
+};
+
+/**
+ * A menu's entries, as their text, with the one in force marked.
+ * @param menu - The menu.
+ * @returns The entries.
+ */
+const entriesOf = (menu: HTMLElement | null) =>
+  [...(menu?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].map(
+    (entry) => `${entry.getAttribute("aria-checked") === "true" ? "* " : ""}${entry.textContent}`
+  );
+
+describe("an option chosen from a menu", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("opens on Enter with the value in force marked and focused, and Enter on another sets what /set sets", async () => {
+    const chosen = signedIn();
+    const { container } = await uiShown(chosen);
+    const menu = await menuFor(container, "ui.time");
+    const entries = entriesOf(menu);
+    const focusedFirst = document.activeElement?.textContent;
+
+    await press(document.activeElement ?? document.body, "ArrowDown");
+    const focusedNext = document.activeElement?.textContent;
+
+    await enter(document.activeElement ?? document.body);
+    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm:ss");
+    await settled(() => document.activeElement === rowElement(container, "ui.time"));
+
+    const typed = signedIn();
+    const other = await uiShown(typed);
+
+    await other.type("/set ui.time HH:mm:ss");
+    await settled(() => typed.daemon.uiChanges.length === 1);
+
+    expect({
+      changes: chosen.daemon.uiChanges,
+      entries,
+      focusedFirst,
+      focusedNext,
+      open: document.querySelector('[role="menu"]') !== null,
+      ui: chosen.daemon.ui,
+    }).toStrictEqual({
+      changes: typed.daemon.uiChanges,
+      entries: ["* HH:mm", "HH:mm:ss", "h:mm a", "h:mm:ss a", "none"],
+      focusedFirst: "HH:mm",
+      focusedNext: "HH:mm:ss",
+      open: false,
+      ui: typed.daemon.ui,
+    });
+  });
+
+  it("lets go on Escape, changing nothing, and gives its row the focus with the view still open", async () => {
+    const fake = signedIn();
+    const { container } = await uiShown(fake);
+
+    await menuFor(container, "ui.time");
+    await press(document.activeElement ?? document.body, "Escape");
+    await settled(() => document.querySelector('[role="menu"]') === null);
+    await settled(() => document.activeElement === rowElement(container, "ui.time"));
+
+    // Escape once more, on the row, is the view's own: it closes.
+    const before = container.querySelector('section[aria-label="Options"]') !== null;
+
+    await press(rowElement(container, "ui.time"), "Escape");
+
+    expect({
+      after: container.querySelector('section[aria-label="Options"]') !== null,
+      before,
+      changes: fake.daemon.uiChanges,
+    }).toStrictEqual({ after: false, before: true, changes: [] });
+  });
+
+  it("ends in Custom… where it also takes text, which opens the field with the value in force", async () => {
+    const fake = signedIn();
+    const { container } = await uiShown(fake);
+    const menu = await menuFor(container, "ui.font");
+    const entries = entriesOf(menu);
+
+    const custom = [...(menu?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].at(
+      -1
+    );
+
+    if (custom === undefined) {
+      throw new Error("no Custom…");
+    }
+
+    await doing(() => {
+      custom.focus();
+    });
+    await enter(custom);
+    await settled(() => container.querySelector('input[aria-label="Value of ui.font"]') !== null);
+
+    const field = container.querySelector<HTMLInputElement>('input[aria-label="Value of ui.font"]');
+
+    if (field === null) {
+      throw new Error("no field");
+    }
+
+    const starting = field.value;
+
+    await typeInto(field, "Comic Sans");
+    await press(field, "Enter");
+    await settled(() => rowOf(container, "ui.font")?.[1]?.startsWith("Comic Sans") === true);
+
+    expect({
+      entries,
+      menu: document.querySelector('[role="menu"]') !== null,
+      starting,
+    }).toStrictEqual({
+      entries: [
+        "* system",
+        "jetbrains-mono",
+        "ibm-plex-mono",
+        "source-code-pro",
+        "commit-mono",
+        "atkinson-hyperlegible-mono",
+        "system-sans",
+        "ibm-plex-sans",
+        "atkinson-hyperlegible-next",
+        "source-sans-3",
+        "inter",
+        "Custom…",
+      ],
+      menu: false,
+      starting: "system",
+    });
+  });
+
+  it("opens a value that is none of the choices as Custom…", async () => {
+    const fake = signedIn();
+    const { container, type } = await uiShown(fake);
+
+    await type("/set ui.width 120");
+    await settled(() => rowOf(container, "ui.width")?.[1] === "120");
+
+    expect(entriesOf(await menuFor(container, "ui.width"))).toStrictEqual(["none", "* Custom…"]);
+  });
+});

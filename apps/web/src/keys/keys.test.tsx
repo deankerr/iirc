@@ -572,6 +572,20 @@ describe("the keys", () => {
       registry.set(editing, name);
       await Promise.resolve();
     });
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    // A family of the device's own is text, which "Custom…", last in the menu, opens.
+    const custom = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].at(-1);
+
+    if (custom === undefined) {
+      throw new Error("no Custom…");
+    }
+
+    await act(async () => {
+      custom.focus();
+      await Promise.resolve();
+    });
+    await press(custom, { key: "Enter" });
     await settled(() => container.querySelector(selector) !== null);
 
     const editor = container.querySelector<HTMLInputElement>(selector);
