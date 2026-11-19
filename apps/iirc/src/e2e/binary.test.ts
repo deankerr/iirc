@@ -391,6 +391,43 @@ describe("the compiled iirc", () => {
   );
 
   it(
+    "says a running Daemon is well, to the route without a key and by iirc health's exit",
+    { timeout: 60_000 },
+    async () => {
+      const dataDir = path.join(directory, "health-data");
+      await run([iirc], "key", "create", "owner", "--data-dir", dataDir);
+      const { base, child } = await startDaemon([iirc], dataDir);
+      const { port } = new URL(base);
+
+      try {
+        const route = await fetch(`${base}/api/health`);
+        const others = await fetch(`${base}/api/networks`);
+        const well = await run([iirc], "health", "--listen", `127.0.0.1:${port}`);
+
+        child.kill("SIGTERM");
+        await child.exited;
+
+        const gone = await run([iirc], "health", "--listen", `127.0.0.1:${port}`);
+
+        expect({
+          gone,
+          others: others.status,
+          route: [route.status, await route.text()],
+          well,
+        }).toStrictEqual({
+          gone: { code: 1, stderr: `Nothing answered at 127.0.0.1:${port}.\n`, stdout: "" },
+          others: 401,
+          route: [200, '{"_tag":"Well"}'],
+          well: { code: 0, stderr: "", stdout: "" },
+        });
+      } finally {
+        child.kill("SIGTERM");
+        await child.exited;
+      }
+    }
+  );
+
+  it(
     "stops while a Frontend follows a stream, ending the stream and logging no error",
     { timeout: 60_000 },
     async () => {

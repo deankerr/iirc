@@ -15,10 +15,11 @@ yield *
 
 ## Routes
 
-Every route is under `/api`. Every one but signing a browser in and out needs a key in `Authorization: Bearer`, or a sign-in in the `iirc_sign_in` cookie, below.
+Every route is under `/api`. Every one but signing a browser in and out, and asking whether the Daemon is well, needs a key in `Authorization: Bearer`, or a sign-in in the `iirc_sign_in` cookie, below.
 
 | Route | Does | Answers | Errors |
 | --- | --- | --- | --- |
+| `GET /api/health` | Whether the Daemon is well, with no key or sign-in, for a health check on its machine. It is unwell while the projector is stopped, and names that part, never why | `200` and `Well` | `Unwell { part }`, `503`, where `part` is `projector` |
 | `POST /api/sign-in` | Signs a browser in with `{ key }` | `204` and the cookie | `Unauthorized`, `CrossOrigin`, `SignInsFailed` |
 | `DELETE /api/sign-in` | Signs the cookie's sign-in out, and clears the cookie. Signing out one that does not exist only clears it | `204` | `CrossOrigin`, `SignInsFailed` |
 | `GET /api/networks` | Lists every Network the Daemon holds, read together, each with its life: `Live`, with whether it runs, or `Kept`, removed with its Timelines kept | `[Live { network, life, status } \| Kept { network, life }]` |  |

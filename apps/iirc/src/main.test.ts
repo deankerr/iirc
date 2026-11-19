@@ -100,14 +100,15 @@ const daemonWithWeb = async (web: string) =>
   await iirc("daemon", "--data-dir", dataDir(), "--listen", "127.0.0.1:0", `--web=${web}`);
 
 /**
- * Starts `iirc daemon` on an ephemeral port, and waits until it listens.
+ * Starts `iirc daemon` on an ephemeral port of a host, and waits until it listens.
+ * @param host - The host it listens on, such as `0.0.0.0`.
  * @param directory - Its data directory.
  * @param args - More arguments, such as `--web`.
- * @returns Where it listens, and the process.
+ * @returns Where it listens on loopback, its port, and the process.
  */
-const startDaemon = async (directory: string, ...args: readonly string[]) => {
+const startDaemonOn = async (host: string, directory: string, ...args: readonly string[]) => {
   const child = Bun.spawn(
-    ["bun", main, "daemon", "--data-dir", directory, "--listen", "127.0.0.1:0", ...args],
+    ["bun", main, "daemon", "--data-dir", directory, "--listen", `${host}:0`, ...args],
     {
       stderr: "pipe",
       stdout: "pipe",
@@ -127,15 +128,24 @@ const startDaemon = async (directory: string, ...args: readonly string[]) => {
     }
 
     logged += decoder.decode(chunk.value);
-    const port = /Listening on http:\/\/127\.0\.0\.1:(?<port>\d+)/u.exec(logged)?.groups?.port;
+    const port = /Listening on http:\/\/[^\s]+:(?<port>\d+)/u.exec(logged)?.groups?.port;
 
     if (port !== undefined) {
       reader.releaseLock();
 
-      return { base: `http://127.0.0.1:${port}`, child };
+      return { base: `http://127.0.0.1:${port}`, child, port };
     }
   }
 };
+
+/**
+ * Starts `iirc daemon` on an ephemeral port, and waits until it listens.
+ * @param directory - Its data directory.
+ * @param args - More arguments, such as `--web`.
+ * @returns Where it listens, its port, and the process.
+ */
+const startDaemon = async (directory: string, ...args: readonly string[]) =>
+  await startDaemonOn("127.0.0.1", directory, ...args);
 
 /**
  * The page's whole policy, with its `frame-src` as given.
@@ -166,6 +176,23 @@ const setPlayers = async (base: string, key: string, value: readonly string[]) =
     body: JSON.stringify({ value }),
     headers: { authorization: `Bearer ${key.trim()}`, "content-type": "application/json" },
     method: "PUT",
+  });
+
+/**
+ * Listens on loopback until stopped, answering each connection as told, or never.
+ * @param answer - What to do with a connection, if anything.
+ * @returns The listener.
+ */
+const listening = (answer?: (socket: Bun.Socket) => void) =>
+  Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      data: () => {
+        // Whatever is asked, it answers only as `answer` did when it opened.
+      },
+      open: (socket) => answer?.(socket),
+    },
   });
 
 describe("iirc", () => {
@@ -441,6 +468,70 @@ describe("iirc", () => {
         stderr:
           "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist.\n",
         stdout: "",
+      });
+    });
+  });
+
+  describe("health", () => {
+    it("exits 0 for a Daemon that answers well, on loopback and on a wildcard", async () => {
+      const onLoopback = await startDaemon(dataDir());
+      const onWildcard = await startDaemonOn("0.0.0.0", dataDir());
+      const loopback = await iirc("health", "--listen", `127.0.0.1:${onLoopback.port}`);
+      const wildcard = await iirc("health", "--listen", `0.0.0.0:${onWildcard.port}`);
+
+      onLoopback.child.kill("SIGTERM");
+      onWildcard.child.kill("SIGTERM");
+      await Promise.all([onLoopback.child.exited, onWildcard.child.exited]);
+
+      expect({ loopback, wildcard }).toStrictEqual({
+        loopback: { code: 0, stderr: "", stdout: "" },
+        wildcard: { code: 0, stderr: "", stdout: "" },
+      });
+    });
+
+    it("exits 1 with one line for a Daemon that answers unwell, naming the part", async () => {
+      const unwell = listening((socket) => {
+        const body = '{"_tag":"Unwell","part":"projector"}';
+
+        socket.end(
+          `HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: ${body.length}\r\nconnection: close\r\n\r\n${body}`
+        );
+      });
+
+      const result = await iirc("health", "--listen", `127.0.0.1:${unwell.port}`);
+
+      unwell.stop(true);
+
+      expect(result).toStrictEqual({
+        code: 1,
+        stderr: `The Daemon at 127.0.0.1:${unwell.port} is unwell: its projector has stopped until it restarts.\n`,
+        stdout: "",
+      });
+    });
+
+    it("exits 1 with one line when nothing answers, listening or not", async () => {
+      const closed = listening();
+
+      closed.stop(true);
+
+      // Accepts a connection, and never answers on it.
+      const silent = listening();
+      const refused = await iirc("health", "--listen", `127.0.0.1:${closed.port}`);
+      const unanswered = await iirc("health", "--listen", `127.0.0.1:${silent.port}`);
+
+      silent.stop(true);
+
+      expect({ refused, unanswered }).toStrictEqual({
+        refused: {
+          code: 1,
+          stderr: `Nothing answered at 127.0.0.1:${closed.port}.\n`,
+          stdout: "",
+        },
+        unanswered: {
+          code: 1,
+          stderr: `Nothing answered at 127.0.0.1:${silent.port} within 5s.\n`,
+          stdout: "",
+        },
       });
     });
   });

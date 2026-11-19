@@ -1,6 +1,7 @@
 /**
  * The contract every Frontend drives the Daemon through. Every route is under `/api`, and
- * every one but signing a browser in and out needs a key or a sign-in.
+ * every one but signing a browser in and out, and asking whether the Daemon is well,
+ * needs a key or a sign-in.
  *
  * @packageDocumentation
  */
@@ -49,6 +50,7 @@ import {
   StoreUnavailable,
   VaultFailed,
 } from "./errors.ts";
+import { Unwell, Well } from "./health.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
 import {
   MediaHash,
@@ -531,8 +533,17 @@ export class SignInGroup extends HttpApiGroup.make("signIn").add(
   })
 ) {}
 
+/**
+ * Whether the Daemon is well, for a health check or a service manager on its machine,
+ * with no key or sign-in, since it says nothing a Frontend reads but that a part stopped.
+ */
+export class HealthGroup extends HttpApiGroup.make("health").add(
+  HttpApiEndpoint.get("health", "/health", { error: Unwell, success: Well })
+) {}
+
 /** The Daemon's API. */
 export class DaemonApi extends HttpApi.make("iirc")
+  .add(HealthGroup)
   .add(SignInGroup)
   .add(NetworksGroup)
   .add(NewsGroup)

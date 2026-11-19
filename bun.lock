@@ -27,6 +27,7 @@
       },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
+        "@iirc/api": "workspace:*",
         "@iirc/daemon": "workspace:*",
         "effect": "catalog:",
       },

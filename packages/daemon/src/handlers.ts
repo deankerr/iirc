@@ -25,6 +25,7 @@ import {
   signInCookie,
   TimelinesFailed,
   TimelinesKept,
+  Unwell,
   UiChanged,
   Unauthorized,
   UnknownNetwork,
@@ -379,6 +380,26 @@ const signIn = HttpApiBuilder.group(
           );
         })
       );
+  })
+);
+
+// Unwell while the projector is stopped, naming it and never its reason, which can hold a
+// path and is a Frontend's to read with a key.
+const health = HttpApiBuilder.group(
+  DaemonApi,
+  "health",
+  Effect.fn(function* (handlers) {
+    const projector = yield* Projector;
+
+    return handlers.handle("health", () =>
+      projector.status.pipe(
+        Effect.flatMap((status) =>
+          status._tag === "Running"
+            ? Effect.succeed({ _tag: "Well" as const })
+            : Effect.fail(new Unwell({ part: "projector" }))
+        )
+      )
+    );
   })
 );
 
@@ -1551,6 +1572,7 @@ const contentUnavailable = HttpRouter.middleware(
  * beyond `ui`, the count of Frontends open, the keys, and the sign-ins.
  */
 export const ApiHandlers = Layer.mergeAll(
+  health,
   signIn,
   networks,
   news,

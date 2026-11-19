@@ -84,8 +84,11 @@ const parameters = (path: string, method: "get" | "post") =>
     .filter((one) => one.in === "query")
     .map((one) => [one.name, one.required]);
 
+// The routes that need no key or sign-in: signing in and out, and whether the Daemon is well.
+const open = (route: string) => route.endsWith(" /api/sign-in") || route === "GET /api/health";
+
 describe("the contract", () => {
-  it("puts every route under /api, and every one but signing in and out behind a key or a sign-in", () => {
+  it("puts every route under /api, and every one but signing in and out, and health, behind a key or a sign-in", () => {
     const routes = Object.entries(document.paths).flatMap(([path, operations]) =>
       (["get", "put", "post", "patch", "delete"] as const).flatMap((method) => {
         const operation = operations[method];
@@ -96,7 +99,7 @@ describe("the contract", () => {
       })
     );
 
-    const guarded = routes.filter(({ route }) => !route.endsWith(" /api/sign-in"));
+    const guarded = routes.filter(({ route }) => !open(route));
 
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
@@ -106,6 +109,7 @@ describe("the contract", () => {
       "DELETE /api/ui/{option}",
       "DELETE /api/uploads/{id}",
       "GET /api/credentials",
+      "GET /api/health",
       "GET /api/networks",
       "GET /api/networks/{network}/at/{sequence}",
       "GET /api/networks/{network}/configuration",
@@ -153,9 +157,9 @@ describe("the contract", () => {
     expect(new Set(guarded.map(({ security }) => JSON.stringify(security)))).toStrictEqual(
       new Set(['[{"bearer":[]},{"signIn":[]}]'])
     );
-    expect(
-      routes.filter(({ route }) => route.endsWith(" /api/sign-in")).map(({ security }) => security)
-    ).toStrictEqual([[], []]);
+    expect(routes.filter(({ route }) => open(route)).map(({ security }) => security)).toStrictEqual(
+      [[], [], []]
+    );
     expect(document.components.securitySchemes).toStrictEqual({
       bearer: { scheme: "Bearer", type: "http" },
       signIn: { in: "cookie", name: "iirc_sign_in", type: "apiKey" },

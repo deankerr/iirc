@@ -9,6 +9,7 @@ export {
   Caller,
   CredentialsGroup,
   DaemonApi,
+  HealthGroup,
   NetworksGroup,
   NewsGroup,
   OptionsGroup,
@@ -54,6 +55,8 @@ export {
   StoreUnavailable,
   VaultFailed,
 } from "./errors.ts";
+
+export { Unwell, Well } from "./health.ts";
 
 export {
   Activity,
