@@ -40,6 +40,8 @@ import {
   collectFloor,
   collectLabelled,
   collectListed,
+  endLone,
+  endsApart,
   floorLookup,
   isNumeric,
   lookupByCommand,
@@ -1195,6 +1197,9 @@ export const interpret = (
     refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
   }
 
+  // A `366` that ends a listing kept apart from the Channel's own is not read as ending it.
+  const apart = endsApart(run, arrival);
+
   // A Line of a labelled Lookup's reply is collected for it, whatever else it is, so a
   // Message that ends one, such as a lone labelled `NOTICE`, ends it and is still read as
   // a Message below.
@@ -1211,7 +1216,9 @@ export const interpret = (
   } else if (arrival.live && isMonitorReply(run, command)) {
     // What `MONITOR` or `WATCH` tells answers no Lookup or action, whatever nick it names.
     monitorReply(run, arrival);
-  } else if (arrival.live) {
+  } else if (arrival.live && !apart) {
     liveLine(run, arrival, raw, labelled || unmonitored);
   }
+
+  endLone(run, arrival);
 };

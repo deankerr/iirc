@@ -159,6 +159,12 @@ type LinkPhase =
        */
       readonly lookups: readonly Looking[];
       /**
+       * For each Channel, by folded name, how many `NAMES` answers a forgotten Lookup began
+       * on the floor, each read to its `366` and kept by no one, so no part of one replaces
+       * the members. At most {@link maxForgotten} Channels.
+       */
+      readonly forgotten: ReadonlyMap<string, number>;
+      /**
        * The one `MODE` query the Client sent of its own, to learn a Channel's modes on
        * joining it, whose answer has not come, or `undefined` for none.
        */
@@ -426,6 +432,9 @@ interface Heard {
 
 /** How many Lookups may await their replies on a Connection at once. */
 export const maxLookups = 8;
+
+/** How many Channels a Connection counts forgotten `NAMES` answers of. */
+export const maxForgotten = 64;
 
 /** How many Lines of one Lookup's reply are kept. */
 export const maxLookupLines = 64;

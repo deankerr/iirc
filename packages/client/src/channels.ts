@@ -27,7 +27,7 @@ import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
-import type { Channel, Joined, Listing, Member, Seen, State } from "./state.ts";
+import type { Channel, Joined, Listing, Looking, Member, Seen, State } from "./state.ts";
 import { userIn, usersFrom, usersOf, withUser, withoutUsers } from "./users.ts";
 import { openOf, sessionOf } from "./views.ts";
 import { keptWatched } from "./watched.ts";
@@ -328,6 +328,41 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
   });
 };
 
+/**
+ * Changes each listing a `NAMES` Lookup is still reading of a Channel, or of every Channel,
+ * as the Channel's own listing changes: either replaces the members when its `366` comes,
+ * so neither may miss what happened before that.
+ * @param run - The step.
+ * @param channel - The Channel, or `undefined` for every Channel.
+ * @param change - What to change.
+ */
+const changeLookupListings = (
+  run: Run,
+  channel: string | undefined,
+  change: (listing: Listing) => Listing
+): void => {
+  const fold = folder(run.state);
+  const key = channel === undefined ? undefined : fold(channel);
+
+  const touches = (each: Looking): boolean =>
+    each.lookup._tag === "Names" &&
+    each.listing !== undefined &&
+    (key === undefined || fold(each.lookup.channel) === key);
+
+  if (openOf(run.state)?.lookups.some(touches) !== true) {
+    return;
+  }
+
+  updateOpen(run, (open) => ({
+    ...open,
+    lookups: open.lookups.map((each) =>
+      touches(each) && each.listing !== undefined
+        ? { ...each, listing: change(each.listing) }
+        : each
+    ),
+  }));
+};
+
 const kickedOrParted = (run: Run, channel: string, nick: string): void => {
   const fold = folder(run.state);
 
@@ -358,6 +393,7 @@ const kickedOrParted = (run: Run, channel: string, nick: string): void => {
     listing: joined.listing === undefined ? undefined : withoutListed(joined.listing, fold(nick)),
     members: withoutMember(joined.members, fold(nick)),
   }));
+  changeLookupListings(run, channel, (listing) => withoutListed(listing, fold(nick)));
   pruneUsers(run, [fold(nick)]);
 };
 
@@ -410,6 +446,19 @@ const joinedSelf = (run: Run, channel: string): void => {
   const folded = folder(run.state)(channel);
   const self = sessionOf(run.state);
   const was = run.state.channels.get(folded);
+
+  // An Ircd answers in order, so any `NAMES` answer asked before this `JOIN` came before
+  // its echo: none a forgotten Lookup began is still to come.
+  updateOpen(run, (open) => {
+    if (!open.forgotten.has(folded)) {
+      return open;
+    }
+
+    const forgotten = new Map(open.forgotten);
+    forgotten.delete(folded);
+
+    return { ...open, forgotten };
+  });
 
   if (self === undefined || was?.phase._tag === "Joined") {
     return;
@@ -490,6 +539,9 @@ const memberJoined = (run: Run, channel: string, nick: string): void => {
         : changeListing(joined.listing, (listed) => withMember(listed, folded, member)),
     members: withMember(joined.members, folded, member),
   }));
+  changeLookupListings(run, channel, (listing) =>
+    changeListing(listing, (listed) => withMember(listed, folded, member))
+  );
 };
 
 /**
@@ -546,6 +598,7 @@ export const foldActivity = (
         }));
       }
 
+      changeLookupListings(run, undefined, (listing) => withoutListed(listing, folded));
       pruneUsers(run, [folded]);
 
       return;
@@ -565,6 +618,12 @@ export const foldActivity = (
           members: renamed(joined.members, from, to, activity.to),
         }));
       }
+
+      changeLookupListings(run, undefined, (listing) =>
+        inListing(listing, from)
+          ? changeListing(listing, (listed) => renamed(listed, from, to, activity.to))
+          : listing
+      );
 
       updateOpen(run, (open) => {
         const seen = userIn(open.users, from);
@@ -610,6 +669,10 @@ export const foldActivity = (
 
         return { ...joined, listing, members, modes };
       });
+
+      changeLookupListings(run, activity.target, (listing) =>
+        changeListing(listing, (listed) => prefixed(listed, activity.changes, rules, run.at, fold))
+      );
 
       return;
     }
@@ -713,6 +776,23 @@ export const endOfNames = (run: Run, channel: string, own?: Listing): void => {
           : joined.topic,
     };
   });
+  pruneUsers(run);
+};
+
+/**
+ * A labelled `NAMES` Lookup's own listing ended by its own `366`. Its members are now the
+ * Channel's, and nothing else of the Channel changes: a listing of Self's `JOIN` still
+ * being read ends only by its own `366`.
+ * @param run - The step.
+ * @param channel - The Channel, as the Lookup named it.
+ * @param own - The Lookup's listing, or `undefined` when it listed no one.
+ */
+export const listedApart = (run: Run, channel: string, own: Listing | undefined): void => {
+  if (own === undefined) {
+    return;
+  }
+
+  changeJoined(run, channel, (joined) => ({ ...joined, members: listedMembers(own) }));
   pruneUsers(run);
 };
 

@@ -13,7 +13,7 @@ import { mode, names, upperCaseAscii, who, whois, whowas } from "@iirc/protocol/
 import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
 
 import { fits, online } from "./acts.ts";
-import { endOfNames, see } from "./channels.ts";
+import { endOfNames, listedApart, see } from "./channels.ts";
 import type { ListedPart } from "./channels.ts";
 import type { Arrival } from "./feature.ts";
 import { Instant } from "./ids.ts";
@@ -39,7 +39,7 @@ import { readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Link, Looking, Refreshed } from "./state.ts";
-import { maxLookupEntries, maxLookupLines, maxLookups } from "./state.ts";
+import { maxForgotten, maxLookupEntries, maxLookupLines, maxLookups } from "./state.ts";
 import { lookupTime } from "./timers.ts";
 import { userIn } from "./users.ts";
 import { openOf } from "./views.ts";
@@ -831,25 +831,53 @@ const keepDescribed = (run: Run, looking: Looking, line: Line): void => {
   }));
 };
 
+// Whether an end numeric names what a `NAMES` or `WHO` asked, second. Any other Lookup's
+// end names nothing it must match here.
+const endsOwn = (run: Run, lookup: Lookup, line: Line): boolean => {
+  if (!isEntries(lookup)) {
+    return true;
+  }
+
+  const [, named] = line.params;
+  const fold = folder(run.state);
+
+  return named !== undefined && fold(named) === fold(askedOf(lookup));
+};
+
+// Its own end numeric. A labelled reply ends with its batch, or as a lone Line, so an end
+// numeric inside it only marks it ended, and what follows it in the batch is kept.
+const takeEnd = (run: Run, looking: Looking, line: Line): void => {
+  const { intent } = looking;
+  const { command } = line;
+
+  // A `366` ends a whole listing, so it corrects the members even past the bound of what
+  // the Lookup reports, which bounds only the card. A labelled answer's rows are its
+  // own, so its `366` leaves the Channel's own listing to its own end. One on the floor
+  // may have taken the rest of the listing of Self's `JOIN`, so it ends that too.
+  if (looking.lookup._tag === "Names") {
+    if (looking.labelled) {
+      listedApart(run, looking.lookup.channel, looking.listing);
+    } else {
+      endOfNames(run, looking.lookup.channel, looking.listing);
+    }
+  }
+
+  if (looking.labelled) {
+    change(run, intent, (each) => ({ ...each, ended: true }));
+  } else {
+    finish(run, intent, "End", command);
+  }
+};
+
 // One Line of a Lookup's reply: its end, an error, or something it says of a User or a list.
 const take = (run: Run, looking: Looking, line: Line): void => {
   const { command } = line;
   const { intent } = looking;
 
-  // A labelled reply ends with its batch, or as a lone Line, so an end numeric inside it
-  // ends nothing, and what follows it in the batch is kept.
-  if (command === ends[looking.lookup._tag]) {
-    // A `366` ends a whole listing, so it corrects the members even past the bound of what
-    // the Lookup reports, which bounds only the card.
-    if (looking.lookup._tag === "Names") {
-      endOfNames(run, looking.lookup.channel, looking.listing);
-    }
-
-    if (looking.labelled) {
-      change(run, intent, (each) => ({ ...each, ended: true }));
-    } else {
-      finish(run, intent, "End", command);
-    }
+  // A `NAMES` or `WHO` end must name what was asked, and any other is read as it is
+  // elsewhere.
+  if (command === ends[looking.lookup._tag] && endsOwn(run, looking.lookup, line)) {
+    takeEnd(run, looking, line);
 
     return;
   }
@@ -1039,10 +1067,77 @@ export const collectLabelled = (run: Run, arrival: Arrival): boolean => {
   }
 
   // A `353` is collected as Features refine it, after this, so a lone labelled one ends
-  // its Lookup there.
+  // its Lookup by `endLone`, once it has been read.
   if (within.ends && !(line.command === "353" && looking.lookup._tag === "Names")) {
     finish(run, within.intent, "End", line.command);
   }
+
+  return true;
+};
+
+/**
+ * A lone labelled Line is the whole of its Lookup's answer: once it has been read, whether
+ * or not it parsed, the Lookup ends, if nothing ended it already.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ */
+export const endLone = (run: Run, arrival: Arrival): void => {
+  const { within } = arrival;
+
+  if (within?.ends === true && arrival.live) {
+    finish(run, within.intent, "End", arrival.line.command);
+  }
+};
+
+const forgottenOf = (run: Run, channel: string): number =>
+  openOf(run.state)?.forgotten.get(folder(run.state)(channel)) ?? 0;
+
+/**
+ * Whether a live `366` ends a listing kept apart from the Channel's own, so the Channel's
+ * own listing does not end by it: a labelled Lookup's own, or one a forgotten Lookup began,
+ * by label or, counted for its Channel, on the floor. One on the floor is taken here, and
+ * read by nothing else.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it, before any Lookup collects it.
+ * @returns Whether it does.
+ */
+export const endsApart = (run: Run, arrival: Arrival): boolean => {
+  const { line, within } = arrival;
+  const [, channel] = line.params;
+
+  if (line.command !== "366" || !arrival.live || channel === undefined) {
+    return false;
+  }
+
+  if (within !== undefined) {
+    const looking = openOf(run.state)?.lookups.find((each) => each.intent === within.intent);
+
+    return (
+      looking === undefined ||
+      (looking.lookup._tag === "Names" && endsOwn(run, looking.lookup, line))
+    );
+  }
+
+  const floor = arrival.batch === undefined && !line.tags.has("label");
+
+  if (!floor || forgottenOf(run, channel) === 0) {
+    return false;
+  }
+
+  const key = folder(run.state)(channel);
+
+  updateOpen(run, (open) => {
+    const forgotten = new Map(open.forgotten);
+    const left = (forgotten.get(key) ?? 1) - 1;
+
+    if (left > 0) {
+      forgotten.set(key, left);
+    } else {
+      forgotten.delete(key);
+    }
+
+    return { ...open, forgotten };
+  });
 
   return true;
 };
@@ -1124,17 +1219,23 @@ export const collectListed = (
   const fold = folder(run.state);
   const floor = within === undefined && arrival.batch === undefined && !line.tags.has("label");
 
+  // A labelled answer's rows are its Lookup's own, or no one's, once it was forgotten. On
+  // the floor, an answer a forgotten Lookup began comes first, and is kept by no one.
+  if (floor && forgottenOf(run, channel) > 0) {
+    return true;
+  }
+
   const looking = openOf(run.state)?.lookups.find((each) =>
-    each.lookup._tag === "Names" && within !== undefined
-      ? each.intent === within.intent
-      : floor &&
+    within === undefined
+      ? floor &&
         each.lookup._tag === "Names" &&
         !each.labelled &&
         fold(each.lookup.channel) === fold(channel)
+      : each.intent === within.intent
   );
 
-  if (looking === undefined) {
-    return false;
+  if (looking?.lookup._tag !== "Names") {
+    return within !== undefined;
   }
 
   const entries: readonly NamesEntry[] = members.map((member) => ({
@@ -1153,11 +1254,28 @@ export const collectListed = (
     };
   });
 
-  if (within?.ends === true) {
-    finish(run, looking.intent, "End", arrival.line.command);
+  return true;
+};
+
+// One more answer a forgotten Lookup began on the floor, for a Channel. Past
+// {@link maxForgotten} Channels, the one counted longest ago is no longer counted.
+const forgetting = (
+  forgotten: ReadonlyMap<string, number>,
+  key: string
+): ReadonlyMap<string, number> => {
+  const next = new Map(forgotten);
+  const count = (next.get(key) ?? 0) + 1;
+
+  next.delete(key);
+  next.set(key, count);
+
+  const [oldest] = next.keys();
+
+  if (next.size > maxForgotten && oldest !== undefined) {
+    next.delete(oldest);
   }
 
-  return true;
+  return next;
 };
 
 /**
@@ -1178,16 +1296,27 @@ export const expireLookup = (run: Run, intent: IntentId): void => {
 
   // It reads on, as the Client's own `WHO` does, so its late `366` still corrects the
   // members, and its late `353`s never reach the Channel's listing. At most
-  // {@link maxLookups} read on so, the oldest forgotten first.
+  // {@link maxLookups} read on so, the oldest forgotten first. What a forgotten one would
+  // still have read is kept by no one: by its label, or on the floor, counted for its
+  // Channel, up to its `366`, so no part of its answer ever replaces the members.
   updateOpen(run, (open) => {
     const lookups = open.lookups.map((each) =>
       each.intent === intent ? { ...each, lapsed: true } : each
     );
 
     const lapsed = lookups.filter((each) => each.lapsed);
-    const oldest = lapsed.length > maxLookups ? lapsed[0]?.intent : undefined;
+    const oldest = lapsed.length > maxLookups ? lapsed[0] : undefined;
+    const kept = lookups.filter((each) => each !== oldest);
 
-    return { ...open, lookups: lookups.filter((each) => each.intent !== oldest) };
+    if (oldest?.lookup._tag !== "Names" || oldest.labelled) {
+      return { ...open, lookups: kept };
+    }
+
+    return {
+      ...open,
+      forgotten: forgetting(open.forgotten, folder(run.state)(oldest.lookup.channel)),
+      lookups: kept,
+    };
   });
 };
 

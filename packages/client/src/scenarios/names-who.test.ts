@@ -317,6 +317,128 @@ describe("a NAMES Lookup", () => {
     expect(membersOf(run)).toStrictEqual(["iirc", "peer"]);
   });
 
+  it("takes each change to the members that comes before its 366", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! names #iirc",
+        ">> NAMES #iirc",
+        "<< :irc.test 353 iirc = #iirc :iirc peer pal",
+        "<< :pal!~p@pal.test PART #iirc",
+        "<< :new!~n@new.test JOIN #iirc",
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+        "?? looked-up i1 names=#iirc members count=3"
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer", "new"]);
+  });
+
+  it("leaves Self's JOIN listing, and the WHO it draws, to that listing's own 366, when labelled", () => {
+    const configuration = configured({ whoOnJoin: true });
+
+    const run = played(
+      [
+        registered(configuration, { offered: echo }),
+        lines(
+          "!! configure +#iirc",
+          ">> JOIN #iirc",
+          "<< :iirc!~iirc@iirc.test JOIN #iirc",
+          ">> MODE #iirc",
+          "<< :irc.test 353 iirc = #iirc :iirc peer",
+          "!! names #iirc",
+          ">> @label=l1 NAMES #iirc",
+          "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+          "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer pal",
+          "<< @batch=b1 :irc.test 366 iirc #iirc :End of /NAMES list.",
+          "<< :irc.test BATCH -b1",
+          "?? looked-up i1 names=#iirc members count=3",
+          "<< :irc.test 353 iirc = #iirc :pal other",
+          "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+          ">> WHO #iirc"
+        ),
+      ],
+      configuration
+    );
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer", "pal", "other"]);
+  });
+
+  it("lets no answer a forgotten Lookup began replace the members", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! names #iirc",
+        ">> NAMES #iirc",
+        "<< :irc.test 353 iirc = #iirc :iirc peer",
+        "+30s",
+        "?? looked-up i1 names=#iirc members=TimedOut count=2",
+        "!! names #o1",
+        ">> NAMES #o1",
+        "!! names #o2",
+        ">> NAMES #o2",
+        "!! names #o3",
+        ">> NAMES #o3",
+        "!! names #o4",
+        ">> NAMES #o4",
+        "!! names #o5",
+        ">> NAMES #o5",
+        "!! names #o6",
+        ">> NAMES #o6",
+        "!! names #o7",
+        ">> NAMES #o7",
+        "!! names #o8",
+        ">> NAMES #o8",
+        "+30s",
+        "?? looked-up i2 names=#o1 members=TimedOut count=0",
+        "?? looked-up i3 names=#o2 members=TimedOut count=0",
+        "?? looked-up i4 names=#o3 members=TimedOut count=0",
+        "?? looked-up i5 names=#o4 members=TimedOut count=0",
+        "?? looked-up i6 names=#o5 members=TimedOut count=0",
+        "?? looked-up i7 names=#o6 members=TimedOut count=0",
+        "?? looked-up i8 names=#o7 members=TimedOut count=0",
+        "?? looked-up i9 names=#o8 members=TimedOut count=0",
+        ">> PING iirc",
+        "<< :irc.test 353 iirc = #iirc :pal",
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list."
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer", "pal"]);
+  });
+
+  it("is ended only by a 366 naming its own Channel", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! names #iirc",
+        ">> @label=l1 NAMES #iirc",
+        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+        "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer",
+        "<< @batch=b1 :irc.test 366 iirc #other :End of /NAMES list.",
+        "<< :irc.test BATCH -b1",
+        "?? looked-up i1 names=#iirc members=Ended count=2"
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer", "pal"]);
+  });
+
+  it("ends by a lone labelled 353 that does not parse", () => {
+    played([
+      ...inChannel(echo),
+      lines(
+        "!! names #iirc",
+        ">> @label=l1 NAMES #iirc",
+        "<< @label=l1 :irc.test 353 iirc",
+        "?? ignored Malformed 353",
+        "?? looked-up i1 names=#iirc failed=353"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
   it("ends by an error naming its Channel, or a FAIL of NAMES", () => {
     played([
       ...inChannel(),
@@ -413,6 +535,23 @@ describe("a WHO Lookup", () => {
         ">> @label=l1 WHO peer",
         "<< @label=l1 :irc.test BATCH +b1 labeled-response",
         "<< @batch=b1 :irc.test 352 iirc * ~p peer.test irc.test peer H :0 Peer",
+        "<< :irc.test BATCH -b1",
+        "?? looked-up i1 who=peer users=Ended count=1"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is ended only by a 315 naming its own mask", () => {
+    played([
+      ...inChannel(echo),
+      lines(
+        "!! who peer",
+        ">> @label=l1 WHO peer",
+        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+        "<< @batch=b1 :irc.test 352 iirc * ~p peer.test irc.test peer H :0 Peer",
+        "<< @batch=b1 :irc.test 315 iirc other :End of WHO list",
         "<< :irc.test BATCH -b1",
         "?? looked-up i1 who=peer users=Ended count=1"
       ),
