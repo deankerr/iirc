@@ -612,7 +612,9 @@ describe("an option's change, while it is on its way", () => {
     const realname = ["realname"];
 
     registry.set(change, { edit: { _tag: "Set", path: realname, text: "Dean" }, network: libera });
-    await settled(() => writes.length === 1);
+    await settled(
+      () => writes.length === 1 && rowOf(container, "network.libera.realname")?.[1] === "Dean"
+    );
     registry.set(change, { edit: { _tag: "Unset", path: realname }, network: libera });
     await settled(
       () =>
