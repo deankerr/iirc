@@ -25,8 +25,6 @@ const glyphs = {
   collapsed: "▸",
   /** Starts a command in the composer, as a `/` begins one. */
   command: "/",
-  /** A Network connected: filled. */
-  connected: "●",
   /** A Network connecting: half filled. */
   connecting: "◐",
   /** Opens an image over the whole screen: arrows pointing out. */
