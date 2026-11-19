@@ -397,11 +397,17 @@ export const contextOf = (
   const main = mainOf(timelines);
 
   const networks = sidebar(timelines);
+  const shownAs = arranged(networks, arrangement);
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
-  // for nothing.
+  // for nothing. Ties among what calls go by the order shown, the pinned first.
   const marked = networks.filter((one) => !one.removed);
-  const calling = marked.flatMap((one) => one.timelines);
+
+  const calling = [
+    ...shownAs.pinned.filter((pin) => !pin.network.removed).map((pin) => pin.timeline),
+    ...shownAs.networks.filter((one) => !one.removed).flatMap((one) => one.timelines),
+  ];
+
   const closed = marked.flatMap((one) => one.closed);
 
   // A Timeline behind the options, the search, or a draft is not the one shown, so
@@ -414,7 +420,7 @@ export const contextOf = (
     shown: panesOf(timelines.layout.root).flatMap((pane) =>
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
-    timelines: shownOrder(arranged(networks, arrangement)),
+    timelines: shownOrder(shownAs),
     unread: unseenIn(calling),
     unreadClosed: unseenIn(closed),
   };

@@ -1264,7 +1264,7 @@ const worthJumping = rank("Message");
 
 /**
  * The Timeline with the most calling for the Owner, of those not skipped: the highest level
- * unread, at least Messages, and ties by the sidebar's order.
+ * unread, at least Messages, and ties by the order the sidebar shows, the pinned first.
  * @param context - The context.
  * @param skip - Whether a Timeline is skipped.
  * @returns The Timeline, or none when nothing calls.

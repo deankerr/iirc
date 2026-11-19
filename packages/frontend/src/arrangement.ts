@@ -151,6 +151,30 @@ const timelinesOrdered = (
 const once = <A>(names: readonly A[]): readonly A[] => [...new Set(names)];
 
 /**
+ * The Owner's order without the ids of Timelines that have gone, so a write does not carry
+ * them on for ever. Only once every Network's Timelines are known, since an id of one not
+ * yet read may name a Timeline still there.
+ * @param networks - The sidebar, in its fixed order.
+ * @param arrangement - The Owner's order.
+ * @returns The order, with what has gone dropped when that can be told.
+ */
+const lasting = (networks: readonly SidebarNetwork[], arrangement: Arrangement): Arrangement => {
+  if (!networks.every((network) => network.listed)) {
+    return arrangement;
+  }
+
+  const held = new Set(
+    networks.flatMap((network) => [...network.timelines, ...network.closed].map((one) => one.id))
+  );
+
+  return {
+    ...arrangement,
+    order: arrangement.order.filter((id) => held.has(id)),
+    pinned: arrangement.pinned.filter((id) => held.has(id)),
+  };
+};
+
+/**
  * The sidebar with the Owner's order applied. The Networks are those not removed, then
  * those removed, each in the Owner's order. A Network's Timelines are in the Owner's order
  * with its own first. A pinned Timeline leaves its Network for `pinned`, in the order
@@ -463,15 +487,17 @@ const timelineMoved = (
  *   said, does whichever the Timeline is not now. A Network's own
  *   Timeline cannot be pinned.
  * @param networks - The sidebar, in its fixed order.
- * @param arrangement - The Owner's order.
+ * @param given - The Owner's order. What it names that has gone is not written again, once
+ * every Network's Timelines are known.
  * @param edit - What the Owner did.
  * @returns The option to set and its whole new value, or none when nothing changes.
  */
 export const arranging = (
   networks: readonly SidebarNetwork[],
-  arrangement: Arrangement,
+  given: Arrangement,
   edit: ArrangeEdit
 ): ArrangeChange | undefined => {
+  const arrangement = lasting(networks, given);
   const shown = arranged(networks, arrangement);
   const isPinned = shown.pinned.some((pin) => pin.timeline.id === edit.timeline);
 

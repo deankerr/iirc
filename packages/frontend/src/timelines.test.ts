@@ -1820,6 +1820,32 @@ describe("the Timelines' state", () => {
     });
   });
 
+  it("breaks a tie in /next-unread by the order shown, so a pinned Timeline comes first", () => {
+    const unread = { activity: 0, direct: 0, highlights: 0, messages: 1 };
+
+    // alpha's own Timeline and #b each have a Message unread, and #a is open.
+    const state = reduceTimelines(
+      following(),
+      changed(6, {
+        timelines: [
+          { ...Schema.encodeSync(Timeline)(timelineOf(idOf(1), "Network", "alpha", 6)), unread },
+          { ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)), unread },
+        ],
+      })
+    );
+
+    const jump = (arrangement: Arrangement) =>
+      interpret("/next-unread", contextOf(state, undefined, arrangement));
+
+    expect({
+      fixed: jump(unarranged),
+      pinned: jump({ ...unarranged, pinned: [two] }),
+    }).toStrictEqual({
+      fixed: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+      pinned: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+    });
+  });
+
   it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
     const [network] = sidebar(following());
     const tree = network === undefined ? undefined : treeOf(network);

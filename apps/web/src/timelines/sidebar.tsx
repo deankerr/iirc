@@ -19,8 +19,9 @@
  * Network it is of. A row is dragged before or after another of its part: a pinned one among
  * the pinned, a Network's own among the Networks as removed as it is, and any other among
  * its Network's. Each part is a Tree of its own, as the removed Networks' is, so its keys
- * stay within it and React Aria's reordering keeps a drop within one part and one Network;
- * a place where nothing would change takes no drop, so it draws no line. The keys pick a
+ * stay within it. A drop is taken only where the core's arranging says something changes,
+ * which keeps it within one part and one Network, and anywhere else is cancelled, so it
+ * draws no line. The keys pick a
  * row up by its drag button, which ArrowRight reaches past its menu's.
  *
  * @packageDocumentation
@@ -899,7 +900,6 @@ const NetworkTrees = ({
                   <TreeItemContent>
                     <span aria-hidden className={styles.gutter} />
                     <span className={styles.reading}>Reading…</span>
-                    <DragButton />
                   </TreeItemContent>
                 </TreeItem>
               )}
