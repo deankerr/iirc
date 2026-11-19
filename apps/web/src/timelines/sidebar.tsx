@@ -76,7 +76,7 @@ import { SignOutButton } from "../sign-in/sign-out-button.tsx";
 import { IconButton, useKeysOf } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
-import { listedNetworks, open, sidebarNetworks, timelinesState } from "./atoms.ts";
+import { listedNetworks, mutedShown, open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
 
@@ -179,15 +179,42 @@ const standingWords = (standing: Standing): string =>
   standing.why === undefined ? standing.word : `${standing.word}: ${standing.why}`;
 
 /**
- * A row's label for a screen reader: its name and what is unread, and the Pane that shows
- * it, when that is not the focused one.
+ * A row's label for a screen reader: its name and what is unread, whether it is muted, and
+ * the Pane that shows it, when that is not the focused one.
  * @param name - The row's name.
- * @param activity - What is unread in it.
+ * @param activity - What is unread in it, as shown.
+ * @param muted - Whether it is muted.
  * @param pane - The number of the other Pane that shows it, if one does.
  * @returns The label.
  */
-const rowLabel = (name: string, activity: Activity, pane: number | undefined): string =>
-  pane === undefined ? labelOf(name, activity) : `${labelOf(name, activity)}, in Pane ${pane}`;
+const rowLabel = (
+  name: string,
+  activity: Activity,
+  muted: boolean,
+  pane: number | undefined
+): string =>
+  pane === undefined
+    ? labelOf(name, activity, muted)
+    : `${labelOf(name, activity, muted)}, in Pane ${pane}`;
+
+/**
+ * The class that dims a name further when its Timeline is muted and has no Highlight to
+ * show, which would colour it.
+ * @param activity - What is unread in it, as shown.
+ * @param muted - Whether it is muted.
+ * @returns The class, or none.
+ */
+const quietClass = (activity: Activity, muted: boolean): string =>
+  muted && activity.level === undefined ? styles.silenced : "";
+
+/**
+ * The quiet marker of a muted Timeline, after its name, or nothing. Hidden from a screen
+ * reader, which hears `muted` in the row's label.
+ * @param props - Whether it is muted.
+ * @returns The marker, or nothing.
+ */
+const MutedMark = ({ muted }: { readonly muted: boolean }) =>
+  muted ? <Icon className={styles.silence} name="muted" /> : null;
 
 /** The class that colours a name by the highest level unread in it. */
 const levelClass: Readonly<Record<Level | "None", string>> = {
@@ -284,12 +311,14 @@ const DragButton = () => (
 
 /**
  * A Timeline's row, under its Network or pinned, with the button that opens its menu.
- * @param props - The Timeline, the Network it is of when it is pinned, the number of the
- * other Pane that shows it, if one does, whether its menu is open, and what opens it.
+ * @param props - The Timeline, whether it is muted, the Network it is of when it is pinned,
+ * the number of the other Pane that shows it, if one does, whether its menu is open, and
+ * what opens it.
  * @returns The row.
  */
 const TimelineItem = ({
   menu,
+  muted,
   of,
   onMenu,
   pane,
@@ -297,16 +326,17 @@ const TimelineItem = ({
 }: {
   readonly pane: number | undefined;
   readonly timeline: Timeline;
+  readonly muted: boolean;
   readonly of?: string | undefined;
   readonly menu: boolean;
   readonly onMenu: (row: HTMLElement) => void;
 }) => {
-  const activity = activityOf(timeline);
+  const activity = activityOf(timeline, muted);
   const name = of === undefined ? timeline.name : `${timeline.name} of ${of}`;
 
   return (
     <TreeItem
-      aria-label={rowLabel(name, activity, pane)}
+      aria-label={rowLabel(name, activity, muted, pane)}
       className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
       data-menu={menu || undefined}
       id={timeline.id}
@@ -320,10 +350,11 @@ const TimelineItem = ({
         <bdi
           className={`${styles.name} ${
             timeline.detached ? styles.levelNone : levelClass[activity.level ?? "None"]
-          }`}
+          } ${quietClass(activity, muted)}`}
         >
           {timeline.name}
         </bdi>
+        <MutedMark muted={muted} />
         {of === undefined ? null : (
           <span aria-hidden className={styles.of}>
             · <bdi>{of}</bdi>
@@ -350,18 +381,21 @@ const previewsChoices: readonly {
 
 /**
  * What can be done with a Timeline from its row: choosing its own Previews, the choice in
- * force marked, exporting it as text, pinning it or unpinning it, unless it is a Network's
- * own, and closing it, when it can be closed.
- * @param props - The Timeline, whether it is pinned, its row, and what closes the menu.
+ * force marked, exporting it as text, muting it or unmuting it, pinning it or unpinning it,
+ * unless it is a Network's own, and closing it, when it can be closed.
+ * @param props - The Timeline, whether it is muted and whether it is pinned, its row, and
+ * what closes the menu.
  * @returns The menu, placed under its row.
  */
 const TimelineMenu = ({
   anchor,
+  muted,
   onClose,
   pinned,
   timeline,
 }: {
   readonly timeline: Timeline;
+  readonly muted: boolean;
   readonly pinned: boolean;
   readonly anchor: RefObject<HTMLElement | null>;
   readonly onClose: () => void;
@@ -439,9 +473,20 @@ const TimelineMenu = ({
             Export as text
           </MenuItem>
         </MenuSection>
-        {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
-        {timeline.kind === "Network" ? null : (
-          <MenuSection className={styles.section}>
+        <MenuSection className={styles.section}>
+          <MenuItem
+            className={styles.action}
+            id="mute"
+            onAction={() => {
+              onClose();
+              carryOut([{ _tag: "Mute", muted: !muted, timeline: timeline.id }]);
+            }}
+            textValue={muted ? "Unmute" : "Mute"}
+          >
+            {muted ? "Unmute" : "Mute"}
+          </MenuItem>
+          {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
+          {timeline.kind === "Network" ? null : (
             <MenuItem
               className={styles.action}
               id="pin"
@@ -458,21 +503,21 @@ const TimelineMenu = ({
             >
               {pinned ? "Unpin" : "Pin"}
             </MenuItem>
-            {close === undefined ? null : (
-              <MenuItem
-                className={styles.action}
-                id="close"
-                onAction={() => {
-                  onClose();
-                  carryOut([close]);
-                }}
-                textValue="Close"
-              >
-                Close
-              </MenuItem>
-            )}
-          </MenuSection>
-        )}
+          )}
+          {close === undefined ? null : (
+            <MenuItem
+              className={styles.action}
+              id="close"
+              onAction={() => {
+                onClose();
+                carryOut([close]);
+              }}
+              textValue="Close"
+            >
+              Close
+            </MenuItem>
+          )}
+        </MenuSection>
       </Menu>
     </Popover>
   );
@@ -481,6 +526,7 @@ const TimelineMenu = ({
 /**
  * What a Network's row says is unread: its own Timeline's, while what is under it shows
  * what is theirs, and otherwise every Timeline's, counting only what calls for the Owner.
+ * A muted Timeline counts only its Highlights, as `activityOf` says.
  * @param network - The Network.
  * @param own - Its own Timeline, if it has one.
  * @param expanded - Whether what is under it shows.
@@ -492,20 +538,21 @@ const networkUnread = (
   expanded: boolean
 ): { readonly activity: Activity; readonly calling: boolean } =>
   expanded && own !== undefined
-    ? { activity: activityOf(own), calling: false }
+    ? { activity: activityOf(own, network.muted.has(own.id)), calling: false }
     : { activity: networkActivity(network), calling: true };
 
 /**
  * A Network's row: its chevron, which expands and collapses it without choosing, its id,
- * coloured by what is unread, how its connection stands, as a symbol unless connected, and, once it has its
- * own Timeline, the button that opens that Timeline's menu.
- * @param props - The Network, its own Timeline, whether its Timelines are shown, and what
- * opens the menu.
+ * coloured by what is unread, marked when its own Timeline is muted, how its connection
+ * stands, as a symbol unless connected, and, once it has its own Timeline, the button that opens that Timeline's menu.
+ * @param props - The Network, its own Timeline, whether that is muted, whether its
+ * Timelines are shown, and what opens the menu.
  * @returns The row's content.
  */
 const NetworkRow = ({
   expandable,
   expanded,
+  muted,
   network,
   onMenu,
   own,
@@ -513,6 +560,7 @@ const NetworkRow = ({
 }: {
   readonly expandable: boolean;
   readonly expanded: boolean;
+  readonly muted: boolean;
   readonly network: SidebarNetwork;
   readonly own: Timeline | undefined;
   readonly pane: number | undefined;
@@ -532,9 +580,12 @@ const NetworkRow = ({
       ) : (
         <span className={styles.chevron} />
       )}
-      <bdi className={`${styles.name} ${levelClass[activity.level ?? "None"]}`}>
+      <bdi
+        className={`${styles.name} ${levelClass[activity.level ?? "None"]} ${quietClass(activity, muted)}`}
+      >
         {network.network}
       </bdi>
+      <MutedMark muted={muted} />
       <Counts activity={activity} calling={calling} />
       <PaneMark pane={pane} />
       {standing.mark === undefined ? null : (
@@ -692,6 +743,7 @@ const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>
   const setDrawer = useAtomSet(drawerState);
   const carryOut = useAtomSet(perform);
   const networks = useAtomValue(sidebarNetworks);
+  const muted = useAtomValue(mutedShown);
   const order = useAtomValue(arrangement);
   // The Timeline whose menu is open, placed by its row.
   const [menu, setMenu] = useState<TimelineId | undefined>(undefined);
@@ -810,6 +862,7 @@ const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>
           onClose={() => {
             setMenu(undefined);
           }}
+          muted={muted.has(menuTimeline.id)}
           pinned={pinned.has(menuTimeline.id)}
           timeline={menuTimeline}
         />
@@ -866,6 +919,7 @@ const PinnedTree = ({ pins }: { readonly pins: readonly Pin[] }) => {
           <TimelineItem
             key={timeline.id}
             menu={part.menu === timeline.id}
+            muted={network.muted.has(timeline.id)}
             of={network.network}
             onMenu={(row) => {
               part.openMenu(timeline, row);
@@ -945,10 +999,11 @@ const NetworkTrees = ({
           const pane = tree.own === undefined ? undefined : others.get(tree.own.id);
           const expanded = !hidden.includes(network.network) && tree.children.length > 0;
           const { activity } = networkUnread(network, tree.own, expanded);
+          const muted = tree.own !== undefined && network.muted.has(tree.own.id);
 
           return (
             <TreeItem
-              aria-label={`${rowLabel(network.network, activity, pane)}, ${standingWords(standingOf(network))}`}
+              aria-label={`${rowLabel(network.network, activity, muted, pane)}, ${standingWords(standingOf(network))}`}
               className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
               data-menu={(tree.own !== undefined && part.menu === tree.own.id) || undefined}
               id={rowKey(one)}
@@ -962,6 +1017,7 @@ const NetworkTrees = ({
                   <NetworkRow
                     expandable={hasChildItems}
                     expanded={isExpanded}
+                    muted={muted}
                     network={network}
                     onMenu={(row) => {
                       if (tree.own !== undefined) {
@@ -990,6 +1046,7 @@ const NetworkTrees = ({
                 <TimelineItem
                   key={timeline.id}
                   menu={part.menu === timeline.id}
+                  muted={network.muted.has(timeline.id)}
                   onMenu={(row) => {
                     part.openMenu(timeline, row);
                   }}

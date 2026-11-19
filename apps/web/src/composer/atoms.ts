@@ -63,14 +63,29 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
-import { aliasesShown, arrange, arrangement, changeAliases, changeUi } from "../options/ui.ts";
+import {
+  aliasesShown,
+  arrange,
+  arrangement,
+  changeAliases,
+  changeUi,
+  mute,
+} from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
 import { jumpToMoment, showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
-import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
+import {
+  latest,
+  mutedShown,
+  open,
+  paned,
+  showDraft,
+  timelinesState,
+  Waits,
+} from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
 import { exportTimeline } from "../timelines/export.ts";
 import { cancelCompletion } from "./completion-state.ts";
@@ -81,7 +96,13 @@ import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
 /** The context commands are judged in, derived from the Timelines and the Sidebar's order. */
 export const commandContext = Atom.make((get) =>
-  contextOf(get(timelinesState), get(channelState), get(arrangement), get(aliasesShown))
+  contextOf(
+    get(timelinesState),
+    get(channelState),
+    get(arrangement),
+    get(aliasesShown),
+    get(mutedShown)
+  )
 );
 
 /** One Timeline's composer, or the one under no Timeline. */
@@ -675,6 +696,10 @@ const changeOne = (
 
     case "CloseTimeline": {
       return closeTimeline(registry, intent);
+    }
+
+    case "Mute": {
+      return mute(registry, intent);
     }
 
     case "Notify": {

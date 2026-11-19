@@ -23,7 +23,6 @@ import type {
 import {
   apply,
   credentialFor,
-  initialOptions,
   grouped,
   networksReading,
   optionName,
@@ -44,9 +43,9 @@ import { signedIn, signInState } from "../sign-in/atoms.ts";
 import { canvasMeasure, familiesMissing } from "../theme/device-fonts.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { deviceUi } from "./device.ts";
+import { optionsState } from "./state.ts";
 
-/** The options view, as the core folds it. */
-export const optionsState = Atom.make(initialOptions).pipe(Atom.keepAlive);
+export { optionsState } from "./state.ts";
 
 /** What the focused Pane shows: its open Timeline, or the options with their filter. */
 export const mainView = Atom.make((get) => mainOf(get(timelinesState)));

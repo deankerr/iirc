@@ -1039,6 +1039,87 @@ describe("the Sidebar in the Owner's order", () => {
 });
 
 /**
+ * A Direct Message with `peer` holding three unread Messages, some of them Highlights.
+ * @param highlights - How many are Highlights.
+ * @returns The Timeline to list.
+ */
+const withUnreadPeer = (highlights: number): More => ({
+  listed: 1,
+  timelines: [
+    {
+      ...describeTimeline(peer, "peer", "Direct"),
+      unread: { activity: 0, direct: 0, highlights, messages: 3 },
+    },
+  ],
+});
+
+describe("muting a Timeline from the Sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  // Catches a menu's Mute that writes nothing, or writes without the sequence read, and a
+  // row that still counts what is unread or does not read as muted, as Unmute must undo.
+  it("mutes a Timeline from its row's menu, which then counts nothing and reads as muted, and unmutes it again", async () => {
+    const { fake } = await arrangedWith({}, withUnreadPeer(0));
+
+    const before = {
+      label: row("peer").getAttribute("aria-label"),
+      text: row("peer").textContent,
+    };
+
+    await pressButton("More for peer");
+    await chooseFromMenu("Mute");
+    await settled(() => fake.daemon.uiChanges.length === 1);
+    await settled(() => row("peer").getAttribute("aria-label")?.endsWith("muted") === true);
+
+    const muted = {
+      label: row("peer").getAttribute("aria-label"),
+      list: fake.daemon.ui.options.muted,
+      text: row("peer").textContent,
+    };
+
+    // Unmuting is made from the options in force once muted, not those it began from.
+    const sequence = String(fake.daemon.ui.sequence);
+
+    await pressButton("More for peer");
+    await chooseFromMenu("Unmute");
+    await settled(() => fake.daemon.uiChanges.length === 2);
+    await settled(() => row("peer").getAttribute("aria-label") === before.label);
+
+    expect({
+      after: { list: fake.daemon.ui.options.muted, text: row("peer").textContent },
+      before,
+      changes: fake.daemon.uiChanges,
+      muted,
+    }).toStrictEqual({
+      after: { list: [], text: before.text },
+      before: { label: "peer, 3 unread", text: "peer3…↕" },
+      changes: [
+        { ifSequence: "4", route: "PUT muted" },
+        { ifSequence: sequence, route: "PUT muted" },
+      ],
+      muted: { label: "peer, muted", list: [peer], text: "peer∅…↕" },
+    });
+  });
+
+  // Catches a muted row that hides a Highlight, or marks it differently from an unmuted one.
+  it("still marks a muted Timeline's Highlight, as an unmuted one's, and counts none of what else is unread", async () => {
+    await arrangedWith({ muted: [peer] }, withUnreadPeer(1));
+    await settled(() => row("peer").getAttribute("aria-label")?.endsWith("muted") === true);
+
+    expect({
+      label: row("peer").getAttribute("aria-label"),
+      text: row("peer").textContent,
+    }).toStrictEqual({ label: "peer, 1 unread, 1 highlight, muted", text: "peer∅1…↕" });
+  });
+});
+
+/**
  * What the sidebar's foot holds, in order: each view's row by its name, and each button by
  * its label or its text.
  * @param footer - Where the foot is.

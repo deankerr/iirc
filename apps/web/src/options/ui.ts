@@ -9,7 +9,8 @@
  * @packageDocumentation
  */
 import { Aliases as AliasesSchema } from "@iirc/api";
-import type { Aliases, PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
+import type { Aliases, PreviewsMediaHeight, TimelineId, UiInForce, UiOptionName } from "@iirc/api";
+import { muting } from "@iirc/frontend/activity";
 import { editAliases } from "@iirc/frontend/aliases";
 import type { AliasesEdit } from "@iirc/frontend/aliases";
 import { arranged, arrangementOf, arranging, unarranged } from "@iirc/frontend/arrangement";
@@ -439,16 +440,18 @@ export const arrange = (registry: AtomRegistry.AtomRegistry, edit: ArrangeEdit) 
 
 /**
  * One try at a change of one shared option made whole from the options read: what to write
- * worked out from them, and sent made from the sequence read.
+ * worked out from them, and sent made from the sequence read. A value of none sends
+ * nothing, as the option is already as wanted.
  * @param registry - The registry.
  * @param option - The option.
- * @param make - Works out its new value from the options read, or why there is none.
+ * @param make - Works out its new value from the options read, or why there is none, or
+ * that none is needed.
  * @returns What it came to, or a conflict to try again.
  */
 const tryWhole = (
   registry: AtomRegistry.AtomRegistry,
   option: UiOptionName,
-  make: (read: UiInForce) => Parsed<Json>
+  make: (read: UiInForce) => Parsed<Json | undefined>
 ) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
@@ -461,6 +464,12 @@ const tryWhole = (
       return refused;
     }
 
+    const done: Outcome = { _tag: "Done" };
+
+    if (made.value === undefined) {
+      return done;
+    }
+
     yield* client.ui.set({
       params: { option },
       payload: { value: made.value },
@@ -468,8 +477,6 @@ const tryWhole = (
     });
 
     yield* readShared(registry);
-
-    const done: Outcome = { _tag: "Done" };
 
     return done;
   }).pipe(
@@ -484,13 +491,14 @@ const tryWhole = (
  * so another device's change in between is kept.
  * @param registry - The registry.
  * @param option - The option.
- * @param make - Works out its new value from the options read, or why there is none.
+ * @param make - Works out its new value from the options read, or why there is none, or
+ * that none is needed, which sends nothing.
  * @returns What it came to.
  */
 export const changeWhole = (
   registry: AtomRegistry.AtomRegistry,
   option: UiOptionName,
-  make: (read: UiInForce) => Parsed<Json>
+  make: (read: UiInForce) => Parsed<Json | undefined>
 ) =>
   Effect.gen(function* () {
     const first = yield* tryWhole(registry, option, make);
@@ -521,3 +529,35 @@ export const changeAliases = (registry: AtomRegistry.AtomRegistry, edit: Aliases
       ? aliases
       : { _tag: "Parsed", value: aliasesJson(aliases.value) };
   });
+
+/**
+ * Mutes a Timeline for every device, or unmutes it: the whole list worked out from the
+ * options read, and once more from those read again after a conflict, so another device's
+ * change in between is kept. What it would write from the options held shows at once. A
+ * Timeline already as wanted sends nothing, and one more than the list holds is refused,
+ * in words.
+ * @param registry - The registry.
+ * @param intent - The Timeline, and whether it is muted.
+ * @returns What it came to.
+ */
+export const mute = (
+  registry: AtomRegistry.AtomRegistry,
+  intent: { readonly timeline: TimelineId; readonly muted: boolean }
+) => {
+  const work = changeWhole(registry, "muted", (read) => {
+    const made = muting(read.options.muted, intent.timeline, intent.muted);
+
+    return made._tag === "Invalid"
+      ? made
+      : { _tag: "Parsed", value: made.value === undefined ? undefined : [...made.value] };
+  });
+
+  const held = uiShown(registry.get(optionsState));
+
+  const shown =
+    held === undefined ? undefined : muting(held.options.muted, intent.timeline, intent.muted);
+
+  return shown?._tag === "Parsed" && shown.value !== undefined
+    ? onItsWay(registry, { _tag: "Ui", option: "muted", value: [...shown.value] }, work)
+    : work;
+};

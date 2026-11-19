@@ -39,6 +39,8 @@ declare const styles: {
   readonly scroll: string;
   readonly section: string;
   readonly sidebar: string;
+  readonly silence: string;
+  readonly silenced: string;
   readonly standing: string;
   readonly tree: string;
   readonly views: string;

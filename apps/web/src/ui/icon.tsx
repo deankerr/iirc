@@ -43,6 +43,8 @@ const glyphs = {
   more: "…",
   /** Picks a row up, to move it with the keys: up and down. */
   move: "↕",
+  /** A Timeline muted, which counts nothing: the empty set. */
+  muted: "∅",
   /** A Network offline: empty. */
   offline: "○",
   /** Plays an animated image, as a play button is drawn. */
