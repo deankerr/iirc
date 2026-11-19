@@ -1505,28 +1505,28 @@ const listHead = (card: Card, live: ChannelHeader | undefined): ChannelHeader | 
     return undefined;
   }
 
-  const casemapping = card.naming?.casemapping ?? defaultCasemapping;
+  // Until the Network's casemapping is read, only the exact name is the same Channel, as a
+  // guessed mapping could fold two Channels the Network keeps apart into one.
+  const same = (one: string, other: string) =>
+    card.naming === undefined
+      ? one === other
+      : casefold(card.naming.casemapping, one) === casefold(card.naming.casemapping, other);
 
-  return live?.network === network &&
-    casefold(casemapping, live.name) === casefold(casemapping, lookup.channel)
-    ? live
-    : undefined;
+  return live?.network === network && same(live.name, lookup.channel) ? live : undefined;
 };
 
 /**
- * The act that removes a mask from a card's list, while the head of that list's own Channel,
- * as held live, says Self may, and gives the list's mode. A head of any other Channel says
- * nothing of it.
+ * The act that removes a mask from a card's list, while the head of that list's own Channel
+ * says Self may, and gives the list's mode.
  * @param card - The card.
- * @param live - The head of the list's Channel as held live, if read.
+ * @param head - The head of the list's own Channel, as `listHead` finds it, if read.
  * @returns How each mask is removed, or none.
  */
 const removing = (
   card: Card,
-  live: ChannelHeader | undefined
+  head: ChannelHeader | undefined
 ): ((mask: string) => Act) | undefined => {
   const { lookup, network } = card.look;
-  const head = listHead(card, live);
 
   if (!isListLookup(lookup)) {
     return undefined;
@@ -1806,8 +1806,8 @@ const masksBody = (
 ): CardShown["body"] => {
   const { lookup } = card.look;
   const note = result.cut === null ? undefined : partialWords[result.cut];
-  const remove = removing(card, head);
   const own = listHead(card, head);
+  const remove = removing(card, own);
   const masks = result.masks.filter((entry) => !card.removing.has(entry.mask));
   const kind = isListLookup(lookup) ? listWords[lookup._tag] : "masks";
 

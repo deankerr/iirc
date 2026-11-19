@@ -999,6 +999,20 @@ describe("a card of a Channel's list", () => {
       offered: ["bob", "carol", "‮evil‬", undefined, undefined, undefined],
     });
 
+    // Until the Network's casemapping is read, only the exact name is the list's own Channel,
+    // so `#[ops]` never reads `#{ops}`'s head on a Network that folds neither.
+    const unnamed = (channel: string) => {
+      const card = cardAfter([entries], listLookOf("Bans", channel, network, timelineId(iirc)));
+      const { body } = cardShown(world(iirc), card, time, { ...byAccount, name: "#{ops}" });
+
+      return body._tag === "Masks" ? body.masks.map((one) => one.account) : [];
+    };
+
+    expect({ exact: unnamed("#{ops}"), folded: unnamed("#[ops]") }).toStrictEqual({
+      exact: ["bob", "carol", "\u202Eevil\u202C", undefined, undefined, undefined],
+      folded: none,
+    });
+
     const shown = cardShown(world(iirc), cardAfter([named, entries], bans), time, byAccount);
 
     expect(shown.body._tag === "Masks" ? shown.body.masks[0] : undefined).toStrictEqual({

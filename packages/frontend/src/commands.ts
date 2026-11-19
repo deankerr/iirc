@@ -2321,9 +2321,20 @@ const banArguments = (
   focus: Focus,
   head: ChannelHeader | undefined
 ): Parsed<ActionRequest> => {
-  const [first, ...rest] = wordsOf(args);
+  const [first] = wordsOf(args);
 
-  return first === "-a" ? bannedByAccount(rest, focus, head) : banPlain(args, focus, head);
+  if (first !== "-a") {
+    return banPlain(args, focus, head);
+  }
+
+  // The nick is split at U+0020 alone, as the nick menu writes it, so one holding another
+  // space is read whole, and never as another User whose nick is its first part.
+  const nicks = args
+    .slice(args.indexOf("-a") + 2)
+    .split(" ")
+    .filter((one) => one !== "");
+
+  return bannedByAccount(nicks, focus, head);
 };
 
 /**
