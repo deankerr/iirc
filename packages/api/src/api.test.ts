@@ -99,6 +99,7 @@ describe("the contract", () => {
       "GET /api/previews/{id}/stream",
       "GET /api/search",
       "GET /api/timelines/changes",
+      "GET /api/timelines/projection",
       "GET /api/timelines/{timeline}",
       "GET /api/timelines/{timeline}/channel",
       "GET /api/timelines/{timeline}/members",
