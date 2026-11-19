@@ -20,7 +20,7 @@ import { dayStart } from "../search/atoms.ts";
  * @param until - Where to stop, or none for its end.
  * @returns The route, relative to the page.
  */
-export const exportPath = (
+const exportPath = (
   timeline: TimelineId,
   since: Instant | undefined,
   until: Instant | undefined
