@@ -95,6 +95,12 @@ const acted = (message: string | null, intent: string): JournalRecord => ({
   network: libera,
 });
 
+const removed: JournalRecord = {
+  _tag: "Input",
+  input: { _tag: "Removed", at: Instant.make(0), keep: false },
+  network: libera,
+};
+
 describe("the aways the Journal holds", () => {
   it.each([
     {
@@ -106,6 +112,11 @@ describe("the aways the Journal holds", () => {
       records: [acted("Away", "away-when-closed-1"), acted("lunch", "typed")],
       want: { message: "lunch", ours: false },
       why: "the Owner's away over it is the Owner's",
+    },
+    {
+      records: [acted("Away", "away-when-closed-1"), removed],
+      want: undefined,
+      why: "a removed Network is forgotten, so its away holds nothing back, nor passes to its id again",
     },
     {
       records: [acted("lunch", "typed"), acted("", "typed")],

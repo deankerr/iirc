@@ -43,12 +43,26 @@ export type AwaysHeld = ReadonlyMap<NetworkId, AwayHeld>;
 
 /**
  * Folds one Journal record: an `Away` act sets its Network's away, as the Client keeps it,
- * where an empty message is back, and anything else passes.
+ * where an empty message is back, a removal forgets it, and anything else passes.
  * @param held - What was held.
  * @param record - The record.
  * @returns What is held after it.
  */
 export const foldAway = (held: AwaysHeld, record: JournalRecord): AwaysHeld => {
+  // A removed Network's away goes with it, so it neither holds back a later away nor
+  // passes to a Network given its id again.
+  if (record._tag === "Input" && record.input._tag === "Removed") {
+    if (!held.has(record.network)) {
+      return held;
+    }
+
+    const next = new Map(held);
+
+    next.delete(record.network);
+
+    return next;
+  }
+
   if (
     record._tag !== "Input" ||
     record.input._tag !== "Act" ||
