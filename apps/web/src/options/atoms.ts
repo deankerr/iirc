@@ -34,7 +34,7 @@ import {
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import { reduceTimelines, mainOf } from "@iirc/frontend/timelines";
 import type { TimelinesEvent } from "@iirc/frontend/timelines";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Effect, Option, Redacted, Schema, Semaphore } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -439,10 +439,38 @@ const tryOnce = (registry: AtomRegistry.AtomRegistry, network: NetworkId, edit: 
     )
   );
 
+/** One turn at a time for each Network's changes, in each registry. */
+const turns = new WeakMap<AtomRegistry.AtomRegistry, Map<NetworkId, Semaphore.Semaphore>>();
+
+/**
+ * Waits for a Network's earlier changes from this page to be answered before this one is
+ * read and made. Each is measured against the Configuration in force, so one made while an
+ * earlier was unanswered would be measured against what that earlier replaces, and an unset
+ * following a set would find nothing to unset and send nothing.
+ * @param registry - The registry.
+ * @param network - The Network.
+ * @param work - The change's tries.
+ * @returns What the work came to.
+ */
+const inTurn = <A, E, R>(
+  registry: AtomRegistry.AtomRegistry,
+  network: NetworkId,
+  work: Effect.Effect<A, E, R>
+) => {
+  const networks = turns.get(registry) ?? new Map<NetworkId, Semaphore.Semaphore>();
+  const turn = networks.get(network) ?? Semaphore.makeUnsafe(1);
+
+  networks.set(network, turn);
+  turns.set(registry, networks);
+
+  return Semaphore.withPermit(turn)(work);
+};
+
 /**
  * Makes a change to a Network's Configuration, which shows at once and until it is answered.
- * If another changed it between the read and the write, it is read again and the same edit
- * applied once more, from what is in force.
+ * It is made once the Network's earlier changes are answered. If another changed it between
+ * the read and the write, it is read again and the same edit applied once more, from what
+ * is in force.
  * @param registry - The registry.
  * @param network - The Network.
  * @param edit - The edit.
@@ -452,17 +480,21 @@ export const configure = (registry: AtomRegistry.AtomRegistry, network: NetworkI
   onItsWay(
     registry,
     { _tag: "Network", edit, network },
-    Effect.gen(function* () {
-      const first = yield* tryOnce(registry, network, edit);
+    inTurn(
+      registry,
+      network,
+      Effect.gen(function* () {
+        const first = yield* tryOnce(registry, network, edit);
 
-      if (first._tag !== "Conflict") {
-        return first;
-      }
+        if (first._tag !== "Conflict") {
+          return first;
+        }
 
-      const second = yield* tryOnce(registry, network, edit);
+        const second = yield* tryOnce(registry, network, edit);
 
-      return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
-    })
+        return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
+      })
+    )
   );
 
 /**
