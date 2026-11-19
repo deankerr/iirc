@@ -53,6 +53,7 @@ PRAGMA user_version = 10;  -- the layout's version
 | Read | Served by |
 | --- | --- |
 | `window` | `items_shown`, partial on `(timeline, cursor, ignored)` where shown, from the position in either direction, with the Timeline and any tombstone found by id |
+| `range` | `items_shown`, one seek to the later of `since` and `after`, then a page forward in cursor order, with the Timeline and any tombstone found by id |
 | one item per message id, as `Added` and `Merged` keep it | `items_by_message_id`, unique on `(timeline, message_id)` where there is one |
 | what a reply answers, on every read that gives items, and as `Added` gives its level | `items_by_message_id`, one seek for each item given, by its Timeline and `answers`. A search seeks for its page alone, once it is kept |
 | `Confirmed`, `Unsent`, and `Rejected` | `items_by_intent` on `(network, intent)` |

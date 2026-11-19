@@ -40,6 +40,7 @@ import type {
   Gap,
   Item,
   NetworkRemoval,
+  Range,
   Search,
   Summary,
   TimelineStoreFailed,
@@ -397,6 +398,47 @@ const texts = (store: TimelineStoreService, timeline: TimelineId, anchor: Anchor
   );
 
 const all: Anchor = { _tag: "After" };
+
+// What a range of a Timeline gives, as the Timeline read and its items' texts, or "none".
+const rangeOf = (store: TimelineStoreService, timeline: TimelineId, range: Range) =>
+  store.range(timeline, range).pipe(
+    Effect.map(
+      Option.match({
+        onNone: () => "none" as const,
+        onSome: (ranged) => ({
+          network: ranged.network,
+          texts: ranged.items.map(textOf),
+          timeline: ranged.timeline,
+        }),
+      })
+    )
+  );
+
+// Every page of a range, each read after the last position of the one before, fitted together.
+const rangePages = (
+  store: TimelineStoreService,
+  timeline: TimelineId,
+  range: Omit<Range, "after">
+) =>
+  Effect.gen(function* () {
+    const pages: (readonly Item[])[] = [];
+    let after: Position | undefined;
+
+    for (;;) {
+      const page = yield* store.range(timeline, { ...range, after });
+      const items = Option.match(page, { onNone: () => [], onSome: (ranged) => ranged.items });
+
+      pages.push(items);
+
+      const last = items.at(-1);
+
+      if (items.length < range.limit || last === undefined) {
+        return pages;
+      }
+
+      after = last.position;
+    }
+  });
 
 const gap = (sequence: number, from: Position, to: Position | undefined, on = libera): Change => ({
   _tag: "Gap",
@@ -2238,6 +2280,81 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "locates the items a step made, a page at a time",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // Each edge of the range from 10 to 20 has an item at it and one a millisecond
+        // before it, and two items share an instant, one of them late history.
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(9, 2, 0), said("before since")),
+          added(2, channel, position(10, 2, 1), said("at since")),
+          hiding(added(2, channel, position(12, 2, 2), said("hidden")), spam),
+          added(2, channel, position(15, 2, 3), said("first at 15")),
+          added(2, channel, position(19, 2, 4), said("before until")),
+          added(2, channel, position(20, 2, 5), said("at until")),
+          added(2, channel, position(25, 2, 6), said("after")),
+          added(2, other, position(14, 2, 7), said("elsewhere")),
+        ]);
+        yield* apply(store, 3, [added(3, channel, position(15, 3), said("late at 15"))]);
+
+        const inside = ["at since", "first at 15", "late at 15", "before until"];
+        const range = { limit: 100, since: at(10), until: at(20) };
+
+        yield* same(
+          "in position order, hidden left out",
+          yield* rangeOf(store, channel, { limit: 100 }),
+          {
+            network: libera,
+            texts: ["before since", ...inside, "at until", "after"],
+            timeline: channel,
+          }
+        );
+        yield* same("each edge exact", yield* rangeOf(store, channel, range), {
+          network: libera,
+          texts: inside,
+          timeline: channel,
+        });
+        yield* same("since alone", yield* rangeOf(store, channel, { limit: 100, since: at(20) }), {
+          network: libera,
+          texts: ["at until", "after"],
+          timeline: channel,
+        });
+        yield* same("until alone", yield* rangeOf(store, channel, { limit: 100, until: at(10) }), {
+          network: libera,
+          texts: ["before since"],
+          timeline: channel,
+        });
+        yield* same("up to the limit", yield* rangeOf(store, channel, { ...range, limit: 2 }), {
+          network: libera,
+          texts: inside.slice(0, 2),
+          timeline: channel,
+        });
+
+        for (const limit of [1, 2, 3]) {
+          const pages = yield* rangePages(store, channel, { ...range, limit });
+
+          yield* same(`pages of ${limit}, fitted together`, pages.flat().map(textOf), inside);
+          yield* same(
+            `pages of ${limit}, each within it`,
+            pages.every((page) => page.length <= limit),
+            true
+          );
+        }
+
+        yield* same("an id never given", yield* rangeOf(store, third, range), "none");
+
+        yield* apply(store, 4, [
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 4 },
+        ]);
+        yield* same("a merged id, through its tombstone", yield* rangeOf(store, other, range), {
+          network: libera,
+          texts: ["at since", "elsewhere", "first at 15", "late at 15", "before until"],
+          timeline: channel,
+        });
+      }),
+    name: "reads a range of a Timeline in position order, its ends exact, a page at a time",
   },
   {
     check: (store) =>

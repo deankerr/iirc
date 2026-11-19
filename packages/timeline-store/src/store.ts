@@ -199,6 +199,27 @@ export interface Window {
 }
 
 /**
+ * Which of a Timeline's items a range reads, in position order: those whose position's time
+ * is at or after `since` and before `until`, strictly after the position `after`, where the
+ * page before ended, up to `limit`. Either end of the range may be left open.
+ */
+export interface Range {
+  readonly since?: Instant | undefined;
+  readonly until?: Instant | undefined;
+  readonly after?: Position | undefined;
+  readonly limit: number;
+}
+
+/** A page of a range of a Timeline's items, in position order. */
+export interface Ranged {
+  /** The Timeline read, which is the one a merged id went to. */
+  readonly timeline: TimelineId;
+  /** The Network the Timeline is one of. */
+  readonly network: string;
+  readonly items: readonly Item[];
+}
+
+/**
  * A step that changed more than a page holds, given without what it changed: its sequence,
  * and the ids of the Timelines it touched or merged, in id order, or `undefined` when even
  * they are more than the page holds, which says to read everything again.
@@ -328,6 +349,15 @@ export interface TimelineStoreService {
     anchor: Anchor,
     limit: number
   ) => Effect.Effect<Option.Option<Window>, TimelineStoreFailed>;
+  /**
+   * A page of a range of a Timeline's items, in position order, following a merged id to
+   * where it went, or `None` when no Timeline ever had the id. Pages fitted together, each
+   * read after the last position of the one before, give the range whole, each item once.
+   */
+  readonly range: (
+    timeline: TimelineId,
+    range: Range
+  ) => Effect.Effect<Option.Option<Ranged>, TimelineStoreFailed>;
   /**
    * The items a step made, in position order, and at one position by Timeline id: those
    * after the item `after` names in that order, up to `limit`, or every one without a page.

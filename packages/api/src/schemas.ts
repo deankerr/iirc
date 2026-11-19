@@ -1621,6 +1621,20 @@ export const TimelineChangesEvent = Schema.Union([
 /** The decoded form of {@link TimelineChangesEvent}. */
 export type TimelineChangesEvent = typeof TimelineChangesEvent.Type;
 
+// Exporting a Timeline.
+
+/**
+ * Which of a Timeline's items an export gives: those whose position's time is at or after
+ * `since` and before `until`, or the whole Timeline when neither is given.
+ */
+export const ExportQuery = Schema.Struct({
+  since: Schema.optionalKey(InstantFromString),
+  until: Schema.optionalKey(InstantFromString),
+});
+
+/** The decoded form of {@link ExportQuery}. */
+export type ExportQuery = typeof ExportQuery.Type;
+
 // Knowledge.
 
 /** Where Self stands with a Channel: wanted, joining, in it, refused, or kicked. */
