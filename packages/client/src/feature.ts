@@ -26,8 +26,9 @@ export type Kept =
    */
   | "user.account.tagged"
   | "user.account.joined"
+  /** A User's mask, as `CHGHOST` and a `NAMES` listing say it. */
   | "user.mask"
-  /** Another User's realname, as their join says it. */
+  /** A User's realname, as their join and `SETNAME` say it. */
   | "user.realname"
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
   | "member.prefixes"
@@ -142,13 +143,14 @@ export type Meant =
     }
   | {
       /**
-       * What a Line said of a User: their account, `null` for logged out, and their
-       * realname. Only the model sees it. It is folded only from a live Line, and only for
+       * What a Line said of a User: their account, `null` for logged out, their mask, and
+       * their realname. Only the model sees it. It is folded only from a live Line, and only for
        * a User who shares a Channel with Self.
        */
       readonly _tag: "Described";
       readonly nick: string;
       readonly account?: string | null;
+      readonly mask?: { readonly user: string; readonly host: string };
       readonly realname?: string;
     };
 

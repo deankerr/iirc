@@ -17,8 +17,17 @@ import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
-import { isNetworkOnly, isPresenceChange } from "./news.ts";
-import type { Activity, Marked, Named, News, PresenceChange, Unrouted, Where } from "./news.ts";
+import { isNetworkOnly, isPresenceChange, isUserChange } from "./news.ts";
+import type {
+  Activity,
+  Marked,
+  Named,
+  News,
+  PresenceChange,
+  Unrouted,
+  UserChange,
+  Where,
+} from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
 import { sessionOf } from "./views.ts";
@@ -87,13 +96,15 @@ export const isUser = (run: Run, source: Source | undefined): boolean =>
  * `ignored` stamp when the source is a User who matches any, else nothing at all.
  * @param run - The step.
  * @param source - The Line's source, or `undefined` when it has none.
+ * @param also - Who the User became, when the Line changed their mask.
  * @returns The stamp, to spread into the News.
  */
 export const stamped = (
   run: Run,
-  source: Source | undefined
+  source: Source | undefined,
+  also?: Source
 ): { readonly ignored?: readonly IgnoreMask[] } => {
-  const ignored = isUser(run, source) ? ignoredBy(run, source) : undefined;
+  const ignored = isUser(run, source) ? ignoredBy(run, source, also) : undefined;
 
   return ignored === undefined ? {} : { ignored };
 };
@@ -241,6 +252,18 @@ const nickChangedWhere = (
   return [...sharedChannels(run, activity.from), ...renamed];
 };
 
+// What changed of a User: Self's is the Network's. Another User's away status is told in
+// their Direct Messages, and the rest where they are, as a `Quit` is.
+const userChangedWhere = (run: Run, naming: Naming, activity: UserChange): readonly Where[] => {
+  if (isSelf(run, activity.nick)) {
+    return [network];
+  }
+
+  return activity._tag === "AwayChanged"
+    ? theirs(run, naming, activity.nick)
+    : [...sharedChannels(run, activity.nick), ...theirs(run, naming, activity.nick)];
+};
+
 /**
  * The Timelines an Activity touches, before {@link placed}.
  * @param run - The step, before the Activity is folded in.
@@ -259,6 +282,10 @@ const activityTimelines = (
   // Channel Self is not in.
   if (isNetworkOnly(activity)) {
     return [network];
+  }
+
+  if (isUserChange(activity)) {
+    return userChangedWhere(run, naming, activity);
   }
 
   switch (activity._tag) {
@@ -283,18 +310,6 @@ const activityTimelines = (
 
     case "NickChanged": {
       return nickChangedWhere(run, naming, activity, live);
-    }
-
-    case "AwayChanged": {
-      return isSelf(run, activity.nick) ? [network] : theirs(run, naming, activity.nick);
-    }
-
-    // Self's account is the Network's, and another User's is told where they are, as a
-    // `Quit` is.
-    case "AccountChanged": {
-      return isSelf(run, activity.nick)
-        ? [network]
-        : [...sharedChannels(run, activity.nick), ...theirs(run, naming, activity.nick)];
     }
 
     // The core places a standard reply where what it answers belongs, and a CTCP by who
@@ -420,7 +435,14 @@ export const routeActivity = (
 ): ActivityNews => ({
   ...activity,
   where: activityWhere(run, activity.activity, activity.live),
-  ...stamped(run, source),
+  ...stamped(
+    run,
+    source,
+    // A change of mask is ignored by the mask the User had or the one they have now.
+    activity.activity._tag === "HostChanged" && source !== undefined
+      ? { ...source, host: activity.activity.host, user: activity.activity.user }
+      : undefined
+  ),
 });
 
 /**

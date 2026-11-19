@@ -67,7 +67,7 @@ export type Owner =
     }
   /**
    * An action: `!! topic #iirc :text`, `!! kick #iirc a,b :reason`, `!! mode #iirc +o=peer -l`,
-   * `!! invite peer #iirc`, `!! ban-account peer #iirc`, `!! nick new`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
+   * `!! invite peer #iirc`, `!! ban-account peer #iirc`, `!! nick new`, `!! setname :New Name`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
    * Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Act"; readonly action: Action }
@@ -756,6 +756,10 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
   ],
   ["quote", ({ rest }) => (rest === "" ? undefined : { _tag: "Raw", line: rest })],
   [
+    "setname",
+    ({ rest }) => (rest.startsWith(":") ? { _tag: "Setname", realname: rest.slice(1) } : undefined),
+  ],
+  [
     "topic",
     ({ words: [channel = "", ...more], trailing }) =>
       trailing === null || more.length > 0 ? undefined : { _tag: "Topic", channel, text: trailing },
@@ -770,6 +774,10 @@ const writeAction = (action: Action): string => {
 
     case "Away": {
       return action.message === null ? "away" : `away :${action.message}`;
+    }
+
+    case "Setname": {
+      return `setname :${action.realname}`;
     }
 
     case "Topic": {

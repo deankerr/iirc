@@ -24,7 +24,7 @@ import {
 import type { Listed, ModeRules } from "./modes.ts";
 import { applyModes, changePrefix } from "./modes.ts";
 import { changesNothingHere } from "./news.ts";
-import type { Activity, ModeChange } from "./news.ts";
+import type { UserChange, Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
 import type { Channel, Joined, Listing, Looking, Member, Seen, State } from "./state.ts";
@@ -307,11 +307,8 @@ const isSelf = (run: Run, nick: string): boolean => {
 export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void => {
   const folded = folder(run.state)(nick);
 
-  const shared = [...run.state.channels.values()].some(
-    ({ phase }) => phase._tag === "Joined" && phase.members.has(folded)
-  );
-
-  if ((!shared && !keptWatched(run, folded)) || isSelf(run, nick)) {
+  // A member a `NAMES` listing names counts once it is read, though the listing has not ended.
+  if ((!shares(run.state, folded) && !keptWatched(run, folded)) || isSelf(run, nick)) {
     return;
   }
 
@@ -544,6 +541,93 @@ const memberJoined = (run: Run, channel: string, nick: string): void => {
   );
 };
 
+// What a User's Line changed of them: Self's presence takes what Self's own says, and
+// another User's is seen, while they share a Channel with Self.
+const userChanged = (run: Run, activity: UserChange): void => {
+  switch (activity._tag) {
+    case "AwayChanged": {
+      see(run, activity.nick, (seen) => ({
+        ...seen,
+        away: { _tag: "Known", at: run.at, from: "ircd", value: activity.away },
+      }));
+
+      return;
+    }
+
+    case "AccountChanged": {
+      const known = { _tag: "Known", at: run.at, from: "ircd", value: activity.account } as const;
+
+      if (isSelf(run, activity.nick)) {
+        updateOpen(run, (open) => ({ ...open, presence: { ...open.presence, account: known } }));
+      } else {
+        see(run, activity.nick, (seen) => ({ ...seen, account: known }));
+      }
+
+      return;
+    }
+
+    case "HostChanged": {
+      const mask = {
+        _tag: "Known",
+        at: run.at,
+        from: "ircd",
+        value: { host: activity.host, user: activity.user },
+      } as const;
+
+      if (isSelf(run, activity.nick)) {
+        updateOpen(run, (open) =>
+          open.presence._tag === "Session"
+            ? { ...open, presence: { ...open.presence, mask } }
+            : open
+        );
+      } else {
+        see(run, activity.nick, (seen) => ({ ...seen, mask }));
+      }
+
+      return;
+    }
+
+    case "RealnameChanged": {
+      const realname = {
+        _tag: "Known",
+        at: run.at,
+        from: "ircd",
+        value: activity.realname,
+      } as const;
+
+      if (isSelf(run, activity.nick)) {
+        updateOpen(run, (open) =>
+          open.presence._tag === "Session"
+            ? { ...open, presence: { ...open.presence, realname } }
+            : open
+        );
+      } else {
+        see(run, activity.nick, (seen) => ({ ...seen, realname }));
+      }
+
+      return;
+    }
+
+    default: {
+      activity satisfies never;
+    }
+  }
+};
+
+// A User quit: they are in no Channel, listing, or Lookup's listing any more.
+const quitFolded = (run: Run, folded: string): void => {
+  for (const channel of run.state.channels.values()) {
+    changeJoined(run, channel.name, (joined) => ({
+      ...joined,
+      listing: joined.listing === undefined ? undefined : withoutListed(joined.listing, folded),
+      members: withoutMember(joined.members, folded),
+    }));
+  }
+
+  changeLookupListings(run, undefined, (listing) => withoutListed(listing, folded));
+  pruneUsers(run, [folded]);
+};
+
 /**
  * Folds an Activity into the Channels it touches.
  * @param run - The step.
@@ -588,18 +672,7 @@ export const foldActivity = (
     }
 
     case "Quit": {
-      const folded = fold(activity.nick);
-
-      for (const channel of run.state.channels.values()) {
-        changeJoined(run, channel.name, (joined) => ({
-          ...joined,
-          listing: joined.listing === undefined ? undefined : withoutListed(joined.listing, folded),
-          members: withoutMember(joined.members, folded),
-        }));
-      }
-
-      changeLookupListings(run, undefined, (listing) => withoutListed(listing, folded));
-      pruneUsers(run, [folded]);
+      quitFolded(run, fold(activity.nick));
 
       return;
     }
@@ -686,23 +759,11 @@ export const foldActivity = (
       return;
     }
 
-    case "AwayChanged": {
-      see(run, activity.nick, (seen) => ({
-        ...seen,
-        away: { _tag: "Known", at: run.at, from: "ircd", value: activity.away },
-      }));
-
-      return;
-    }
-
-    case "AccountChanged": {
-      const known = { _tag: "Known", at: run.at, from: "ircd", value: activity.account } as const;
-
-      if (isSelf(run, activity.nick)) {
-        updateOpen(run, (open) => ({ ...open, presence: { ...open.presence, account: known } }));
-      } else {
-        see(run, activity.nick, (seen) => ({ ...seen, account: known }));
-      }
+    case "AwayChanged":
+    case "AccountChanged":
+    case "HostChanged":
+    case "RealnameChanged": {
+      userChanged(run, activity);
 
       return;
     }

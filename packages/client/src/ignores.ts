@@ -49,12 +49,15 @@ const everyFold = (masks: readonly IgnoreMask[]): readonly IgnoreMask[] => [
  * whatever the masks.
  * @param run - The step.
  * @param source - The Line's source, when it is a User's, else `undefined`.
+ * @param also - Who the User became, when the Line changed their mask: a mask matching
+ * either counts, so ignoring a host follows it from the User's old one to the new.
  * @returns The masks it matches, folded, in the Configuration's order, each once, or
  * `undefined` when none.
  */
 export const ignoredBy = (
   run: Run,
-  source: Source | undefined
+  source: Source | undefined,
+  also?: Source
 ): readonly IgnoreMask[] | undefined => {
   const masks = run.state.configuration?.ignores ?? [];
 
@@ -64,7 +67,11 @@ export const ignoredBy = (
 
   const found = canonical(
     run,
-    masks.filter((mask) => matches(run.state.casemapping, mask, source))
+    masks.filter(
+      (mask) =>
+        matches(run.state.casemapping, mask, source) ||
+        (also !== undefined && matches(run.state.casemapping, mask, also))
+    )
   );
 
   return found.length === 0 ? undefined : found;

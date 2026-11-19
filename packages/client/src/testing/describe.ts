@@ -222,7 +222,7 @@ const writeRefused = (reason: RefusedReason): string =>
   reason._tag === "Rejected" ? `Rejected ${atom(reason.reply)}` : reason._tag;
 
 // What an action tried, as one attribute: `topic=#iirc`, `kick=#iirc:a,b`,
-// `part=#iirc`, `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `ctcp=peer:VERSION`,
+// `part=#iirc`, `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `setname`, `away`, `back`, `ctcp=peer:VERSION`,
 // `ping=peer`, `raw=WHOIS`, or
 // `raw` for a Line that did not parse.
 const writeAttempted = (attempted: Attempted): string => {
@@ -253,6 +253,10 @@ const writeAttempted = (attempted: Attempted): string => {
 
     case "Away": {
       return attempted.away ? "away" : "back";
+    }
+
+    case "Setname": {
+      return "setname";
     }
 
     case "Raw": {
@@ -467,6 +471,17 @@ const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts
         ],
         tail: [],
       };
+    }
+
+    case "HostChanged": {
+      return {
+        head: [atom(activity.nick), `user=${atom(activity.user)}`, `host=${atom(activity.host)}`],
+        tail: [],
+      };
+    }
+
+    case "RealnameChanged": {
+      return { head: [atom(activity.nick)], tail: trailing(activity.realname) };
     }
 
     case "StandardReply": {

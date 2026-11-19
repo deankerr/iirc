@@ -336,7 +336,7 @@ describe("a required login never goes unmet", () => {
     });
     play(client, {
       configuration: required,
-      transcript: [opened, lines("<< :irc.test CAP * LS :chghost"), givesUp],
+      transcript: [opened, lines("<< :irc.test CAP * LS :invite-notify"), givesUp],
     });
 
     expect.assertions(0);
@@ -407,7 +407,7 @@ describe("a required login never goes unmet", () => {
     });
     play(client, {
       configuration: optional,
-      transcript: [opened, lines("<< :irc.test CAP * LS :chghost", ">> CAP END")],
+      transcript: [opened, lines("<< :irc.test CAP * LS :invite-notify", ">> CAP END")],
     });
     play(client, {
       configuration: optional,

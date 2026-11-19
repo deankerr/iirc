@@ -220,16 +220,26 @@ const ctcp = (source: Ctcp): Ctcp => ({
 
 type Presence = Extract<
   Activity,
-  { readonly _tag: "AccountChanged" | "AwayChanged" | "CameOnline" | "WentOffline" }
+  {
+    readonly _tag:
+      | "AccountChanged"
+      | "AwayChanged"
+      | "CameOnline"
+      | "HostChanged"
+      | "RealnameChanged"
+      | "WentOffline";
+  }
 >;
 
 const isPresence = (source: Activity): source is Presence =>
   source._tag === "AccountChanged" ||
   source._tag === "AwayChanged" ||
   source._tag === "CameOnline" ||
+  source._tag === "HostChanged" ||
+  source._tag === "RealnameChanged" ||
   source._tag === "WentOffline";
 
-// What a User's presence changed to, as an Away, an account, or coming or going.
+// What a User's presence changed to, as an Away, an account, a mask, a realname, or coming or going.
 const presence = (source: Presence): WireActivity => {
   if (source._tag === "CameOnline" || source._tag === "WentOffline") {
     const wire: Case<Activity, WireActivity, typeof source._tag> = {
@@ -245,6 +255,27 @@ const presence = (source: Presence): WireActivity => {
       _tag: "AccountChanged",
       account: source.account,
       nick: source.nick,
+    };
+
+    return wire;
+  }
+
+  if (source._tag === "HostChanged") {
+    const wire: Case<Activity, WireActivity, "HostChanged"> = {
+      _tag: "HostChanged",
+      host: source.host,
+      nick: source.nick,
+      user: source.user,
+    };
+
+    return wire;
+  }
+
+  if (source._tag === "RealnameChanged") {
+    const wire: Case<Activity, WireActivity, "RealnameChanged"> = {
+      _tag: "RealnameChanged",
+      nick: source.nick,
+      realname: source.realname,
     };
 
     return wire;
@@ -598,6 +629,12 @@ const attempted = (source: Attempted): WireAttempted => {
         _tag: "Raw",
         command: source.command,
       };
+
+      return wire;
+    }
+
+    case "Setname": {
+      const wire: Case<Attempted, WireAttempted, "Setname"> = { _tag: "Setname" };
 
       return wire;
     }

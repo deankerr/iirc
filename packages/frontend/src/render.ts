@@ -259,40 +259,15 @@ export type Marker = string;
  * @param activity - The Activity.
  * @returns Its marker.
  */
+const arriving: ReadonlySet<Activity["_tag"]> = new Set(["Joined", "CameOnline"]);
+const leaving: ReadonlySet<Activity["_tag"]> = new Set(["Parted", "Quit", "Kicked", "WentOffline"]);
+
 const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" | "Motd" }>): Marker => {
-  switch (activity._tag) {
-    case "Joined":
-    case "CameOnline": {
-      return "-->";
-    }
-
-    case "Parted":
-    case "Quit":
-    case "Kicked":
-    case "WentOffline": {
-      return "<--";
-    }
-
-    case "NickChanged":
-    case "TopicChanged":
-    case "ModeChanged":
-    case "AwayChanged":
-    case "AccountChanged":
-    case "Invited":
-    case "OperGranted":
-    case "OperRefused":
-    case "StandardReply":
-    case "CtcpRequest":
-    case "CtcpReply":
-    case "CtcpSent":
-    case "CtcpUnsent": {
-      return "--";
-    }
-
-    default: {
-      return activity satisfies never;
-    }
+  if (arriving.has(activity._tag)) {
+    return "-->";
   }
+
+  return leaving.has(activity._tag) ? "<--" : "--";
 };
 
 /**
@@ -412,17 +387,27 @@ const describeInvitation = (
 
 type Presence = Extract<
   Activity,
-  { readonly _tag: "AccountChanged" | "AwayChanged" | "CameOnline" | "WentOffline" }
+  {
+    readonly _tag:
+      | "AccountChanged"
+      | "AwayChanged"
+      | "CameOnline"
+      | "WentOffline"
+      | "HostChanged"
+      | "RealnameChanged";
+  }
 >;
 
 const isPresence = (activity: Activity): activity is Presence =>
   activity._tag === "AccountChanged" ||
+  activity._tag === "HostChanged" ||
+  activity._tag === "RealnameChanged" ||
   activity._tag === "AwayChanged" ||
   activity._tag === "CameOnline" ||
   activity._tag === "WentOffline";
 
 /**
- * A User's away, account, or presence changing, in words.
+ * A User's away, account, mask, real name, or presence changing, in words.
  * @param activity - The Activity.
  * @returns Its parts.
  */
@@ -433,6 +418,14 @@ const describePresence = (activity: Presence): readonly Part[] => {
 
   if (activity._tag === "WentOffline") {
     return [nickPart(activity.nick), words(" went offline")];
+  }
+
+  if (activity._tag === "HostChanged") {
+    return [nickPart(activity.nick), words(" is now "), name(`${activity.user}@${activity.host}`)];
+  }
+
+  if (activity._tag === "RealnameChanged") {
+    return [nickPart(activity.nick), words(" set their real name to "), said(activity.realname)];
   }
 
   if (activity._tag === "AccountChanged") {
@@ -676,6 +669,10 @@ export const requested = (action: ActionRequest): Attempted => {
       return { _tag: "Ping", nick: action.nick };
     }
 
+    case "Setname": {
+      return { _tag: "Setname" };
+    }
+
     default: {
       return action satisfies never;
     }
@@ -751,6 +748,10 @@ const attemptedParts = (attempted: Attempted): readonly Part[] => {
 
     case "Ping": {
       return [words("Your PING of "), nickPart(attempted.nick)];
+    }
+
+    case "Setname": {
+      return [words("Your real name change")];
     }
 
     default: {

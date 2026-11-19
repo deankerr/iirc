@@ -113,6 +113,7 @@ const Activity = Schema.TaggedUnion({
   },
   CtcpSent: { args: Schema.String, command: Schema.String, nick: Schema.String },
   CtcpUnsent: { command: Schema.String, nick: Schema.String, target: Schema.String },
+  HostChanged: { host: Schema.String, nick: Schema.String, user: Schema.String },
   Invited: { by: Schema.String, channel: Schema.String },
   Joined: { channel: Schema.String, nick: Schema.String },
   Kicked: {
@@ -133,6 +134,7 @@ const Activity = Schema.TaggedUnion({
     reason: Schema.UndefinedOr(Schema.String),
   },
   Quit: { nick: Schema.String, reason: Schema.UndefinedOr(Schema.String) },
+  RealnameChanged: { nick: Schema.String, realname: Schema.String },
   StandardReply: {
     code: Schema.String,
     command: Schema.String,
@@ -173,6 +175,7 @@ const Attempted = Schema.TaggedUnion({
   Part: { channel: Schema.String },
   Ping: { nick: Schema.String },
   Raw: { command: Schema.NullOr(Schema.String) },
+  Setname: {},
   Topic: { channel: Schema.String },
 });
 

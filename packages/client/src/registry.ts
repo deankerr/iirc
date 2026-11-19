@@ -10,6 +10,7 @@ import { accountTag } from "./features/account-tag.ts";
 import { awayNotify } from "./features/away-notify.ts";
 import { batch } from "./features/batch.ts";
 import { capNotify } from "./features/cap-notify.ts";
+import { chghost } from "./features/chghost.ts";
 import { echo } from "./features/echo.ts";
 import { extendedJoin } from "./features/extended-join.ts";
 import { extendedMonitor } from "./features/extended-monitor.ts";
@@ -17,7 +18,9 @@ import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
 import { saslPlain } from "./features/sasl.ts";
 import { serverTime } from "./features/server-time.ts";
+import { setname } from "./features/setname.ts";
 import { standardReplies } from "./features/standard-replies.ts";
+import { userhostInNames } from "./features/userhost-in-names.ts";
 import { utf8Only } from "./features/utf8-only.ts";
 
 /** A Feature as the core holds it, with its own state's type forgotten. */
@@ -54,6 +57,10 @@ export const registry: readonly Registered[] = [
   register(accountNotify),
   register(extendedJoin),
   register(extendedMonitor),
+  register(chghost),
+  register(setname),
+  // After `multi-prefix`, which reads the raw names and finds each member by the nick the core read.
+  register(userhostInNames),
   register(utf8Only),
   register(standardReplies),
 ];

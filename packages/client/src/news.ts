@@ -106,6 +106,15 @@ export type Activity =
     }
   /** A User logged in to `account`, or out of theirs with `null`, as an `ACCOUNT` Line says. */
   | { readonly _tag: "AccountChanged"; readonly nick: string; readonly account: string | null }
+  /** A User's user and host changed to `user` and `host`, as a `CHGHOST` Line says: no quit or join. */
+  | {
+      readonly _tag: "HostChanged";
+      readonly nick: string;
+      readonly user: string;
+      readonly host: string;
+    }
+  /** A User set their realname to `realname`, as a `SETNAME` Line says. */
+  | { readonly _tag: "RealnameChanged"; readonly nick: string; readonly realname: string }
   | { readonly _tag: "Invited"; readonly channel: string; readonly by: string }
   | { readonly _tag: "CameOnline"; readonly nick: string }
   | { readonly _tag: "WentOffline"; readonly nick: string }
@@ -151,6 +160,23 @@ export type PresenceChange = Extract<Activity, { readonly _tag: "CameOnline" | "
  */
 export const isPresenceChange = (activity: Activity): activity is PresenceChange =>
   activity._tag === "CameOnline" || activity._tag === "WentOffline";
+
+/** What a User's Line changed of them, which Self's own says of Self: away, account, mask, or realname. */
+export type UserChange = Extract<
+  Activity,
+  { readonly _tag: "AwayChanged" | "AccountChanged" | "HostChanged" | "RealnameChanged" }
+>;
+
+/**
+ * Whether an Activity is a {@link UserChange}.
+ * @param activity - The Activity.
+ * @returns Whether it is.
+ */
+export const isUserChange = (activity: Activity): activity is UserChange =>
+  activity._tag === "AwayChanged" ||
+  activity._tag === "AccountChanged" ||
+  activity._tag === "HostChanged" ||
+  activity._tag === "RealnameChanged";
 
 /**
  * Whether an Activity changes no Channel and answers nothing Self sent: one that is
@@ -255,6 +281,7 @@ export type RefusedReason =
  * - `Invite`: a nick to a Channel.
  * - `Nick`: Self's nick.
  * - `Away`: away, or back with `away` false.
+ * - `Setname`: Self's realname, never the realname itself.
  * - `Raw`: a Line written as text, by its command, or `null` when it did not parse.
  * - `Ctcp`: a CTCP request to a nick, by its command, upper-cased.
  * - `Ping`: a CTCP `PING` to a nick.
@@ -267,6 +294,7 @@ export type Attempted =
   | { readonly _tag: "Invite"; readonly nick: string; readonly channel: string }
   | { readonly _tag: "Nick"; readonly nick: string }
   | { readonly _tag: "Away"; readonly away: boolean }
+  | { readonly _tag: "Setname" }
   | { readonly _tag: "Raw"; readonly command: string | null }
   | { readonly _tag: "Ctcp"; readonly nick: string; readonly command: string }
   | { readonly _tag: "Ping"; readonly nick: string }
@@ -274,8 +302,8 @@ export type Attempted =
 
 /**
  * Where an action of the Owner's belongs, to show its refusal: the Channel it was about,
- * when the Client held that Channel as it was asked for, and otherwise, and for a nick,
- * away, a raw Line, and Self's own modes, the Network's own Timeline.
+ * when the Client held that Channel as it was asked for, and otherwise, and for a nick, a
+ * realname, away, a raw Line, and Self's own modes, the Network's own Timeline.
  */
 export type ActionWhere = Extract<Where, { readonly _tag: "Network" | "Channel" }>;
 
