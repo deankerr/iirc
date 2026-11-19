@@ -237,7 +237,7 @@ export const layerAwayWhenClosed = Layer.effect(Following)(
       Effect.tap((folded) => SubscriptionRef.set(held, folded.held))
     );
 
-    // Then each one journaled after it. Only an `Away` act changes what is held, and only a
+    // Then each one journaled after it. Only an `Away` act or a removal changes what is held, and only a
     // change is told.
     const followFrom = (last: Sequence | undefined) =>
       journal.follow(last === undefined ? {} : { after: last }).pipe(
