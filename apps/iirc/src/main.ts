@@ -8,59 +8,21 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import {
   createKey,
   DataDirectoryFailed,
-  defaultListen,
   holdDataDirectory,
   KeyName,
   layerDaemon,
   layerLogger,
 } from "@iirc/daemon";
-import type { Beside, Listen } from "@iirc/daemon";
-import {
-  Cause,
-  Console,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Option,
-  Redacted,
-  Runtime,
-  Schema,
-  SchemaGetter,
-} from "effect";
+import type { Beside } from "@iirc/daemon";
+import { Cause, Console, Effect, Exit, FileSystem, Layer, Option, Redacted, Runtime } from "effect";
 import { Argument, Command, Flag } from "effect/cli";
 import { Digest, SecureRandom } from "effect/crypto";
 
 import { failed, reportedOnStderr } from "./command-failed.ts";
+import { health } from "./health.ts";
+import { listenFlag } from "./listen.ts";
 import { layerWeb } from "./web.ts";
 import type { WebSource } from "./web.ts";
-
-/** `host:port`, with an IPv6 host in brackets, such as `[::1]:7667`. */
-const ListenAddress = Schema.String.check(
-  Schema.isPattern(/^(?:\[[0-9A-Fa-f:.]+\]|[^\s:[\]]+):\d{1,5}$/u, {
-    message: "must be host:port, such as 127.0.0.1:7667 or [::1]:7667",
-  })
-).pipe(
-  Schema.decodeTo(
-    Schema.Struct({
-      host: Schema.String,
-      port: Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 0 })),
-    }),
-    {
-      decode: SchemaGetter.transform((text: string) => {
-        const colon = text.lastIndexOf(":");
-
-        return {
-          host: text.slice(0, colon).replace(/^\[(?<inner>.*)\]$/u, "$<inner>"),
-          port: Number(text.slice(colon + 1)),
-        };
-      }),
-      encode: SchemaGetter.transform(({ host, port }: Listen) =>
-        host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`
-      ),
-    }
-  )
-);
 
 const dataDir = Flag.String("data-dir").pipe(
   Flag.withDescription("Directory holding the Journal, the Credentials, and the API keys")
@@ -88,11 +50,7 @@ const daemon = Command.make(
   "daemon",
   {
     dataDir,
-    listen: Flag.String("listen").pipe(
-      Flag.withSchema(ListenAddress),
-      Flag.withDescription("Where the API listens, loopback unless a proxy fronts it"),
-      Flag.withDefault(defaultListen)
-    ),
+    listen: listenFlag("Where the API listens, loopback unless a proxy fronts it"),
     web: Flag.String("web").pipe(
       // A bare `--web` reads as `--web=`, an empty path, which names no directory: the
       // build compiled into this executable.
@@ -263,7 +221,7 @@ const key = Command.make("key").pipe(
 
 const iirc = Command.make("iirc").pipe(
   Command.withDescription("An always-on IRC client"),
-  Command.withSubcommands([daemon, key])
+  Command.withSubcommands([daemon, health, key])
 );
 
 // `runMain` interrupts main on SIGINT and SIGTERM, which is how a Daemon is asked to stop,

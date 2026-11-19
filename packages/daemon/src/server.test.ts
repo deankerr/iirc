@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync } from "node:fs"
 
 import { BunFileSystem, BunHttpServer } from "@effect/platform-bun";
 import {
+  DaemonApi,
   Happened,
   ItemAfter,
   LookedAnswer,
@@ -14,13 +15,18 @@ import {
 import type { NetworkConfiguration } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
+import { TimelineStoreFailed } from "@iirc/timeline-store";
+import type { TimelineStoreService } from "@iirc/timeline-store";
 import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
-import { Context, Duration, Effect, Layer, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Ref, Schema } from "effect";
 import type { Scope } from "effect";
+import { constVoid } from "effect/Function";
 import { HttpRouter, HttpServer } from "effect/http";
+import { HttpApi } from "effect/http-api";
 import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { eventually } from "./testing/running.ts";
 import {
   layerWorld,
   makeKey,
@@ -52,9 +58,14 @@ interface Served {
  * the live clock, with heartbeats every 50 ms.
  * @param dataDir - The data directory, which holds the keys and the sign-ins.
  * @param key - The key requests present unless told otherwise.
+ * @param wrap - What to make of the Timeline store, itself unless given.
  * @returns The server, which stops when the Scope closes.
  */
-const serveOn = (dataDir: string, key: string) =>
+const serveOn = (
+  dataDir: string,
+  key: string,
+  wrap: (store: TimelineStoreService) => TimelineStoreService = (store) => store
+) =>
   Effect.gen(function* () {
     const journal = yield* makeSqliteJournal(`${dataDir}/journal.sqlite`);
 
@@ -62,7 +73,7 @@ const serveOn = (dataDir: string, key: string) =>
       Effect.provide(BunFileSystem.layer)
     );
 
-    const world = yield* makeWorld(journal, store);
+    const world = yield* makeWorld(journal, wrap(store));
 
     const server = HttpRouter.serve(ApiRoutes, {
       disableListenLog: true,
@@ -1435,4 +1446,144 @@ describe("the API over a real server", () => {
       stored: all.some((secret) => result.stored.includes(secret)),
     }).toStrictEqual({ logged: false, shown: false, stored: false });
   });
+});
+
+/**
+ * Asks whether the Daemon is well.
+ * @param served - The server.
+ * @param key - The key to present, or `null` for none.
+ * @returns The status and the body.
+ */
+const health = (served: Served, key: string | null) =>
+  served
+    .request("/api/health", { key })
+    .pipe(
+      Effect.flatMap((response) =>
+        textOf(response).pipe(Effect.map((body) => [response.status, body] as const))
+      )
+    );
+
+describe("whether the Daemon is well, over a real server", () => {
+  // A reason that holds a path, as a store's own can, which the answer must never carry.
+  const reason = "SQLITE_FULL writing /home/owner/.local/share/iirc/views.sqlite";
+
+  /**
+   * Serves the API on a Timeline store that fails every read of how far it folded, and
+   * every apply, once armed, so the step to fail is the first one folded after arming it.
+   * @param keyed - Whether the data directory holds a key.
+   * @param armedFromStart - Whether it is armed before the projector starts.
+   * @returns The server, and arming.
+   */
+  const serveArmed = (keyed: boolean, armedFromStart = false) =>
+    Effect.gen(function* () {
+      const dataDir = yield* temporaryDirectory;
+      const key = keyed ? yield* makeKey(dataDir) : "iirc_no-key-was-made";
+      const armed = yield* Ref.make(armedFromStart);
+
+      const failing = <A>(effect: Effect.Effect<A, TimelineStoreFailed>) =>
+        Effect.flatMap(Ref.get(armed), (now) =>
+          now ? Effect.fail(new TimelineStoreFailed({ reason })) : effect
+        );
+
+      const served = yield* serveOn(dataDir, key, (store) => ({
+        ...store,
+        apply: (step) => failing(store.apply(step)),
+        folded: failing(store.folded),
+      }));
+
+      return { arm: Ref.set(armed, true), served };
+    });
+
+  const well = [200, '{"_tag":"Well"}'];
+  const unwell = [503, '{"_tag":"Unwell","part":"projector"}'];
+
+  it("is well before the step the store fails, and unwell after it, asked without a key", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { arm, served } = yield* serveArmed(true);
+          const call = yield* talk(served, ["one"]);
+
+          // "one" is folded: the peer's Timeline is listed.
+          yield* eventually(
+            Effect.flatMap(served.request("/api/networks/libera/timelines"), textOf),
+            (body) => decodeList(body).timelines.some((timeline) => timeline.name === "peer")
+          );
+
+          const before = yield* health(served, null);
+
+          yield* arm;
+          yield* say(call, ":peer!u@h PRIVMSG iirc :two");
+
+          const after = yield* eventually(health(served, null), ([status]) => status !== 200);
+
+          return { after, before, withKey: yield* health(served, served.key) };
+        })
+      )
+    );
+
+    expect(result).toStrictEqual({ after: unwell, before: well, withKey: unwell });
+  });
+
+  it("answers the same on a Daemon with no keys", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* serveArmed(false);
+          const stopped = yield* serveArmed(false, true);
+
+          return {
+            running: yield* health(running.served, null),
+            stopped: yield* eventually(health(stopped.served, null), ([status]) => status !== 200),
+          };
+        })
+      )
+    );
+
+    expect(result).toStrictEqual({ running: well, stopped: unwell });
+  });
+
+  // Every route of the contract, with each path parameter filled in, but asking whether
+  // the Daemon is well and signing a browser in and out.
+  interface Route {
+    readonly method: string;
+    readonly path: string;
+  }
+
+  const keyed: Route[] = [];
+
+  HttpApi.reflect(DaemonApi, {
+    onEndpoint: ({ endpoint, group }) => {
+      if (group.identifier !== "health" && group.identifier !== "signIn") {
+        keyed.push({ method: endpoint.method, path: endpoint.path.replaceAll(/:\w+/gu, "x") });
+      }
+    },
+    onGroup: constVoid,
+  });
+
+  it.each([
+    ["with keys", true],
+    ["with none", false],
+  ])(
+    "leaves every other route refusing without a key or a sign-in, on a Daemon %s",
+    async (_, withKeys) => {
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { served } = yield* serveArmed(withKeys);
+
+            const ask = ({ method, path }: Route) =>
+              served
+                .request(path, { key: null, method })
+                .pipe(Effect.map((response) => `${response.status} ${method} ${path}`));
+
+            return yield* Effect.forEach(keyed, ask, { concurrency: 1 });
+          })
+        )
+      );
+
+      expect(keyed.length).toBeGreaterThan(40);
+      expect(result).toStrictEqual(keyed.map(({ method, path }) => `401 ${method} ${path}`));
+    }
+  );
 });

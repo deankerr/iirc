@@ -8,11 +8,13 @@ iirc daemon --data-dir ~/.local/share/iirc              # serves on 127.0.0.1:76
 iirc daemon --data-dir ~/.local/share/iirc --listen 127.0.0.1:7700
 iirc daemon --data-dir ~/.local/share/iirc --web                 # and the web frontend built in
 iirc daemon --data-dir ~/.local/share/iirc --web=apps/web/dist   # or one built into a directory
+iirc health                                              # exits 0 while the Daemon is well
 ```
 
 | Command | Does |
 | --- | --- |
 | `iirc daemon --data-dir <dir> [--listen host:port] [--web[=<dir>]]` | Runs the Daemon on the data directory, serving the API on loopback, `127.0.0.1:7667` unless given. An IPv6 host goes in brackets, such as `[::1]:7667`. With `--web`, it also serves the web frontend on the same origin: the one compiled into the executable, or with `--web=<dir>`, the one built into that directory. The directory is joined by `=`, so `--web` never takes the next argument for one. |
+| `iirc health [--listen host:port]` | Asks the Daemon at the address it listens on, taken as `iirc daemon` takes it with the same default, whether it is well, for a container's health check or a service manager. It exits 0 if so, and 1 with one line on stderr when the Daemon answers unwell, naming the part, or when nothing answers within 5 s. A wildcard, such as `0.0.0.0` or `[::]`, is asked on loopback of the same family. It asks that address directly, never through a proxy the environment names, and follows no redirect. |
 | `iirc key create <name> --data-dir <dir>` | Makes an API key, stores its hash, and prints the key on stdout. It holds the data directory while it does, so it refuses while a Daemon runs on it. |
 
 Either makes the data directory, mode `0700`, if it is missing.
@@ -65,7 +67,7 @@ Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from 
 
 - **SIGINT and SIGTERM exit 0.** `BunRuntime.runMain` interrupts the Daemon, which stops the Runtime, then serving, then the rest, and an interrupt is a clean exit rather than the default 130.
 - **stdout holds only what was asked for.** The key from `iirc key create` is alone on stdout, so `KEY=$(iirc key create …)` holds nothing else. Logs, as logfmt, and every refusal go to stderr.
-- **A refusal is one line in words, and exits 1:** a data directory another Daemon holds, a key name taken, a Journal of another version, a Timeline store that cannot be opened, a port it cannot listen on, a web frontend that cannot be served.
+- **A refusal is one line in words, and exits 1:** an unwell Daemon, or none answering, to `iirc health`, a data directory another Daemon holds, a key name taken, a Journal of another version, a Timeline store that cannot be opened, a port it cannot listen on, a web frontend that cannot be served.
 
 ## Tests
 
