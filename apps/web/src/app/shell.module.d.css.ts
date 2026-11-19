@@ -11,9 +11,11 @@ declare const styles: {
   readonly markDirect: string;
   readonly markHighlight: string;
   readonly markMessage: string;
+  readonly reason: string;
   readonly scrim: string;
   readonly shell: string;
   readonly show: string;
+  readonly stopped: string;
   readonly title: string;
   readonly view: string;
   readonly withSidebar: string;
