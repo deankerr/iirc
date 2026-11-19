@@ -122,6 +122,7 @@ const Activity = Schema.TaggedUnion({
     reason: Schema.UndefinedOr(Schema.String),
   },
   ModeChanged: { by: Schema.String, changes: Schema.Array(ModeChange), target: Schema.String },
+  Motd: { cut: Schema.Boolean, lines: Schema.Array(Schema.String) },
   NickChanged: { from: Schema.String, to: Schema.String },
   Numeric: { numeric: Schema.String, params: Schema.Array(Schema.String) },
   OperGranted: { nick: Schema.String },

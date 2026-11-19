@@ -482,6 +482,28 @@ const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
   return daemon.reads;
 };
 
+/**
+ * The message of the day's folded line, in the open Timeline.
+ * @returns Its button.
+ */
+const motdButton = () => logOf().querySelector<HTMLButtonElement>("button[aria-expanded]");
+
+/**
+ * The message of the day's text, while it is open.
+ * @returns Its text.
+ */
+const motdBlock = () => logOf().querySelector("pre")?.textContent;
+
+/**
+ * What the message of the day shows: its line's words, whether it says it is open, and its text.
+ * @returns Them.
+ */
+const seen = () => [
+  motdButton()?.textContent,
+  motdButton()?.getAttribute("aria-expanded"),
+  motdBlock(),
+];
+
 describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
@@ -933,6 +955,49 @@ describe("what the view says it shows", () => {
         row: "-- peer invited you to #elsewhere join",
       },
     });
+  });
+
+  it("shows a message of the day as one folded line that a press opens to its lines and closes again", async () => {
+    const motd: typeof TimelineItem.Encoded = {
+      ...joined(1),
+      content: {
+        _tag: "Activity",
+        activity: { _tag: "Motd", cut: true, lines: ["- Welcome", "-   spaced  out"] },
+        at: { _tag: "Unknown" },
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+      level: null,
+      timeline: own,
+    };
+
+    const { registry } = await signedIn([], [], {}, [motd]);
+
+    await openFromPalette("libera");
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().querySelector("button[aria-expanded]") !== null);
+
+    const folded = seen();
+
+    await act(async () => {
+      motdButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settled(() => motdBlock() !== undefined);
+
+    const opened = seen();
+
+    await act(async () => {
+      motdButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settled(() => motdBlock() === undefined);
+
+    expect([folded, opened, seen()]).toStrictEqual([
+      ["\u25B8 Message of the day, 2 lines, cut short", "false", undefined],
+      ["\u25BE Message of the day, 2 lines, cut short", "true", "Welcome\n  spaced  out"],
+      ["\u25B8 Message of the day, 2 lines, cut short", "false", undefined],
+    ]);
   });
 
   it("shows what a reply answers above it, and goes to that Message when pressed", async () => {

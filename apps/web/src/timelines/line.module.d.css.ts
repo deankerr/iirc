@@ -21,6 +21,10 @@ declare const styles: {
   readonly menued: string;
   readonly message: string;
   readonly more: string;
+  readonly motd: string;
+  readonly motdBlock: string;
+  readonly motdSummary: string;
+  readonly motdText: string;
   readonly new: string;
   readonly newText: string;
   readonly nick0: string;

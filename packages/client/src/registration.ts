@@ -159,6 +159,7 @@ export const begin = (run: Run): void => {
     lookups: [],
     modesQuery: undefined,
     monitoring: unmonitored,
+    motd: undefined,
     opened: run.at,
     pings: [],
     pingsSent: 0,

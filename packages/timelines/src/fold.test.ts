@@ -414,6 +414,34 @@ describe("a numeric", () => {
   );
 });
 
+describe("a message of the day", () => {
+  it.each([true, false])(
+    "is an item in the Network's Timeline with no level, so it never counts, live %s",
+    (live) => {
+      const { changes } = fold([
+        happened(1, [
+          {
+            _tag: "Activity",
+            activity: { _tag: "Motd", cut: false, lines: ["- Welcome"] },
+            at: known(t0),
+            id: unknown,
+            live,
+            where: [network],
+          },
+        ]),
+      ]);
+
+      expect(
+        ofTag(changes, "Added").map(({ content, level, timeline }) => [
+          content._tag === "Activity" && content.activity._tag,
+          timeline,
+          level,
+        ])
+      ).toStrictEqual([["Motd", timelineIdOf(1, 0, 0), undefined]]);
+    }
+  );
+});
+
 const readMarker = (where: Marked, read: Instant): News => ({
   _tag: "ReadMarker",
   read,

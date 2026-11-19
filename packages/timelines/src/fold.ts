@@ -375,7 +375,7 @@ const kindOf = (where: Where): Kind => {
 const levelOf = (news: Routed, kind: Kind): Level | undefined => {
   if (news._tag === "Activity") {
     // What an Ircd says as it goes about its business calls for no one: it never counts.
-    if (news.activity._tag === "Numeric") {
+    if (news.activity._tag === "Numeric" || news.activity._tag === "Motd") {
       return undefined;
     }
 
