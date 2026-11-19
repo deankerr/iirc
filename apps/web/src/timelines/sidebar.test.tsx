@@ -197,6 +197,20 @@ const row = (name: string) => {
 };
 
 /**
+ * How a Network's row says its connection stands: to a screen reader, as a symbol drawn,
+ * filled, half filled, or empty, whatever else holds it, and in its title.
+ * @param name - The Network.
+ * @returns Its label, the symbols drawn, and the title, if one is.
+ */
+const standing = (name: string) => ({
+  label: row(name).getAttribute("aria-label"),
+  symbols: [...row(name).querySelectorAll('[aria-hidden="true"]')].flatMap((mark) =>
+    /^[●◐○]$/u.test(mark.textContent) ? [mark.textContent] : []
+  ),
+  title: row(name).querySelector<HTMLElement>("[title]")?.title ?? null,
+});
+
+/**
  * A button, by its label or its text.
  * @param name - Its label or text.
  * @returns It, or none.
@@ -367,15 +381,24 @@ describe("the sidebar", () => {
     });
   });
 
-  it("says how a connection stands as a symbol, keeping the word in its label and title", async () => {
-    await signedIn();
-    const standing = row("libera").querySelector<HTMLElement>("[title]");
+  it("marks a Network's connection only when it is not connected, saying both to a screen reader", async () => {
+    const fake = fakeDaemon();
 
-    expect({
-      label: row("libera").getAttribute("aria-label"),
-      symbol: standing?.textContent,
-      title: standing?.title,
-    }).toStrictEqual({ label: "libera, connected", symbol: "●", title: "connected" });
+    fake.daemon.timelines.set("oftc", [
+      {
+        gaps: [],
+        items: [],
+        timeline: { ...describeTimeline(idOf(10), "oftc", "Network"), network: "oftc" },
+      },
+    ]);
+    await signedIn({ listed: 1, timelines: [] }, fake);
+    // Each Network's connection is read on its own, so oftc's may come after libera's.
+    await settled(() => standing("oftc").label === "oftc, offline");
+
+    expect([standing("libera"), standing("oftc")]).toStrictEqual([
+      { label: "libera, connected", symbols: [], title: null },
+      { label: "oftc, offline", symbols: ["○"], title: "offline" },
+    ]);
   });
 
   it("marks a Timeline another Pane shows, more quietly, with that Pane's number", async () => {

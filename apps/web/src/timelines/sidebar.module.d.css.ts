@@ -3,7 +3,6 @@ declare const styles: {
   readonly action: string;
   readonly calling: string;
   readonly chevron: string;
-  readonly connected: string;
   readonly connecting: string;
   readonly controls: string;
   readonly counts: string;
