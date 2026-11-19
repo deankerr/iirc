@@ -176,8 +176,9 @@ const Profile = ({
 };
 
 /**
- * One mask of a Channel's list: the mask, who set it and when, dimly, and while Self may, a
- * button that removes it, which the card then no longer shows.
+ * One mask of a Channel's list: the mask, or for a ban by account, a dim word `account` and
+ * the account, then the mask dimly, who set it and when, dimly, and while Self may, a
+ * button that removes the mask, which the card then no longer shows.
  * @param props - The mask, and the Pane whose card it is on.
  * @returns The mask.
  */
@@ -188,7 +189,14 @@ const Mask = ({ mask, pane }: { readonly mask: MaskShown; readonly pane: string 
 
   return (
     <li className={styles.mask}>
-      <bdi>{mask.mask}</bdi>
+      {mask.account === undefined ? (
+        <bdi>{mask.mask}</bdi>
+      ) : (
+        <>
+          <span className={styles.dim}>account</span> <bdi>{mask.account}</bdi>{" "}
+          <bdi className={styles.dim}>{mask.mask}</bdi>
+        </>
+      )}
       {set.length === 0 ? null : (
         <span className={styles.dim}>
           {" set by "}

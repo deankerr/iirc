@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
-import type { Member, Timeline } from "@iirc/api";
+import type { ChannelHeader, Member, Timeline } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -88,11 +88,17 @@ const hostilePeer: LookScript = {
  * @param timeline - Its Timeline.
  * @param name - Its name.
  * @param held - The prefix modes Self holds.
+ * @param accountBan - How its Network's bans name an account, if they do.
  * @returns The head, as the wire carries it.
  */
-const headOf = (timeline: string, name: string, held: readonly string[]) =>
+const headOf = (
+  timeline: string,
+  name: string,
+  held: readonly string[],
+  accountBan: (typeof ChannelHeader.Encoded)["accountBan"] = null
+) =>
   ({
-    accountBan: null,
+    accountBan,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held: { _tag: "Known", at: 1, from: "ircd", value: [...held] },
@@ -134,12 +140,14 @@ const settled = async (holds: () => boolean) => {
  * @param held - The prefix modes Self holds in `#iirc`.
  * @param scripts - How the Daemon answers each `look`.
  * @param opsHeld - The prefix modes Self holds in `#ops`, which no Pane shows.
+ * @param accountBan - How `#iirc`'s Network's bans name an account, if they do.
  * @returns The fake, the registry, and the page.
  */
 const signedInHolding = async (
   held: readonly string[],
   scripts: readonly LookScript[],
-  opsHeld: readonly string[] = ["o"]
+  opsHeld: readonly string[] = ["o"],
+  accountBan: (typeof ChannelHeader.Encoded)["accountBan"] = null
 ) => {
   const fake = fakeDaemon();
 
@@ -150,7 +158,7 @@ const signedInHolding = async (
     { gaps: [], items: [], timeline: listed(ops, "#ops", "Channel") },
   ]);
   fake.daemon.channels.set(iirc, {
-    header: headOf(iirc, "#iirc", held),
+    header: headOf(iirc, "#iirc", held, accountBan),
     members: [member("op", ["o"]), member("peer")],
   });
   // Another Channel, which no Pane shows.
@@ -595,6 +603,49 @@ describe("the Lookup card", () => {
       looks: [{ _tag: "Bans", channel: "#iirc" }],
       masks: ["bad!*@* set by op!u@h×", `${override}worse!*@*‬×`],
       removable: ["Close the Lookup", "Remove bad!*@*", `Remove ${override}worse!*@*‬`],
+    });
+  });
+
+  it("lists a ban by account as the account, with its mask dimly beside it, and still removes the mask", async () => {
+    const bans: LookScript = {
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "Listed",
+        cut: null,
+        masks: [
+          { mask: "~account:bob", setAt: null, setBy: "op!u@h" },
+          { mask: "bad!*@*", setAt: null, setBy: null },
+        ],
+        notes: [],
+      },
+    };
+
+    const { container, daemon } = await signedInHolding(["o"], [bans], ["o"], {
+      names: ["account", "a"],
+      prefix: "~",
+    });
+
+    await inComposer(container, "/bans", "Enter");
+    await settled(() => card()?.textContent.includes("bad!*@*") === true);
+
+    const drawn = [...(card()?.querySelectorAll("li") ?? [])].map((one) => one.textContent);
+
+    await act(async () => {
+      card()?.querySelector<HTMLElement>('button[aria-label="Remove ~account:bob"]')?.click();
+      await Promise.resolve();
+    });
+    await settled(() => daemon.acts.length === 1);
+
+    expect({ acts: daemon.acts.map((one) => one.action), drawn }).toStrictEqual({
+      acts: [
+        {
+          _tag: "Mode",
+          changes: [{ mode: "b", param: "~account:bob", set: false }],
+          target: "#iirc",
+        },
+      ],
+      drawn: ["account bob ~account:bob set by op!u@h×", "bad!*@*×"],
     });
   });
 

@@ -26,11 +26,12 @@ type Held = (typeof ChannelHeader.Encoded)["held"];
 /**
  * `#iirc`'s head, on a Network whose `PREFIX` is `(qohv)~@%+`, with Self holding what is given.
  * @param held - The prefix modes Self holds, as far as known.
+ * @param accountBan - How its bans name an account, if they do.
  * @returns The head.
  */
-const headOf = (held: Held) =>
+const headOf = (held: Held, accountBan: (typeof ChannelHeader.Encoded)["accountBan"] = null) =>
   Schema.decodeSync(ChannelHeader)({
-    accountBan: null,
+    accountBan,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held,
@@ -75,6 +76,11 @@ const inChannel = (held: Held): CommandContext => ({
   ...around,
   focus: focus("Channel", "#iirc"),
   head: headOf(held),
+});
+
+const inAccountChannel = (held: Held): CommandContext => ({
+  ...inChannel(held),
+  head: headOf(held, { names: ["account", "a"], prefix: "~" }),
 });
 
 const here = (prefixes: readonly string[] | undefined): Presence => ({ _tag: "Here", prefixes });
@@ -194,6 +200,36 @@ describe("the menu on a nick", () => {
     ]);
   });
 
+  it("offers ban account right after ban where the Network's bans name an account, running /ban -a", () => {
+    const context = inAccountChannel(known(["o"]));
+    const { entries } = nickEntries("peer", timeline, here([]), context);
+
+    const composed = (line: string) => {
+      const read = interpret(line, context);
+
+      return read._tag === "Parsed" ? read.value : read.message;
+    };
+
+    expect({
+      gone: ids(context, { _tag: "Gone" }),
+      listed: entries.map((entry) => entry.id),
+      none: ids(inChannel(known(["o"]))),
+      notOperator: ids(inAccountChannel(known([]))),
+      ran: entries.find((entry) => entry.id === "ban-account"),
+    }).toStrictEqual({
+      gone: [...everyone, "ban", "ban-account"],
+      listed: [...everyone, "ban", "ban-account", "op", "deop", "voice", "devoice", "kick"],
+      none: operator,
+      notOperator: everyone,
+      ran: {
+        id: "ban-account",
+        intents: composed("/ban -a peer"),
+        label: "Ban peer's account",
+        text: "ban account",
+      },
+    });
+  });
+
   it("offers nothing to operate outside a Channel", () => {
     const direct: CommandContext = { ...around, focus: focus("Direct", "peer"), head: undefined };
     const own: CommandContext = { ...around, focus: focus("Network", "libera"), head: undefined };
@@ -237,18 +273,20 @@ describe("the menu on a nick", () => {
       notOperatorSessionUnknown: coming({ ...inChannel(known([])), session: undefined }),
       otherHead: coming({ ...op, head: { ...headOf(known(["o"])), timeline: other } }),
       presenceReading: coming(op, { _tag: "Reading" }),
+      presenceReadingByAccount: coming(inAccountChannel(known(["o"])), { _tag: "Reading" }),
       sessionUnknown: coming({ ...op, session: undefined }),
     }).toStrictEqual({
       direct: 0,
       elsewhere: 0,
       found: 0,
       gone: 0,
-      headUnread: 6,
+      headUnread: 7,
       headUnreadOffline: 0,
       notOperator: 0,
       notOperatorSessionUnknown: 0,
-      otherHead: 6,
+      otherHead: 7,
       presenceReading: 5,
+      presenceReadingByAccount: 5,
       sessionUnknown: 6,
     });
   });
