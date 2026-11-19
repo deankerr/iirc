@@ -63,6 +63,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **A Direct Message not yet begun is a view, not a Timeline.** The API makes a Timeline only when something is said. The draft shows its Timeline as soon as one is listed, matched by the casemapping read when the draft was made, never one held from another time, which could match another User's Timeline.
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
 - **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
+- **`/date` is a jump to an instant.** It takes a moment as `since:` does, `parseMoment` reads it with no zone, and the runtime gives the instant a day begins. The window is read around `firstAt` that instant, the earliest position there is at it, and `targetKey` lands on the first item row at or after where a jump went, or the last when none is, so a date before a Timeline began shows its beginning and one after its end its latest. The Day row's words offer it, starting `/date` with that day.
 - **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped. A Pane showing the Uploads comes back showing them, and a layout kept before they had a view comes back as it was.
 
 ## Arranging the Sidebar
@@ -118,7 +119,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Aliases | `/alias`, `/alias add`, `/alias remove` |
-| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/focus` |
+| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/focus` |
 | Arranging | `/move`, `/pin` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
