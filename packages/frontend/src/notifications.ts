@@ -2,7 +2,7 @@
  * Which items the changes stream adds call for a notification, and what it says. Only
  * something said live to the Owner, a Highlight, a Direct Message from someone else, or an
  * invitation, that the Owner is not already looking at and has not read, and in a muted
- * Timeline only a Highlight. The runtime shows them, when the Owner turned notifications
+ * Timeline, or in any while what is muted is not known, only a Highlight. The runtime shows them, when the Owner turned notifications
  * on for the device.
  *
  * @packageDocumentation
@@ -26,6 +26,12 @@ export interface Notify {
   readonly body: string;
   readonly tag: string;
 }
+
+/**
+ * The Timelines the Owner muted, or `NotKnown` while the options are not read, so a Timeline
+ * muted on another device never notifies before they are.
+ */
+export type Muted = ReadonlySet<TimelineId> | "NotKnown";
 
 /**
  * A Timeline as the state lists it, after the change.
@@ -97,7 +103,8 @@ const saidToOwner = (item: TimelineItem): string | undefined => {
  * @param after - The state with the change folded.
  * @param change - The change.
  * @param page - The page.
- * @param muted - The Timelines the Owner muted, which call for a notification only by a Highlight.
+ * @param muted - The Timelines the Owner muted, which call for a notification only by a
+ * Highlight, or `NotKnown`, while every Timeline does.
  * @param item - The item.
  * @returns The notification, or none.
  */
@@ -105,7 +112,7 @@ const notifyOf = (
   after: Timelines,
   change: TimelineChange,
   page: Page,
-  muted: ReadonlySet<TimelineId>,
+  muted: Muted,
   item: TimelineItem
 ): Notify | undefined => {
   const body = saidToOwner(item);
@@ -115,7 +122,7 @@ const notifyOf = (
     item.sequence !== change.sequence ||
     body === undefined ||
     timeline === undefined ||
-    (muted.has(timeline.id) && item.level !== "Highlight") ||
+    ((muted === "NotKnown" || muted.has(timeline.id)) && item.level !== "Highlight") ||
     (timeline.read !== null && item.position.at <= timeline.read) ||
     lookingAt(after, page, timeline.id)
   ) {
@@ -139,7 +146,8 @@ const notifyOf = (
  * @param after - The state with it folded.
  * @param change - The change.
  * @param page - The page.
- * @param muted - The Timelines the Owner muted, where only a Highlight notifies.
+ * @param muted - The Timelines the Owner muted, where only a Highlight notifies, or
+ * `NotKnown` before the options are read, when only a Highlight notifies anywhere.
  * @returns The notifications, at most one per Timeline, the latest.
  */
 export const notificationsOf = (
@@ -147,7 +155,7 @@ export const notificationsOf = (
   after: Timelines,
   change: TimelineChange,
   page: Page,
-  muted: ReadonlySet<TimelineId> = new Set()
+  muted: Muted = new Set()
 ): readonly Notify[] => {
   // A step at or below the boundary was considered before, as when a reset replays it, and
   // one the state did not take, as one given twice, moves no boundary.

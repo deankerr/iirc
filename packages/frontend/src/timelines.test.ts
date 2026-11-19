@@ -1901,7 +1901,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("passes a muted Timeline over in /next-unread unless a Highlight is unread there, and /read all still marks it", () => {
+  it("passes a muted Timeline over in /next-unread, a Highlight unread there too, and /read all still marks it", () => {
     const messages = withUnread({ messages: 1 }, { messages: 3 });
     const highlight = withUnread({ messages: 1 }, { highlights: 1, messages: 3 });
 
@@ -1909,13 +1909,15 @@ describe("the Timelines' state", () => {
       allMuted: from(messages, [one, two], "/next-unread"),
       highlight: from(highlight, [two], "/next-unread"),
       highlightMarked: from(highlight, [one, two], "/read all"),
+      highlightOnly: from(withUnread({}, { highlights: 1 }), [two], "/next-unread"),
       marked: from(messages, [one, two], "/read all"),
       messages: from(messages, [two], "/next-unread"),
       unmuted: from(messages, [], "/next-unread"),
     }).toStrictEqual({
       allMuted: [],
-      highlight: [two],
+      highlight: [one],
       highlightMarked: [one, two],
+      highlightOnly: [],
       // Muted or not, the Daemon still counts them, so marking all read marks them.
       marked: [one, two],
       messages: [one],

@@ -21,7 +21,7 @@ import type {
 import type { Aliases } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
-import { levelOf, markLatest, unreadShown } from "./activity.ts";
+import { levelOf, markLatest } from "./activity.ts";
 import { arranged, shownOrder, unarranged } from "./arrangement.ts";
 import type { Arrangement } from "./arrangement.ts";
 import { channelIn, initialChannels } from "./channel.ts";
@@ -348,8 +348,8 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
 
 /**
  * The Timelines with something unread, as a command sees them. A muted one is listed while
- * the Daemon counts anything unread in it, so `/read all` still marks it, but its level is
- * the one shown, so navigation passes it over unless a Highlight is unread there.
+ * the Daemon counts anything unread in it, so `/read all` still marks it, but with no level,
+ * so navigation passes it over, a Highlight unread there too.
  * @param timelines - The Timelines.
  * @param muted - The Timelines the Owner muted.
  * @returns Those with something unread, in their order.
@@ -363,7 +363,7 @@ const unseenIn = (
       ? []
       : [
           {
-            level: levelOf(unreadShown(timeline.unread, muted.has(timeline.id))),
+            level: muted.has(timeline.id) ? undefined : levelOf(timeline.unread),
             mark: markLatest(timeline),
             timeline: timeline.id,
           },

@@ -16,6 +16,7 @@ import type {
 import { closingShown, initialClosing } from "@iirc/frontend/closing";
 import type { Closing } from "@iirc/frontend/closing";
 import { notificationsOf } from "@iirc/frontend/notifications";
+import type { Muted } from "@iirc/frontend/notifications";
 import { uiShown } from "@iirc/frontend/options";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
@@ -87,6 +88,17 @@ export const mutedShown = Atom.make((get): ReadonlySet<TimelineId> => {
   const list = get(mutedList);
 
   return list.length === 0 ? noneMuted : new Set(list);
+});
+
+/**
+ * The Timelines the Owner muted as the Daemon holds them, not as a change on its way shows
+ * them, or `NotKnown` until the options are read, so a notification is never let through by
+ * a mute set elsewhere and not yet read, nor by an unmute that may yet fail.
+ */
+const mutedHeld = Atom.make((get): Muted => {
+  const { ui } = get(optionsState);
+
+  return ui === undefined ? "NotKnown" : new Set(ui.options.muted);
 });
 
 /**
@@ -442,7 +454,7 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
         registry.get(timelinesState),
         event.data,
         registry.get(pageState),
-        registry.get(mutedShown)
+        registry.get(mutedHeld)
       );
 
       // Where an Upload was said is read again beside the stream, never holding it up.

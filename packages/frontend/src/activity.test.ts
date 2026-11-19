@@ -880,7 +880,7 @@ describe("notifications", () => {
     item: typeof TimelineItem.Encoded,
     page: Page = seeing,
     before = state,
-    muted: readonly string[] = []
+    muted: readonly string[] | "NotKnown" = []
   ) => {
     const event = changed(11, { items: [item] });
 
@@ -889,7 +889,7 @@ describe("notifications", () => {
       reduceTimelines(before, event),
       event.change,
       page,
-      new Set(muted.map((id) => timelineId(id)))
+      muted === "NotKnown" ? muted : new Set(muted.map((id) => timelineId(id)))
     ).map((one) => one.timeline);
   };
 
@@ -915,6 +915,19 @@ describe("notifications", () => {
       others: notified(direct, seeing, state, [other]),
       unmuted: notified(highlight(other)),
     }).toStrictEqual({ direct: [], highlight: [other], others: [peer], unmuted: [other] });
+  });
+
+  // Catches a Timeline muted on another device notifying before this one has read the options.
+  it("notifies of a Highlight alone while what is muted is not known", () => {
+    expect({
+      direct: notified(
+        said({ at: 50, level: "Direct", sequence: 11, timeline: peer }),
+        seeing,
+        state,
+        "NotKnown"
+      ),
+      highlight: notified(highlight(other), seeing, state, "NotKnown"),
+    }).toStrictEqual({ direct: [], highlight: [other] });
   });
 
   it("never notifies of what the Owner sees, a Message, history, ours, read, or given before", () => {
