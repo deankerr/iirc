@@ -16,4 +16,8 @@
   ],
   // TypeScript reads these for the class names each CSS Module exports; nothing imports them.
   "ignore": ["apps/web/src/**/*.module.d.css.ts"],
+  // A test runs this as a process of its own, by its path, which knip does not follow.
+  "workspaces": {
+    "packages/timeline-store-sqlite": { "entry": ["src/fold-messages.fixture.ts"] },
+  },
 }

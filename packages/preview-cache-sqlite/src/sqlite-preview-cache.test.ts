@@ -147,7 +147,7 @@ describe("a file it cannot use", () => {
         ).pipe(Effect.flip);
 
         expect(failure._tag).toBe("PreviewCacheFailed");
-        expect(failure.reason).toContain("unable to open database file");
+        expect(failure.reason).toContain("unable to open database file (SQLITE_CANTOPEN)");
         expect(yield* Effect.promise(async () => await readdir(directory))).toStrictEqual([]);
       })
     );

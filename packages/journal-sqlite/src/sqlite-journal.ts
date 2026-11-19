@@ -30,6 +30,13 @@ const pageSize = 500;
 const recordText = Schema.fromJsonString(Schema.toCodecJson(JournalRecord));
 const rowSchema = Schema.Struct({ record: recordText, sequence: Sequence });
 
+const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
+
+// SQLite's extended result code, such as `SQLITE_IOERR_GETTEMPPATH`, which names the cause
+// where the message says only `disk I/O error`. Carried to be read, never decided from.
+const codeOf = (native: Error) =>
+  Option.match(decodeCode(native), { onNone: () => "", onSome: ({ code }) => ` (${code})` });
+
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
 // its cause. The text is only carried into the reason to be read, never decided from.
@@ -38,7 +45,7 @@ const failed =
     const native = error instanceof SqlError ? error.reason.cause : error.cause;
 
     return new JournalFailed({
-      reason: `${what}: ${native instanceof Error ? native.message : error.message}`,
+      reason: `${what}: ${native instanceof Error ? `${native.message}${codeOf(native)}` : error.message}`,
     });
   };
 
@@ -123,6 +130,9 @@ export const openSqliteJournal = (
     // Each commit waits for the log to reach the disk, so an append that has returned
     // survives a crash of the process and of the machine. This is per connection.
     yield* sql`PRAGMA synchronous = FULL`.pipe(Effect.mapError(failed("cannot configure")));
+    // SQLite's temporary files, such as a statement's journal, are kept in memory, so the
+    // Journal asks for no directory but its own.
+    yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
     yield* openJournal(sql).pipe(
       Effect.catchTag("SqlError", (error) => Effect.fail(failed("cannot open the Journal")(error)))
     );

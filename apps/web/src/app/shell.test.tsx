@@ -148,6 +148,28 @@ describe("the shell", () => {
     });
   });
 
+  it("says across its top that the Daemon hit a fatal error, and why, once it stops folding the Timelines", async () => {
+    const { container, daemon, stopProjection } = await signedIn();
+
+    await shown(container, "main");
+    await eventually(() => daemon.projectionFollowers.length > 0);
+
+    const alerts = () =>
+      [...container.querySelectorAll('[role="alert"]')].map((one) => one.textContent);
+
+    const whileFolded = alerts();
+
+    stopProjection("TimelineStoreFailed: cannot apply: disk I/O error (SQLITE_IOERR_GETTEMPPATH)");
+    await eventually(() => alerts().length > whileFolded.length);
+
+    expect({ stopped: alerts(), whileFolded }).toStrictEqual({
+      stopped: [
+        "The Daemon hit a fatal error. The Timelines stopped updating, and stay behind until the Daemon restarts.TimelineStoreFailed: cannot apply: disk I/O error (SQLITE_IOERR_GETTEMPPATH)",
+      ],
+      whileFolded: [],
+    });
+  });
+
   it("asks for a Credential in a prompt, and keeps its value in no fiber, prop, state, tracker, or atom", async () => {
     const { container, daemon, registry } = await signedIn();
     const secret = "hunter2-held-by-the-vault";

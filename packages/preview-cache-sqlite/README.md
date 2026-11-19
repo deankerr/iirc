@@ -25,6 +25,7 @@ PRAGMA user_version = 4;  -- the layout's version
 - **`images` and `evict` are one statement each.** `images` groups the rows by `image`, reading each size from the state with `json_extract`, and `evict` is one `UPDATE` that clears `image`, sets `fetched` to `0`, and clears the Preview's `image` in `state` with `json_set`. The layout is unchanged.
 - **`shown` is one statement,** `UPDATE ... SET shown = max(shown, ?) ... RETURNING`, so it never moves backward and a read after it sees it.
 - **`journal_mode` is `WAL` and `synchronous` is `NORMAL`.** A power failure may lose the last commits, which costs only fetches, never part of one.
+- **`temp_store` is `MEMORY`,** so SQLite's temporary files stay in memory and the cache needs no writable directory but its own.
 
 ## A file it cannot use is made again
 

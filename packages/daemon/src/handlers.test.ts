@@ -1736,6 +1736,35 @@ describe("the handlers", () => {
     });
   });
 
+  it("follows the projection, Running as it opens and Stopped with its reason once it stops", async () => {
+    const result = await run(
+      (world, api) =>
+        Effect.gen(function* () {
+          const following = yield* api.timelines.projection();
+
+          const said = yield* following.pipe(
+            Stream.filter((event) => event.event === "projection"),
+            Stream.map((event) => event.data),
+            Stream.takeUntil((projection) => projection._tag === "Stopped"),
+            Stream.runCollect,
+            Effect.forkChild
+          );
+
+          yield* settle;
+          yield* directly(world, api, ["one"]);
+
+          return yield* Fiber.join(said);
+        }),
+      undefined,
+      await Effect.runPromise(failingStore)
+    );
+
+    expect(result).toStrictEqual([
+      { _tag: "Running" },
+      { _tag: "Stopped", reason: "TimelineStoreFailed: the test failed this apply" },
+    ]);
+  });
+
   it("pages a Network's Timelines by id, and says whether more follow", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

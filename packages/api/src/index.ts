@@ -100,6 +100,7 @@ export {
   NewsEvent,
   MessageId,
   Projection,
+  ProjectionEvent,
   ProjectionVersion,
   Rank,
   ReadRequest,

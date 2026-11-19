@@ -24,7 +24,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
 | `SignIns` | Makes, checks, and ends sign-ins, kept in `sign-ins.json`. |
 | `holdDataDirectory(dataDir)` | Holds a data directory exclusively for the enclosing Scope, or fails with `DataDirectoryLocked`. |
-| `Projector`, `ProjectorStatus` | Whether the Timelines are being folded: `Running`, or `Stopped { reason }` once a failure stopped it. And `folded`, the projection version and the last sequence folded, together, now and each time either changes. |
+| `Projector`, `ProjectorStatus` | Whether the Timelines are being folded: `Running`, or `Stopped { reason }` once a failure stopped it, now as `status`, and now and when it stops as `statuses`. And `folded`, the projection version and the last sequence folded, together, now and each time either changes. |
 | `layerProjector` | The projector alone, given a `Runtime` and a `TimelineStore`. |
 | `UiConfiguration`, `layerUiConfiguration`, `UiChangedSince` | The options under `ui`, folded from the Journal's Changes, and how a Change is checked and journaled, failing with `UiChangedSince` when made from other options than those in force. The Layer needs the `Journal`. |
 | `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store`, `uploads`, and `previews`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |

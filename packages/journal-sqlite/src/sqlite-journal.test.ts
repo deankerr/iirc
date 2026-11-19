@@ -280,7 +280,7 @@ describe("a Journal that cannot be read or written", () => {
         expect(failure._tag).toBe("JournalFailed");
         expect(failure).toHaveProperty(
           "reason",
-          expect.stringContaining("unable to open database file")
+          expect.stringContaining("unable to open database file (SQLITE_CANTOPEN)")
         );
       })
     );

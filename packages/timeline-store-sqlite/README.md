@@ -92,6 +92,7 @@ Each Timeline's row keeps its Read Marker, `read`, and a count for each level, s
 | Setting | Value | Why |
 | --- | --- | --- |
 | `journal_mode` | `WAL` | Reads never block the projector's writes, nor an inspector with `sqlite3`. Set once the file is known to be a store. |
+| `temp_store` | `MEMORY` | SQLite's temporary files stay in memory, so the store needs no writable directory but its own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal, which SQLite otherwise spills to a temporary file past 64 KiB, as when several of the items' indexes split at once, and which fails with `SQLITE_IOERR_GETTEMPPATH` where there is no temporary directory. |
 | `synchronous` | `NORMAL` | In WAL mode a commit does not wait for the disk, and a power failure may lose the last commits, but never part of one. That is all a derived store needs: it may lag the Journal after a crash, and folds the rest again on start. It is never ahead of what it records as folded, because `through` commits in the same transaction as the rows it describes. The Journal's own `FULL` is what makes the Journal durable. |
 | One connection | serialised by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, and a transaction holds it, so a read never sees part of an apply. |
 
@@ -112,7 +113,7 @@ The store made again has no projection version, so whatever starts it folds the 
 
 ## Failure
 
-`TimelineStoreFailed` is any failure to open, read, or write: a path that cannot be opened, a lock held too long, a full disk, or a row that does not decode. Its reason says what SQLite said, from the native error inside the SQL error, such as `unable to open database file` or `database is locked`. A row damaged after the file was opened fails the read that reaches it. Removing the file while the Daemon is stopped rebuilds it.
+`TimelineStoreFailed` is any failure to open, read, or write: a path that cannot be opened, a lock held too long, a full disk, or a row that does not decode. Its reason says what SQLite said, from the native error inside the SQL error, with its extended result code, such as `unable to open database file (SQLITE_CANTOPEN)` or `database is locked (SQLITE_BUSY)`. A row damaged after the file was opened fails the read that reaches it. Removing the file while the Daemon is stopped rebuilds it.
 
 ## Tests
 
