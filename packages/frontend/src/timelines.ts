@@ -4139,7 +4139,7 @@ const byCodeUnits = (left: string, right: string): number => {
  * @param right - The other.
  * @returns Their order.
  */
-const sidebarOrder = (left: Timeline, right: Timeline): number =>
+export const sidebarOrder = (left: Timeline, right: Timeline): number =>
   kindOrder[left.kind] - kindOrder[right.kind] ||
   byCodeUnits(left.key ?? left.name, right.key ?? right.name) ||
   byCodeUnits(left.id, right.id);

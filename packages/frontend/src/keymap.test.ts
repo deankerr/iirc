@@ -54,6 +54,7 @@ const inChannel: CommandContext = {
   named: [],
   open: channel,
   panes: 1,
+  pinned: [],
   session: true,
   shown: [],
   timelines: [own, channel, direct],
@@ -225,6 +226,10 @@ describe("chords", () => {
   });
 });
 
+const moving = (direction: "Up" | "Down") => [
+  { _tag: "Arrange", edit: { _tag: "Move", direction, timeline: channel } },
+];
+
 describe("the keymap", () => {
   it("parses every default binding", () => {
     expect(defaultKeymap).toHaveLength(defaultBindings.length);
@@ -352,6 +357,17 @@ describe("the keymap", () => {
       none: [],
       other: [{ _tag: "Open", timeline: direct }],
     });
+  });
+
+  it("moves the open Timeline up or down in the Sidebar with Mod+Alt and the arrows, while typing too, and only where one is open", () => {
+    const up = press("ArrowUp", "ArrowUp", { alt: true, ctrl: true });
+    const down = press("ArrowDown", "ArrowDown", { alt: true, ctrl: true });
+
+    expect({
+      down: resolve(defaultKeymap, at({ editing: true }), down),
+      nowhere: resolve(defaultKeymap, at({}, { ...inChannel, focus: undefined }), up),
+      up: resolve(defaultKeymap, at(), up),
+    }).toStrictEqual({ down: moving("Down"), nowhere: undefined, up: moving("Up") });
   });
 
   it("shows or hides the members with Alt+M, Option+M on a Mac, while typing too, and with the Composer's list open", () => {

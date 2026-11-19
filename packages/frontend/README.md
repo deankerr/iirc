@@ -38,7 +38,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **`UnknownNetwork` names no life, so it lets nothing go.** The Network list is read again, and a Network it does not name, whose life began before it was asked, is over.
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
 - **A Network's connection, Self's away, Self's nick, and which partners are on it are derived, never polled.** They come from `known`, and then from the Session items the changes carry. Self's nick is the one `known` gave, a `SessionBegan`'s, or, after a change of nick in the Network's own Timeline, where the Client routes Self's and no one else's, that one, whichever is latest. It is kept when the Session ends, so history read while offline still says which items are Self's. `known` is read again when Self's away changes, when a partner comes, goes, quits, or changes nick in their Direct Message Timeline, and when one is opened. A partner shows as there or gone only while connected and as `known` says, and as neither otherwise. Whether a Session carries tags is `known`'s alone to say, so a `SessionBegan` leaves it unknown and has `known` read again, and `carriesTags` is true only once it says so.
-- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for `/go`, and gives it with the rest while a Pane has it open, so one opened by `/go` or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, the one that calls most, and the page's title count only what the sidebar lists.
+- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for `/go`, and gives it with the rest while a Pane has it open, so one opened by `/go` or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, which follows the order shown, the one that calls most, and the page's title count only what the sidebar lists.
 - **A removed Network is derived too.** One removed with its Timelines kept is named `Kept` by the Network list, which names every Network, live or kept, in one read, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
 - **A dropped Timeline is let go of at once.** The changes name it, or name its Network as removed without keeping its Timelines, which reaches a Network that never had one too. Its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. A Network the changes name as removed with its Timelines kept is only read from then on. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, for the life it ended.
 
@@ -64,6 +64,17 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
 - **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
 - **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped. A Pane showing the Uploads comes back showing them, and a layout kept before they had a view comes back as it was.
+
+## Arranging the Sidebar
+
+`@iirc/frontend/arrangement` puts the Owner's order on what `sidebar` gives. The order and the pins are three `ui` options every device shares, `sidebar.networks`, `sidebar.order`, and `sidebar.pinned`, and `arrangementOf` reads them as an `Arrangement`. With none set, `arranged` gives exactly the fixed order `sidebar` gives, so an Owner who sets nothing sees nothing change.
+
+- **One rule places everything.** The items a list names come in its order, and one it does not name goes right after the one before it in the fixed order, or first when none comes before it. A Timeline that appears later, with no place given, so takes the place the fixed order gives it. The rule orders the Networks, a Network's Timelines, and the pins alike, and an id that names nothing held is ignored.
+- **The Networks are those not removed, then those removed,** each group in the Owner's order. A Network's own Timeline stays first, as its row.
+- **A pinned Timeline leaves its Network for the pinned part above them,** in the order pinned, and a `Pin` says which Network it is of. Only a Timeline the sidebar lists can be pinned: one closed, gone, or not read shows nothing, and a Network's own Timeline is never pinned. What is closed is left as it was.
+- **`shownOrder` is what `/next` and `/previous` step through:** the pinned, then each Network's Timelines, as shown. The context carries it as `timelines`, given the arrangement.
+- **`arranging` says what to write for one edit, from what is shown now,** the option and its whole new value, or nothing when nothing would change. `Move` and `Place` of a pinned Timeline reorder the pinned part. Of a Network's own Timeline they move its Network among those as removed as it is. Of any other they move it among its Network's Timelines that are not pinned, and the value keeps the place of every other Network's Timelines and of those closed. None wraps at an edge, and a `Place` onto another part or Network changes nothing. `Pin` appends to `sidebar.pinned`, or removes from it, and refuses a Network's own Timeline.
+- **`/move up|down` and `/pin` give an `Arrange` intent** with the edit. `/pin` pins the focused Timeline, or unpins it when the context's `pinned` names it, and the runtime writes what `arranging` gave.
 
 ## Panes
 
@@ -97,7 +108,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, and what is unread.
+The one registry of commands, `commands`, as data, behind the composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, every Timeline in the order the sidebar shows, those pinned, and what is unread.
 
 | For | Commands |
 | --- | --- |
@@ -107,6 +118,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/focus` |
+| Arranging | `/move`, `/pin` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 | Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
@@ -132,22 +144,23 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 Keybindings as data over the registry. A binding names a chord, a command, its arguments, and a `when`. `resolve` gives a pressed key's intents, or nothing, so a key no binding takes is never swallowed.
 
-| Keys                              | Does                                          |
-| --------------------------------- | --------------------------------------------- |
-| `mod+shift+p`                     | Start `/` in the Composer                     |
-| `mod+k`                           | Start `/go ` in the Composer                  |
-| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline                    |
-| `alt+a`                           | The Timeline that calls most                  |
-| `alt+m`                           | Show or hide the members                      |
-| `alt+n`                           | Show or hide the sidebar                      |
-| `mod+,`                           | Show the options                              |
-| `mod+shift+f`                     | Show the search                               |
-| `alt+shift+arrows`                | Move between Panes                            |
-| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down                   |
-| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink           |
-| `mod+b`, `i`, `u`, `e`, `r`       | Bold, italic, underline, fixed pitch, reverse |
-| `mod+shift+x`                     | Strikethrough                                 |
-| `mod+shift+k`                     | Choose a colour                               |
+| Keys                                   | Does                                             |
+| -------------------------------------- | ------------------------------------------------ |
+| `mod+shift+p`                          | Start `/` in the Composer                        |
+| `mod+k`                                | Start `/go ` in the Composer                     |
+| `alt+arrowdown`, `alt+arrowup`         | Next and previous Timeline                       |
+| `mod+alt+arrowdown`, `mod+alt+arrowup` | Move the open Timeline down or up in the sidebar |
+| `alt+a`                                | The Timeline that calls most                     |
+| `alt+m`                                | Show or hide the members                         |
+| `alt+n`                                | Show or hide the sidebar                         |
+| `mod+,`                                | Show the options                                 |
+| `mod+shift+f`                          | Show the search                                  |
+| `alt+shift+arrows`                     | Move between Panes                               |
+| `alt+shift+s`, `alt+shift+d`           | Split side by side, or down                      |
+| `alt+shift+w`, `z`, `e`, `g`, `r`      | Close, zoom, equalize, grow, shrink              |
+| `mod+b`, `i`, `u`, `e`, `r`            | Bold, italic, underline, fixed pitch, reverse    |
+| `mod+shift+x`                          | Strikethrough                                    |
+| `mod+shift+k`                          | Choose a colour                                  |
 
 - **A chord is parsed.** `formatChord` writes one so that it parses back the same. A binding that does not parse, or names no command, is dropped, so a keymap holds only bindings that can fire.
 - **`mod` is Cmd on a Mac and Ctrl elsewhere.** `showChord` writes a chord as the platform does.
@@ -227,7 +240,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
-- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
+- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, and `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the sidebar: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and for `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.** `showsIn` works out once for a window which items a Channel's Timeline draws, and shows every item of another kind of Timeline. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`. `spoke` hides the joins, parts, and quits of Users who did not say a Message, of any kind, in that window no more than five minutes before it, measured between the two items' own times in the window's order, and a User is followed across a change of nick. Self's are always shown, as far as `rowsOf` says Self is known, and with Self's nick unknown, every one is. Only the window's Messages count, so one near its start may be hidden though its User spoke just before the window begins.

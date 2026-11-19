@@ -23,6 +23,7 @@ import { Schema } from "effect";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
+import type { ArrangeEdit } from "./arrangement.ts";
 import type { Flag } from "./formatting.ts";
 import type { Axis, Direction } from "./layout.ts";
 import {
@@ -123,8 +124,10 @@ export interface CommandContext {
    * known yet. A command that needs one is refused until it does.
    */
   readonly session: boolean | undefined;
-  /** Every Timeline, in the sidebar's order. */
+  /** Every Timeline, in the order the sidebar shows: the pinned, then each Network's. */
   readonly timelines: readonly TimelineId[];
+  /** The Timelines pinned above the Networks, in order, as the sidebar shows them. */
+  readonly pinned: readonly TimelineId[];
   /** Every Timeline by name, those closed too, as `namedIn` lists them, which `/go` finds one in. */
   readonly named: readonly NamedTimeline[];
   /**
@@ -331,7 +334,8 @@ export type Intent =
   | { readonly _tag: "Search"; readonly query: string | undefined }
   | Look
   | { readonly _tag: "Format"; readonly format: Flag }
-  | { readonly _tag: "ChooseColour" };
+  | { readonly _tag: "ChooseColour" }
+  | { readonly _tag: "Arrange"; readonly edit: ArrangeEdit };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -947,7 +951,7 @@ const partArguments = (args: string, focus: Focus): Parsed<Edit> => {
 };
 
 /**
- * The Timeline next to the open one in the sidebar's order, wrapping around at either end,
+ * The Timeline next to the open one in the order the sidebar shows, wrapping around at either end,
  * or the first or the last when none is open.
  * @param direction - `Next` or `Previous`.
  * @returns The command's parser: the Timeline to open, or none when it is already open.
@@ -973,6 +977,52 @@ const stepped =
 
     return parsed(to === open ? undefined : to);
   };
+
+/**
+ * What `/move` was given: `up` or `down`.
+ * @param args - The text after `/move`.
+ * @returns The direction, or why there is none.
+ */
+const moveArguments = (args: string): Parsed<"Up" | "Down"> => {
+  const way = args.trim().toLowerCase();
+
+  if (way === "up") {
+    return parsed("Up");
+  }
+
+  return way === "down" ? parsed("Down") : invalid("Move it which way? /move up|down");
+};
+
+/**
+ * What `/pin` does with the open Timeline: unpins it when it is pinned, else pins it, unless
+ * it is a Network's own, whose row is the Network.
+ * @param args - The text after `/pin`.
+ * @param context - The context.
+ * @returns The edit, or why there is none.
+ */
+const pinArguments = (args: string, context: CommandContext): Parsed<ArrangeEdit> => {
+  const { focus, pinned } = context;
+
+  if (args.trim() !== "") {
+    return invalid("/pin takes nothing after it.");
+  }
+
+  if (focus === undefined) {
+    return invalid("Open a Timeline first.");
+  }
+
+  if (focus.kind === "Network") {
+    return invalid(
+      `${focus.network}'s own Timeline is the Network's row, so it is not pinned. /move moves the Network.`
+    );
+  }
+
+  return parsed({
+    _tag: "Pin",
+    pinned: !pinned.includes(focus.timeline),
+    timeline: focus.timeline,
+  });
+};
 
 const goUsage = "/go [network] <name>";
 
@@ -2592,6 +2642,32 @@ export const commands: readonly Command[] = [
     parse: (args) =>
       args.trim() === "" ? parsed(undefined) : invalid("/latest takes nothing after it."),
     usage: "/latest",
+    when: focused,
+  }),
+  command({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Move the open Timeline one place up or down in the sidebar, among the pinned, among the Networks if it is a Network's own, or among its Network's, for every device.",
+    id: "timeline.move",
+    intents: (direction: "Up" | "Down", focus) => [
+      { _tag: "Arrange", edit: { _tag: "Move", direction, timeline: focus.timeline } },
+    ],
+    name: "move",
+    parse: moveArguments,
+    usage: "/move up|down",
+    when: focused,
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description:
+      "Pin the open Timeline above the Networks in the sidebar, or unpin it when it is pinned, for every device.",
+    id: "timeline.pin",
+    intents: (edit: ArrangeEdit) => [{ _tag: "Arrange", edit }],
+    name: "pin",
+    parse: pinArguments,
+    usage: "/pin",
     when: focused,
   }),
   unfocused({

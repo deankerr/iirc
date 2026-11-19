@@ -505,13 +505,16 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * Alt+Shift: with the arrows to move between them, as Alt and the arrows move between
  * Timelines, and with a letter to split, close, zoom, equalize, grow, or shrink, a letter
  * because Option on a Mac types another character, which only a letter's or a digit's
- * physical key names back.
+ * physical key names back. Mod+Alt with the up and down arrows moves the open Timeline in
+ * the Sidebar, and `/pin` has no key.
  */
 export const defaultBindings: readonly BindingText[] = [
   { command: "timeline.go", keys: "mod+k" },
   { args: "/", command: "composer.focus", keys: "mod+shift+p" },
   { command: "timeline.next", keys: "alt+arrowdown" },
   { command: "timeline.previous", keys: "alt+arrowup" },
+  { args: "up", command: "timeline.move", keys: "mod+alt+arrowup" },
+  { args: "down", command: "timeline.move", keys: "mod+alt+arrowdown" },
   { command: "timeline.unread", keys: "alt+a" },
   { command: "members.toggle", keys: "alt+m" },
   { command: "sidebar.toggle", keys: "alt+n" },

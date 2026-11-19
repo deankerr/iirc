@@ -816,6 +816,7 @@ const context: CommandContext = {
   named: [],
   open: undefined,
   panes: 1,
+  pinned: [],
   session: false,
   shown: [],
   timelines: [],

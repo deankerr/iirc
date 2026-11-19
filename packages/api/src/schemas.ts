@@ -33,6 +33,7 @@ import type { Position } from "@iirc/timelines";
 import { Effect, Result, Schema, SchemaGetter, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
 
+import { NetworkId } from "./network-id.ts";
 import { OwnerInForce } from "./options.ts";
 import { UiInForce } from "./ui.ts";
 
@@ -72,20 +73,7 @@ const everyOf =
   ): A =>
     list;
 
-/**
- * A Network, by the id the Owner gave it: up to 64 lower-case letters, digits, `.`, `_`,
- * and `-`, starting with a letter or digit. It is a path segment, so it holds nothing that
- * needs escaping.
- */
-export const NetworkId = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/u, {
-    message:
-      "must be 1 to 64 lower-case letters, digits, `.`, `_`, or `-`, starting with a letter or digit",
-  })
-).pipe(Schema.brand("NetworkId"));
-
-/** The decoded form of {@link NetworkId}. */
-export type NetworkId = typeof NetworkId.Type;
+export { NetworkId } from "./network-id.ts";
 
 /** An Entry's place in the Journal. Sequences only increase, and may skip numbers. */
 export const Sequence = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("Sequence"));

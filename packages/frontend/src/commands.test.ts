@@ -26,6 +26,7 @@ const around = {
   named: [],
   open: undefined,
   panes: 1,
+  pinned: [],
   shown: [],
   timelines: [],
   unread: [],
@@ -402,6 +403,31 @@ describe("reading a line", () => {
       prev: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
       started: { _tag: "Parsed", value: [{ _tag: "StartCommand", text: "/go " }] },
       trailing: "/next takes nothing after it.",
+    });
+  });
+
+  it("moves the open Timeline up or down with /move, and pins or unpins it with /pin, which the Network's own Timeline never is", () => {
+    const pinned: CommandContext = { ...inChannel, pinned: [timeline] };
+
+    expect({
+      down: chosen("/move DOWN", inChannel),
+      network: chosen("/pin", inNetwork),
+      networkMoved: chosen("/move up", inNetwork),
+      nowhere: message("/move up", nowhere),
+      pin: chosen("/pin", inChannel),
+      trailing: message("/pin now", inChannel),
+      unpin: chosen("/pin", pinned),
+      which: message("/move sideways", inChannel),
+    }).toStrictEqual({
+      down: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Down", timeline } }],
+      network:
+        "libera's own Timeline is the Network's row, so it is not pinned. /move moves the Network.",
+      networkMoved: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Up", timeline } }],
+      nowhere: "Open a Timeline first.",
+      pin: [{ _tag: "Arrange", edit: { _tag: "Pin", pinned: true, timeline } }],
+      trailing: "/pin takes nothing after it.",
+      unpin: [{ _tag: "Arrange", edit: { _tag: "Pin", pinned: false, timeline } }],
+      which: "Move it which way? /move up|down",
     });
   });
 

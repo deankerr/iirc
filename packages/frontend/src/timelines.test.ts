@@ -18,6 +18,8 @@ import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { unarranged } from "./arrangement.ts";
+import type { Arrangement } from "./arrangement.ts";
 import { interpret } from "./commands.ts";
 import { contextOf } from "./composer.ts";
 import { panesOf, single } from "./layout.ts";
@@ -1782,6 +1784,39 @@ describe("the Timelines' state", () => {
       marked: [two],
       navigation: [],
       next: { _tag: "Parsed", value: [] },
+    });
+  });
+
+  it("steps /next and /previous through the Timelines in the order shown: the Owner's, with the pinned first", () => {
+    const state = following();
+
+    const stepped = (arrangement: Arrangement) => {
+      const context = contextOf(state, undefined, arrangement);
+
+      return {
+        next: interpret("/next", context),
+        order: context.timelines,
+        previous: interpret("/previous", context),
+      };
+    };
+
+    // The open Timeline is #a, which the fixed order lists after the Network's own.
+    expect({
+      none: stepped(unarranged).order,
+      ordered: stepped({ ...unarranged, order: [two, three] }),
+      pinned: stepped({ ...unarranged, pinned: [two] }),
+    }).toStrictEqual({
+      none: [one, three, two],
+      ordered: {
+        next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+        order: [one, two, three],
+        previous: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+      },
+      pinned: {
+        next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+        order: [two, one, three],
+        previous: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+      },
     });
   });
 
