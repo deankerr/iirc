@@ -64,6 +64,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
 - **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
 - **`/date` is a jump to an instant.** It takes a moment as `since:` does, `parseMoment` reads it with no zone, and the runtime gives the instant a day begins. The window is read around `firstAt` that instant, the earliest position there is at it, and `targetKey` lands on the first item row at or after where a jump went, or the last when none is, so a date before a Timeline began shows its beginning and one after its end its latest. The Day row's words offer it, starting `/date` with that day.
+- **`/export [since] [until]` saves the open Timeline as text.** Its moments are read as search's `since:` and `until:` are, through `boundMoment`: a day starts at its beginning for `since` and at the next day's for `until`, so `until` takes the whole day it names, and a time with its zone is exact. The `Export` intent carries those bounds as moments and the runtime places a day in the Owner's time zone. Two days or two instants out of order are refused in words, which `startsBefore` tells; a day against an instant depends on the zone, so the runtime decides it and exports nothing for a range that holds nothing.
 - **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped. A Pane showing the Uploads comes back showing them, and a layout kept before they had a view comes back as it was.
 
 ## Arranging the Sidebar
@@ -121,7 +122,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Aliases | `/alias`, `/alias add`, `/alias remove` |
 | Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/focus` |
 | Arranging | `/move`, `/pin` |
-| Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
+| Reading | `/read`, `/read all`, `/close-timeline`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 | Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
 

@@ -59,6 +59,20 @@ const goes = (moment: Moment) => [
   { _tag: "GoToDate", moment, timeline: inChannel.focus?.timeline },
 ];
 
+const dayOf = (year: number, month: number, day: number): Moment => ({
+  _tag: "Day",
+  day: { day, month, year },
+});
+
+const exports = (since: Moment | undefined, until: Moment | undefined) => [
+  { _tag: "Export", since, timeline, until },
+];
+
+const atOf = (ms: number): Moment => ({
+  _tag: "At",
+  at: Schema.decodeSync(ReadRequest)({ read: ms, target: null }).read,
+});
+
 const message = (line: string, context: CommandContext) => {
   const read = interpret(line, context);
 
@@ -471,6 +485,45 @@ describe("reading a line", () => {
       usage,
       `2026-02-30 is no day of the calendar. ${usage}`,
       `2026-11-10T09:30 needs its zone, such as Z or +01:00, or a date alone. ${usage}`,
+      usage,
+      "Open a Timeline first.",
+    ]);
+  });
+
+  it("exports the open Timeline with /export, the whole or between two moments read as search reads them, a day taken whole as until", () => {
+    const run = (line: string) => chosen(line, inChannel);
+
+    const usage =
+      "/export takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00, to start from, and another to stop at, each optional.";
+
+    expect([
+      run("/export"),
+      run("/export 2026-11-01"),
+      run("/export  2026-11-01   2026-11-02 "),
+      run("/export 2026-11-02 2026-11-02"),
+      run("/export 2026-12-30 2026-12-31"),
+      run("/export 2026-11-01T09:30+01:00 2026-11-01T09:31Z"),
+      run("/export 2026-11-01 2026-11-01T09:31Z"),
+      run("/export 2026-11-03 2026-11-02"),
+      run("/export 2026-11-01T09:31Z 2026-11-01T09:31Z"),
+      run("/export 2026-11-01T09:31Z 2026-11-01T08:30Z"),
+      run("/export yesterday"),
+      run("/export 2026-11-01 2026-02-30"),
+      run("/export 2026-11-01 2026-11-02 2026-11-03"),
+      chosen("/export", nowhere),
+    ]).toStrictEqual([
+      exports(undefined, undefined),
+      exports(dayOf(2026, 11, 1), undefined),
+      exports(dayOf(2026, 11, 1), dayOf(2026, 11, 3)),
+      exports(dayOf(2026, 11, 2), dayOf(2026, 11, 3)),
+      exports(dayOf(2026, 12, 30), dayOf(2027, 1, 1)),
+      exports(atOf(1_793_521_800_000), atOf(1_793_525_460_000)),
+      exports(dayOf(2026, 11, 1), atOf(1_793_525_460_000)),
+      "/export: the start must come before the end.",
+      "/export: the start must come before the end.",
+      "/export: the start must come before the end.",
+      usage,
+      `2026-02-30 is no day of the calendar. ${usage}`,
       usage,
       "Open a Timeline first.",
     ]);

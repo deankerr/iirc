@@ -400,6 +400,37 @@ export const instantAt = (
 ): Instant | undefined => (moment._tag === "At" ? moment.at : instantOf(dayStart(moment.day)));
 
 /**
+ * Where a range's bound stands as a moment: a date, the start of that day for `since`, and
+ * of the next for `until`, so `until` takes the whole day it names; or a time with its
+ * zone, exactly. `since:`, `until:`, and `/export` all read a range so.
+ * @param name - The bound, `since` or `until`.
+ * @param moment - What was written.
+ * @returns The moment the bound stands at.
+ */
+export const boundMoment = (name: "since" | "until", moment: Moment): Moment =>
+  name === "until" && moment._tag === "Day" ? { _tag: "Day", day: nextDay(moment.day) } : moment;
+
+/**
+ * Whether one moment lies before another, as far as it can be told with no time zone: two
+ * days, or two instants. A day and an instant depend on where the day begins, which only
+ * the runtime knows.
+ * @param first - The earlier, if it is.
+ * @param second - The later, if it is.
+ * @returns Whether `first` lies before `second`, or none when the zone decides.
+ */
+export const startsBefore = (first: Moment, second: Moment): boolean | undefined => {
+  if (first._tag === "At" && second._tag === "At") {
+    return first.at < second.at;
+  }
+
+  if (first._tag === "Day" && second._tag === "Day") {
+    return daysFromEpoch(first.day) < daysFromEpoch(second.day);
+  }
+
+  return undefined;
+};
+
+/**
  * Where `since:` or `until:` stands: a date, the start of that day in the Owner's time zone
  * for `since:`, and of the next for `until:`, so `until:` takes the whole day it names; or
  * an ISO time with its zone, exactly.
@@ -420,12 +451,7 @@ const boundOf = (
     return moment;
   }
 
-  const bound: Moment =
-    name === "until" && moment.value._tag === "Day"
-      ? { _tag: "Day", day: nextDay(moment.value.day) }
-      : moment.value;
-
-  const at = instantAt(bound, dayStart);
+  const at = instantAt(boundMoment(name, moment.value), dayStart);
 
   return at === undefined ? invalid(`${value} cannot be searched from. ${usage}`) : parsed(at);
 };

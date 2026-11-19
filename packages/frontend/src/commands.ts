@@ -59,7 +59,7 @@ import {
   starting,
 } from "./options.ts";
 import type { Asked, Configuration, Edit, Json } from "./options.ts";
-import { parseMoment } from "./search.ts";
+import { boundMoment, parseMoment, startsBefore } from "./search.ts";
 import type { Moment } from "./search.ts";
 import { parseThemeName, systemTheme } from "./theme.ts";
 import type { ThemeOption, ThemesEdit } from "./theme.ts";
@@ -183,6 +183,14 @@ export interface MarkRead {
   readonly read: Instant;
 }
 
+/** A Timeline saved as text: from `since`, inclusive, to `until`, exclusive, as far as there is when none. */
+export interface Export {
+  readonly _tag: "Export";
+  readonly timeline: TimelineId;
+  readonly since: Moment | undefined;
+  readonly until: Moment | undefined;
+}
+
 /**
  * Close a Timeline: the Daemon's `close`, with `target` a Channel's name or a Direct Message
  * partner's nick. A Channel Self is in is never closed: the Daemon answers so, and the
@@ -261,6 +269,9 @@ export interface Act {
  * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
  * - `GoToDate`: show a Timeline from its first item at or after a moment, which the runtime
  *   places in the Owner's time zone when it is a day, as jumping to a search's result does.
+ * - `Export`: save a Timeline as a text file, the part of it from `since`, inclusive, to
+ *   `until`, exclusive, when given, which the runtime places in the Owner's time zone when
+ *   a bound is a day. `until` is already the start of the day after the one the Owner named.
  * - `StartCommand`: focus the composer under the main view and start `text` in it, with
  *   its list open, as a key that starts a command does. A draft with text in it is set
  *   aside, and comes back when the command runs or on Escape.
@@ -329,6 +340,7 @@ export type Intent =
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
   | { readonly _tag: "GoToDate"; readonly timeline: TimelineId; readonly moment: Moment }
+  | Export
   | { readonly _tag: "StartCommand"; readonly text: string }
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
@@ -432,6 +444,52 @@ const command = <A>(
       return value._tag === "Parsed" ? parsed(intents(value.value, focus)) : value;
     },
   };
+};
+
+/** The range of a Timeline `/export` saves: each bound is none for as far as there is. */
+interface ExportRange {
+  readonly since: Moment | undefined;
+  readonly until: Moment | undefined;
+}
+
+/**
+ * The arguments of `/export`: none, a moment to start from, or two, to start from and to
+ * stop before. A day stops after the whole of it, as `until:` does in a search.
+ * @param args - The arguments.
+ * @returns The range, or why it cannot be read, in words.
+ */
+const exportArguments = (args: string): Parsed<ExportRange> => {
+  const usage =
+    "/export takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00, to start from, and another to stop at, each optional.";
+
+  const words = args.split(/\s+/u).filter((word) => word !== "");
+
+  if (words.length > 2) {
+    return invalid(usage);
+  }
+
+  const [sinceText, untilText] = words;
+  const since = sinceText === undefined ? undefined : parseMoment(sinceText, usage);
+  const until = untilText === undefined ? undefined : parseMoment(untilText, usage);
+
+  if (since?._tag === "Invalid") {
+    return since;
+  }
+
+  if (until?._tag === "Invalid") {
+    return until;
+  }
+
+  const range = {
+    since: since === undefined ? undefined : boundMoment("since", since.value),
+    until: until === undefined ? undefined : boundMoment("until", until.value),
+  };
+
+  return range.since !== undefined &&
+    range.until !== undefined &&
+    startsBefore(range.since, range.until) === false
+    ? invalid("/export: the start must come before the end.")
+    : parsed(range);
 };
 
 /**
@@ -2754,6 +2812,20 @@ export const commands: readonly Command[] = [
       return value === "" ? invalid(`Go to when? ${usage}`) : parseMoment(value, usage);
     },
     usage: "/date <date|time>",
+    when: focused,
+  }),
+  command({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Save the open Timeline as a text file, the whole of it, or from a date or a time with its zone, up to another, a day taken whole.",
+    id: "timeline.export",
+    intents: (range: ExportRange, focus) => [
+      { _tag: "Export", since: range.since, timeline: focus.timeline, until: range.until },
+    ],
+    name: "export",
+    parse: exportArguments,
+    usage: "/export [since] [until]",
     when: focused,
   }),
   command({

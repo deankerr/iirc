@@ -7,7 +7,7 @@ import { Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { perform } from "../composer/atoms.ts";
@@ -17,6 +17,7 @@ import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
+import { watchDownloads } from "../testing/downloads.ts";
 import {
   eventually,
   fakeDaemon,
@@ -1590,6 +1591,55 @@ describe("signing out from the sidebar", () => {
     }).toStrictEqual({
       failure: "The Daemon could not save its sign-ins, so nothing changed. Try again.",
       signedIn: true,
+    });
+  });
+});
+
+/**
+ * The text of every item the menu open offers.
+ * @returns Their text, in order.
+ */
+const menuTexts = async () => {
+  await settled(() => document.querySelector('[role="menu"]') !== null);
+
+  return [...document.querySelectorAll('[role^="menuitem"]')].map((one) => one.textContent);
+};
+
+describe("exporting a Timeline from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  // Catches a menu with no way to save a Timeline, or one that saves another, or only part.
+  it("starts the download of a Timeline whole, by its id, from its row's menu, which every Timeline has", async () => {
+    const downloads = watchDownloads();
+
+    await signedIn();
+
+    await pressButton("More for #other");
+    const channel = await menuTexts();
+
+    await chooseFromMenu("Export as text");
+
+    await pressButton("More for libera");
+    const network = await menuTexts();
+
+    await chooseFromMenu("Export as text");
+
+    expect({
+      downloads,
+      menus: [channel.includes("Export as text"), network.includes("Export as text")],
+    }).toStrictEqual({
+      downloads: [
+        { href: `/api/timelines/${other}/export`, saves: true },
+        { href: `/api/timelines/${own}/export`, saves: true },
+      ],
+      menus: [true, true],
     });
   });
 });
