@@ -82,12 +82,30 @@ const known = (api: Api) => api.networks.known({ params: { network } });
 const joined = (channel: string) => (state: Knowledge) =>
   state.channels.some((one) => one.name === channel && one.standing === "Joined");
 
+// The nicks of a Channel's members, as the Client keeps them.
+const membersOf = (state: Knowledge, channel: string): readonly string[] =>
+  state.channels.find((one) => one.name === channel)?.members.map((one) => one.nick) ?? [];
+
+// Whether a Timeline holds a Message with this text.
+const said = (text: string) => (items: readonly TimelineItem[]) =>
+  items.some((item) => item.content._tag === "Message" && item.content.text === text);
+
+// Whether a Timeline holds an Activity that matches.
+const shows =
+  (matches: (activity: NonNullable<ReturnType<typeof activityOf>>) => boolean) =>
+  (items: readonly TimelineItem[]) =>
+    items.some((item) => {
+      const activity = activityOf(item);
+
+      return activity !== undefined && matches(activity);
+    });
+
 describe("ergo, masks and real names", () => {
   let ergo: Ircd;
 
   beforeAll(async () => {
     ergo = await startErgo();
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await ergo.stop();
@@ -132,20 +150,28 @@ describe("ergo, masks and real names", () => {
 
         const daemon = yield* start(channel);
 
+        // With `userhost-in-names`, Ergo lists `palmask!~u@127.0.0.1`: the member is known by
+        // their bare nick only if the Feature read the listing.
         const state = yield* eventually(
           known(daemon.api),
-          (each) => joined(channel)(each) && maskOf(each.users, "palmask") !== "Unknown"
+          (each) =>
+            joined(channel)(each) &&
+            membersOf(each, channel).includes("palmask") &&
+            userNamed(each.users, "palmask")?.mask._tag === "Known"
         );
 
         pal.close();
         yield* daemon.stop;
 
-        return maskOf(state.users, "palmask");
+        return { mask: maskOf(state.users, "palmask"), members: membersOf(state, channel) };
       })
     );
 
+    expect(result.members.filter((nick) => nick.includes("!") || nick.includes("@"))).toStrictEqual(
+      []
+    );
     // Ergo coerces every ident to `~u`, and shows a loopback Connection by its address.
-    expect(result).toStrictEqual({ host: "127.0.0.1", user: "~u" });
+    expect(result.mask).toStrictEqual({ host: "127.0.0.1", user: "~u" });
   }, 120_000);
 
   it("shows a changed host as one HostChanged, with no quit and join", async () => {
@@ -176,8 +202,11 @@ describe("ergo, masks and real names", () => {
           (each) => hostOf(each.users, "palhost") === ergoOperVhost
         );
 
+        // A Message after the change, so the window holds everything that came before it.
+        pal.send(`PRIVMSG ${channel} :after the host change`);
+
         const timeline = yield* timelineOf(api, channel);
-        const items = yield* itemsOf(api, timeline);
+        const items = yield* eventually(itemsOf(api, timeline), said("after the host change"));
 
         pal.close();
         yield* daemon.stop;
@@ -249,8 +278,15 @@ describe("ergo, masks and real names", () => {
           (each) => realnameOf(each.users, "palname") === "Pal Renamed"
         );
 
-        const items = yield* itemsOf(api, yield* timelineOf(api, null));
-        const channelItems = yield* itemsOf(api, yield* timelineOf(api, channel));
+        const items = yield* eventually(
+          itemsOf(api, yield* timelineOf(api, null)),
+          shows((one) => one._tag === "RealnameChanged" && one.nick === "iirc")
+        );
+
+        const channelItems = yield* eventually(
+          itemsOf(api, yield* timelineOf(api, channel)),
+          shows((one) => one._tag === "RealnameChanged" && one.nick === "palname")
+        );
 
         pal.close();
         yield* daemon.stop;
