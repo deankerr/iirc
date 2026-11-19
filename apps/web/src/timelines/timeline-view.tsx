@@ -11,7 +11,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
-import { olderUnasked, rowsOf, targetKey } from "@iirc/frontend/timelines";
+import { olderUnasked, pageSize, rowsOf, targetKey } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
@@ -662,9 +662,11 @@ const Lines = ({
   /**
    * Reads on without asking while what is drawn cannot be scrolled to reach more: no item
    * drawn, or less than fills the view, as when `ui.activity` hides a whole page. It reads
-   * the page before, or the page after while a jump's target is held, as after a jump
-   * before a Timeline's first item. Only in a view that can be seen, in the page and with
-   * a height.
+   * the page before, except while a jump's window draws no item at all, as after a jump
+   * before a Timeline's first item onto Activity hidden: what it jumped to lies at or after
+   * its first item, so it reads the page after instead, until an item is drawn, and only
+   * while that drops nothing past the cap, so nothing held, a Gap's edge included, is let
+   * go. Only in a view that can be seen, in the page and with a height.
    * @param element - The scroller.
    */
   const fill = (element: HTMLDivElement) => {
@@ -674,13 +676,9 @@ const Lines = ({
       return;
     }
 
-    // A jump's window holds what it jumped to at or after its first item, so it reads on
-    // toward it until the Owner scrolls, never back and forth.
-    const onward = window.later && window.target !== undefined;
-
-    if (!onward) {
+    if (!(drawsNoItem && window.target !== undefined && window.later)) {
       readOlder();
-    } else if (!window.newer && !window.reading) {
+    } else if (!window.newer && !window.reading && window.items.length + pageSize <= cap) {
       askNewer(timeline);
     }
   };

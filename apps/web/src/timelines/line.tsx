@@ -273,6 +273,18 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
 };
 
 /**
+ * A day as `/date` takes it, `2026-11-15`, or nothing for a day it cannot write: a year
+ * outside 0 to 9999. Written apart from a `<time>`'s, which HTML bounds at the year 1.
+ * @param at - The instant.
+ * @returns The day, or nothing.
+ */
+const dayCommanded = (at: number): string => {
+  const day = dayWritten("iso", at) ?? "";
+
+  return /^\d{4}-/u.test(day) ? day : "";
+};
+
+/**
  * Where the day changes: the day's words, as `ui.day` says, after a rule. Its time column is
  * there and empty, so the line shows and lines up whether or not any line's time does. The
  * words offer to go to another day: pressed, they start `/date` with this day in the
@@ -298,8 +310,7 @@ const DayLine = ({ at }: { readonly at: number }) => {
             aria-label={`${written}: go to another day`}
             className={styles.dayGo}
             onPress={() => {
-              // Written apart from `iso`, which HTML's dates bound at the year 1.
-              start([{ _tag: "StartCommand", text: `/date ${dayWritten("iso", at) ?? ""}` }]);
+              start([{ _tag: "StartCommand", text: `/date ${dayCommanded(at)}` }]);
             }}
           >
             <time dateTime={iso}>{written}</time>

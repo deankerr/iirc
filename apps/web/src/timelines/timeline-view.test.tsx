@@ -2248,8 +2248,8 @@ describe("going to a date", () => {
   });
 
   it("reads newer without scrolling from a date before the start while ui.activity hides every row there", async () => {
-    // 1200 joins, then one Message: a jump before the start lands on more joins than a read gives.
-    const items = [...Array.from({ length: 1200 }, (_, index) => joined(index + 1)), message(1201)];
+    // 300 joins, then one Message: a jump before the start lands on more joins than a read gives.
+    const items = [...Array.from({ length: 300 }, (_, index) => joined(index + 1)), message(301)];
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
@@ -2257,11 +2257,13 @@ describe("going to a date", () => {
       await Promise.resolve();
     });
     await openFromPalette();
-    await settled(() => logOf().textContent?.includes("line 1201"));
+    await settled(() => logOf().textContent?.includes("line 301"));
     // Before the first item in any zone, whose items are in the first minutes of 1970 UTC.
     await typed("/date 1969-12-30");
     await sentWithEnter();
-    await landedOn("<peer> line 1201");
+    // Drawn with no scroll at all, since a log that draws nothing cannot be scrolled.
+    await settled(() => targetRow() === "<peer> line 301");
+    await landedOn("<peer> line 301");
 
     const shown = registry.get(openTimeline);
 
