@@ -13,6 +13,7 @@ import {
 } from "@iirc/api";
 import type {
   Member,
+  LookedAnswer,
   MembersAfter,
   NewsEvent,
   Resume,
@@ -294,6 +295,23 @@ const saidLine = (call: Parameters<typeof heard>[0]) =>
 
     return line;
   });
+
+/**
+ * A directory test's Channel name by its index.
+ * @param index - Its index.
+ * @returns Its name.
+ */
+const named = (index: number) => `#c${String(index).padStart(3, "0")}`;
+
+/**
+ * The Channels a page of a directory names, or the answer when it is not one.
+ * @param shown - The answer.
+ * @returns The names, or the answer.
+ */
+const names = (shown: LookedAnswer) =>
+  shown._tag === "LookedUp" && shown.result._tag === "Channels"
+    ? shown.result.channels.map((one) => one.channel)
+    : shown;
 
 describe("the handlers", () => {
   it("reads the Configuration in force, and refuses a PUT made from another, with 409", async () => {
@@ -778,6 +796,7 @@ describe("the handlers", () => {
         const offline = yield* api.networks.look({
           params: { network: libera },
           payload: { lookup: { _tag: "Whois", nick: "peer" } },
+          query: {},
         });
 
         const call = yield* registerOnFloor(world.memory);
@@ -794,6 +813,7 @@ describe("the handlers", () => {
           api.networks.look({
             params: { network: libera },
             payload: { intent: CallerIntent.make("who"), lookup: { _tag: "Whois", nick: "peer" } },
+            query: {},
           })
         );
 
@@ -828,16 +848,19 @@ describe("the handlers", () => {
           line,
           looked: yield* api.networks.looked({
             params: { intent: CallerIntent.make("who"), network: libera },
+            query: {},
           }),
           news,
           notJournaled: yield* api.networks.looked({
             params: { intent: CallerIntent.make("nobody"), network: libera },
+            query: {},
           }),
           offline,
           unknown: yield* api.networks
             .look({
               params: { network: NetworkId.make("nowhere") },
               payload: { lookup: { _tag: "Whowas", nick: "peer" } },
+              query: {},
             })
             .pipe(
               Effect.flip,
@@ -882,6 +905,126 @@ describe("the handlers", () => {
       unknown: "UnknownNetwork",
     });
     expect(result.looked).toStrictEqual(result.answered);
+  });
+
+  it("gives a directory of Channels a page at a time, and News its first, all of it counted", async () => {
+    const entries = 103;
+
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+        yield* settle;
+
+        const call = yield* registerOnFloor(world.memory);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
+        yield* say(call, ":irc.test 353 iirc = #iirc :iirc");
+        yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+        yield* settle;
+
+        const intent = CallerIntent.make("dir");
+
+        const looking = yield* Effect.forkChild(
+          api.networks.look({
+            params: { network: libera },
+            payload: { intent, lookup: { _tag: "Channels" } },
+            query: { limit: 2, offset: 1 },
+          })
+        );
+
+        yield* settle;
+        yield* TestClock.adjust(2000);
+        const line = yield* heard(call);
+
+        yield* say(call, ":irc.test 321 iirc Channel :Users  Name");
+
+        // Each Channel has one member more than the one before, so the most come last.
+        for (let index = 0; index < entries; index += 1) {
+          yield* say(call, `:irc.test 322 iirc ${named(index)} ${index + 1} :topic ${index}`);
+        }
+
+        yield* say(call, ":irc.test 323 iirc :End of /LIST");
+
+        const answered = yield* Fiber.join(looking);
+
+        const stream = yield* api.news.follow({ headers: {}, query: {} });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) =>
+              event.event === "happened" &&
+              event.data.news.some((one) => one._tag === "LookedUp" && one.intent === intent)
+          ),
+          Stream.runCollect
+        );
+
+        const news = happenings(events).flatMap((event) =>
+          event.data.news.flatMap((one) =>
+            one._tag === "LookedUp" && one.intent === intent ? [one] : []
+          )
+        );
+
+        const again = yield* api.networks.looked({
+          params: { intent, network: libera },
+          query: { limit: 500, offset: 100 },
+        });
+
+        const whole = yield* api.networks.looked({
+          params: { intent, network: libera },
+          query: {},
+        });
+
+        const past = yield* api.networks.looked({
+          params: { intent, network: libera },
+          query: { offset: 500 },
+        });
+
+        return {
+          again: names(again),
+          answered: names(answered),
+          counted:
+            answered._tag === "LookedUp" && answered.result._tag === "Channels"
+              ? {
+                  cut: answered.result.cut,
+                  offset: answered.result.offset,
+                  seen: answered.result.seen,
+                  total: answered.result.total,
+                }
+              : answered,
+          line,
+          news: news.map((one) =>
+            one.result._tag === "Channels"
+              ? {
+                  first: one.result.channels[0]?.channel,
+                  length: one.result.channels.length,
+                  offset: one.result.offset,
+                  total: one.result.total,
+                }
+              : one.result
+          ),
+          past: names(past),
+          wholeLength: (() => {
+            const shown = names(whole);
+
+            return Array.isArray(shown) ? shown.length : shown;
+          })(),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      // The Channels with the most members come first, so a page from 100 on holds the fewest.
+      again: [named(2), named(1), named(0)],
+      answered: [named(entries - 2), named(entries - 3)],
+      counted: { cut: null, offset: 1, seen: entries, total: entries },
+      line: "LIST",
+      news: [{ first: named(entries - 1), length: 100, offset: 0, total: entries }],
+      past: [],
+      wholeLength: 100,
+    });
   });
 
   it("sends a heartbeat while nothing happens", async () => {
@@ -2330,6 +2473,7 @@ describe("a Channel's head and members", () => {
               intent: CallerIntent.make("bans"),
               lookup: { _tag: "Bans", channel: "#IIRC" },
             },
+            query: {},
           })
         );
 
@@ -2346,6 +2490,7 @@ describe("a Channel's head and members", () => {
         const refused = yield* api.networks.look({
           params: { network: libera },
           payload: { lookup: { _tag: "Invitations", channel: "#iirc" } },
+          query: {},
         });
 
         return {
@@ -2354,6 +2499,7 @@ describe("a Channel's head and members", () => {
           line,
           looked: yield* api.networks.looked({
             params: { intent: CallerIntent.make("bans"), network: libera },
+            query: {},
           }),
           refused,
         };

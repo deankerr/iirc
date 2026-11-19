@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import { NetworkId as WireNetworkId, Sequence as WireSequence } from "@iirc/api";
+import { NetworkId as WireNetworkId, Sequence as WireSequence, windowLimit } from "@iirc/api";
 import type {
   Activity as WireActivity,
   Attempted as WireAttempted,
@@ -34,6 +34,7 @@ import type {
   Happened as WireHappened,
   IgnoredReason as WireIgnoredReason,
   Knowledge as WireKnowledge,
+  ChannelEntry as WireChannelEntry,
   Looked as WireLooked,
   LookResult as WireLookResult,
   Lookup as WireLookup,
@@ -58,6 +59,7 @@ import type {
   LookResult,
   Lookup,
   Marked,
+  ChannelEntry,
   Closable,
   MaskEntry,
   ModeChange,
@@ -641,6 +643,12 @@ const maskEntry = (source: MaskEntry): Fields<MaskEntry, WireMaskEntry> => ({
   setBy: source.setBy ?? null,
 });
 
+const channelEntry = (source: ChannelEntry): Fields<ChannelEntry, WireChannelEntry> => ({
+  channel: source.channel,
+  members: source.members,
+  topic: source.topic,
+});
+
 const namesEntry = (source: NamesEntry): Fields<NamesEntry, WireNamesEntry> => ({
   nick: source.nick,
   prefixes: [...source.prefixes],
@@ -682,6 +690,14 @@ const lookupOf = (source: Lookup): WireLookup => {
       return wire;
     }
 
+    case "Channels": {
+      // The Client's filters are the contract's, each given only when the Owner gave it.
+      const { _tag, ...filters } = source;
+      const wire: Case<Lookup, WireLookup, "Channels"> = { _tag, ...filters };
+
+      return wire;
+    }
+
     case "Names": {
       const wire: Case<Lookup, WireLookup, "Names"> = {
         _tag: "Names",
@@ -703,7 +719,24 @@ const lookupOf = (source: Lookup): WireLookup => {
   }
 };
 
-const lookResult = (source: LookResult): WireLookResult => {
+/** Which of a `Channels` result's entries a Frontend asked for: `limit` of them from `offset`. */
+export interface LookPage {
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/** The page News gives of a `Channels` result, and a request that names none. */
+const firstLookPage: LookPage = { limit: windowLimit.default, offset: 0 };
+
+/**
+ * A Lookup's result, as the contract says it. Only a `Channels` result is paged: its entries
+ * are the Client's list from `page.offset`, at most `page.limit`, and `total` says how long
+ * that whole list is.
+ * @param source - The result.
+ * @param page - Which page of a `Channels` result to give.
+ * @returns Its wire form.
+ */
+const lookResult = (source: LookResult, page: LookPage): WireLookResult => {
   switch (source._tag) {
     case "Found": {
       const wire: Case<LookResult, WireLookResult, "Found"> = {
@@ -732,6 +765,20 @@ const lookResult = (source: LookResult): WireLookResult => {
         cut: source.cut ?? null,
         masks: source.masks.map(maskEntry),
         notes: source.notes.map(standardReply),
+      };
+
+      return wire;
+    }
+
+    case "Channels": {
+      const wire: Case<LookResult, WireLookResult, "Channels", "offset" | "total"> = {
+        _tag: "Channels",
+        channels: source.channels.slice(page.offset, page.offset + page.limit).map(channelEntry),
+        cut: source.cut ?? null,
+        notes: source.notes.map(standardReply),
+        offset: page.offset,
+        seen: source.seen,
+        total: source.channels.length,
       };
 
       return wire;
@@ -794,15 +841,16 @@ const lookResult = (source: LookResult): WireLookResult => {
 /**
  * What a `look` answers, or a Lookup found by its intent.
  * @param source - What the Runtime gave.
+ * @param page - Which page of a `Channels` result to give.
  * @returns Its wire form.
  */
-export const looked = (source: LookOutcome): WireLooked => {
+export const looked = (source: LookOutcome, page: LookPage): WireLooked => {
   switch (source._tag) {
     case "LookedUp": {
       const wire: Case<LookOutcome, WireLooked, "LookedUp"> = {
         _tag: "LookedUp",
         intent: source.intent,
-        result: lookResult(source.result),
+        result: lookResult(source.result, page),
         sequence: source.sequence,
       };
 
@@ -1195,7 +1243,7 @@ const news = (source: News): WireNews => {
         _tag: "LookedUp",
         intent: source.intent,
         lookup: lookupOf(source.lookup),
-        result: lookResult(source.result),
+        result: lookResult(source.result, firstLookPage),
       };
 
       return wire;

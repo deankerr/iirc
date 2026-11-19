@@ -164,8 +164,13 @@ export interface Departure {
     | { readonly _tag: "Said"; readonly intent: IntentId }
     /** A Line of an Owner's action, such as a `KICK` or a `/quote`d Line. */
     | { readonly _tag: "Acted"; readonly intent: IntentId }
-    /** The Line of an Owner's Lookup, such as a `WHOIS`, whose reply is collected for its intent. */
-    | { readonly _tag: "Looked"; readonly intent: IntentId }
+    /**
+     * The Line of an Owner's Lookup, such as a `WHOIS`, whose reply is collected for its
+     * intent, and whether that reply may be tied to it `byLabel`. A `LIST`'s may not: its
+     * answer may outlast any bound on the labels awaited, and its numerics tie it by
+     * structure alone.
+     */
+    | { readonly _tag: "Looked"; readonly intent: IntentId; readonly byLabel: boolean }
     | { readonly _tag: "Protocol" };
   /**
    * Whether the Ircd will echo this Line back, tied to its intent. It starts false, and

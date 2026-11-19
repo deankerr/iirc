@@ -81,6 +81,7 @@ import {
   Located,
   Looked,
   LookedAnswer,
+  LookQuery,
   LookRequest,
   MemberPage,
   MembersQuery,
@@ -208,11 +209,13 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       error: [UnknownNetwork, NetworkStopped],
       params: NetworkPath,
       payload: LookRequest,
+      query: LookQuery,
       success: Looked,
     }),
     HttpApiEndpoint.get("looked", "/networks/:network/lookups/:intent", {
       error: JournalFailed,
       params: { intent: CallerIntent, network: NetworkId },
+      query: LookQuery,
       success: LookedAnswer,
     }),
     HttpApiEndpoint.post("read", "/networks/:network/read", {

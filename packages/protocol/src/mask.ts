@@ -118,6 +118,16 @@ const globs = (pattern: readonly string[], text: readonly string[]): boolean => 
   return at === pattern.length;
 };
 
+/**
+ * Whether a glob, with `*` for any run of characters and `?` for any one, matches a text
+ * whole, each as given: a caller folds both first where case does not count.
+ * @param pattern - The glob.
+ * @param text - The text.
+ * @returns Whether it matches.
+ */
+export const globMatches = (pattern: string, text: string): boolean =>
+  globs(characters(pattern), characters(text));
+
 /** Who a mask is tried on: a Line's source, split as `parseSource` splits it. */
 export interface Matchable {
   readonly nick: string;

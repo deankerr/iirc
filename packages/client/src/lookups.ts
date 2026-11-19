@@ -3,14 +3,17 @@
  * which may span many Lines, into one result for the intent. The reply is tied to the
  * Lookup only by structure: by label, where `labeled-response` ties it, and otherwise by
  * the numerics that name the nick, Channel, or mask looked up, oldest Lookup first, since
- * an Ircd answers a Connection's commands in the order they came. It ends at its end
- * numeric, such as `318`, `368`, `366`, or `315`, at the end of its labelled answer, when its time runs out, or when its
+ * an Ircd answers a Connection's commands in the order they came. A `LIST`'s numerics name
+ * nothing it asked, so only one awaits at a time, and every `321`, `322`, and `323` on the
+ * floor while it does is its own. It ends at its end numeric, such as `318`, `368`, `366`,
+ * `315`, or `323`, at the end of its labelled answer, when its time runs out, or when its
  * Connection ends, and is reported once, as `LookedUp`.
  *
  * @packageDocumentation
  */
-import { mode, names, upperCaseAscii, who, whois, whowas } from "@iirc/protocol/line";
+import { list, mode, names, upperCaseAscii, who, whois, whowas } from "@iirc/protocol/line";
 import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
+import { globMatches } from "@iirc/protocol/mask";
 
 import { fits, online } from "./acts.ts";
 import { endOfNames, listedApart, see } from "./channels.ts";
@@ -26,6 +29,7 @@ import type { Listed } from "./modes.ts";
 import { maskListsOf } from "./modes.ts";
 import { parseChannel, parseNick } from "./names.ts";
 import type {
+  ChannelEntry,
   LookRefusal,
   LookResult,
   MaskEntry,
@@ -39,7 +43,13 @@ import { readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Link, Looking, Refreshed } from "./state.ts";
-import { maxForgotten, maxLookupEntries, maxLookupLines, maxLookups } from "./state.ts";
+import {
+  maxDirectory,
+  maxForgotten,
+  maxLookupEntries,
+  maxLookupLines,
+  maxLookups,
+} from "./state.ts";
 import { lookupTime } from "./timers.ts";
 import { userIn } from "./users.ts";
 import { openOf } from "./views.ts";
@@ -60,6 +70,9 @@ type EntryLookup = Extract<Lookup, { readonly _tag: "Names" | "Who" }>;
 const isEntries = (lookup: Lookup): lookup is EntryLookup =>
   lookup._tag === "Names" || lookup._tag === "Who";
 
+/** A `LIST` of the Network's Channels. */
+type ChannelsLookup = Extract<Lookup, { readonly _tag: "Channels" }>;
+
 // What an entries Lookup asked: a `NAMES`'s Channel, or a `WHO`'s mask.
 const askedOf = (lookup: EntryLookup): string =>
   lookup._tag === "Names" ? lookup.channel : lookup.mask;
@@ -67,6 +80,7 @@ const askedOf = (lookup: EntryLookup): string =>
 /** The numerics that end a reply, by the Lookup they end. */
 const ends: Readonly<Record<Lookup["_tag"], string>> = {
   Bans: "368",
+  Channels: "323",
   Exceptions: "349",
   Invitations: "347",
   Names: "366",
@@ -90,6 +104,7 @@ const noChannel: ReadonlySet<string> = new Set(["401", "403"]);
  */
 const missing: Readonly<Record<Lookup["_tag"], ReadonlySet<string>>> = {
   Bans: noChannel,
+  Channels: new Set(),
   Exceptions: noChannel,
   Invitations: noChannel,
   Names: noChannel,
@@ -112,9 +127,11 @@ const only: Readonly<Record<UserLookup["_tag"], ReadonlySet<string>>> = {
 
 /**
  * Reply numerics the Client reads for something else, which name a nick second as a
- * Lookup's reply does, so none is taken for part of one.
+ * Lookup's reply does, so none is taken for part of one: a `LIST`'s `321`, `322`, and
+ * `323` among them, whatever their second parameter says, and a `263`, whose second
+ * parameter names a command, never a nick.
  */
-const readElsewhere: ReadonlySet<string> = new Set(["341", "353"]);
+const readElsewhere: ReadonlySet<string> = new Set(["263", "321", "322", "323", "341", "353"]);
 
 /** Error numerics that answer a Lookup by naming its nick, or naming nothing, as `431` does. */
 const errors: ReadonlySet<string> = new Set(["401", "402", "406", "431"]);
@@ -141,11 +158,52 @@ const refuse = (run: Run, input: Input & { readonly _tag: "Look" }, reason: Look
   });
 };
 
+/** What a `LIST` asks of the Ircd, and what the Client filters its reply by itself. */
+interface Listing {
+  readonly conditions: readonly string[];
+  readonly sift: Looking["sift"];
+}
+
+/**
+ * What a `LIST` asks of the Ircd, as its `ELIST` allows, by letters in any case: the mask
+ * by `M`, unless it starts with `!`, which an Ircd with `N` reads as its negation, and the
+ * least members by `U`, as `>N` for one fewer, so `>0` leaves out Channels with none. What
+ * the Ircd is not asked, the Client filters by itself.
+ * @param run - The step.
+ * @param lookup - The Lookup.
+ * @returns The conditions to send, and what is left to filter.
+ */
+const listingOf = (run: Run, lookup: ChannelsLookup): Listing => {
+  const elist = upperCaseAscii(openOf(run.state)?.isupport.get("ELIST") ?? "");
+  const { least, mask } = lookup;
+  const conditions: string[] = [];
+  let sift: Listing["sift"] = { least, mask };
+
+  if (mask !== undefined && !mask.startsWith("!") && elist.includes("M")) {
+    conditions.push(mask);
+    sift = { ...sift, mask: undefined };
+  }
+
+  if (least !== undefined && elist.includes("U")) {
+    conditions.push(`>${least - 1}`);
+    sift = { ...sift, least: undefined };
+  }
+
+  return { conditions, sift };
+};
+
+// Whether a `LIST` asks what a Line can carry: a mask that is not empty and holds no comma
+// or space, which would make it a list or a second parameter, and a least count that is a
+// whole number of at least one.
+const isListable = ({ least, mask }: ChannelsLookup): boolean =>
+  (mask === undefined || (mask !== "" && !/[ ,]/u.test(mask))) &&
+  (least === undefined || (Number.isSafeInteger(least) && least >= 1));
+
 /**
  * The Line a Lookup sends: a `WHOIS` or `WHOWAS` of a nick by the Network's rules, a
  * `MODE` asking a Channel's list, by the mode the Network gives that list, a `NAMES` of a
- * Channel's name by the Network's rules, or a `WHO` of a mask as one parameter, never
- * asking WHOX fields, each sent whole.
+ * Channel's name by the Network's rules, a `WHO` of a mask as one parameter, never
+ * asking WHOX fields, or a `LIST` with what `ELIST` lets the Ircd filter, each sent whole.
  * @param run - The step.
  * @param lookup - The Lookup.
  * @returns The Line, or why it cannot be sent.
@@ -169,6 +227,8 @@ const lineOf = (run: Run, lookup: Lookup): OutboundLine | "NotOffered" | "Unsend
     line = parseChannel(naming, lookup.channel) === undefined ? undefined : names(lookup.channel);
   } else if (lookup._tag === "Who") {
     line = who(lookup.mask);
+  } else if (lookup._tag === "Channels") {
+    line = isListable(lookup) ? list(listingOf(run, lookup).conditions) : undefined;
   } else if (parseNick(naming, lookup.nick) !== undefined) {
     line = lookup._tag === "Whois" ? whois(lookup.nick) : whowas(lookup.nick);
   }
@@ -179,7 +239,9 @@ const lineOf = (run: Run, lookup: Lookup): OutboundLine | "NotOffered" | "Unsend
 /**
  * The Owner looks something up. It needs a Session. A nick must be a nick by the Network's
  * rules, and a Channel's name a Channel's, and a list one the Network keeps, sent whole. At
- * most {@link maxLookups} await their replies on a Connection at once.
+ * most {@link maxLookups} await their replies on a Connection at once, and one `LIST`,
+ * which awaits its end even once its time runs out, since nothing but its being the one
+ * awaiting ties its reply to it on the floor.
  * @param run - The step.
  * @param input - The Lookup.
  */
@@ -201,13 +263,20 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
     return;
   }
 
-  if (open.lookups.filter((each) => !each.lapsed).length >= maxLookups) {
+  if (
+    open.lookups.filter((each) => !each.lapsed).length >= maxLookups ||
+    (lookup._tag === "Channels" && open.lookups.some((each) => each.lookup._tag === "Channels"))
+  ) {
     refuse(run, input, "Busy");
 
     return;
   }
 
-  const sent = send(run, line, line.command, { _tag: "Looked", intent: input.intent });
+  const sent = send(run, line, line.command, {
+    _tag: "Looked",
+    byLabel: lookup._tag !== "Channels",
+    intent: input.intent,
+  });
 
   // A Feature refused it at egress.
   if (sent === undefined) {
@@ -218,7 +287,9 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
 
   updateOpen(run, (phase) => {
     const looking: Looking = {
+      begun: false,
       bounded: false,
+      channels: [],
       deadline: Instant.make(run.at + lookupTime),
       ended: false,
       error: undefined,
@@ -235,6 +306,11 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
       notes: [],
       order: phase.awaited,
       profiles: [],
+      seen: 0,
+      sift:
+        lookup._tag === "Channels"
+          ? listingOf(run, lookup).sift
+          : { least: undefined, mask: undefined },
       users: [],
     };
 
@@ -633,11 +709,31 @@ const entriesResultOf = (
   return isNames ? { _tag: "Members", cut, members, notes } : { _tag: "Users", cut, notes, users };
 };
 
+// What a `LIST` found: `Bounded` only when it saw more Channels than it kept, however many
+// notes it held, and otherwise cut short by its time or its Connection. It is never
+// labelled, so it never ends with a labelled answer.
+const channelsResultOf = (looking: Looking, ending: Ending): LookResult => {
+  const { channels, notes, seen } = looking;
+  const stopped = ending === "End" ? undefined : ending;
+
+  return {
+    _tag: "Channels",
+    channels,
+    cut: seen > channels.length ? "Bounded" : stopped,
+    notes,
+    seen,
+  };
+};
+
 const resultOf = (looking: Looking, ending: Ending, reply: string): LookResult => {
   const { notes } = looking;
 
   if (looking.error !== undefined) {
     return { ...looking.error, notes };
+  }
+
+  if (looking.lookup._tag === "Channels") {
+    return channelsResultOf(looking, ending);
   }
 
   if (isEntries(looking.lookup)) {
@@ -726,10 +822,16 @@ const rejectionOf = (looking: Looking, line: Line): Looking["error"] => {
     : { _tag: "Failed", reply: command };
 };
 
+// Whether a `LIST`'s rows have begun, so it holds until its `323` or its Connection's end.
+const holds = (looking: Looking): boolean => looking.lookup._tag === "Channels" && looking.begun;
+
 // A `WARN` or a `NOTE` says something of the Lookup, and ends nothing, and neither does a
-// `FAIL` after the one that gave its result, which is kept beside them so none is lost.
+// `FAIL` after the one that gave its result, or one of a `LIST` whose rows have begun, which
+// is kept beside them so none is lost.
 const isNote = (looking: Looking, command: string): boolean =>
-  command === "WARN" || command === "NOTE" || (command === "FAIL" && looking.error !== undefined);
+  command === "WARN" ||
+  command === "NOTE" ||
+  (command === "FAIL" && (looking.error !== undefined || holds(looking)));
 
 // Keeps a note in the Lookup's notes. Past the Lines one Lookup keeps, it is not kept.
 const keepNote = (run: Run, looking: Looking, line: Line): void => {
@@ -780,6 +882,80 @@ const keepWho = (run: Run, looking: Looking, line: Line): void => {
       ? { ...each, bounded: true }
       : { ...each, users: [...each.users, { away: awayOf(flags), host, nick, realname, user }] }
   );
+};
+
+/**
+ * One Channel a `322` describes, `<client> <channel> <count> [:<topic>]`: a name that is a
+ * Channel's by the Network's rules, and a count of digits.
+ * @param run - The step.
+ * @param line - The Line.
+ * @returns The Channel, or `undefined` when the Line does not fit.
+ */
+const readListed = (run: Run, line: Line): ChannelEntry | undefined => {
+  const [, channel, count, topic] = line.params;
+
+  return channel === undefined ||
+    count === undefined ||
+    !digits.test(count) ||
+    parseChannel(namingNow(run), channel) === undefined
+    ? undefined
+    : { channel, members: Number(count), topic: topic ?? "" };
+};
+
+// Most members first, then by name, in code-unit order.
+const ranks = (left: ChannelEntry, right: ChannelEntry): number =>
+  right.members - left.members ||
+  (left.channel < right.channel ? -1 : Number(left.channel > right.channel));
+
+// The Channels kept with one more, in rank, and at most {@link maxDirectory} of them, so
+// the least drops out once there are more.
+const ranked = (kept: readonly ChannelEntry[], entry: ChannelEntry): readonly ChannelEntry[] => {
+  let low = 0;
+  let high = kept.length;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const there = kept[middle];
+
+    if (there !== undefined && ranks(there, entry) <= 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+
+  return low >= maxDirectory
+    ? kept
+    : [...kept.slice(0, low), entry, ...kept.slice(low, maxDirectory - 1)];
+};
+
+// Keeps the Channel one `322` of a `LIST` reply describes, if it matches what the Ircd was
+// not asked to filter by: its name by the glob, folded by the Network's casemapping, and
+// its members by the least. Every one that matches is seen.
+const keepChannel = (run: Run, looking: Looking, line: Line): void => {
+  const entry = readListed(run, line);
+
+  if (entry === undefined) {
+    ignore(run, { _tag: "Malformed", command: line.command });
+
+    return;
+  }
+
+  const { least, mask } = looking.sift;
+  const fold = folder(run.state);
+
+  if (
+    (least !== undefined && entry.members < least) ||
+    (mask !== undefined && !globMatches(fold(mask), fold(entry.channel)))
+  ) {
+    return;
+  }
+
+  change(run, looking.intent, (each) => ({
+    ...each,
+    channels: ranked(each.channels, entry),
+    seen: each.seen + 1,
+  }));
 };
 
 // The modes a member's prefixes stand for, as far as the listing knows them.
@@ -869,6 +1045,34 @@ const takeEnd = (run: Run, looking: Looking, line: Line): void => {
   }
 };
 
+// Whether a `LIST`'s reply is a `263`, which asks to try again later, and ends it as an
+// error would, before its rows begin.
+const refusesList = (looking: Looking, command: string): boolean =>
+  looking.lookup._tag === "Channels" && command === "263" && !looking.begun;
+
+// Whether a Line of a Lookup's reply refuses it: an error numeric, a `FAIL`, or a `263` of a
+// `LIST`.
+const isRejection = (looking: Looking, command: string): boolean =>
+  isError(command) || command === "FAIL" || refusesList(looking, command);
+
+// A `321` or `322` of a `LIST` begins its rows, and a `322` is kept while it has neither its
+// error nor run out of time.
+const takeListed = (run: Run, looking: Looking, line: Line): void => {
+  const { command } = line;
+
+  if (command !== "321" && command !== "322") {
+    return;
+  }
+
+  if (!looking.begun) {
+    change(run, looking.intent, (each) => ({ ...each, begun: true }));
+  }
+
+  if (command === "322" && looking.error === undefined && !looking.lapsed) {
+    keepChannel(run, looking, line);
+  }
+};
+
 // One Line of a Lookup's reply: its end, an error, or something it says of a User or a list.
 const take = (run: Run, looking: Looking, line: Line): void => {
   const { command } = line;
@@ -894,12 +1098,20 @@ const take = (run: Run, looking: Looking, line: Line): void => {
     return;
   }
 
-  if (isError(command) || command === "FAIL") {
+  if (isRejection(looking, command)) {
     change(run, intent, (each) => ({
       ...each,
       error: each.error ?? rejectionOf(each, line),
       lines: each.lines + 1,
     }));
+
+    return;
+  }
+
+  // A `LIST` keeps what each `322` describes, none counted against the Lines one Lookup
+  // keeps. One whose time ran out keeps nothing, and a `321` says nothing.
+  if (looking.lookup._tag === "Channels") {
+    takeListed(run, looking, line);
 
     return;
   }
@@ -1023,6 +1235,26 @@ const answersUser = (run: Run, lookup: UserLookup, line: Line): boolean => {
   return holds && named !== undefined && fold(named) === fold(lookup.nick);
 };
 
+// Whether a numeric is part of a `LIST`'s reply on the floor: a `321`, `322`, or `323`,
+// which name nothing it asked, so belong to the one `LIST` that awaits, or, before its rows
+// begin, a `263` or `421`, which name the command they refuse second. No other error is
+// taken, since one naming a nick could name one called `List`.
+const answersChannels = (looking: Looking, line: Line): boolean => {
+  const { command, params } = line;
+  const [, named] = params;
+
+  if (command === "321" || command === "322" || command === "323") {
+    return true;
+  }
+
+  return (
+    (command === "263" || command === "421") &&
+    !looking.begun &&
+    named !== undefined &&
+    upperCaseAscii(named) === "LIST"
+  );
+};
+
 // Whether a numeric, not tied by label, is part of a Lookup's reply on the floor.
 const answers = (run: Run, looking: Looking, line: Line): boolean => {
   const { command } = line;
@@ -1038,6 +1270,10 @@ const answers = (run: Run, looking: Looking, line: Line): boolean => {
 
   if (isEntries(lookup)) {
     return answersEntries(run, lookup, line);
+  }
+
+  if (lookup._tag === "Channels") {
+    return answersChannels(looking, line);
   }
 
   return isList(lookup) ? answersList(run, looking, lookup, line) : answersUser(run, lookup, line);
@@ -1155,9 +1391,18 @@ export const floorLookup = (run: Run, line: Line): Looking | undefined =>
     ? openOf(run.state)?.lookups.find((each) => answers(run, each, line))
     : undefined;
 
+// The command a Lookup is sent with.
+const verbOf = (lookup: Lookup): string => {
+  if (isList(lookup)) {
+    return "MODE";
+  }
+
+  return lookup._tag === "Channels" ? "LIST" : upperCaseAscii(lookup._tag);
+};
+
 /**
  * The oldest Lookup sent without a label that a standard reply, outside any batch or label,
- * names by its command, `WHOIS`, `WHOWAS`, `NAMES`, `WHO`, or a list's `MODE`, compared without regard to
+ * names by its command, `WHOIS`, `WHOWAS`, `NAMES`, `WHO`, `LIST`, or a list's `MODE`, compared without regard to
  * ASCII case. One that already has its error keeps a later `FAIL` in its notes.
  * @param run - The step.
  * @param reply - The standard reply.
@@ -1166,10 +1411,7 @@ export const floorLookup = (run: Run, line: Line): Looking | undefined =>
 export const lookupByCommand = (run: Run, reply: StandardReply): Looking | undefined => {
   const verb = upperCaseAscii(reply.command);
 
-  return openOf(run.state)?.lookups.find(
-    (each) =>
-      !each.labelled && (isList(each.lookup) ? "MODE" : upperCaseAscii(each.lookup._tag)) === verb
-  );
+  return openOf(run.state)?.lookups.find((each) => !each.labelled && verbOf(each.lookup) === verb);
 };
 
 /**
@@ -1186,12 +1428,14 @@ export const collectFloor = (run: Run, looking: Looking, line: Line): void => {
   // The protocol promises no end numeric after a `FAIL`, or after an error numeric that
   // refuses a `MODE`, `NAMES`, or `WHO`, so one that gives the Lookup its result ends it, rather than leaving
   // it to wait out its time. A `WHOIS` or `WHOWAS` error numeric is followed by its end
-  // numeric, as it always was.
+  // numeric, as it always was. A `263` refusing a `LIST` is followed by nothing either.
   const final =
     line.command === "FAIL" ||
-    ((isList(looking.lookup) || isEntries(looking.lookup)) && isError(line.command));
+    refusesList(looking, line.command) ||
+    ((isList(looking.lookup) || isEntries(looking.lookup) || looking.lookup._tag === "Channels") &&
+      isError(line.command));
 
-  if (final && looking.error === undefined) {
+  if (final && looking.error === undefined && !holds(looking)) {
     finish(run, looking.intent, "End", line.command);
   }
 };
@@ -1286,7 +1530,9 @@ const forgetting = (
 export const expireLookup = (run: Run, intent: IntentId): void => {
   const looking = openOf(run.state)?.lookups.find((each) => each.intent === intent);
 
-  if (looking?.lookup._tag !== "Names" || looking.lapsed) {
+  const readsOn = looking?.lookup._tag === "Names" || looking?.lookup._tag === "Channels";
+
+  if (looking === undefined || !readsOn || looking.lapsed) {
     finish(run, intent, "TimedOut", "");
 
     return;
@@ -1294,9 +1540,10 @@ export const expireLookup = (run: Run, intent: IntentId): void => {
 
   report(run, looking, resultOf(looking, "TimedOut", ""));
 
-  // It reads on, as the Client's own `WHO` does, so its late `366` still corrects the
-  // members, and its late `353`s never reach the Channel's listing. At most
-  // {@link maxLookups} read on so, the oldest forgotten first. What a forgotten one would
+  // It reads on, as the Client's own `WHO` does, so a `NAMES`'s late `366` still corrects
+  // the members, and its late `353`s never reach the Channel's listing, and a `LIST`'s late
+  // `322`s are taken, kept by no one, until its `323`, holding off another `LIST` till then.
+  // At most {@link maxLookups} `NAMES` read on so, the oldest forgotten first. What a forgotten one would
   // still have read is kept by no one: by its label, or on the floor, counted for its
   // Channel, up to its `366`, so no part of its answer ever replaces the members.
   updateOpen(run, (open) => {
@@ -1304,7 +1551,7 @@ export const expireLookup = (run: Run, intent: IntentId): void => {
       each.intent === intent ? { ...each, lapsed: true } : each
     );
 
-    const lapsed = lookups.filter((each) => each.lapsed);
+    const lapsed = lookups.filter((each) => each.lapsed && each.lookup._tag === "Names");
     const oldest = lapsed.length > maxLookups ? lapsed[0] : undefined;
     const kept = lookups.filter((each) => each !== oldest);
 

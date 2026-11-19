@@ -879,6 +879,23 @@ const isWord = (word: string) => {
 };
 
 /**
+ * `LIST` of the Channels on the Network, with conditions to filter them by, as the Ircd's
+ * `ELIST` offers them, such as a mask or `>4`, sent as one parameter joined by commas. Which
+ * conditions the Ircd offers is the caller's to know.
+ * @param conditions - The conditions, each one word with no comma, or none.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const list = (conditions: readonly string[] = []): OutboundLine | Rejected => {
+  if (conditions.length === 0) {
+    return outbound("LIST", []);
+  }
+
+  return conditions.every((condition) => isWord(condition) && !condition.includes(","))
+    ? outbound("LIST", [conditions.join(",")])
+    : rejected("InvalidParameter");
+};
+
+/**
  * `MODE` of one Target, to read its modes, or with arguments to change them.
  * @param target - A Channel, or Self.
  * @param args - The mode string and its parameters, if any, each one word.

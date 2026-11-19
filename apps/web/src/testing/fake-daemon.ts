@@ -422,9 +422,37 @@ const LookBody = Schema.fromJsonString(
         channel: Schema.String,
       }),
       Schema.TaggedStruct("Who", { mask: Schema.String }),
+      Schema.TaggedStruct("Channels", {
+        least: Schema.optionalKey(Schema.Finite),
+        mask: Schema.optionalKey(Schema.String),
+      }),
     ]),
   })
 );
+
+/**
+ * A Lookup's result as one page, as the Daemon gives it: a `Channels` result's whole list,
+ * which a test scripts at offset 0, sliced by the request's `offset` and `limit`, 0 and 100
+ * when left out, with `total` its length. Any other result is whole.
+ * @param result - The whole result.
+ * @param url - The request's URL.
+ * @returns The page.
+ */
+const pageOf = (result: typeof LookResult.Encoded, url: URL): typeof LookResult.Encoded => {
+  if (result._tag !== "Channels") {
+    return result;
+  }
+
+  const offset = Number(url.searchParams.get("offset") ?? "0");
+  const limit = Number(url.searchParams.get("limit") ?? "100");
+
+  return {
+    ...result,
+    channels: result.channels.slice(offset, offset + limit),
+    offset,
+    total: result.channels.length,
+  };
+};
 
 /**
  * How the fake answers a `look`: journaled and `LookedUp` at once, journaled and `Pending`,
@@ -605,6 +633,7 @@ export const fakeDaemon = () => {
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
   const looked: string[] = [];
+  const lookedPages: { readonly offset: string | null; readonly limit: string | null }[] = [];
   const lookedHeld: (() => void)[] = [];
   const looksHeld: (() => void)[] = [];
   const actsHeld: (() => void)[] = [];
@@ -728,6 +757,8 @@ export const fakeDaemon = () => {
     looked,
     /** Releases each `GET` of a Lookup held, in the order they came. */
     lookedHeld,
+    /** Each page of a `Channels` result read by its intent, as its `offset` and `limit`, in order. */
+    lookedPages,
     /** Each `look` asked for, in order, with its Network. */
     looks,
     /** Releases each `look` held, in the order they came. */
@@ -1837,10 +1868,11 @@ export const fakeDaemon = () => {
    * `LookedUp`, or `NotJournaled` for one never journaled. It waits until a test releases it
    * when `holdLooked` says.
    * @param intent - Its intent.
+   * @param url - The request's URL, whose query pages a `Channels` result.
    * @param init - The request.
    * @returns The answer.
    */
-  const askedAfter = async (intent: string, init: RequestInit) => {
+  const askedAfter = async (intent: string, url: URL, init: RequestInit) => {
     daemon.looked.push(intent);
 
     if (daemon.holdLooked) {
@@ -1859,7 +1891,19 @@ export const fakeDaemon = () => {
       return json(200, { _tag: "Pending", intent, sequence: held.sequence });
     }
 
-    return json(200, { _tag: "LookedUp", intent, result: held.result, sequence: held.sequence });
+    if (held.result._tag === "Channels") {
+      daemon.lookedPages.push({
+        limit: url.searchParams.get("limit"),
+        offset: url.searchParams.get("offset"),
+      });
+    }
+
+    return json(200, {
+      _tag: "LookedUp",
+      intent,
+      result: pageOf(held.result, url),
+      sequence: held.sequence,
+    });
   };
 
   /**
@@ -1887,7 +1931,7 @@ export const fakeDaemon = () => {
     const { intent, network } = one;
 
     if (method === "GET" && intent !== undefined) {
-      return await askedAfter(intent, init);
+      return await askedAfter(intent, url, init);
     }
 
     const body = Schema.decodeSync(LookBody)(await new Response(init.body).text());
@@ -1938,7 +1982,12 @@ export const fakeDaemon = () => {
       }
 
       case "LookedUp": {
-        return json(200, { _tag: "LookedUp", intent: named, result: script.result, sequence });
+        return json(200, {
+          _tag: "LookedUp",
+          intent: named,
+          result: pageOf(script.result, url),
+          sequence,
+        });
       }
 
       default: {

@@ -363,6 +363,13 @@ export interface NamesEntry {
   readonly prefixes: readonly string[];
 }
 
+/** One Channel as a `LIST` reply (`322`) describes it: its name, how many members it has, and its topic, `""` when the Ircd gave none. */
+export interface ChannelEntry {
+  readonly channel: string;
+  readonly members: number;
+  readonly topic: string;
+}
+
 /** One User as a `WHO` reply (`352`) describes them. */
 export interface WhoEntry {
   readonly nick: string;
@@ -380,13 +387,13 @@ export type Notes = readonly StandardReply[];
 /**
  * Why a Lookup ended with only part of its reply: no end came within its time limit
  * (`TimedOut`), its Connection ended first (`Ended`), or the reply ran past the Lines,
- * or the members or Users, one Lookup collects (`Bounded`).
+ * or the members, Users, or Channels, one Lookup collects (`Bounded`).
  */
 export type PartialReason = "TimedOut" | "Ended" | "Bounded";
 
 /**
  * Why a Lookup was not sent: no Session (`Offline`), no Line can carry it (`Unsendable`),
- * too many Lookups await their replies on the Connection (`Busy`), or the Network keeps no
+ * too many Lookups await their replies on the Connection, or another `Channels` does (`Busy`), or the Network keeps no
  * such list, by its ISUPPORT (`NotOffered`).
  */
 export type LookRefusal = "Offline" | "Unsendable" | "Busy" | "NotOffered";
@@ -403,6 +410,9 @@ export type LookRefusal = "Offline" | "Unsendable" | "Busy" | "NotOffered";
  * - `Members`: of a `NAMES`, each member listed, in order, and `Users`: of a `WHO`, each
  *   User a `352` described, in order, each with `cut` as for a list, stopped short of its
  *   end, `366` or `315`. An end with nothing before it is an empty list.
+ * - `Channels`: of a `LIST`, the Channels it described that match what was asked, most
+ *   members first, then by name, at most `maxDirectory`, with `seen` how many matched,
+ *   kept or not, and `cut` as for a list, `Bounded` when `seen` is more than were kept.
  * - `NotFound`: the Network has no such User, by `401` or `406`, or ended its reply with
  *   no User in it, by the end numeric, or no such Channel, by `401` or `403`.
  * - `Failed`: another error numeric, such as `402`, `431`, or `482`, a `FAIL` by its code,
@@ -438,6 +448,13 @@ export type LookResult =
   | {
       readonly _tag: "Users";
       readonly users: readonly WhoEntry[];
+      readonly cut: PartialReason | undefined;
+      readonly notes: Notes;
+    }
+  | {
+      readonly _tag: "Channels";
+      readonly channels: readonly ChannelEntry[];
+      readonly seen: number;
       readonly cut: PartialReason | undefined;
       readonly notes: Notes;
     }

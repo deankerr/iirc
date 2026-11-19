@@ -14,6 +14,7 @@ import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 import type {
+  ChannelEntry,
   EndReason,
   MaskEntry,
   NamesEntry,
@@ -396,11 +397,29 @@ export interface Looking {
   readonly listing: Listing | undefined;
   /**
    * Whether its time ran out, and it reported what it had. A `NAMES` still reads its
-   * answer, to its `366` or its labelled answer's end, and reports nothing more.
+   * answer, to its `366` or its labelled answer's end, and a `LIST` to its `323` or its
+   * labelled answer's end, keeping nothing, and each reports nothing more.
    */
   readonly lapsed: boolean;
   /** The Users a `WHO` reply has described so far, in order, up to {@link maxLookupEntries}. */
   readonly users: readonly WhoEntry[];
+  /**
+   * The Channels a `LIST` reply has described so far that match what was asked, the
+   * {@link maxDirectory} with the most members, most first, then by name.
+   */
+  readonly channels: readonly ChannelEntry[];
+  /** How many Channels a `LIST` reply has described that match what was asked, kept or not. */
+  readonly seen: number;
+  /**
+   * Whether a `LIST` reply's rows have begun, with a `321` or a `322`, after which nothing
+   * but its `323` or its Connection's end ends it.
+   */
+  readonly begun: boolean;
+  /**
+   * What a `LIST` asked that the Ircd was not asked to filter by, which the Client does:
+   * a glob of the Channels' names, and the least members.
+   */
+  readonly sift: { readonly mask: string | undefined; readonly least: number | undefined };
   /** The mode a Channel's list was asked by, which a `472` names, or `undefined` for a User's. */
   readonly mode: string | undefined;
   /** The error its reply held, which it reports at its end. */
@@ -445,6 +464,12 @@ export const maxLookupLines = 64;
  * against {@link maxLookupLines}.
  */
 export const maxLookupEntries = 500;
+
+/**
+ * How many Channels a `LIST` reply keeps: those with the most members. A reply may describe
+ * tens of thousands, and none counts against {@link maxLookupLines}, so this alone bounds it.
+ */
+export const maxDirectory = 1000;
 
 /** How many Lines of actions a Connection keeps awaiting an answer. */
 export const maxActing = 64;
