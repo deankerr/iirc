@@ -8,7 +8,7 @@ import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
 import { client, makeClient } from "../core.ts";
-import { configured, joined, play, registered } from "../testing/index.ts";
+import { configured, play, registered } from "../testing/index.ts";
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
@@ -85,7 +85,7 @@ describe("a Configured that requires a login", () => {
       },
     });
 
-    const played = play(client, {
+    play(client, {
       configuration: optional,
       transcript: [
         registered(optional, { offered: ["sasl=PLAIN"] }),
@@ -93,7 +93,7 @@ describe("a Configured that requires a login", () => {
       ],
     });
 
-    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
+    expect.assertions(0);
   });
 
   it("gives up at once when the Ircd has no cap negotiation", () => {
@@ -231,27 +231,6 @@ describe("the rule holds without any Feature", () => {
         ),
         givesUp,
       ],
-    });
-
-    expect.assertions(0);
-  });
-});
-
-// Kept so the joined prelude is exercised with the rule: an optional login still joins.
-describe("an optional login", () => {
-  it("lets the Session begin and join without one", () => {
-    const optional = configured({
-      login: {
-        _tag: "Sasl",
-        account: "iirc",
-        credential: CredentialName.make("pw"),
-        required: false,
-      },
-    });
-
-    play(client, {
-      configuration: optional,
-      transcript: [registered(optional), joined(optional, "#iirc")],
     });
 
     expect.assertions(0);

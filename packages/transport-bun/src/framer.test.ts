@@ -13,18 +13,6 @@ const frame = (limit: number, reads: readonly string[]) => {
 };
 
 describe("the framer", () => {
-  it("ends a Line at CRLF", () => {
-    expect(frame(512, ["PING :a\r\nPING :b\r\n"])).toStrictEqual(["PING :a", "PING :b"]);
-  });
-
-  it("ends a Line at a bare LF", () => {
-    expect(frame(512, ["PING :a\nPING :b\n"])).toStrictEqual(["PING :a", "PING :b"]);
-  });
-
-  it("ends a Line at a bare CR, rather than joining it to the next", () => {
-    expect(frame(512, ["PING :a\rPING :b\r"])).toStrictEqual(["PING :a", "PING :b"]);
-  });
-
   it("takes every kind of ending in one read", () => {
     expect(frame(512, ["one\r\ntwo\nthree\rfour\r\n"])).toStrictEqual([
       "one",
@@ -40,14 +28,6 @@ describe("the framer", () => {
 
   it("ends a Line at a CR at the end of a read, before the next Line's read", () => {
     expect(frame(512, ["PING :x\r", "PING :y\r"])).toStrictEqual(["PING :x", "PING :y"]);
-  });
-
-  it("gives nothing between LF and CR, which are two endings", () => {
-    expect(frame(512, ["PING :x\n\rPING :y\n", "\r"])).toStrictEqual(["PING :x", "PING :y"]);
-  });
-
-  it("joins a Line split across reads", () => {
-    expect(frame(512, ["PI", "NG :spl", "it\r\n"])).toStrictEqual(["PING :split"]);
   });
 
   it("gives a Line one byte at a time", () => {

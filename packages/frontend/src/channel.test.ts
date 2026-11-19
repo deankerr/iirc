@@ -398,6 +398,9 @@ const tags = (reads: readonly ChannelRead[]) =>
     wait: read.wait,
   }));
 
+// The kinds of read a Channel wants now, its members showing.
+const asks = (channel: Channel) => tags(channelReads(channel, inIirc, true)).map((one) => one.tag);
+
 describe("the open Channel", () => {
   it("is the open Timeline when its Network lists it as a Channel's, and the options are not shown", () => {
     const options = reduceTimelines(world(iirc), { _tag: "OptionsShown", filter: "" });
@@ -443,40 +446,53 @@ describe("the open Channel", () => {
     // What a Frontend that fell behind is told: the head moved at step 9, then a Read
     // Marker at step 11, as one change of step 11.
     const gathered = reduceChannel(state, headMoved(9, 11));
+    const asked = takeOn(gathered);
+    const [headRead, membersRead] = asked.reads;
+
+    // Both reads the move called for, answered.
+    const read = channelOf(
+      [
+        ...head(headRead, "Joined", gathered.generation),
+        ...(membersRead === undefined
+          ? []
+          : [
+              {
+                _tag: "MembersRead",
+                generation: gathered.generation,
+                page: page([member("op", ["o"]), member("peer", [])]),
+                read: membersRead,
+              } satisfies ChannelEvent,
+            ]),
+      ],
+      asked.state
+    );
+
     // The same head said again, as every later change of the Timeline says it.
-    const same = reduceChannel(gathered, headMoved(9, 12));
+    const same = reduceChannel(read, headMoved(9, 12));
     const further = reduceChannel(same, headMoved(13, 13));
 
     expect({
-      further: [further.generation - same.generation, further.headSeen],
-      gathered: [
-        tags(channelReads(gathered, inIirc, true)).map((read) => read.tag),
-        gathered.headSeen,
-      ],
-      same: same.generation - gathered.generation,
+      further: asks(further),
+      gathered: asks(gathered),
+      read: asks(read),
+      same: asks(same),
     }).toStrictEqual({
-      further: [1, 13],
-      gathered: [["Head", "Members"], 9],
-      same: 0,
+      further: ["Head", "Members"],
+      gathered: ["Head", "Members"],
+      read: [],
+      same: [],
     });
   });
 
   it("reads both again, after a moment, when a change may have changed the Channel", () => {
     const { state } = settled();
-    const item = (one: typeof TimelineItem.Encoded) => changed({ items: [one] });
 
-    const gap = changed({
-      gaps: [{ changed: 11, from: cursor(11_000, 11), network: "libera", to: null }],
-    });
-
+    // Which changes touch the Channel is `touches`'s, tested below: this is its wiring.
     const again = (event: ChannelEvent) =>
       tags(channelReads(reduceChannel(state, event), inIirc, true)).map((read) => read.tag);
 
     expect({
-      elsewhere: again(item(joined(11, other))),
-      gap: again(gap),
-      joined: again(item(joined(11))),
-      message: again(item(said(11, "peer"))),
+      joined: again(changed({ items: [joined(11)] })),
       overflow: again({
         _tag: "Overflowed",
         overflow: overflow([iirc]),
@@ -490,14 +506,11 @@ describe("the open Channel", () => {
         overflow: overflow(null),
       }),
       reset: again({ _tag: "Reset" }),
-      waits: tags(channelReads(reduceChannel(state, item(joined(11))), inIirc, true)).map(
-        (read) => read.wait
-      ),
+      waits: tags(
+        channelReads(reduceChannel(state, changed({ items: [joined(11)] })), inIirc, true)
+      ).map((read) => read.wait),
     }).toStrictEqual({
-      elsewhere: [],
-      gap: ["Head", "Members"],
       joined: ["Head", "Members"],
-      message: [],
       overflow: ["Head", "Members"],
       overflowElsewhere: [],
       overflowEverything: ["Head", "Members"],
@@ -1205,7 +1218,6 @@ describe("the Channels the Panes show", () => {
         read._tag,
         read.wait,
       ]),
-      same: reduceChannels(held, event([iirc])) === held,
-    }).toStrictEqual({ head: "#iirc", members: 0, reads: [["Members", false]], same: true });
+    }).toStrictEqual({ head: "#iirc", members: 0, reads: [["Members", false]] });
   });
 });

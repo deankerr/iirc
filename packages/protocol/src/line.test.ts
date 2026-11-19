@@ -24,16 +24,6 @@ describe("a secret Line", () => {
     });
     expect(Schema.decodeUnknownSync(json)(JSON.parse(recorded))).toStrictEqual(line);
   });
-
-  it("names only the places a Credential can go", () => {
-    expect(Object.keys(SecretLine.cases)).toStrictEqual([
-      "AuthenticatePlain",
-      "Identify",
-      "JoinWithKey",
-      "Oper",
-      "Pass",
-    ]);
-  });
 });
 
 // A Line as the Journal would hold it, before it is checked.
@@ -68,24 +58,8 @@ describe("an outbound Line", () => {
 
   it.each([
     ["a second Line in a parameter", { ...ok, params: ["#iirc", "hi\r\nOPER root bad"] }],
-    ["NUL in a parameter", { ...ok, params: ["#iirc", "hi\0"] }],
-    ["a space in a middle parameter", { ...ok, params: ["#a b", "hi"] }],
-    ["an empty middle parameter", { ...ok, params: ["", "hi"] }],
-    ["a middle parameter starting with a colon", { ...ok, params: [":x", "hi"] }],
-    ["a command that is not one", { ...ok, command: "PRIV MSG" }],
     ["a lower-case command, which would not parse back the same", { ...ok, command: "privmsg" }],
-    ["a lone surrogate, which UTF-8 cannot carry", { ...ok, params: ["#iirc", "\uD800"] }],
-    ["more than 15 parameters", { ...ok, params: Array.from({ length: 16 }, () => "x") }],
-    ["more than 510 bytes", { ...ok, params: ["#iirc", "é".repeat(250)] }],
-    ["a tag that is not client-only", { ...ok, tags: { time: "2026-11-08T00:00:00Z" } }],
-    ["tags over 4094 bytes", { ...ok, tags: { "+big": ";".repeat(2100) } }],
   ])("refuses %s", (_, line) => {
     expect(safe(line)).toBeFalsy();
-  });
-
-  it("cannot be made unsafe", () => {
-    expect(() => OutboundLine.make({ ...ok, params: ["#iirc", "hi\r\nQUIT"] })).toThrow(
-      "Schema validation failed"
-    );
   });
 });

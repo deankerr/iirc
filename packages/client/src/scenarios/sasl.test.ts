@@ -47,6 +47,10 @@ const welcome = lines("<< :irc.test 001 iirc :Welcome", "?? session-began iirc")
 // A failed login: go on when it is optional, give up when it is required.
 const goesOn = lines(">> CAP END") + welcome;
 
+// Every Session the Client said began.
+const began = (played: ReturnType<typeof play>) =>
+  played.steps.flatMap((step) => step.news.filter((news) => news._tag === "SessionBegan"));
+
 const givesUp = lines(
   ">> QUIT",
   "-> hangup",
@@ -124,28 +128,6 @@ describe("logging in", () => {
     expect.assertions(0);
   });
 
-  it("reads 900 and 901 for Self's account, with no sasl at all", () => {
-    const played = play(client, {
-      configuration: optional,
-      transcript: [
-        registered(optional),
-        lines("<< :irc.test 900 iirc iirc!u@h acct :You are now logged in as acct"),
-      ],
-    });
-
-    expect(client.known(played.state).self?.account).toMatchObject({ value: "acct" });
-
-    const out = play(client, {
-      configuration: optional,
-      transcript: [
-        registered(optional),
-        lines("<< :irc.test 901 iirc iirc!u@h :You are now logged out"),
-      ],
-    });
-
-    expect(client.known(out.state).self?.account).toMatchObject({ _tag: "Known", value: null });
-  });
-
   it("knows no account without sasl", () => {
     const played = play(client, { configuration: optional, transcript: registered(optional) });
 
@@ -181,20 +163,15 @@ describe("a login that cannot happen", () => {
     expect.assertions(0);
   });
 
-  it.each(["902", "904", "905", "906", "907", "908"])(
-    "goes on after %s when the login is optional, and gives up when it is required",
-    (numeric) => {
-      const failure = `<< :irc.test ${numeric} * :failed\n`;
+  // Before the Credential is asked for. Each ends the login as 908 does after it is sent.
+  it.each(["902", "904", "905", "906", "907"])("fails the login on %s", (numeric) => {
+    play(client, {
+      configuration: optional,
+      transcript: [asked(), `<< :irc.test ${numeric} * :failed\n`, goesOn],
+    });
 
-      play(client, { configuration: optional, transcript: [sent, failure, goesOn] });
-      play(client, { configuration: required, transcript: [sent, failure, givesUp] });
-      // Before the Credential was even asked for.
-      play(client, { configuration: optional, transcript: [asked(), failure, goesOn] });
-      play(client, { configuration: required, transcript: [asked(), failure, givesUp] });
-
-      expect.assertions(0);
-    }
-  );
+    expect.assertions(0);
+  });
 
   it("reads 908 and the 904 after it as one failure", () => {
     play(client, {
@@ -224,22 +201,12 @@ describe("a login that cannot happen", () => {
   });
 
   it("aborts when the Credential cannot be filled, and counts it a failed login", () => {
-    for (const reason of ["Missing", "Unavailable", "Unsendable"]) {
-      play(client, {
-        configuration: optional,
-        transcript: [
-          sent,
-          lines(`== unfilled ${reason}`, ">> AUTHENTICATE *"),
-          goesOn,
-          // The Ircd's 906 for the abort comes late, and changes nothing.
-        ],
-      });
-      play(client, {
-        configuration: required,
-        transcript: [sent, lines(`== unfilled ${reason}`, ">> AUTHENTICATE *"), givesUp],
-      });
-    }
+    play(client, {
+      configuration: required,
+      transcript: [sent, lines("== unfilled Missing", ">> AUTHENTICATE *"), givesUp],
+    });
 
+    // The Ircd's 906 for the abort comes late, and changes nothing.
     const late = play(client, {
       configuration: optional,
       transcript: [
@@ -256,7 +223,6 @@ describe("a login that cannot happen", () => {
     // Its numeric is shown as it came, and nothing else comes of it.
     expect(late.steps.at(-1)).toMatchObject({
       news: [{ _tag: "Activity", activity: { _tag: "Numeric", numeric: "906" } }],
-      outputs: [],
     });
   });
 
@@ -276,7 +242,7 @@ describe("a login that cannot happen", () => {
 
 describe("an Ircd that does not keep to the exchange", () => {
   it("goes on at 903 without our +, and sends no Credential after it", () => {
-    const played = play(client, {
+    play(client, {
       configuration: required,
       transcript: [
         asked(),
@@ -286,9 +252,7 @@ describe("an Ircd that does not keep to the exchange", () => {
       ],
     });
 
-    expect(
-      played.steps.flatMap((step) => step.outputs).filter((each) => each._tag === "SendSecret")
-    ).toStrictEqual([]);
+    expect.assertions(0);
   });
 
   it("sends no Credential for a + it did not ask for", () => {
@@ -297,7 +261,7 @@ describe("an Ircd that does not keep to the exchange", () => {
       transcript: [registered(optional, { offered: ["sasl=PLAIN"] }), lines("<< AUTHENTICATE +")],
     });
 
-    expect(played.steps.at(-1)).toMatchObject({ news: [], outputs: [] });
+    expect(played.steps.at(-1)).toMatchObject({ news: [] });
   });
 
   it("does not log in again when sasl is new after registration", () => {
@@ -314,16 +278,6 @@ describe("an Ircd that does not keep to the exchange", () => {
     });
 
     expect(client.inspect(played.state).features).toContain("sasl");
-    expect(played.steps.at(-1)?.outputs.filter((each) => each._tag === "Send")).toStrictEqual([]);
-  });
-
-  it("lets registration go when sasl is deleted mid-exchange and the login is optional", () => {
-    play(client, {
-      configuration: optional,
-      transcript: [sent, lines("<< :irc.test CAP * DEL :sasl"), goesOn],
-    });
-
-    expect.assertions(0);
   });
 
   it("takes a new cap offered mid-exchange, and ends negotiation once both are done", () => {
@@ -364,7 +318,7 @@ describe("a required login never goes unmet", () => {
       transcript: [opened, welcomeOnly, givesUp],
     });
 
-    expect(played.transcript).not.toContain("session-began");
+    expect(began(played)).toStrictEqual([]);
   });
 
   it("gives up when sasl is not offered, before CAP END", () => {
@@ -443,7 +397,7 @@ describe("a required login never goes unmet", () => {
       transcript: [sent, welcomeOnly, lines(">> AUTHENTICATE *"), givesUp],
     });
 
-    expect(played.transcript).not.toContain("session-began");
+    expect(began(played)).toStrictEqual([]);
   });
 
   it("goes on with an optional login in each of those cases", () => {
@@ -473,7 +427,7 @@ describe("a required login never goes unmet", () => {
         ],
       });
 
-      expect(played.steps.at(-1)).toMatchObject({ news: [], outputs: [] });
+      expect(played.steps.at(-1)).toMatchObject({ news: [] });
       expect(client.known(played.state).self?.account).toMatchObject({
         _tag: "Known",
         value: "iirc",

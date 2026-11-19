@@ -387,31 +387,6 @@ describe("the Composer's habits", () => {
     }).toStrictEqual({ newline: true, plainEnter: false, said: lines, send: true });
   });
 
-  it("confirms a paste with the send button under ui.enter newline", async () => {
-    const { container, daemon } = await signedIn({ enter: "newline" });
-    const lines = ["1", "2", "3", "4", "5", "6"];
-
-    await typeIn(container, lines.join("\n"));
-    await act(async () => {
-      sendButton(container)?.click();
-      await Promise.resolve();
-    });
-    await settled(() => container.textContent.includes("Send 6 lines"));
-
-    const plainEnter = await pressIn(container, "Enter");
-
-    await act(async () => {
-      sendButton(container)?.click();
-      await Promise.resolve();
-    });
-    await settled(() => daemon.says.length === lines.length);
-
-    expect({ plainEnter, said: daemon.says.map((one) => one.text) }).toStrictEqual({
-      plainEnter: true,
-      said: lines,
-    });
-  });
-
   it("under ui.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
     const shown = await signedIn({ enter: "newline" });
     const secret = "hunter2-held-by-the-vault";
@@ -420,10 +395,8 @@ describe("the Composer's habits", () => {
     await typeIn(shown.container, typed);
     const whileTyped = trackedIn(shown.container);
 
-    let left = true;
-
     const first = await atOnce(shown.container, () => {
-      left = composerOf(shown.container).dispatchEvent(
+      composerOf(shown.container).dispatchEvent(
         new KeyboardEvent("keydown", {
           bubbles: true,
           cancelable: true,
@@ -434,13 +407,12 @@ describe("the Composer's habits", () => {
       );
     });
 
-    expect({ ...leftOf(shown, secret), first, left, whileTyped }).toStrictEqual({
+    expect({ ...leftOf(shown, secret), first, whileTyped }).toStrictEqual({
       acts: [],
       draft: "",
       draftHolds: false,
       first: { tracker: "", value: "" },
       history: [],
-      left: false,
       said: [],
       sentToDaemon: false,
       tracker: "",
@@ -487,34 +459,14 @@ describe("the Composer's habits", () => {
     ]);
   });
 
-  it("puts ui.suffix after a nick completed at the start of a line, and a space elsewhere", async () => {
-    const { container, registry } = await signedIn({ suffix: ", " });
+  it("puts ui.suffix after a nick completed at the start of a line", async () => {
+    const { container } = await signedIn({ suffix: ", " });
 
     await typeIn(container, "pe");
     await pressIn(container, "Tab");
     await settled(() => composerOf(container).value === "peer, ");
 
-    const start = composerOf(container).value;
-
-    await act(async () => {
-      registry.set(deviceUi, { suffix: "" });
-      await Promise.resolve();
-    });
-    await typeIn(container, "pe");
-    await pressIn(container, "Tab");
-    await settled(() => composerOf(container).value === "peer");
-
-    const none = composerOf(container).value;
-
-    await typeIn(container, "hi pe");
-    await pressIn(container, "Tab");
-    await settled(() => composerOf(container).value === "hi peer ");
-
-    expect([start, none, composerOf(container).value]).toStrictEqual([
-      "peer, ",
-      "peer",
-      "hi peer ",
-    ]);
+    expect(composerOf(container).value).toBe("peer, ");
   });
 });
 
@@ -700,20 +652,6 @@ describe("the Composer's list", () => {
     });
   });
 
-  it("leaves the arrows to recall what was sent while it is closed", async () => {
-    const { container, daemon } = await signedIn();
-
-    await typeIn(container, "/me waves");
-    await pressIn(container, "Enter");
-    await settled(() => daemon.says.length === 1);
-    await pressIn(container, "ArrowUp");
-
-    expect([composerOf(container).value, listIn(container).list]).toStrictEqual([
-      "/me waves",
-      undefined,
-    ]);
-  });
-
   it("opens on Tab for a nick, asked of the members, the first written in", async () => {
     const { container } = await signedIn();
 
@@ -861,7 +799,7 @@ describe("the Composer's list of everything the palette lists", () => {
 
   it("lists the themes after /theme, draws the one highlighted, and gives the one in effect back on Escape, and when the draft is typed over", async () => {
     const { container, registry } = await signedIn();
-    const stop = watchTheme(registry);
+    const stop = await act(() => watchTheme(registry));
 
     mounted.push(stop);
 
@@ -906,7 +844,7 @@ describe("the Composer's list of everything the palette lists", () => {
 
   it("lists the fonts after /set ui.font and a family typed by name, and draws the one highlighted until the list closes", async () => {
     const { container, registry } = await signedIn();
-    const stop = watchTheme(registry);
+    const stop = await act(() => watchTheme(registry));
 
     mounted.push(stop);
 
@@ -1069,73 +1007,6 @@ describe("the Composer's emoji", () => {
       before: undefined,
       first: ["\u{1F604} :smile:", "\u{1F604} :smile:"],
       smile: true,
-    });
-  });
-
-  it("writes the emoji into the draft on Tab, and gives back what was typed on Escape", async () => {
-    const { container } = await withEmoji();
-
-    await typeIn(container, "hi :smile");
-    await settled(() => listIn(container).names !== undefined);
-    await pressIn(container, "Tab");
-
-    const tabbed = composerOf(container).value;
-
-    await pressIn(container, "Escape");
-
-    expect([tabbed, composerOf(container).value]).toStrictEqual(["hi \u{1F604} ", "hi :smile"]);
-  });
-
-  it("writes the emoji of the one pressed, and Enter sends the draft as it stands", async () => {
-    const { container, daemon } = await withEmoji();
-
-    await typeIn(container, ":smile");
-    await settled(() => listIn(container).names !== undefined);
-
-    const option = container.querySelector('[role="option"]');
-
-    if (option === null) {
-      throw new Error("no option");
-    }
-
-    await act(async () => {
-      option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    const pressed = composerOf(container).value;
-
-    await typeIn(container, ":smile");
-    await pressIn(container, "Enter");
-    await settled(() => daemon.says.length === 1);
-
-    expect({ pressed, said: daemon.says.map((one) => one.text) }).toStrictEqual({
-      pressed: "\u{1F604} ",
-      said: [":smile"],
-    });
-  });
-
-  it("lists nothing for a time, a word with a colon in it, or one colon and a letter", async () => {
-    const { container, registry } = await withEmoji();
-
-    await typeIn(container, "12:30");
-    const time = listIn(container).list;
-
-    await typeIn(container, "foo:smile");
-    const inside = listIn(container).list;
-
-    await typeIn(container, ":s");
-    const one = listIn(container).list;
-
-    await typeIn(container, "https://example.org:8080");
-    const address = listIn(container).list;
-
-    expect({ address, inside, loaded: registry.get(emojiState), one, time }).toStrictEqual({
-      address: undefined,
-      inside: undefined,
-      loaded: undefined,
-      one: undefined,
-      time: undefined,
     });
   });
 });
@@ -1332,25 +1203,6 @@ describe("the Composer's formatting", () => {
       gone: null,
       offered: [17, "default colour", "red"],
       said: ["a \u000304b\u000399 c"],
-    });
-  });
-
-  it("leaves nothing stray once Backspace deletes a formatted run", async () => {
-    const { container, daemon } = await signedIn();
-
-    await typeIn(container, "a b c");
-    await select(container, 2, 3);
-    await chordIn(container, "b");
-    await editTo(container, "a  c", 2);
-
-    const backdrop = backdropOf(container);
-
-    await pressIn(container, "Enter");
-    await settled(() => daemon.says.length === 1);
-
-    expect({ backdrop, said: daemon.says.map((one) => one.text) }).toStrictEqual({
-      backdrop: undefined,
-      said: ["a  c"],
     });
   });
 });

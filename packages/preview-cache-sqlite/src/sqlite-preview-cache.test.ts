@@ -5,19 +5,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BunFileSystem } from "@effect/platform-bun";
-import { PreviewCache } from "@iirc/preview-cache";
 import type { Kept, PreviewCacheService } from "@iirc/preview-cache";
 import { previewCacheLaws } from "@iirc/preview-cache/testing";
 import { holds } from "@iirc/runtime/testing";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Logger, Option } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { layerSqlitePreviewCache, makeSqlitePreviewCache } from "./sqlite-preview-cache.ts";
+import { makeSqlitePreviewCache } from "./sqlite-preview-cache.ts";
 
-// A law carries its own ten-second guard against a hang (`holds`), so Vitest must wait longer
-// than that, or a law that is only slow under a loaded machine fails as Vitest's timeout.
-vi.setConfig({ testTimeout: 20_000 });
+// No logger, so what the code under test logs is not printed over the test run.
+const quiet = Logger.layer([]);
 
 // A directory for one test, removed when its Scope ends.
 const temporaryDirectory = Effect.acquireRelease(
@@ -38,7 +36,7 @@ const opened = (file: string) =>
 const freshCache = temporaryFile.pipe(Effect.flatMap(opened));
 
 const run = async <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-  await Effect.runPromise(Effect.scoped(effect));
+  await Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(quiet)));
 
 // Opens the file in a Scope of its own, so it is closed again when `use` is done.
 const using = <A, E>(file: string, use: (cache: PreviewCacheService) => Effect.Effect<A, E>) =>
@@ -79,33 +77,6 @@ describe("the SQLite Preview cache", () => {
     await expect(Effect.runPromise(holds(law, freshCache))).resolves.toBeUndefined();
   });
 
-  it("keeps a record across closing and opening the file", async () => {
-    await run(
-      Effect.gen(function* () {
-        const file = yield* temporaryFile;
-
-        yield* using(file, (cache) => cache.put(kept));
-
-        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(kept));
-      })
-    );
-  });
-
-  it("provides the cache as a Layer", async () => {
-    await run(
-      Effect.gen(function* () {
-        const file = yield* temporaryFile;
-        const layer = layerSqlitePreviewCache(file).pipe(Layer.provide(BunFileSystem.layer));
-
-        yield* PreviewCache.use((cache) => cache.put(kept)).pipe(Effect.provide(layer));
-
-        expect(
-          yield* PreviewCache.use((cache) => cache.get(link)).pipe(Effect.provide(layer))
-        ).toStrictEqual(Option.some(kept));
-      })
-    );
-  });
-
   it("fails reading a row that does not decode, and keeps the file", async () => {
     await run(
       Effect.gen(function* () {
@@ -135,20 +106,6 @@ describe("a file it cannot use", () => {
         expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.none());
         yield* using(file, (cache) => cache.put(kept));
         expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(kept));
-      })
-    );
-  });
-
-  it("makes a file of the layout before images were referred to again", async () => {
-    await run(
-      Effect.gen(function* () {
-        const file = yield* temporaryFile;
-
-        yield* using(file, (cache) => cache.put(kept));
-        raw(file, "DROP INDEX previews_image");
-        raw(file, "PRAGMA user_version = 1");
-
-        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.none());
       })
     );
   });

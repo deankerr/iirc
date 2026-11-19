@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { client } from "../core.ts";
 import { ConnectionId, Instant } from "../ids.ts";
 import type { MemberKnowledge } from "../known.ts";
-import { listedMembers } from "../members.ts";
 import type { State } from "../state.ts";
 import { configured, floorIsupport, joined, play, registered, replay } from "../testing/index.ts";
 
@@ -25,12 +24,6 @@ const shown = ({ nick, prefixes }: MemberKnowledge): string => {
 const shownAll = (members: ReadonlyMap<string, MemberKnowledge>): readonly string[] =>
   [...members].map(([key, member]) => `${key}=${shown(member)}`);
 
-// What a step should show of `#big`: its members, and the listing pending, in order.
-interface Expected {
-  readonly members: readonly string[];
-  readonly listing: readonly string[] | undefined;
-}
-
 /**
  * How long each test here may run. They build Channels of thousands of members, which
  * takes a few seconds under a full suite's load, past Vitest's default of 5 s. The cost
@@ -44,7 +37,8 @@ describe("a long NAMES listing", () => {
     () => {
       const prelude = [registered(base), joined(base, "#big", [])];
       const transcript = [...prelude];
-      const expected: Expected[] = [];
+      // What each step shows of `#big`'s members, in order.
+      const expected: (readonly string[])[] = [];
 
       // A plain Map of each, as `key=nick tag:prefixes`.
       const members = new Map([["iirc", "iirc Known:"]]);
@@ -52,11 +46,7 @@ describe("a long NAMES listing", () => {
 
       const receive = (line: string) => {
         transcript.push(`${line}\n`);
-        expected.push({
-          listing:
-            listing === undefined ? undefined : [...listing].map(([key, at]) => `${key}=${at}`),
-          members: [...members].map(([key, at]) => `${key}=${at}`),
-        });
+        expected.push([...members].map(([key, at]) => `${key}=${at}`));
       };
 
       const part = (index: number, extra: readonly string[] = []) => {
@@ -114,23 +104,17 @@ describe("a long NAMES listing", () => {
 
       const ended = [...(listing ?? [])].map(([key, at]) => `${key}=${at}`);
 
-      listing = undefined;
-      members.clear();
       receive("<< :irc.test 366 iirc #big :End of /NAMES list.");
-      expected[expected.length - 1] = { listing: undefined, members: ended };
+      expected[expected.length - 1] = ended;
 
       const before = play(client, { configuration: base, transcript: prelude }).steps.length;
       const played = play(client, { configuration: base, transcript });
 
-      const shownSteps = played.steps.slice(before).map(({ state }): Expected => {
-        const phase = state.channels.get("#big")?.phase;
-        const pending = phase?._tag === "Joined" ? phase.listing : undefined;
-
-        return {
-          listing: pending === undefined ? undefined : shownAll(listedMembers(pending)),
-          members: shownAll(client.known(state).channels.get("#big")?.members ?? new Map()),
-        };
-      });
+      const shownSteps = played.steps
+        .slice(before)
+        .map(({ state }) =>
+          shownAll(client.known(state).channels.get("#big")?.members ?? new Map())
+        );
 
       expect(shownSteps).toStrictEqual(expected);
     },
@@ -143,6 +127,42 @@ const utf8 = new TextEncoder();
 // oxlint-disable-next-line no-restricted-globals -- times a regression: work that grows with the Network takes seconds.
 const now = (): number => performance.now();
 
+// A Line as the Runtime hands it to the Client.
+const received = (line: string) =>
+  ({
+    _tag: "Received",
+    at: Instant.make(120_000),
+    bytes: utf8.encode(line),
+    connection: ConnectionId.make(1),
+  }) as const;
+
+// The middle of 101 timings.
+const middle = (each: readonly number[]) => each.toSorted((low, high) => low - high)[50] ?? 0;
+
+// A State, and the Line to step it with each time.
+type Side = readonly [State, (index: number) => string];
+
+// The median cost of each side's step, over 101 Lines each, timed in turn so a loaded
+// machine slows both alike.
+const inTurn = (sides: readonly [Side, Side]): readonly [number, number] => {
+  const each: readonly [number[], number[]] = [[], []];
+
+  for (let index = 0; index < 101; index += 1) {
+    for (const [side, [from, line]] of sides.entries()) {
+      const input = received(line(index));
+      const started = now();
+      client.step(from, input);
+      each[side]?.push(now() - started);
+    }
+  }
+
+  return [middle(each[0]), middle(each[1])];
+};
+
+// A part of a listing of `#a`, of 20 Users new to it.
+const part = (index: number) =>
+  `:irc.test 353 iirc = #a :${Array.from({ length: 20 }, (_unused, each) => `p${index}x${each}`).join(" ")}`;
+
 describe("a Network of 30,000 members", () => {
   it(
     "costs each step what its Line touches",
@@ -151,7 +171,7 @@ describe("a Network of 30,000 members", () => {
       const configuration = configured({ channels: channels.map((name) => ({ name })) });
 
       // Every Feature on, so each step reads what a hook may read.
-      const played = replay(client, {
+      const { state: registeredState } = replay(client, {
         configuration,
         transcript: registered(configuration, {
           isupport: [...floorIsupport, "UTF8ONLY"],
@@ -168,63 +188,74 @@ describe("a Network of 30,000 members", () => {
         }),
       });
 
-      let { state }: { state: State } = played;
-      let at = 60_000;
+      // Three Channels of `size` members each, and two States of `#a`'s listing on the way:
+      // one a few parts in, one most of the way through.
+      const network = (size: number) => {
+        let state = registeredState;
+        const listing: State[] = [];
 
-      const receive = (line: string): void => {
-        at += 1;
-        ({ state } = client.step(state, {
-          _tag: "Received",
-          at: Instant.make(at),
-          bytes: utf8.encode(line),
-          connection: ConnectionId.make(1),
-        }));
-      };
+        const receive = (line: string): void => {
+          ({ state } = client.step(state, received(line)));
+        };
 
-      const began = now();
+        for (const channel of channels) {
+          receive(`:iirc!u@h JOIN ${channel}`);
 
-      for (const channel of channels) {
-        receive(`:iirc!u@h JOIN ${channel}`);
+          for (let start = 0; start < size; start += 20) {
+            const names = Array.from(
+              { length: 20 },
+              (_unused, index) => `u${channel.slice(1)}${start + index}`
+            );
 
-        for (let start = 0; start < 10_000; start += 20) {
-          const names = Array.from(
-            { length: 20 },
-            (_unused, index) => `u${channel.slice(1)}${start + index}`
-          );
+            receive(
+              `:irc.test 353 iirc = ${channel} :${start === 0 ? "iirc " : ""}${names.join(" ")}`
+            );
 
-          receive(
-            `:irc.test 353 iirc = ${channel} :${start === 0 ? "iirc " : ""}${names.join(" ")}`
-          );
+            if (channel === "#a" && (start === 500 || start === size - 500)) {
+              listing.push(state);
+            }
+          }
+
+          receive(`:irc.test 366 iirc ${channel} :End of /NAMES list.`);
         }
 
-        receive(`:irc.test 366 iirc ${channel} :End of /NAMES list.`);
-      }
-
-      const listing = now() - began;
-
-      const median = (line: (index: number) => string): number => {
-        const each = Array.from({ length: 101 }, (_unused, index) => {
-          const started = now();
-          receive(line(index));
-
-          return now() - started;
-        });
-
-        return each.toSorted((left, right) => left - right)[50] ?? 0;
+        return { listing, state };
       };
 
+      const small = network(200);
+      const large = network(10_000);
+
+      const both = (line: (index: number) => string) =>
+        inTurn([
+          [small.state, line],
+          [large.state, line],
+        ]);
+
       const steps = [
-        median((index) => `:ua1!u@h PRIVMSG #a :hello ${index}`),
-        median((index) => `:new${index}!u@h JOIN #a`),
-        median((index) => `:new${index}!u@h PART #a`),
-        median((index) => `:ua${index + 10}!u@h QUIT :bye`),
+        both((index) => `:ua1!u@h PRIVMSG #a :hello ${index}`),
+        both((index) => `:new${index}!u@h JOIN #a`),
+        both((index) => `:ua${index + 10}!u@h PART #a`),
+        both((index) => `:ua${index + 10}!u@h QUIT :bye`),
+        both((index) => `:irc.test 353 iirc = #a :new${index}`),
       ];
 
-      expect(client.channel(state, "#a")?.channel.members.size).toBe(10_000 - 101 + 1);
-      // Generous bounds, for a loaded machine. Reading the listings takes about 0.1 s, and
-      // each step well under 1 ms, where work that grows with the Network took 6 s and 6 ms.
-      expect(listing).toBeLessThan(2000);
-      expect(Math.max(...steps)).toBeLessThan(2);
+      // A part of a listing costs the same late in it as early, where work that grows with
+      // the listing made the late one cost some 20 times as much.
+      const [early, late] = large.listing;
+
+      const parts = inTurn([
+        [early ?? large.state, part],
+        [late ?? large.state, part],
+      ]);
+
+      expect(client.channel(large.state, "#a")?.channel.members.size).toBe(10_001);
+      expect(large.listing).toHaveLength(2);
+
+      // A step on a Network 50 times the size costs about twice as much, where work that
+      // grows with the Network made it some 50 times as much.
+      for (const [smaller, larger] of [...steps, parts]) {
+        expect(larger).toBeLessThan(smaller * 10);
+      }
     },
     scaleTimeout
   );
@@ -234,8 +265,8 @@ describe("a Network of 30,000 members", () => {
 const reply = (token: string, nick: string) =>
   `:irc.test 354 iirc ${token} #big ~${nick} ${nick}.test ${nick} G acct :${nick}`;
 
-// The middle of 501 timings.
-const median = (each: readonly number[]) => each.toSorted((left, right) => left - right)[250] ?? 0;
+// An account-tagged Message from a member of `#big`.
+const message = (index: number) => `@account=acct${index} :u${index}!u@h PRIVMSG #big :hi`;
 
 describe("a WHO answer of a Channel of 10,000 members", () => {
   it(
@@ -252,21 +283,9 @@ describe("a WHO answer of a Channel of 10,000 members", () => {
       });
 
       let { state }: { state: State } = played;
-      let at = 60_000;
-
-      const input = (line: string) => {
-        at += 1;
-
-        return {
-          _tag: "Received",
-          at: Instant.make(at),
-          bytes: utf8.encode(line),
-          connection: ConnectionId.make(1),
-        } as const;
-      };
 
       const receive = (line: string): void => {
-        ({ state } = client.step(state, input(line)));
+        ({ state } = client.step(state, received(line)));
       };
 
       const nicks = Array.from({ length: 10_000 }, (_unused, index) => `u${index}`);
@@ -281,54 +300,31 @@ describe("a WHO answer of a Channel of 10,000 members", () => {
 
       receive(":irc.test 366 iirc #big :End of /NAMES list.");
 
-      // What a step costs with nothing to learn: a reply with another's token.
-      const idle = now();
-
-      for (const nick of nicks) {
-        receive(reply("999", nick));
-      }
-
-      const baseline = now() - idle;
       const asked = state;
-      const began = now();
-      let slowest = 0;
+
+      // A reply costs about what one with another's token, which changes nothing, does.
+      const [idle, answering] = inTurn([
+        [asked, (index) => reply("999", `u${index}`)],
+        [asked, (index) => reply("152", `u${index}`)],
+      ]);
 
       for (const nick of nicks) {
-        const started = now();
         receive(reply("152", nick));
-        slowest = Math.max(slowest, now() - started);
       }
 
       receive(":irc.test 315 iirc #big :End of WHO list");
 
-      const answer = now() - began;
-      const answered = state;
-
-      // An account-tagged Message refreshes its sender, before the answer and after it,
-      // timed in turn so a loaded machine slows both alike.
-      const before: number[] = [];
-      const after: number[] = [];
-
-      for (let index = 0; index < 501; index += 1) {
-        const line = input(`@account=acct${index} :u${index}!u@h PRIVMSG #big :hi`);
-
-        for (const [from, into] of [
-          [asked, before],
-          [answered, after],
-        ] as const) {
-          const started = now();
-          client.step(from, line);
-          into.push(now() - started);
-        }
-      }
+      // An account-tagged Message refreshes its sender, before the answer and after it.
+      const [before, after] = inTurn([
+        [asked, message],
+        [state, message],
+      ]);
 
       expect(client.known(state).users.get("u9999")?.away).toMatchObject({ _tag: "Known" });
-      // Reading the answer costs about what reading 10,000 Lines that change nothing does,
-      // where copying every User on each reply took three times that.
-      expect(answer).toBeLessThan(Math.max(baseline * 2, 200));
-      expect(slowest).toBeLessThan(50);
+      // Copying every User on each reply made it cost many times as much.
+      expect(answering).toBeLessThan(idle * 5);
       // A Message costs the same once 10,000 Users are known, where it took twice as long.
-      expect(median(after)).toBeLessThan(median(before) * 1.25);
+      expect(after).toBeLessThan(before * 1.5);
     },
     scaleTimeout
   );

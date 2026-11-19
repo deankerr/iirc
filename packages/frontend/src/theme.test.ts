@@ -102,17 +102,14 @@ describe("a theme drawn from a palette", () => {
     );
   });
 
-  it("is the same every time it is drawn, and every colour is a palette's colour", () => {
+  it("writes every colour as CSS reads it", () => {
     fc.assert(
       fc.property(palettes, (palette) => {
         const once = drawn(palette, "theme");
 
         const colours = [...cssVariables(once).map(([, value]) => value), ...once.ircGrounds];
 
-        expect({
-          again: drawn(palette, "theme"),
-          css: colours.every((one) => /^#[0-9a-f]{6}$|^rgb\(/u.test(one)),
-        }).toStrictEqual({ again: once, css: true });
+        expect(colours.every((one) => /^#[0-9a-f]{6}$|^rgb\(/u.test(one))).toBeTruthy();
       }),
       { numRuns: 40 }
     );

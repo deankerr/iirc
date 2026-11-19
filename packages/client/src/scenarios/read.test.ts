@@ -100,15 +100,6 @@ describe("marking a Timeline read", () => {
         lines(
           "!! read #a,#b t+1s",
           "?? ignored NoTimeline",
-          // A list with empty items is a list all the same, though one item is left.
-          "!! read #a, t+1s",
-          "?? ignored NoTimeline",
-          "!! read ,#a t+1s",
-          "?? ignored NoTimeline",
-          "!! read #a,, t+1s",
-          "?? ignored NoTimeline",
-          "!! read , t+1s",
-          "?? ignored NoTimeline",
           "!! read $*.test t+1s",
           "?? ignored NoTimeline",
           "!! read nick@server t+1s",

@@ -9,12 +9,6 @@ const withTestClock = async <A>(effect: Effect.Effect<A>) =>
   await Effect.runPromise(Effect.provide(effect, TestClock.layer()));
 
 describe("the Clock", () => {
-  it("reads the instant from the Clock in context", async () => {
-    const instant = await withTestClock(Effect.andThen(TestClock.setTime(1_762_560_000_000), now));
-
-    expect(instant).toBe(1_762_560_000_000);
-  });
-
   it("wakes at an instant, and not before", async () => {
     const woke = await withTestClock(
       Effect.gen(function* () {

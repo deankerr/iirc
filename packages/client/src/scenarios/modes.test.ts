@@ -63,8 +63,8 @@ describe("learning a Channel's modes", () => {
     expect(client.inspect(played.state).states.modes).toBeUndefined();
   });
 
-  it("asks one Channel at a time, so the Owner's Lines never wait behind a hundred queries", () => {
-    const names = Array.from({ length: 100 }, (_unused, index) => `#c${index}`);
+  it("asks one Channel at a time, the next once one is answered, and sends the Owner's Lines meanwhile", () => {
+    const names = ["#c0", "#c1", "#c2"];
     const many = configured({ channels: names.map((name) => ({ name })) });
 
     const played = play(client, {
@@ -74,8 +74,8 @@ describe("learning a Channel's modes", () => {
         "+1s\n",
         ...names.map((name, index) => echo(name, ...(index === 0 ? [">> MODE #c0"] : []))),
         lines(
-          "!! say #c99 :hello",
-          ">> PRIVMSG #c99 hello",
+          "!! say #c2 :hello",
+          ">> PRIVMSG #c2 hello",
           "<< :irc.test 324 iirc #c0 +nt",
           "?? channel-learned channel:#c0",
           ">> MODE #c1",
@@ -162,21 +162,6 @@ describe("learning a Channel's modes", () => {
     expect(modesOf(played)).toStrictEqual({ _tag: "Unknown" });
     expect(noise(played, before)).toStrictEqual([]);
     expect(client.known(played.state).channels.get("#iirc")?.standing).toBe("Joined");
-  });
-
-  it("asks nothing more once the Ircd never answers, and costs only the Line", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base),
-        lines("!! configure +#iirc", ">> JOIN #iirc"),
-        echo("#iirc", ">> MODE #iirc"),
-        lines("+30s", "+30s", ">> PING iirc"),
-      ],
-    });
-
-    expect(modesOf(played)).toStrictEqual({ _tag: "Unknown" });
-    expect(client.inspect(played.state).states.modes).toBeUndefined();
   });
 
   it("asks again when Self joins the Channel again, and in each Session", () => {

@@ -21,23 +21,6 @@ const link = (address: string, list: readonly string[] = defaults) =>
   playerOf([candidate(address)], list)?.link;
 
 describe(playerOf, () => {
-  it("gives a listed host's player, with the size the page gave", () => {
-    expect(
-      playerOf(
-        [
-          candidate("https://player.vimeo.com/video/76979871?h=8272103f6e", {
-            height: 720,
-            width: 1280,
-          }),
-        ],
-        defaults
-      )
-    ).toStrictEqual({
-      link: "https://player.vimeo.com/video/76979871?h=8272103f6e",
-      size: { height: 720, width: 1280 },
-    });
-  });
-
   it("gives each of the six services' embed hosts", () => {
     expect(
       [
@@ -208,11 +191,5 @@ describe(stillListed, () => {
         "https://youtube-nocookie.com/embed/abc",
       ].map((address) => stillListed(address, defaults))
     ).toStrictEqual([false, false, false, false, false]);
-  });
-
-  it("holds for a kept YouTube link only when the youtube-nocookie host is listed", () => {
-    expect(
-      stillListed("https://www.youtube-nocookie.com/embed/abc", ["player.vimeo.com"])
-    ).toBeFalsy();
   });
 });

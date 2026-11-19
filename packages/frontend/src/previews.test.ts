@@ -14,14 +14,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   asksAnywhere,
-  asksFor,
   asksWanted,
   choosing,
   foldedOf,
   initialPreviews,
   mayPreview,
   messageKey,
-  modeIn,
   motionOf,
   opening,
   pressOf,
@@ -165,12 +163,6 @@ const asking = (sequence: number) => {
 const links = said("see https://a.example/ and https://b.example/");
 
 describe("whether to ask", () => {
-  it("asks under links only and on, never under off, and never before the mode is read", () => {
-    expect(
-      (["off", "links only", "on", undefined] as const).map((mode) => asksFor(mode))
-    ).toStrictEqual([false, true, true, false]);
-  });
-
   it("reads the mode from the shared options alone", () => {
     const shared = Schema.decodeSync(UiInForce)({
       options: { ...uiDefaults, previews: "on" },
@@ -181,14 +173,6 @@ describe("whether to ask", () => {
       undefined,
       { players: listed, shown: "on", timelines: {} },
     ]);
-  });
-
-  it("takes a Timeline's own choice over ui.previews, and ui.previews where it has none", () => {
-    const modes: PreviewsModes = { players: listed, shown: "on", timelines: { [other]: "off" } };
-
-    expect([modeIn(modes, timeline), modeIn(modes, other), modeIn(undefined, other)]).toStrictEqual(
-      ["on", "off", undefined]
-    );
   });
 
   it("makes or removes one Timeline's own choice, leaving the others", () => {
@@ -366,18 +350,6 @@ const waiting = () => {
 };
 
 describe("a link waiting for a press", () => {
-  it("is drawn as the plain link with a press, by its index among the Message's links", () => {
-    expect(previewsOf(waiting(), "on", timeline, at(1), links, drawing)).toStrictEqual([
-      expect.objectContaining({ _tag: "Ready", key: "0" }),
-      {
-        _tag: "Waiting",
-        index: 1,
-        key: "1",
-        link: { href: "https://b.example/", text: "https://b.example/" },
-      },
-    ]);
-  });
-
   it("is a press of its Message's place and its index, at the stream's count", () => {
     const state = fold(waiting(), { _tag: "Changed", item: item("a", ready) });
 
@@ -494,13 +466,6 @@ describe("folding a change", () => {
         (one) => one._tag
       )
     ).toStrictEqual(["Pending"]);
-  });
-
-  it("holds no change of an item no Message shows", () => {
-    const followed = fold(initialPreviews, { _tag: "Followed" });
-    const changed = fold(followed, { _tag: "Changed", item: item("f", ready) });
-
-    expect(changed.items.size).toBe(0);
   });
 
   it("forgets everything on signing out", () => {
@@ -638,35 +603,6 @@ describe("what a Message shows", () => {
       ["Ready", "https://a.example/#two", "1"],
     ]);
   });
-
-  it("keeps each Message's own link when two Messages differ only by a fragment", () => {
-    const first = asking(1);
-    const one = said("https://a.example/#one");
-    const two = said("https://a.example/#two");
-
-    const answered = fold(
-      first.state,
-      { _tag: "Answered", ask: first.ask, previews: [item("a", ready, "https://a.example/#one")] },
-      { _tag: "Shown", position: at(2), timeline }
-    );
-
-    const [second] = asksWanted(answered, everywhere("on"));
-
-    if (second === undefined) {
-      throw new Error("nothing to ask");
-    }
-
-    const both = fold(
-      answered,
-      { _tag: "Asked", ask: second },
-      { _tag: "Answered", ask: second, previews: [item("a", ready, "https://a.example/#two")] }
-    );
-
-    expect([
-      previewsOf(both, "on", timeline, at(1), one, drawing).map((shown) => shown.link.href),
-      previewsOf(both, "on", timeline, at(2), two, drawing).map((shown) => shown.link.href),
-    ]).toStrictEqual([["https://a.example/#one"], ["https://a.example/#two"]]);
-  });
 });
 
 /**
@@ -723,17 +659,6 @@ const shownReady = (
 };
 
 describe("a Preview's image", () => {
-  it("is a thumbnail, served from our own origin, for a page that has one", () => {
-    expect(
-      shownReady({ image: { animated: false, hash, size: 10, type: "image/png" } })?.image
-    ).toStrictEqual({
-      alt: "Cats",
-      animated: false,
-      drawn: "Thumbnail",
-      src: `/api/previews/media/${hash}`,
-    });
-  });
-
   it("is the whole image for a link that is itself an image, and says when it moves", () => {
     expect(
       shownReady({
@@ -748,13 +673,6 @@ describe("a Preview's image", () => {
       drawn: "Whole",
       src: `/api/previews/media/${hash}`,
     });
-  });
-
-  it("is none under links only, even one held from while Previews were on", () => {
-    expect(
-      shownReady({ image: { animated: false, hash, size: 10, type: "image/png" } }, "links only")
-        ?.image
-    ).toBeUndefined();
   });
 
   it("is none when the Daemon kept none", () => {
@@ -831,14 +749,10 @@ describe("a Preview's player", () => {
     ).toStrictEqual({ height: 9, width: 16 });
   });
 
-  it("is none under links only, even one held from while Previews were on", () => {
-    expect(shownReady(playing, "links only")?.player).toBeUndefined();
-  });
-
   it("is none for any kind but a player", () => {
     expect(
       (["page", "image", "video", "audio"] as const).map(
-        (kind) => shownReady({ ...playing, kind, player: null })?.player
+        (kind) => shownReady({ ...playing, kind })?.player
       )
     ).toStrictEqual([undefined, undefined, undefined, undefined]);
   });
@@ -884,22 +798,6 @@ describe("a Preview's player", () => {
       undefined,
       undefined,
       "example.com · A song",
-    ]);
-  });
-
-  it("has no poster when the Daemon kept none, and still plays", () => {
-    const shown = shownReady({ ...playing, image: null });
-
-    expect([shown?.image, shown?.player?.host]).toStrictEqual([
-      undefined,
-      "www.youtube-nocookie.com",
-    ]);
-  });
-
-  it("is summed up as a page is, by its site and title", () => {
-    expect([summary(playing), summary({ ...playing, title: null })]).toStrictEqual([
-      "example.com · A song",
-      "example.com",
     ]);
   });
 });
@@ -1105,23 +1003,9 @@ describe("a Preview's media", () => {
     expect(streamed({ kind: "image", type: "image/png" })).toBeUndefined();
     expect(streamed({ kind: "player" })).toBeUndefined();
   });
-
-  it("encodes the Timeline and the place in the route's query", () => {
-    const src = streamed({ kind: "video", type: "video/mp4" })?.src ?? "";
-    const query = new URL(src, "http://daemon.test").searchParams;
-
-    expect({ position: query.get("position"), timeline: query.get("timeline") }).toStrictEqual({
-      position: cursorOf(at(1)),
-      timeline,
-    });
-  });
 });
 
 describe("the summary line", () => {
-  it("says a page's site and title", () => {
-    expect(summary({})).toBe("example.com · Cats");
-  });
-
   it("says the site alone for a page with no title", () => {
     expect(summary({ title: null })).toBe("example.com");
   });

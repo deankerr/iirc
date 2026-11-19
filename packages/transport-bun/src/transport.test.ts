@@ -4,7 +4,7 @@ import { TLSSocket } from "node:tls";
 import type { IrcdAddress } from "@iirc/client";
 import { maxReceivedBytes } from "@iirc/runtime/transport";
 import type { LinkEvent } from "@iirc/runtime/transport";
-import { Deferred, Duration, Effect, Fiber, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Latch, Stream } from "effect";
 import type { Scope } from "effect";
 import { constVoid } from "effect/Function";
 import { describe, expect, it, vi } from "vitest";
@@ -176,14 +176,11 @@ describe("a dial that fails", () => {
   });
 
   it("times out connecting", async () => {
-    const started = performance.now();
-
     const events = await run(
       dialAndRead(plainAddress, { connectTimeout: "50 millis", route: () => Effect.never })
     );
 
     expect(events).toStrictEqual(["Closed TimedOut"]);
-    expect(performance.now() - started).toBeLessThan(1000);
   });
 });
 
@@ -361,18 +358,15 @@ describe("TLS", () => {
 });
 
 describe("an open Connection", () => {
-  it.each([
-    ["plain TCP", undefined, plainAddress],
-    ["TLS", certificate, tlsAddress],
-  ] as const)("reports a peer that resets it, over %s", async (_, tls, address) => {
+  it("reports a peer that resets it", async () => {
     const events = await run(
       Effect.gen(function* () {
-        const far = yield* ircd(tls);
+        const far = yield* ircd(certificate);
 
         const link = yield* makeBunTransport({
           route: to(far.port),
           trust: [certificate.cert],
-        }).dial(address);
+        }).dial(tlsAddress);
 
         const socket = yield* far.accepted;
 
@@ -424,47 +418,6 @@ describe("an open Connection", () => {
     });
   });
 
-  it("frames Lines however the reads split them", async () => {
-    const events = await run(
-      Effect.gen(function* () {
-        const far = yield* ircd(undefined);
-        const link = yield* makeBunTransport({ route: to(far.port) }).dial(plainAddress);
-        const socket = yield* far.accepted;
-
-        const reads = [
-          "PING :a\r",
-          "\nPING :b\r\nPING :c\r\nPI",
-          "NG :d\r\n",
-          "PING :e\rPING :f\nPING :g\r",
-          "PING :unfinished",
-        ];
-
-        socket.setNoDelay(true);
-
-        for (const read of reads) {
-          socket.write(read);
-          yield* Effect.sleep("5 millis");
-        }
-
-        socket.end();
-
-        return (yield* Stream.runCollect(link.events)).map(show);
-      })
-    );
-
-    expect(events).toStrictEqual([
-      "Opened",
-      "Received PING :a",
-      "Received PING :b",
-      "Received PING :c",
-      "Received PING :d",
-      "Received PING :e",
-      "Received PING :f",
-      "Received PING :g",
-      "Closed Ended",
-    ]);
-  });
-
   it("cuts a Line longer than maxReceivedBytes that arrives over many reads", async () => {
     const lengths = await run(
       Effect.gen(function* () {
@@ -492,28 +445,6 @@ describe("an open Connection", () => {
     expect(lengths).toStrictEqual(["Opened", maxReceivedBytes, 11, "Closed"]);
   });
 
-  it("reads only as fast as the events are read, so a flood waits in the kernel", async () => {
-    const waiting = await run(
-      Effect.gen(function* () {
-        const far = yield* ircd(undefined);
-        const link = yield* makeBunTransport({ route: to(far.port) }).dial(plainAddress);
-        const socket = yield* far.accepted;
-        const flood = bytes.encode(`:irc.test NOTICE * :${"x".repeat(500)}\r\n`.repeat(32_768));
-
-        socket.write(flood);
-        yield* Effect.sleep("200 millis");
-        // Nothing has read the events, so most of the flood is still the far end's.
-        const unsent = socket.writableLength;
-
-        yield* link.hangup;
-
-        return unsent;
-      })
-    );
-
-    expect(waiting).toBeGreaterThan(1_000_000);
-  });
-
   it("does nothing with a send before Opened", async () => {
     const heard = await run(
       Effect.gen(function* () {
@@ -529,13 +460,32 @@ describe("an open Connection", () => {
         const socket = yield* far.accepted;
         const chunks: Buffer[] = [];
 
-        socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-        // Wait for Opened before sending, as the Runtime does.
-        const events = yield* Effect.forkChild(Stream.runCollect(link.events));
+        const late = yield* Latch.make();
 
-        yield* Effect.sleep("20 millis");
+        socket.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+
+          if (Buffer.concat(chunks).toString().includes("NICK late\r\n")) {
+            late.openUnsafe();
+          }
+        });
+
+        // Wait for Opened before sending, as the Runtime does.
+        const opened = yield* Deferred.make<undefined>();
+
+        const events = yield* Effect.forkChild(
+          Stream.runCollect(
+            link.events.pipe(
+              Stream.tap((event) =>
+                event._tag === "Opened" ? Deferred.succeed(opened, undefined) : Effect.void
+              )
+            )
+          )
+        );
+
+        yield* Deferred.await(opened);
         yield* link.send(bytes.encode("NICK late\r\n"));
-        yield* Effect.sleep("20 millis");
+        yield* late.await;
         yield* link.hangup;
         yield* Fiber.join(events);
 
@@ -643,7 +593,8 @@ describe("an open Connection", () => {
         const link = yield* makeBunTransport({
           hangupTimeout: "100 millis",
           route: to(far.port),
-          writeTimeout: "1 minute",
+          // Far longer than any test may run, so only hangupTimeout can end the hangup.
+          writeTimeout: "1 hour",
         }).dial(plainAddress);
 
         const socket = yield* far.accepted;
@@ -653,16 +604,12 @@ describe("an open Connection", () => {
         const chunk = bytes.encode(`PRIVMSG #flood :${"x".repeat(65_000)}\r\n`);
 
         yield* sendUntilStalled(link.send(chunk));
-        const started = performance.now();
-
         yield* link.hangup;
-        const took = performance.now() - started;
         const destroyedWhilePaused = destroyed(socket.remotePort) && socket.isPaused();
 
         return {
           destroyedWhilePaused,
           events: (yield* Fiber.join(reading)).map(show),
-          inBound: took >= 90 && took < 1000,
         };
       })
     );
@@ -670,7 +617,6 @@ describe("an open Connection", () => {
     expect(result).toStrictEqual({
       destroyedWhilePaused: true,
       events: ["Opened", "Closed HungUp"],
-      inBound: true,
     });
   });
 

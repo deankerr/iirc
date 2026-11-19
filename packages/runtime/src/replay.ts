@@ -234,7 +234,7 @@ const foldOne = <S>(
  * @param entry - The Entry.
  * @returns What it made happen: one step's News, when it was an Input whose step gave any.
  */
-export const foldEntry = <S>(
+const foldEntry = <S>(
   client: Client<S>,
   networks: Map<NetworkId, Folded<S>>,
   entry: Entry

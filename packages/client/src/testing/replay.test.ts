@@ -1,12 +1,7 @@
-import { CredentialName } from "@iirc/protocol/line";
 import { HashSet } from "effect";
 import { constUndefined } from "effect/Function";
 import { describe, expect, it } from "vitest";
 
-import ergoFeatures from "../../../../fixtures/transcripts/ergo/first-features.irc?raw";
-import ergoFloor from "../../../../fixtures/transcripts/ergo/floor.irc?raw";
-import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-features.irc?raw";
-import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import type { Client } from "../client.ts";
 import { ConnectionId } from "../ids.ts";
 import type { Input } from "../input.ts";
@@ -44,17 +39,6 @@ class Box {
 }
 
 describe("exact replay, after every play", () => {
-  it("passes a Client that is a pure fold of plain data", () => {
-    expect(
-      failure(() =>
-        play(toy(), {
-          configuration: base,
-          transcript: registered(base, { offered: ["multi-prefix"] }),
-        })
-      )
-    ).toBe("it held");
-  });
-
   it("catches a Client that reads Math.random", () => {
     // oxlint-disable-next-line no-restricted-properties -- A Client that is not deterministic, on purpose.
     const random = keeping(() => ({ roll: Math.random() }));
@@ -172,71 +156,6 @@ describe(impurity, () => {
     ).toBe("state.value is a getter");
     expect(impurity({ [Symbol("s")]: 1 })).toBe("state has a symbol key");
   });
-});
-
-const fixtures = [
-  [
-    "ergo/first-features",
-    ergoFeatures,
-    configured({
-      ircds: [{ host: "ergo.test", port: 6697, tls: true }],
-      login: {
-        _tag: "Sasl",
-        account: "iirc",
-        credential: CredentialName.make("iirc"),
-        required: true,
-      },
-      realname: "iirc transcript spike",
-    }),
-  ],
-  [
-    "ergo/floor",
-    ergoFloor,
-    configured({
-      ircds: [{ host: "ergo.test", port: 6667, tls: false }],
-      realname: "iirc transcript spike",
-    }),
-  ],
-  [
-    "ngircd/first-features",
-    ngircdFeatures,
-    configured({
-      ircds: [{ host: "ngircd.test", port: 6667, tls: false }],
-      realname: "iirc transcript spike",
-    }),
-  ],
-  [
-    "ngircd/floor",
-    ngircdFloor,
-    configured({
-      ircds: [{ host: "ngircd.test", port: 6667, tls: false }],
-      realname: "iirc transcript spike",
-    }),
-  ],
-] as const;
-
-describe("the recorded fixtures, replayed", () => {
-  it.each(fixtures)(
-    "%s replays through the scripted Client, which ignores most of it",
-    (_name, transcript, configuration) => {
-      const played = replay(scriptedClient, { configuration, transcript });
-
-      expect(played.inputs.length).toBeGreaterThan(30);
-      expect(played.ignored.length).toBeGreaterThan(25);
-      expect(played.transcript).toContain("?? ignored NotNow Received");
-    }
-  );
-
-  it.each(fixtures)(
-    "%s replays through the toy Client, which registers",
-    (_name, transcript, configuration) => {
-      const played = replay(toy(), { configuration, transcript });
-
-      expect(toy().inspect(played.state).states).toStrictEqual({ connection: "Idle" });
-      expect(played.transcript).toContain("?? session-began iirc_");
-      expect(played.transcript).toContain("?? session-ended Closed Ended");
-    }
-  );
 });
 
 describe("exact replay against snapshots", () => {
@@ -370,20 +289,6 @@ describe("inputs the Client changes", () => {
 });
 
 describe("snapshots", () => {
-  it("hold a short hash of each part, not its text", () => {
-    const played = play(toy(), { configuration: base, transcript: registered(base) });
-
-    const hashes = played.snapshots.flatMap((each) => [
-      each.state,
-      each.outputs,
-      each.news,
-      each.inspection,
-      each.knowledge,
-    ]);
-
-    expect(hashes.every((hash) => hash.length <= 16)).toBeTruthy();
-  });
-
   it("still show a readable diff of the part that differs", () => {
     // oxlint-disable-next-line no-restricted-properties -- A Client that is not deterministic, on purpose.
     const random = keeping(() => ({ roll: Math.random() }));

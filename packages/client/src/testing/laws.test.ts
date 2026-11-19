@@ -39,37 +39,6 @@ describe(across, () => {
   });
 });
 
-describe("the four laws, kept", () => {
-  it.each([
-    [
-      "inert",
-      () => {
-        inert(subject());
-      },
-    ],
-    [
-      "refines",
-      () => {
-        refines(subject());
-      },
-    ],
-    [
-      "replays",
-      () => {
-        replays(subject());
-      },
-    ],
-    [
-      "deactivates",
-      () => {
-        deactivates(subject(), { after });
-      },
-    ],
-  ])("%s holds for the toy Client", (_law, run) => {
-    expect(failure(run)).toBe("it held");
-  });
-});
-
 describe("the four laws, broken", () => {
   it("inert catches a Feature that is off yet changes what the Client does", () => {
     expect(

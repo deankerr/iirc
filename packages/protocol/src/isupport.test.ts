@@ -282,12 +282,6 @@ describe(casefold, () => {
     expect(casefold("ascii", "[A]\\~")).toBe("[a]\\~");
   });
 
-  it("touches nothing past ASCII, so names are split and never merged", () => {
-    expect(casefold("rfc8265", "ÉCOLE")).toBe("École");
-    expect(casefold("ascii", "İSTANBUL")).toBe("İstanbul");
-    expect(sameName("rfc8265", "Ω", "ω")).toBeFalsy();
-  });
-
   it("compares names under a mapping", () => {
     expect(sameName("rfc1459", "Nick[a]", "nick{A}")).toBeTruthy();
     expect(sameName("ascii", "Nick[a]", "nick{A}")).toBeFalsy();

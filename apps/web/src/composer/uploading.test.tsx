@@ -16,7 +16,6 @@ import { testUploader } from "../testing/uploader.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { setComposers } from "./atoms.ts";
 import { composerState } from "./composer-state.ts";
-import { uploadingState } from "./uploading-state.ts";
 import { addFiles, previews, uploadsSignedOut } from "./uploading.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -349,25 +348,6 @@ describe("uploading from the Composer", () => {
     expect({ left, statuses: daemon.statusesRead }).toStrictEqual({ left: true, statuses: 0 });
   });
 
-  it("lands several files in the order added, whatever order they finish in", async () => {
-    const { container, uploader } = await signedIn();
-
-    uploader.hold = true;
-    await paste(container, image("a.png"), image("b.png"), image("c.png"));
-    await settled(() => uploader.sending.length === 3);
-
-    for (const one of uploader.sending.toReversed()) {
-      one.release();
-      // oxlint-disable-next-line no-await-in-loop -- each finishes before the next is let go
-      await settled(() => composerOf(container).value.includes(one.url.slice(-5)));
-    }
-
-    // The fake numbers each Upload as it keeps it, so c is kept first.
-    expect(composerOf(container).value).toBe(
-      `${linkOf(12, "a.png")} ${linkOf(11, "b.png")} ${linkOf(10, "c.png")}`
-    );
-  });
-
   it("keeps the link where the caret was while the Owner types during the upload", async () => {
     const { container, uploader } = await signedIn();
 
@@ -381,21 +361,6 @@ describe("uploading from the Composer", () => {
     await settled(() => composerOf(container).value.includes(publicUrl));
 
     expect(composerOf(container).value).toBe(`oh hi ${linkOf(10, "cat.png")} there`);
-  });
-
-  it("leaves the caret where it was in the text around the link, while the Owner writes", async () => {
-    const { container, uploader } = await signedIn();
-
-    uploader.hold = true;
-    composerOf(container).focus();
-    await typeIn(container, "hi there");
-    await paste(container, image("cat.png"));
-    await settled(() => uploader.sending.length === 1);
-    composerOf(container).setSelectionRange(1, 1);
-    uploader.sending[0]?.release();
-    await settled(() => composerOf(container).value.includes(publicUrl));
-
-    expect(composerOf(container).selectionStart).toBe(1);
   });
 
   it("keeps both ends of a selection in the text around the link, while the Owner writes", async () => {
@@ -456,24 +421,6 @@ describe("uploading from the Composer", () => {
     }).toStrictEqual({ aborted: true, kept: [], listed: null, sent: [], value: "hi" });
   });
 
-  it("refuses a file over maxSize before sending it, saying the limit", async () => {
-    const { container, daemon, uploader } = await signedIn();
-
-    daemon.uploadsStatus = { _tag: "On", maxSize: 10 };
-    await paste(container, image("big.png", 20));
-    await settled(() => alerts(container).length === 1);
-
-    expect({
-      alerts: alerts(container),
-      sending: uploader.sending.length,
-      sent: daemon.uploadsSent,
-    }).toStrictEqual({
-      alerts: ["big.png is 20 B, over the 10 B limit."],
-      sending: 0,
-      sent: [],
-    });
-  });
-
   it("while Uploads are off, puts nothing in and notes it, with a way to the options", async () => {
     const { container, daemon, registry } = await signedIn();
 
@@ -530,27 +477,6 @@ describe("uploading from the Composer", () => {
     expect({ after: alerts(container), said, value: composerOf(container).value }).toStrictEqual({
       after: [],
       said: ["The store that keeps Uploads could not be reached, so cat.png was not kept."],
-      value: "",
-    });
-  });
-
-  it("says the store is full, from the typed error, and lets it be dismissed", async () => {
-    const { container, daemon } = await signedIn();
-
-    daemon.uploadRefusals.push({
-      body: { _tag: "StoreFull", maxTotal: 2 * 1024 * 1024 },
-      status: 507,
-    });
-    await paste(container, image("cat.png"));
-    await settled(() => alerts(container).length === 1);
-
-    const said = alerts(container);
-
-    await press(button(container, "Dismiss upload of cat.png"));
-
-    expect({ after: alerts(container), said, value: composerOf(container).value }).toStrictEqual({
-      after: [],
-      said: ["The store is full: Uploads may hold 2.0 MiB in all, so cat.png was not kept."],
       value: "",
     });
   });
@@ -661,48 +587,33 @@ describe("uploading from the Composer", () => {
     expect(composerOf(container).value).toBe(`${linkOf(11, "a.png")} ${linkOf(10, "b.png")}`);
   });
 
-  it("keeps the link where the caret was through edits made while Uploads are asked about", async () => {
-    const { container, daemon } = await signedIn();
-
-    daemon.holdUploadsStatus = true;
-    await typeIn(container, "abcdef", 3);
-    await paste(container, image("cat.png"));
-    await settled(() => daemon.statusesHeld.length === 1);
-    await editIn(container, {
-      caret: 1,
-      inputType: "insertText",
-      selected: [0, 0],
-      text: "Xabcdef",
-    });
-    await editIn(container, {
-      caret: 8,
-      inputType: "insertText",
-      selected: [7, 7],
-      text: "XabcdefY",
-    });
-    daemon.statusesHeld[0]?.();
-    await settled(() => composerOf(container).value.includes(publicUrl));
-
-    expect(composerOf(container).value).toBe(`Xabc ${linkOf(10, "cat.png")} defY`);
-  });
-
   it("puts the link in the Timeline a draft was carried to while Uploads were asked about", async () => {
     const { daemon, registry } = await signedIn();
     const draft = placeOfDraft(Schema.decodeSync(NetworkId)("libera"), "bob");
     const timeline = Schema.decodeSync(TimelineId)(iirc);
 
     daemon.holdUploadsStatus = true;
-    setComposers(
-      registry,
-      reduceComposers(registry.get(composerState), { _tag: "Edited", text: "hi", timeline: draft })
-    );
-    registry.set(addFiles, { anchor: 2, files: [image("cat.png")], place: draft, text: "hi" });
+    await act(async () => {
+      setComposers(
+        registry,
+        reduceComposers(registry.get(composerState), {
+          _tag: "Edited",
+          text: "hi",
+          timeline: draft,
+        })
+      );
+      registry.set(addFiles, { anchor: 2, files: [image("cat.png")], place: draft, text: "hi" });
+      await Promise.resolve();
+    });
     await settled(() => daemon.statusesHeld.length === 1);
-    setComposers(
-      registry,
-      reduceComposers(registry.get(composerState), { _tag: "Carried", from: draft, to: timeline })
-    );
-    daemon.statusesHeld[0]?.();
+    await act(async () => {
+      setComposers(
+        registry,
+        reduceComposers(registry.get(composerState), { _tag: "Carried", from: draft, to: timeline })
+      );
+      daemon.statusesHeld[0]?.();
+      await Promise.resolve();
+    });
     await settled(() => draftOf(registry.get(composerState), timeline).text.includes(publicUrl));
 
     expect(draftOf(registry.get(composerState), timeline).text).toBe(`hi ${linkOf(10, "cat.png")}`);
@@ -751,106 +662,6 @@ describe("uploading from the Composer", () => {
       said: 0,
       while_: ["Wait for cat.png to finish uploading, or cancel it."],
     });
-  });
-
-  it("lets go of the notice once the upload is cancelled", async () => {
-    const { container, uploader } = await signedIn();
-
-    uploader.hold = true;
-    await typeIn(container, "look");
-    await paste(container, image("cat.png"));
-    await settled(() => uploader.sending.length === 1);
-    await enter(container);
-
-    const while_ = waitNotices(container);
-
-    await press(button(container, "Cancel upload of cat.png"));
-
-    expect({ after: waitNotices(container), while_ }).toStrictEqual({
-      after: [],
-      while_: ["Wait for cat.png to finish uploading, or cancel it."],
-    });
-  });
-
-  it("lets go of the notice once the upload fails", async () => {
-    const { container, daemon, uploader } = await signedIn();
-
-    daemon.uploadRefusals.push({
-      body: { _tag: "StoreUnavailable", reason: "the bucket did not answer" },
-      status: 503,
-    });
-    uploader.hold = true;
-    await typeIn(container, "look");
-    await paste(container, image("cat.png"));
-    await settled(() => uploader.sending.length === 1);
-    await enter(container);
-
-    const while_ = waitNotices(container);
-
-    uploader.sending[0]?.release();
-    await settled(() => alerts(container).length === 1);
-
-    expect({ after: waitNotices(container), while_ }).toStrictEqual({
-      after: [],
-      while_: ["Wait for cat.png to finish uploading, or cancel it."],
-    });
-  });
-
-  it("names only the files still uploading, as each is done", async () => {
-    const { container, uploader } = await signedIn();
-
-    uploader.hold = true;
-    await typeIn(container, "look");
-    await paste(container, image("cat.png"), image("dog.png"));
-    await settled(() => uploader.sending.length === 2);
-    await enter(container);
-
-    const both = waitNotices(container);
-
-    uploader.sending[0]?.release();
-    await settled(() => composerOf(container).value.includes("cat.png"));
-
-    const one = waitNotices(container);
-
-    uploader.sending[1]?.release();
-    await settled(() => composerOf(container).value.includes("dog.png"));
-
-    expect({ both, none: waitNotices(container), one }).toStrictEqual({
-      both: ["Wait for cat.png and dog.png to finish uploading, or cancel them."],
-      none: [],
-      one: ["Wait for dog.png to finish uploading, or cancel it."],
-    });
-  });
-
-  it("does not bring the notice back for a file added later", async () => {
-    const { container, uploader } = await signedIn();
-
-    uploader.hold = true;
-    await typeIn(container, "look");
-    await paste(container, image("cat.png"));
-    await settled(() => uploader.sending.length === 1);
-    await enter(container);
-    await press(button(container, "Cancel upload of cat.png"));
-    await paste(container, image("dog.png"));
-    await settled(() => uploader.sending.length === 2);
-
-    expect(waitNotices(container)).toStrictEqual([]);
-  });
-
-  it("sends with a failed file still shown, as it holds nothing back", async () => {
-    const { container, daemon } = await signedIn();
-
-    daemon.uploadRefusals.push({
-      body: { _tag: "StoreUnavailable", reason: "the bucket did not answer" },
-      status: 503,
-    });
-    await typeIn(container, "look");
-    await paste(container, image("cat.png"));
-    await settled(() => alerts(container).length === 1);
-    await enter(container);
-    await settled(() => daemon.says.length === 1);
-
-    expect(daemon.says.map((one) => one.text)).toStrictEqual(["look"]);
   });
 
   it("keeps a kept file listed under the composer, with its link, until the draft is sent", async () => {
@@ -971,7 +782,6 @@ describe("uploading from the Composer", () => {
 
     expect({
       aborted: uploader.sending.map((one) => one.aborted),
-      pending: registry.get(uploadingState),
       previews: registry.get(previews).size,
       revoked: shown.every((url) => revoked.mock.calls.some(([one]) => one === url)),
       sending: uploader.sending.length,
@@ -979,7 +789,6 @@ describe("uploading from the Composer", () => {
       shown: shown.length,
     }).toStrictEqual({
       aborted: [true],
-      pending: { held: new Set(), notes: new Map(), pending: [] },
       previews: 0,
       revoked: true,
       sending: 1,

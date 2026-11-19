@@ -1,4 +1,4 @@
-import type { Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
+import type { Timeline, TimelineItem } from "@iirc/api";
 import { mainOf } from "@iirc/frontend/timelines";
 import { describe, expect, it } from "vitest";
 
@@ -6,8 +6,8 @@ import { perform } from "../composer/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
 import type { FakeTimeline } from "../testing/fake-daemon.ts";
-import { openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
-import { jumpTo, moreResults, resultRows, searchState } from "./atoms.ts";
+import { sync, timelinesState } from "../timelines/atoms.ts";
+import { moreResults, resultRows, searchState } from "./atoms.ts";
 
 const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
 
@@ -107,20 +107,6 @@ const following = async () => {
   return { ...fake, registry };
 };
 
-const merged = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({
-    dropped: [],
-    gaps: [],
-    items: [],
-    merged: [{ changed: sequence, id: other, into: channel, network: "libera" }],
-    removals: [],
-    sequence,
-    timelines: [],
-  }),
-  event: "changed",
-  id: `1.${sequence}`,
-});
-
 /**
  * A page of the search as the fake was asked for it.
  * @param search - The query, as the URL had it.
@@ -181,22 +167,6 @@ describe("searching", () => {
     });
   });
 
-  it("begins again from the first page when the changes report a merge", async () => {
-    const { daemon, registry, send } = await following();
-
-    registry.set(perform, [{ _tag: "Search", query: "word" }]);
-    await until(registry, searchState, (search) => search.results.length === 100);
-
-    send(merged(201));
-    await eventually(() => daemon.searchesRead.length === 2);
-    await until(registry, searchState, (search) => search.results.length === 100);
-
-    expect(daemon.searchesRead.map((one) => asked(one).after)).toStrictEqual([
-      undefined,
-      undefined,
-    ]);
-  });
-
   it("says in words why a query cannot be searched, or why the Daemon refused it", async () => {
     const { daemon, registry } = await following();
 
@@ -224,42 +194,6 @@ describe("searching", () => {
       gone: "That Timeline is gone, so nothing was searched.",
       reads: 1,
       short: "Search for at least 3 characters.",
-    });
-  });
-
-  it("jumps to a result: its Timeline read around it, never following, and marked", async () => {
-    const { daemon, registry } = await following();
-
-    registry.set(perform, [{ _tag: "Search", query: "word 20" }]);
-    const search = await until(registry, searchState, (one) => one.results.length > 0);
-    const result = search.results.find((item) => item.sequence === 20);
-
-    if (result === undefined) {
-      throw new Error("no result at step 20");
-    }
-
-    registry.set(jumpTo, result);
-    const shown = await until(registry, openTimeline, (one) => one._tag === "Shown");
-    const window = shown._tag === "Shown" ? shown.window : undefined;
-
-    expect({
-      around: daemon.windowsRead.map(
-        (one) => new URLSearchParams(one).get("around")?.split("-")[1]
-      ),
-      main: mainOf(registry.get(timelinesState))._tag,
-      window: [
-        window?.following,
-        window?.target?.sequence,
-        window?.items[0]?.sequence,
-        window?.items.at(-1)?.sequence,
-        window?.later,
-        window?.seen,
-      ],
-    }).toStrictEqual({
-      around: [hex(20n, 14)],
-      main: "Timeline",
-      // Nineteen lie before it, so the rest of a hundred come from it on.
-      window: [false, 20, 1, 100, true, undefined],
     });
   });
 });

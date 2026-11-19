@@ -294,7 +294,6 @@ describe("asking who is in a Channel on joining it", () => {
 
   it.each([
     ["an unknown command", "<< :irc.test 421 iirc who :Unknown command"],
-    ["too few parameters", "<< :irc.test 461 iirc WHO :Not enough parameters"],
     ["a FAIL", "<< :irc.test FAIL WHO TOO_MANY_REQUESTS #a :Slow down"],
   ])("asks the next when the answer is %s", (_name, error) => {
     const two = configured({ channels: [{ name: "#a" }, { name: "#b" }], whoOnJoin: true });
@@ -343,10 +342,9 @@ describe("asking who is in a Channel on joining it", () => {
     expect.assertions(0);
   });
 
-  it.each([
-    ["left out, as a Journal written before it", configured()],
-    ["off", configured({ whoOnJoin: false })],
-  ])("asks nothing when the option is %s", (_name, configuration) => {
+  it("asks nothing when the option is off", () => {
+    const configuration = configured({ whoOnJoin: false });
+
     const played = play(client, {
       configuration,
       transcript: [

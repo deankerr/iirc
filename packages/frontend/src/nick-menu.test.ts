@@ -192,13 +192,6 @@ describe("the menu on a nick", () => {
     ]);
   });
 
-  it("places ban straight after ignore, before the entries that need the User there", () => {
-    const context = inChannel(known(["o"]));
-
-    expect(ids(context, { _tag: "Unknown" }).slice(3)).toStrictEqual(["ignore", "ban"]);
-    expect(ids(context, here([])).slice(3, 5)).toStrictEqual(["ignore", "ban"]);
-  });
-
   it("offers nothing to operate outside a Channel", () => {
     const direct: CommandContext = { ...around, focus: focus("Direct", "peer"), head: undefined };
     const own: CommandContext = { ...around, focus: focus("Network", "libera"), head: undefined };

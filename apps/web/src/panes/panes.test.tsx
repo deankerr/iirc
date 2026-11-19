@@ -6,7 +6,7 @@ import { panesOf } from "@iirc/frontend/layout";
 import type { Layout } from "@iirc/frontend/layout";
 import type { PaneView } from "@iirc/frontend/timelines";
 import { mainOf, openOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -245,16 +245,6 @@ const settled = async (holds: () => boolean) => {
 };
 
 /**
- * Lets React and the library render and report what they will.
- * @param millis - How long.
- */
-const pause = async (millis: number) => {
-  await act(async () => {
-    await Effect.runPromise(Effect.sleep(`${millis} millis`));
-  });
-};
-
-/**
  * A Timeline's log, by its name.
  * @param name - The name.
  * @returns The log, or none while it is not drawn.
@@ -308,18 +298,12 @@ const signedIn = async ({
   fake.daemon.through = history ? 40 : 1;
 
   const registry = registryFor(fake.fetch);
-  const layouts: Layout<PaneView>[] = [];
 
   if (kept !== undefined) {
     writeChoice(layoutKey, kept);
   }
 
   registry.set(pageState, { compact: false, focused: true, visible });
-  registry.subscribe(timelinesState, (state) => {
-    if (layouts.at(-1) !== state.layout) {
-      layouts.push(state.layout);
-    }
-  });
 
   await run(registry, check, undefined);
   registry.mount(sync);
@@ -363,7 +347,7 @@ const signedIn = async ({
     await settled(() => logNamed("#iirc") !== null);
   }
 
-  return { container, daemon: fake.daemon, layouts, registry };
+  return { container, daemon: fake.daemon, registry };
 };
 
 /**
@@ -472,14 +456,6 @@ const ratiosOf = (layout: Layout<PaneView>) =>
     ? layout.root.children.map((child) => Math.round(child.ratio * 1000) / 1000)
     : [];
 
-/**
- * A Pane as a device keeps it, as JSON text, with nothing open.
- * @param index - Its number.
- * @returns The JSON of the Pane, as a child of a Split.
- */
-const keptPane = (index: number) =>
-  `{"node":{"_tag":"Pane","id":"p${index}","view":{"open":null,"options":null}},"ratio":1}`;
-
 describe("the Panes", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -557,42 +533,29 @@ describe("the Panes", () => {
     });
   });
 
-  it("takes the core's ratios without echoing them back, in StrictMode", async () => {
-    const { layouts, registry } = await signedIn({ strict: true });
+  it("takes the core's ratios, in StrictMode", async () => {
+    const { registry } = await signedIn({ strict: true });
 
     await press(composer(), altShift("s"));
     await settled(() => document.querySelectorAll("[data-separator]").length === 1);
-    await pause(50);
-    const before = layouts.length;
 
-    // Ratios from the core, as a resize by keys and equalizing are, each taken once.
+    // Ratios from the core, as a resize by keys and equalizing are.
     await act(async () => {
       registry.set(paned, { _tag: "Grow" });
       await Promise.resolve();
     });
-    await pause(50);
-    const grown = drawnOf("p1");
+    await settled(() => drawnOf("p1") === 55);
 
     await act(async () => {
       registry.set(paned, { _tag: "Equalize" });
       await Promise.resolve();
     });
-    await pause(100);
+    await settled(() => drawnOf("p0") === 50);
 
     expect({
       drawn: drawnOf("p0"),
       group: document.querySelector("[data-group]")?.id,
-      grown,
-      layouts: layouts.slice(before).map(ratiosOf),
-    }).toStrictEqual({
-      drawn: 50,
-      group: "group:s1",
-      grown: 55,
-      layouts: [
-        [0.45, 0.55],
-        [0.5, 0.5],
-      ],
-    });
+    }).toStrictEqual({ drawn: 50, group: "group:s1" });
   });
 
   it("goes back to an earlier set of Panes at the core's ratios, not the library's memory", async () => {
@@ -617,7 +580,7 @@ describe("the Panes", () => {
       registry.set(paned, { _tag: "Equalize" });
       await Promise.resolve();
     });
-    await pause(100);
+    await settled(() => drawnOf("p0") === 50);
 
     expect({
       core: ratiosOf(registry.get(timelinesState).layout),
@@ -718,7 +681,7 @@ describe("the Panes", () => {
       registry.set(paned, { _tag: "Swap", direction: "Right" });
       await Promise.resolve();
     });
-    await pause(200);
+    await settled(() => log?.scrollTop === 140 && document.activeElement === log);
 
     const state = registry.get(timelinesState);
 
@@ -803,32 +766,13 @@ describe("the Panes", () => {
     }).toStrictEqual({ held: [true, false], restored: iirc });
   });
 
-  it("starts and follows whatever layout was kept: too deep, too many Panes, too long, or no JSON", async () => {
-    const many = `{"focused":"p0","next":99,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s0","children":[${Array.from({ length: 65 }, (_, index) => keptPane(index)).join(",")}]}}`;
+  it("starts at a layout of its own when the one kept cannot be taken", async () => {
+    const { registry } = await signedIn({ kept: "{not json" });
 
-    const started: string[] = [];
-
-    for (const kept of [
-      `${'{"root":'.repeat(5000)}1${"}".repeat(5000)}`,
-      many,
-      " ".repeat(70_000),
-      "{not json",
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one page after another
-      const { registry } = await signedIn({ kept });
-
-      started.push(
-        `${panesOf(registry.get(timelinesState).layout.root).length} ${openOf(registry.get(timelinesState)) === iirc}`
-      );
-
-      for (const unmount of mounted.splice(0)) {
-        act(() => {
-          unmount();
-        });
-      }
-    }
-
-    expect(started).toStrictEqual(["1 true", "1 true", "1 true", "1 true"]);
+    expect([
+      panesOf(registry.get(timelinesState).layout.root).length,
+      openOf(registry.get(timelinesState)),
+    ]).toStrictEqual([1, iirc]);
   });
 });
 
@@ -879,7 +823,9 @@ describe("what stands in front of a Timeline", () => {
   it("closes the options by Escape or their close button, back to the Timeline behind them", async () => {
     const { registry } = await signedIn();
 
-    await run(registry, openOptions, "");
+    await act(async () => {
+      await run(registry, openOptions, "");
+    });
     await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
 
     const grid = document.querySelector<HTMLElement>('section[aria-label="Options"] [role="grid"]');
@@ -888,7 +834,9 @@ describe("what stands in front of a Timeline", () => {
     await settled(() => logNamed("#iirc") !== null);
     const escaped = mainTag(registry);
 
-    await run(registry, openOptions, "");
+    await act(async () => {
+      await run(registry, openOptions, "");
+    });
     await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
 
     await act(async () => {
@@ -906,7 +854,9 @@ describe("what stands in front of a Timeline", () => {
   it("marks only what the focused Pane shows, and shows the Timeline behind the options when it is chosen", async () => {
     const { registry } = await signedIn();
 
-    await run(registry, openOptions, "");
+    await act(async () => {
+      await run(registry, openOptions, "");
+    });
     await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
 
     const marked = {

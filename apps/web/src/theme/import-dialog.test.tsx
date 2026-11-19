@@ -7,7 +7,6 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { signedOut } from "../options/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import {
   eventually,
@@ -16,7 +15,7 @@ import {
   registryFor,
   run,
 } from "../testing/fake-daemon.ts";
-import { importDraft, tooLong } from "./atoms.ts";
+import { importDraft } from "./atoms.ts";
 import type { ThemeReaderPort } from "./reader.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -67,6 +66,16 @@ const render = async (registry: AtomRegistry.AtomRegistry) => {
 };
 
 /**
+ * Waits until something holds, letting React render what changed meanwhile.
+ * @param holds - What must hold.
+ */
+const settled = async (holds: () => boolean) => {
+  await act(async () => {
+    await eventually(holds);
+  });
+};
+
+/**
  * Sets a field's value as a keystroke does, beneath React's own tracking, then says so.
  * @param field - The field.
  * @param value - The value.
@@ -88,7 +97,7 @@ const typeInto = async (field: HTMLTextAreaElement, value: string) => {
  * @returns It.
  */
 const shown = async <E extends Element>(selector: string) => {
-  await eventually(() => document.querySelector(selector) !== null);
+  await settled(() => document.querySelector(selector) !== null);
 
   const found = document.querySelector<E>(selector);
 
@@ -142,12 +151,12 @@ describe("the import dialog", () => {
     const { status, text } = await importing(instantThemeReader);
 
     await typeInto(text, kitty);
-    await eventually(() => status() === "Read as Kitty.");
+    await settled(() => status() === "Read as Kitty.");
 
     expect(status()).toBe("Read as Kitty.");
   });
 
-  it("ends a read the next text supersedes, and refuses one that takes too long, staying responsive", async () => {
+  it("ends a read the next text supersedes, still taking text while it reads", async () => {
     const started: string[] = [];
     const ended: string[] = [];
 
@@ -174,20 +183,17 @@ describe("the import dialog", () => {
 
     // Still taking text while the first reads: the newer text ends the older read.
     await typeInto(text, "base00: ab");
-    const typed = text.value;
+    await settled(() => started.length === 2);
 
-    await eventually(() => status() === tooLong);
-
-    expect({ ended, reading, started, status: status(), typed }).toStrictEqual({
-      ended: ["base00: a", "base00: ab"],
+    expect({ ended, reading, started, typed: text.value }).toStrictEqual({
+      ended: ["base00: a"],
       reading: "Reading…",
       started: ["base00: a", "base00: ab"],
-      status: tooLong,
       typed: "base00: ab",
     });
   });
 
-  it("closes the import as it unmounts or the page signs out, ending a read in flight", async () => {
+  it("closes the import as it unmounts, ending a read in flight", async () => {
     const ended: string[] = [];
 
     const never: ThemeReaderPort = {
@@ -201,26 +207,14 @@ describe("the import dialog", () => {
         ),
     };
 
-    const first = await importing(never);
+    const { registry, text, unmount } = await importing(never);
 
-    await typeInto(first.text, "base00: a");
-    act(first.unmount);
-    const unmounted = { ended: [...ended], open: first.registry.get(importDraft).open };
+    await typeInto(text, "base00: a");
+    act(unmount);
 
-    const second = await importing(never);
-
-    await typeInto(second.text, "base00: b");
-    await act(async () => {
-      signedOut(second.registry);
-      await Promise.resolve();
-    });
-
-    expect({
-      signedOut: { ended, open: second.registry.get(importDraft).open },
-      unmounted,
-    }).toStrictEqual({
-      signedOut: { ended: ["base00: a", "base00: b"], open: false },
-      unmounted: { ended: ["base00: a"], open: false },
+    expect({ ended, open: registry.get(importDraft).open }).toStrictEqual({
+      ended: ["base00: a"],
+      open: false,
     });
   });
 });

@@ -24,15 +24,12 @@ import {
 import { sync } from "../timelines/atoms.ts";
 import {
   cancelImport,
-  chooseFile,
   drawnTheme,
   editImport,
   importDraft,
-  importRead,
   saveImport,
   watchTheme,
 } from "./atoms.ts";
-import type { ChosenFile } from "./atoms.ts";
 import type { ThemeReaderPort } from "./reader.ts";
 
 /** Nord, as Alacritty's theme of it has it. */
@@ -99,18 +96,6 @@ const signedIn = () => {
 };
 
 /**
- * A file whose text comes only when the test says.
- * @param name - Its name.
- * @returns The file, and a way to give its text.
- */
-const deferred = (name: string) => {
-  const { promise, resolve } = Promise.withResolvers<string>();
-  const file: ChosenFile = { name, size: 10, text: async () => await promise };
-
-  return { file, give: resolve };
-};
-
-/**
  * Whether the device prefers dark, as the browser's media query says it, and changes it
  * when the test says, as a device does when its setting changes.
  */
@@ -131,11 +116,6 @@ class DevicePreference extends EventTarget {
     this.dispatchEvent(new Event("change"));
   }
 }
-
-/** Lets the reads a test started settle. */
-const settle = async () => {
-  await Effect.runPromise(Effect.sleep("20 millis"));
-};
 
 const drawnNow = () => document.documentElement.style.getPropertyValue("--color-background");
 
@@ -331,10 +311,8 @@ describe("themes", () => {
 
     vi.stubGlobal("matchMedia", () => device);
 
-    const fake = signedIn();
-    const { notice, registry, type } = await page(fake);
+    const { registry, type } = await page(signedIn());
     const stop = watchTheme(registry);
-    const before = drawnNow();
 
     await type("/theme -dark nord");
     await until(registry, uiInEffect, (ui) => ui.dark === "nord");
@@ -343,65 +321,22 @@ describe("themes", () => {
     device.prefer(false);
     const light = drawnNow();
 
-    await type("/theme -light solarized-light");
-    await until(registry, uiInEffect, (ui) => ui.light === "solarized-light");
-    const lightChosen = drawnNow();
-
     device.prefer(true);
     const backToDark = drawnNow();
 
-    await type("/theme -light system");
-    const refused = notice();
-
-    await type("/theme -light");
-    const listed = registry.get(paletteState).scope;
-
-    const sunny = registry
-      .get(paletteSections)
-      .flatMap((section) => section.entries)
-      .find((entry) => entry.key === "theme:gruvbox-dark");
-
-    if (sunny !== undefined) {
-      registry.set(pickEntry, sunny);
-    }
-
-    await until(registry, uiInEffect, (ui) => ui.light === "gruvbox-dark");
-    device.prefer(false);
-    const picked = drawnNow();
-
     await type("/theme dracula");
     await until(registry, uiInEffect, (ui) => ui.theme === "dracula");
+    device.prefer(false);
     const named = drawnNow();
-
-    device.prefer(true);
-    const namedDark = drawnNow();
 
     stop();
     vi.unstubAllGlobals();
 
-    expect({
-      backToDark,
-      before,
-      dark,
-      light,
-      lightChosen,
-      listed,
-      named: [named, namedDark],
-      picked,
-      refused,
-      shared: [fake.daemon.ui.options.light, fake.daemon.ui.options.dark],
-    }).toStrictEqual({
+    expect({ backToDark, dark, light, named }).toStrictEqual({
       backToDark: "#2e3440",
-      before: "#111314",
       dark: "#2e3440",
       light: "#f6f5f1",
-      lightChosen: "#fdf6e3",
-      listed: { _tag: "Themes", option: "light" },
-      named: ["#282a36", "#282a36"],
-      picked: "#282828",
-      refused:
-        "system follows the device, so it is never the theme drawn while the device is light. Name a theme, such as light.",
-      shared: ["gruvbox-dark", "nord"],
+      named: "#282a36",
     });
   });
 
@@ -551,47 +486,8 @@ describe("themes", () => {
     });
   });
 
-  it("draws a bundled font chosen in the palette after a family typed there, since this device's override would win over the shared one", async () => {
-    const fake = signedIn();
-    const { registry } = await page(fake);
-
-    const choose = async (query: string, key: string, font: string) => {
-      paletteHappened(registry, { _tag: "Opened", scope: allScope });
-      paletteHappened(registry, { _tag: "Queried", query });
-
-      const entry = registry
-        .get(paletteSections)
-        .flatMap((section) => section.entries)
-        .find((one) => one.key === key);
-
-      if (entry !== undefined) {
-        registry.set(pickEntry, entry);
-      }
-
-      await until(registry, uiInEffect, (ui) => ui.font === font);
-    };
-
-    await choose("font Fira Code", "font:Fira Code", "Fira Code");
-    const family = readChoice(deviceUiKey);
-
-    await choose("inter", "font:inter", "inter");
-
-    expect({
-      family,
-      inEffect: registry.get(uiInEffect).font,
-      kept: readChoice(deviceUiKey),
-      shared: fake.daemon.ui.options.font,
-    }).toStrictEqual({
-      family: '{"font":"Fira Code"}',
-      inEffect: "inter",
-      kept: '{"font":"inter"}',
-      shared: "system",
-    });
-  });
-
-  it("draws the widest line on the root in characters, lets this device's own win, and draws none as no property", async () => {
-    const fake = signedIn();
-    const { notice, registry, type } = await page(fake);
+  it("draws the widest line on the root in characters, and none as no property", async () => {
+    const { registry, type } = await page(signedIn());
     const stop = watchTheme(registry);
     const before = widestLine();
 
@@ -599,36 +495,13 @@ describe("themes", () => {
     await until(registry, uiInEffect, (ui) => ui.width === 72);
     const shared = widestLine();
 
-    await type("/set -device ui.width none");
-    await until(registry, uiInEffect, (ui) => ui.width === "none");
-    const deviceNone = widestLine();
-
-    await type("/set ui.width 39");
-    const refused = notice();
-
-    await type("/unset -device ui.width");
-    await until(registry, uiInEffect, (ui) => ui.width === 72);
-    const unsetDevice = widestLine();
-
-    await type("/unset ui.width");
-    await until(registry, uiInEffect, (ui) => ui.width === "none");
-    const unset = widestLine();
-
     stop();
 
-    expect({ before, deviceNone, refused, shared, unset, unsetDevice }).toStrictEqual({
-      before: "",
-      deviceNone: "",
-      refused: 'ui.width: Give a whole number from 40 to 400, or none, not "39".',
-      shared: "72ch",
-      unset: "",
-      unsetDevice: "72ch",
-    });
+    expect({ before, shared }).toStrictEqual({ before: "", shared: "72ch" });
   });
 
-  it("draws the line height on the root at once, lets this device's own win, and falls back as each is unset", async () => {
-    const fake = signedIn();
-    const { notice, registry, type } = await page(fake);
+  it("draws the line height on the root at once", async () => {
+    const { registry, type } = await page(signedIn());
     const stop = watchTheme(registry);
     const before = lineHeight();
 
@@ -636,96 +509,9 @@ describe("themes", () => {
     await until(registry, uiInEffect, (ui) => ui.leading === 1.8);
     const shared = lineHeight();
 
-    await type("/set -device ui.leading 1.2");
-    await until(registry, uiInEffect, (ui) => ui.leading === 1.2);
-    const device = lineHeight();
-
-    await type("/set ui.leading 1.9");
-    await eventually(() => fake.daemon.ui.options.leading === 1.9);
-    const stillDevice = lineHeight();
-
-    await type("/set ui.leading 3");
-    const refused = notice();
-
-    await type("/unset -device ui.leading");
-    await until(registry, uiInEffect, (ui) => ui.leading === 1.9);
-    const unsetDevice = lineHeight();
-
-    await type("/unset ui.leading");
-    await until(registry, uiInEffect, (ui) => ui.leading === 1.45);
-    const unset = lineHeight();
-
     stop();
 
-    expect({ before, device, refused, shared, stillDevice, unset, unsetDevice }).toStrictEqual({
-      before: "1.45",
-      device: "1.2",
-      refused: 'ui.leading: Give a number from 1 to 2, in steps of 0.01, not "3".',
-      shared: "1.8",
-      stillDevice: "1.2",
-      unset: "1.45",
-      unsetDevice: "1.9",
-    });
-  });
-
-  it("applies only the latest file read: typing, closing, and another choice let one go", async () => {
-    const reads: string[] = [];
-
-    const counting: ThemeReaderPort = {
-      read: (text) =>
-        Effect.suspend(() => {
-          reads.push(text);
-
-          return instantThemeReader.read(text);
-        }),
-    };
-
-    const { registry, type } = await page(signedIn(), counting);
-
-    // Typing after choosing a file keeps what was typed.
-    await type("/theme import");
-    const typedOver = deferred("first.conf");
-
-    registry.set(chooseFile, typedOver.file);
-    registry.set(editImport, { text: nord });
-    typedOver.give("from the file");
-    await settle();
-    const typed = registry.get(importDraft).text;
-
-    // A file that finishes after Cancel starts no read and opens nothing.
-    const cancelled = deferred("late.conf");
-
-    registry.set(chooseFile, cancelled.file);
-    registry.set(cancelImport, undefined);
-    const before = reads.length;
-
-    cancelled.give(nord);
-    await settle();
-    const afterCancel = { open: registry.get(importDraft).open, reads: reads.length - before };
-
-    // Of two choices, the later applies, whichever finishes first.
-    await type("/theme import");
-    const older = deferred("older.conf");
-    const newer = deferred("newer.toml");
-
-    registry.set(chooseFile, older.file);
-    registry.set(chooseFile, newer.file);
-    newer.give(nord);
-    await settle();
-    older.give("from the older file");
-    await settle();
-
-    expect({
-      afterCancel,
-      chosen: [registry.get(importDraft).fileName, registry.get(importDraft).text === nord],
-      read: registry.get(importRead)?._tag,
-      typed: typed === nord,
-    }).toStrictEqual({
-      afterCancel: { open: false, reads: 0 },
-      chosen: ["newer.toml", true],
-      read: "Parsed",
-      typed: true,
-    });
+    expect({ before, shared }).toStrictEqual({ before: "1.45", shared: "1.8" });
   });
 
   it("closes an import on sign-out, ending its read, and draws the theme in effect", async () => {

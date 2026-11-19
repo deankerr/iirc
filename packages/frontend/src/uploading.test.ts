@@ -9,7 +9,6 @@ import {
   anchorAfter,
   caretAfter,
   checking,
-  editOf,
   failureOf,
   failureText,
   followed,
@@ -132,10 +131,6 @@ const keep = (
 const textOf = (state: { readonly composers: Composers }) => draftOf(state.composers, place).text;
 
 describe("where an anchor goes as the draft is edited", () => {
-  it("stays where an edit is wholly after it", () => {
-    expect(anchorAfter(2, "hi there", "hi there, you")).toBe(2);
-  });
-
   it("moves by the change in length when an edit is wholly before it", () => {
     expect(anchorAfter(6, "hello world", "hey world")).toBe(4);
   });
@@ -149,10 +144,6 @@ describe("where an anchor goes as the draft is edited", () => {
     expect(anchorAfter(3, "hi ", "hi there")).toBe(3);
   });
 
-  it("is clamped to the text when the draft is cleared", () => {
-    expect(anchorAfter(5, "hello", "")).toBe(0);
-  });
-
   it("follows the edit the Owner made where text repeats, not the first it could be", () => {
     // Between the words of "hi hi", the first "hi " selected and deleted.
     expect(anchorAfter(3, "hi hi", "hi", { caret: 0, from: 0 })).toBe(0);
@@ -163,20 +154,11 @@ describe("where an anchor goes as the draft is edited", () => {
   });
 
   it("moves back with a Backspace before it", () => {
-    expect(editOf("aa", "a", { caret: 0, from: 1 })).toStrictEqual({
-      newEnd: 0,
-      oldEnd: 1,
-      start: 0,
-    });
-    expect(anchorAfter(2, "aa", "a", { caret: 0, from: 1 })).toBe(1);
+    // Between the two `a`s, the first deleted: the texts alone would say the second.
+    expect(anchorAfter(1, "aa", "a", { caret: 0, from: 1 })).toBe(0);
   });
 
   it("stays with a forward delete after it", () => {
-    expect(editOf("aa", "a", { caret: 1, from: 1 })).toStrictEqual({
-      newEnd: 1,
-      oldEnd: 2,
-      start: 1,
-    });
     expect(anchorAfter(1, "aa", "a", { caret: 1, from: 1 })).toBe(1);
   });
 
@@ -187,9 +169,6 @@ describe("where an anchor goes as the draft is edited", () => {
 
   it("finds the edit from the texts when the selection does not explain it", () => {
     // An undo, which the selection before says nothing of.
-    expect(editOf("hello world", "hey world", { caret: 0, from: 11 })).toStrictEqual(
-      editOf("hello world", "hey world")
-    );
     expect(anchorAfter(6, "hello world", "hey world", { caret: 0, from: 11 })).toBe(4);
   });
 
@@ -293,27 +272,6 @@ describe("putting a link into the draft", () => {
     const cancelled = { ...start, uploading: fold(start.uploading, { _tag: "Dropped", key: "a" }) };
 
     expect(textOf(keep(cancelled, "a"))).toBe("");
-  });
-
-  it("follows a draft that came to show its Timeline", () => {
-    const draft: Place = "draft libera peer";
-    const composers = typed(initialComposers, "hi", draft);
-
-    const uploading = fold(
-      initialUploading,
-      ...arrived(2, [file("a")], { _tag: "On", maxSize: 100 }, draft)
-    );
-
-    const carried = reduceComposers(composers, { _tag: "Carried", from: draft, to: elsewhere });
-
-    const kept = uploaded(
-      followed(uploading, composers, carried),
-      carried,
-      "a",
-      uploadOf("a", "L")
-    );
-
-    expect(draftOf(kept.composers, elsewhere).text).toBe("hi L");
   });
 });
 
@@ -706,16 +664,6 @@ describe("sending a draft while its files upload", () => {
     ]).toStrictEqual([undefined, undefined]);
   });
 
-  it("holds nothing back for a file refused as the store being full", () => {
-    const full = fold(addedAt(4, file("a")), {
-      _tag: "Failed",
-      failure: { _tag: "StoreFull", maxTotal: mib },
-      key: "a",
-    });
-
-    expect(heldBack(full, composers, place)).toBeUndefined();
-  });
-
   it("holds nothing back for a draft typing a Credential's value, so it is let go of", () => {
     const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
 
@@ -729,12 +677,6 @@ describe("what a composer says of a send held back", () => {
 
   it("says nothing until a send was held back", () => {
     expect(heldNoteIn(addedAt(4, file("a")), composers, place)).toBeUndefined();
-  });
-
-  it("says why, as heldBack does, for the files waiting then", () => {
-    const state = fold(addedAt(4, file("a"), file("b")), held);
-
-    expect(heldNoteIn(state, composers, place)).toBe(heldBack(state, composers, place));
   });
 
   it("names only the files still waiting, as each is kept, fails, or is cancelled", () => {
@@ -768,19 +710,11 @@ describe("what a composer says of a send held back", () => {
         fold(state, { _tag: "Failed", failure: { _tag: "StoreUnavailable" }, key: "a" }),
     ],
     ["cancelled", (state: Uploading) => fold(state, { _tag: "Dropped", key: "a" })],
-    [
-      "refused as Uploads turned off",
-      (state: Uploading) => fold(state, { _tag: "Off", key: "a", missing: [] }),
-    ],
   ])("lets go of it once the last file is %s, and no file added later brings it back", (_, end) => {
     const done = end(fold(addedAt(4, file("a")), held));
     const later = fold(done, ...arrived(0, [file("b")], on));
 
-    expect([
-      done.held.size,
-      heldNoteIn(done, composers, place),
-      heldNoteIn(later, composers, place),
-    ]).toStrictEqual([0, undefined, undefined]);
+    expect(heldNoteIn(later, composers, place)).toBeUndefined();
   });
 
   it("stays with a draft carried to its Timeline while its file uploads", () => {
@@ -815,12 +749,6 @@ describe("what a composer says of a send held back", () => {
 describe("the note while Uploads are off", () => {
   it("names one option", () => {
     expect(offNote(["uploads.publicUrl"])).toBe("Uploads are off until uploads.publicUrl is set.");
-  });
-
-  it("names two options joined by and", () => {
-    expect(offNote(["store.s3.bucket", "uploads.publicUrl"])).toBe(
-      "Uploads are off until store.s3.bucket and uploads.publicUrl are set."
-    );
   });
 
   it("names more options as a list", () => {

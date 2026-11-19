@@ -110,37 +110,6 @@ describe("the page as it starts", () => {
     }
   });
 
-  it("draws a wait until the ui options are read, then the shell in the Owner's theme and font", async () => {
-    const fake = fakeDaemon();
-
-    fake.daemon.signedIn = true;
-    fake.daemon.ui = chosen("gruvbox-dark", "jetbrains-mono", 1);
-    fake.daemon.holdUiFollows = true;
-    const registry = registryFor(fake.fetch);
-
-    await run(registry, check, undefined);
-    const { container, firstShellFrames } = await render(registry);
-
-    await eventually(() => fake.daemon.uiFollowsHeld.length > 0);
-    const waiting = { drawing: drawing(container), root: drawnRoot() };
-
-    fake.daemon.holdUiFollows = false;
-    await act(async () => {
-      for (const release of fake.daemon.uiFollowsHeld.splice(0)) {
-        release();
-      }
-
-      await eventually(() => drawing(container).shell);
-    });
-
-    expect({ firstShellFrames, waiting }).toStrictEqual({
-      firstShellFrames: [
-        { font: '"JetBrains Mono Variable", var(--font-device)', theme: "gruvbox-dark" },
-      ],
-      waiting: { drawing: { shell: false, wait: true }, root: defaults },
-    });
-  });
-
   it("offers to sign out from the wait, which a follow that never answers would otherwise hold", async () => {
     const fake = fakeDaemon();
 

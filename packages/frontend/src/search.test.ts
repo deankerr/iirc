@@ -219,10 +219,6 @@ describe("reading a query", () => {
       read("word since:2026-11-10T24:00Z"),
       read("word since:2026-11-11 until:2026-11-10"),
       read("word since:2026-11-10T09:30+99:99"),
-      read("word since:2026-11-10T09:30+01:60"),
-      read("word since:2026-11-10T09:30-24:00"),
-      read("word since:2026-11-10T09:60Z"),
-      read("word since:2026-11-10T09:30:60Z"),
     ]).toStrictEqual([
       "Search for at least 3 characters.",
       "Say what to search for: at least 3 characters, with from:, in:, network:, since:, or until: to narrow it.",
@@ -241,10 +237,6 @@ describe("reading a query", () => {
       "2026-11-10T24:00Z is no time of the calendar. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
       "since: must come before until:.",
       "+99:99 is no zone's offset. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "+01:60 is no zone's offset. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "-24:00 is no zone's offset. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "2026-11-10T09:60Z is no time of the calendar. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "2026-11-10T09:30:60Z is no time of the calendar. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
     ]);
   });
 

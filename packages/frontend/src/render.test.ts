@@ -111,6 +111,10 @@ const hostile = fc
   )
   .map((parts) => parts.join(""));
 
+// A link closed by many brackets, and many embeddings closed by isolates' ends, of a size.
+const brackets = (size: number) => `https://example.org/${")".repeat(size)}`;
+const nested = (size: number) => `${"\u202A".repeat(size / 2)}${"\u2069".repeat(size / 2)}`;
+
 describe("formatted text", () => {
   it("reads mIRC formatting into styles, as data", () => {
     expect(formatted("\u0002bold\u0002 and \u000304red\u0003")).toStrictEqual([
@@ -208,25 +212,34 @@ describe("formatted text", () => {
   });
 
   it("trims a link's hostile brackets and closes deep bidi formatting in linear time", () => {
-    // Quadratic work over these takes seconds; linear, a few milliseconds.
-    const brackets = `https://example.org/${")".repeat(64_000)}`;
-    const nested = `${"\u202A".repeat(30_000)}${"\u2069".repeat(30_000)}`;
+    // The quickest of a few runs, so a pause of the machine's own counts for nothing.
+    const took = (size: number) =>
+      Math.min(
+        ...Array.from({ length: 3 }, () => {
+          // oxlint-disable-next-line no-restricted-globals -- a test of how the work grows
+          const started = performance.now();
+          formatted(brackets(size));
+          contained(nested(size));
 
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const started = performance.now();
-    const linked = formatted(brackets);
-    const closed = contained(nested);
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const took = performance.now() - started;
+          // oxlint-disable-next-line no-restricted-globals -- a test of how the work grows
+          return performance.now() - started;
+        })
+      );
+
+    // Four times the text takes about four times as long when linear, and sixteen when
+    // quadratic.
+    took(16_000);
+    const ratio = took(64_000) / took(16_000);
+    const linked = formatted(brackets(64_000));
 
     expect({
-      closed: closed.length,
-      fast: took < 500,
+      closed: contained(nested(60_000)).length,
+      linear: ratio < 10,
       link: linked[0]?._tag === "Link" ? linked[0].href : undefined,
       rest: linked[1]?.text.length,
     }).toStrictEqual({
       closed: 90_000,
-      fast: true,
+      linear: true,
       link: "https://example.org/",
       rest: 64_000,
     });
@@ -272,14 +285,6 @@ describe("nick colours", () => {
     const used = new Set(Array.from({ length: 500 }, (_, index) => nickColour(`user${index}`)));
 
     expect(used.size).toBe(nickSlots);
-  });
-
-  it("is the same slot on every run, so it can be checked against a constant", () => {
-    expect([nickColour("iirc"), nickColour("peer"), nickColour("")]).toStrictEqual([
-      nickColour("IIRC"),
-      nickColour("PEER"),
-      0x81_1c_9d_c5 % nickSlots,
-    ]);
   });
 });
 

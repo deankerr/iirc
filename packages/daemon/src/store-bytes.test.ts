@@ -3,10 +3,13 @@ import { makeMemoryByteStore } from "@iirc/byte-store/testing";
 import { PreviewCache, PreviewCacheFailed } from "@iirc/preview-cache";
 import type { PreviewCacheService } from "@iirc/preview-cache";
 import { makeMemoryPreviewCache } from "@iirc/preview-cache/testing";
-import { Deferred, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Scope, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { StoreBytes, hashOf, layerStoreBytes } from "./store-bytes.ts";
+
+// No logger, so what the code under test logs is not printed over the test run.
+const quiet = Logger.layer([]);
 
 const bytes = new TextEncoder().encode("shared bytes");
 const hash = hashOf(bytes);
@@ -44,7 +47,7 @@ const run = async <A>(
 
         return yield* test(shared, store, cache);
       })
-    )
+    ).pipe(Effect.provide(quiet))
   );
 
 const held = (store: ByteStoreService) => Effect.orDie(store.held);

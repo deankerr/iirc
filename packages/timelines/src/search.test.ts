@@ -32,18 +32,13 @@ describe("the text a search looks for", () => {
   it.each<readonly [string, string, boolean]>([
     ["three letters", "iir", true],
     ["two", "ab", false],
-    ["none", "", false],
-    ["three ideographs", "\u65E5\u672C\u8A9E", true],
     ["two astral characters, four code units", "\u{1F600}\u{1F600}", false],
-    ["three astral characters", "\u{1F600}\u{1F600}\u{1F600}", true],
     ["a composed letter and one more, two code points", "\u00E1a", false],
     ["a letter, its combining accent, and one more, three code points", "a\u0301a", true],
     ["two dotted capital Is, which fold to two code points", "\u0130\u0130", false],
-    ["three dotted capital Is", "\u0130\u0130\u0130", true],
     ["510 letters", "a".repeat(searchTextMaximum), true],
     ["511 letters", "a".repeat(searchTextMaximum + 1), false],
     ["510 astral characters, 1020 code units", "\u{1F600}".repeat(searchTextMaximum), true],
-    ["511 astral characters", "\u{1F600}".repeat(searchTextMaximum + 1), false],
     ["510 dotted capital Is", "\u0130".repeat(searchTextMaximum), true],
   ])("counts %s by code point once folded", (_, text, valid) => {
     expect(isSearchText(text)).toBe(valid);

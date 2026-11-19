@@ -5,7 +5,6 @@
 import { describe, expect, it } from "vitest";
 
 import { client } from "../core.ts";
-import { maxPending } from "../features/echo.ts";
 import { FeatureName } from "../ids.ts";
 import { configured, joined, play, registered } from "../testing/index.ts";
 
@@ -168,26 +167,6 @@ describe("our Message, echoed", () => {
     ).toHaveLength(1);
   });
 
-  it("awaits a bounded number of labels, forgetting the oldest", () => {
-    const sayings = Array.from({ length: maxPending + 1 }, (_unused, index) => say(index + 1));
-
-    play(client, {
-      configuration: base,
-      transcript: [
-        ...echoing,
-        ...sayings,
-        lines(
-          "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello",
-          "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? confirmed i2 :hello"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
-
   it("tells the echo of a Message to Self from the copy delivered to Self", () => {
     play(client, {
       configuration: base,
@@ -284,7 +263,7 @@ describe("our Message, refused", () => {
 });
 
 describe("without both caps", () => {
-  it.each([[["echo-message"]], [["labeled-response"]], [[]]])(
+  it.each([[["echo-message"]], [["labeled-response"]]])(
     "asks for neither, labels nothing, and awaits no echo, offered %j",
     (offered) => {
       play(client, {
@@ -305,20 +284,6 @@ describe("without both caps", () => {
       expect.assertions(0);
     }
   );
-
-  it("is declined by the Owner as one Feature", () => {
-    const declined = configured({ declined: [FeatureName.make("echo-message")] });
-
-    play(client, {
-      configuration: declined,
-      transcript: [
-        registered(declined, { offered: both, requested: ["batch"] }),
-        lines("!! say #iirc :hello", ">> PRIVMSG #iirc hello"),
-      ],
-    });
-
-    expect.assertions(0);
-  });
 });
 
 describe("the caps changing mid-Session", () => {

@@ -81,9 +81,9 @@ const transcript = (set: readonly CapName[]): string => {
 
 const subject: Subject<State> = { caps, client, configuration: base, features, transcript };
 
-// Each law replays the transcript for each of 56 sets of caps, and `inert` and
-// `deactivates` several times over, so they take longer than a scenario.
-describe("the laws, over every Feature", { timeout: 60_000 }, () => {
+// Each law runs the transcript for every set of caps, and `inert` and `deactivates`
+// several times over for each, so they take longer than a scenario.
+describe("the laws, over every Feature", () => {
   it("inert: a Feature that is off changes nothing", () => {
     expect(() => {
       inert(subject);

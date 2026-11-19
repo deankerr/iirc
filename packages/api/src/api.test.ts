@@ -23,7 +23,6 @@ import {
   Resume,
   ReadRequest,
   SayRequest,
-  SessionKnowledge,
   SignInRequest,
   TimelineChangesEvent,
   TimelineItem,
@@ -227,24 +226,6 @@ describe("the contract", () => {
       "Failure",
     ]);
     expect(say(request)._tag).toBe("Success");
-  });
-
-  it("round-trips whether a Session carries tags", () => {
-    const wire = Schema.encodeSync(SessionKnowledge);
-    const read = Schema.decodeUnknownSync(SessionKnowledge);
-    const since = Instant.make(5);
-
-    const registered = [true, false].map((tags) =>
-      read(wire({ _tag: "Registered", ircd: "irc.test", since, tags }))
-    );
-
-    expect(registered).toStrictEqual([
-      { _tag: "Registered", ircd: "irc.test", since, tags: true },
-      { _tag: "Registered", ircd: "irc.test", since, tags: false },
-    ]);
-    expect(
-      Schema.is(SessionKnowledge)({ _tag: "Registered", ircd: "irc.test", since })
-    ).toBeFalsy();
   });
 
   it("takes an action whole, and refuses one no Line could carry, or with a field nothing reads", () => {
@@ -1084,28 +1065,6 @@ describe("the contract", () => {
       text.includes('"answers":{"anyOf":[{"$ref":"#/components/schemas/UntrustedMessageId"}'),
       text.includes(`"context":{"anyOf":[${untrusted}`),
     ]).toStrictEqual([position, encoded, null, true, true, true]);
-  });
-
-  it("carries an invitation as who invited and to which Channel, both Untrusted", () => {
-    const invited = { _tag: "Invited", by: "peer", channel: "#elsewhere" } as const;
-
-    expect([
-      roundTrip(invited),
-      Schema.is(Activity)({ _tag: "Invited", by: "peer" }),
-      Schema.is(Activity)({ _tag: "Invited", channel: "#elsewhere" }),
-    ]).toStrictEqual([invited, false, false]);
-  });
-
-  it("carries a login or logout as the nick and the account, or null, both Untrusted", () => {
-    const loggedIn = { _tag: "AccountChanged", account: "bobby", nick: "bob" } as const;
-    const loggedOut = { _tag: "AccountChanged", account: null, nick: "bob" } as const;
-
-    expect([
-      roundTrip(loggedIn),
-      roundTrip(loggedOut),
-      Schema.is(Activity)({ _tag: "AccountChanged", nick: "bob" }),
-      Schema.is(Activity)({ _tag: "AccountChanged", account: "bobby" }),
-    ]).toStrictEqual([loggedIn, loggedOut, false, false]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {

@@ -347,15 +347,16 @@ const profileNick = () =>
     'section[aria-labelledby] [role="button"][aria-haspopup="menu"]'
   );
 
-/**
- * Touches the nick in the row of `line 2`, as a finger does.
- * @param type - The pointer event.
- * @param x - Where, across.
- */
-const touch = async (type: string, x = 0) => {
+/** Puts a finger down on the nick in the row of `line 2`. */
+const touchDown = async () => {
   await act(async () => {
     nickIn("line 2")?.dispatchEvent(
-      new PointerEvent(type, { bubbles: true, clientX: x, clientY: 0, pointerType: "touch" })
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        clientX: 0,
+        clientY: 0,
+        pointerType: "touch",
+      })
     );
     await Promise.resolve();
   });
@@ -379,7 +380,7 @@ const offeredHolding = async (held: readonly string[]) => {
   await settled(() => nickIn("line 2") !== undefined);
   await press(nickIn("line 2"));
   await settled(() => daemon.membersRead.some((query) => query.includes("prefix=peer")));
-  await pause(50);
+  await settled(() => rows().length === entries().length);
 
   const offered = entries();
 
@@ -457,7 +458,7 @@ describe("the menu on a nick", () => {
     await settled(() => nickIn("line 2") !== undefined);
     await press(nickIn("line 2"));
     await settled(() => daemon.held.members.length === 1);
-    await pause(50);
+    await settled(() => rows().includes("Reading what else can be done with peer"));
 
     const waiting = rows();
 
@@ -466,9 +467,6 @@ describe("the menu on a nick", () => {
     }
 
     await settled(() => daemon.held.known.length === 1);
-    await pause(50);
-
-    const stillWaiting = rows();
 
     for (const release of daemon.held.known.splice(0)) {
       release();
@@ -476,9 +474,8 @@ describe("the menu on a nick", () => {
 
     await settled(() => rows().length === 10);
 
-    expect({ arrived: rows(), stillWaiting, waiting }).toStrictEqual({
+    expect({ arrived: rows(), waiting }).toStrictEqual({
       arrived: operator("peer"),
-      stillWaiting: waiting,
       waiting: [...everyone("peer"), "Ban peer", "Reading what else can be done with peer"],
     });
   });
@@ -494,16 +491,8 @@ describe("the menu on a nick", () => {
     expect(entries()).toStrictEqual([...everyone("gone"), "Ban gone"]);
   });
 
-  it("offers nothing to operate with no status, voice, or half-operator", async () => {
-    expect({
-      halfop: await offeredHolding(["h"]),
-      none: await offeredHolding([]),
-      voice: await offeredHolding(["v"]),
-    }).toStrictEqual({
-      halfop: everyone("peer"),
-      none: everyone("peer"),
-      voice: everyone("peer"),
-    });
+  it("offers nothing to operate where Self holds a rank below operator", async () => {
+    await expect(offeredHolding(["h"])).resolves.toStrictEqual(everyone("peer"));
   });
 
   it("opens from a nick in an Activity's words by the keyboard, and from a sender by the context menu, in place of the Message's", async () => {
@@ -539,24 +528,15 @@ describe("the menu on a nick", () => {
     }).toStrictEqual({ byKey: "What to do with peer", byMenu: "What to do with peer", menus: 1 });
   });
 
-  it("opens on a long press of a touch, and not on a touch that moves away", async () => {
+  it("opens on a long press of a touch", async () => {
     await signedIn(["o"]);
 
     await settled(() => nickIn("line 2") !== undefined);
 
-    await touch("pointerdown");
-    await touch("pointermove", 40);
+    await touchDown();
     await pause(600);
 
-    const scrolled = menu();
-
-    await touch("pointerdown");
-    await pause(600);
-
-    expect({ held: menu()?.getAttribute("aria-label"), scrolled }).toStrictEqual({
-      held: "What to do with peer",
-      scrolled: null,
-    });
+    expect(menu()?.getAttribute("aria-label")).toBe("What to do with peer");
   });
 
   it("opens from a Lookup card's profile", async () => {

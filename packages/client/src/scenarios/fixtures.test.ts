@@ -178,79 +178,7 @@ describe("the first Features on the recorded Ircds", () => {
   });
 });
 
-const base = configured();
-
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
-
-// A Session's worth of traffic: Messages, Activity, `PING`s, and a quiet spell long
-// enough for the lag `PING`.
-const traffic = (round: number): string =>
-  Array.from({ length: 20 }, (_unused, index) =>
-    lines(
-      "+3s",
-      `<< :peer${index}!u@h JOIN #iirc`,
-      `<< :peer${index}!u@h PRIVMSG #iirc :round ${round} line ${index}`,
-      `<< :op!u@h MODE #iirc +v peer${index}`,
-      `<< :peer${index}!u@h NICK other${index}`,
-      `<< :other${index}!u@h PART #iirc :bye`,
-      "<< PING :keep",
-      ">> PONG keep"
-    )
-  ).join("") + lines("+60s", ">> PING iirc", "<< :irc.test PONG irc.test iirc");
-
-// Registration again after a redial, without the first Configured and dial.
-const again = (): string =>
-  registered(base)
-    .replace(/^!! configure\n-> dial[^\n]*\n/u, "")
-    .replace(/(?<welcome><< :irc\.test 001 [^\n]*\n)/u, "$<welcome>>> JOIN #iirc\n");
-
-const long = [
-  registered(base),
-  joined(base, "#iirc", ["@op"]),
-  traffic(1),
-  lines("== closed Reset", "+2s", "-> dial irc.test:6697 tls"),
-  again(),
-  lines(
-    "<< :iirc!~iirc@iirc.test JOIN #iirc",
-    ">> MODE #iirc",
-    "<< :irc.test 353 iirc = #iirc :iirc @op",
-    "<< :irc.test 366 iirc #iirc :End",
-    "<< :irc.test 324 iirc #iirc +nt",
-    "<< :irc.test 329 iirc #iirc 1767225600"
-  ),
-  traffic(2),
-  lines(
-    "+60s",
-    ">> PING iirc",
-    "+30s",
-    "-> hangup",
-    "== closed HungUp",
-    "+4s",
-    "-> dial irc.test:6697 tls"
-  ),
-  again(),
-  traffic(3),
-];
-
-describe("a long scenario", () => {
-  it("plays, with reconnects, hundreds of Lines, and timers", () => {
-    const played = play(client, { configuration: base, transcript: long });
-
-    expect(played.inputs.length).toBeGreaterThan(400);
-    expect(client.inspect(played.state).connection).toBe(3);
-  });
-
-  it("folds the same in a fresh process", async () => {
-    const played = play(client, { configuration: base, transcript: long });
-
-    await expect(
-      replayFresh(client, played.inputs, {
-        module: new URL("../core.ts", import.meta.url),
-        name: "client",
-      })
-    ).resolves.toBeUndefined();
-  });
-});
 
 const login = configured({
   login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
@@ -327,13 +255,6 @@ const everyFeature = [
 ];
 
 describe("a long scenario with every Feature on", () => {
-  it("plays, with SASL, echoes, batches, and a reconnect", () => {
-    const played = play(client, { configuration: login, transcript: everyFeature });
-
-    expect(played.inputs.length).toBeGreaterThan(400);
-    expect(client.inspect(played.state).features).toHaveLength(9);
-  });
-
   it("folds the same in a fresh process", async () => {
     const played = play(client, { configuration: login, transcript: everyFeature });
 

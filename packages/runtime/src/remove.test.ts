@@ -3,8 +3,8 @@
  * Runtime and the next, its Credentials are forgotten, and its id is free again unless its
  * Timelines are kept.
  */
-import { client, Instant, IntentId } from "@iirc/client";
-import type { Client, ClientState, NetworkConfiguration } from "@iirc/client";
+import { client, IntentId } from "@iirc/client";
+import type { Client, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
 import {
@@ -22,10 +22,7 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { JournalFailed, NetworkId, Sequence, networkOf } from "./journal.ts";
-import type { Entry, JournalRecord } from "./journal.ts";
-import { foldEntry } from "./replay.ts";
-import type { Folded } from "./replay.ts";
+import { JournalFailed, NetworkId, networkOf } from "./journal.ts";
 import { LifeChanged, TimelinesKept, UnknownNetwork } from "./runtime.ts";
 import type { RuntimeService } from "./runtime.ts";
 import { outline, runTest, settle, startRuntime, wrapJournal } from "./testing/harness.ts";
@@ -441,47 +438,6 @@ describe("a Network whose Client throws on its first Configuration", () => {
       removal: { life: 1, sequence: 2 },
       retaken: "TimelinesKept",
     });
-  });
-});
-
-describe("every fold of the Journal", () => {
-  it("lets go of a removed Configuration once its Credentials were forgotten, the News fold too", async () => {
-    const result = await runTest(() =>
-      Effect.gen(function* () {
-        const networks = new Map<NetworkId, Folded<ClientState>>();
-        const at = Instant.make(0);
-
-        const records: readonly JournalRecord[] = [
-          {
-            _tag: "Input",
-            input: { _tag: "Configured", at, configuration: configured({ password: name("a") }) },
-            network: libera,
-          },
-          { _tag: "Input", input: { _tag: "Removed", at, keep: false }, network: libera },
-          { _tag: "Forgotten", credentials: [name("a")], network: libera },
-          {
-            _tag: "Input",
-            input: { _tag: "Configured", at, configuration: configured({ password: name("b") }) },
-            network: libera,
-          },
-          { _tag: "Input", input: { _tag: "Removed", at, keep: false }, network: libera },
-        ];
-
-        const entries: readonly Entry[] = records.map((record, index) => ({
-          record,
-          sequence: Sequence.make(index + 1),
-        }));
-
-        for (const entry of entries) {
-          yield* foldEntry(client, networks, entry);
-        }
-
-        return networks.get(libera)?.unforgotten.map((each) => each.password);
-      })
-    );
-
-    // Only the life whose Credentials were never forgotten is left.
-    expect(result).toStrictEqual(["b"]);
   });
 });
 

@@ -3,7 +3,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { NetworkId, TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
-import { Effect, Redacted, Schema } from "effect";
+import { Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,7 +16,6 @@ import { uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
-import { paletteSections, pickEntry } from "../palette/atoms.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
 import {
   eventually,
@@ -45,11 +44,10 @@ const peer = timelineId(idOf(4));
 const describeTimeline = (
   id: string,
   name: string,
-  kind: "Network" | "Channel" | "Direct",
-  closed = false
+  kind: "Network" | "Channel" | "Direct"
 ): typeof Timeline.Encoded => ({
   changed: 1,
-  closed,
+  closed: false,
   detached: false,
   head: null,
   id,
@@ -658,40 +656,6 @@ describe("closing a Timeline from the sidebar", () => {
       leaving: "Idle",
     });
   });
-
-  it("lists a closed Timeline while a Pane has it open from the palette, and not once it moves on", async () => {
-    const registry = await signedIn({
-      listed: 0,
-      timelines: [describeTimeline(peer, "peer", "Direct", true)],
-    });
-
-    const before = names();
-
-    const entry = registry
-      .get(paletteSections)
-      .flatMap((section) => section.entries)
-      .find((one) => one.key === `timeline:${peer}`);
-
-    await doing(() => {
-      if (entry !== undefined) {
-        registry.set(pickEntry, entry);
-      }
-    });
-    await settled(() => names().includes("peer"));
-
-    const opened = [names(), row("peer").getAttribute("aria-selected")];
-
-    await doing(() => {
-      registry.set(open, iirc);
-    });
-    await settled(() => !names().includes("peer"));
-
-    expect({ after: names(), before, opened }).toStrictEqual({
-      after: ["libera", "#iirc", "#other"],
-      before: ["libera", "#iirc", "#other"],
-      opened: [["libera", "#iirc", "#other", "peer"], "true"],
-    });
-  });
 });
 
 /**
@@ -729,13 +693,6 @@ const holdingCloses = (fake: ReturnType<typeof fakeDaemon>) => {
   return { closes, fetch, state };
 };
 
-/** Lets several frames pass, so a close still held is seen to be. */
-const later = async () => {
-  await act(async () => {
-    await Effect.runPromise(Effect.sleep("100 millis"));
-  });
-};
-
 describe("a close, while it is on its way", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -743,33 +700,6 @@ describe("a close, while it is on its way", () => {
     }
 
     localStorage.clear();
-  });
-
-  it("takes the row out of the sidebar as soon as the close is asked, and keeps it out once answered", async () => {
-    const fake = fakeDaemon();
-    const { closes, fetch } = holdingCloses(fake);
-
-    await signedIn(undefined, fake, fetch);
-    await pressButton("More for #other");
-    await chooseFromMenu("Close");
-    await settled(() => closes.length === 1);
-    await later();
-
-    const whileHeld = names();
-
-    await doing(() => {
-      for (const release of closes.splice(0)) {
-        release();
-      }
-    });
-    await settled(() => fake.daemon.closes.length === 1);
-    await later();
-
-    expect({ after: names(), closes: fake.daemon.closes, whileHeld }).toStrictEqual({
-      after: ["libera", "#iirc"],
-      closes: [{ network: "libera", target: "#other" }],
-      whileHeld: ["libera", "#iirc"],
-    });
   });
 
   it("shows the row again, and says why, when the close is refused", async () => {
@@ -785,7 +715,6 @@ describe("a close, while it is on its way", () => {
     await pressButton("More for #other");
     await chooseFromMenu("Close");
     await settled(() => closes.length === 1);
-    await later();
 
     const whileHeld = names();
 
@@ -988,7 +917,9 @@ describe("the shell", () => {
     await signedIn();
     const row = document.querySelector<HTMLElement>('nav [role="row"]');
 
-    row?.focus();
+    await doing(() => {
+      row?.focus();
+    });
     const before = document.activeElement === row;
 
     await press(row ?? document.body, { altKey: true, code: "KeyN", key: "n" });

@@ -75,7 +75,7 @@ export const importDraft = Atom.make(closedDraft).pipe(Atom.keepAlive);
 const readLimit = "1 second";
 
 /** Why text that took longer than `readLimit` to read was not imported, in words. */
-export const tooLong =
+const tooLong =
   "This took too long to read, so it was not imported. A terminal theme reads at once.";
 
 /** The last text the reader was given, and what it read it as, none while it reads. */

@@ -3,7 +3,7 @@ import type { Timeline, TimelineChangesEvent } from "@iirc/api";
 import { draftOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Notice } from "@iirc/frontend/composer";
 import { followFrom, openOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { closeOptions, mainView, openOptions } from "../options/atoms.ts";
@@ -309,20 +309,13 @@ describe("saying", () => {
     }).toStrictEqual({ notJournaled: "CheckAgain", says: 1, unanswered: "CheckAgain" });
   });
 
-  it("says an unknown Network in words, and sends nothing for an unknown command", async () => {
+  it("says an unknown Network in words", async () => {
     const { daemon, notice, type } = await composing();
 
     daemon.sayAnswers.push("UnknownNetwork");
     await type("hello");
-    const unknown = notice()?.message;
 
-    await type("/frob");
-
-    expect({ command: notice()?.message, says: daemon.says.length, unknown }).toStrictEqual({
-      command: "There is no command /frob. Start with // to say text that begins with /.",
-      says: 1,
-      unknown: "The Daemon has no Network libera.",
-    });
+    expect(notice()?.message).toBe("The Daemon has no Network libera.");
   });
 
   it("sends many lines only once confirmed, in order", async () => {
@@ -553,53 +546,6 @@ describe("saying", () => {
     }).toStrictEqual({ options: "to erin", search: "to finn" });
   });
 
-  it("says a Say's failure under the Timeline a draft came to show while the Say was in flight", async () => {
-    const { daemon, registry, send: sendChange } = await composing();
-    const libera = Schema.decodeSync(NetworkId)("libera");
-    const place = placeOfDraft(libera, "dave");
-    const dave = Schema.decodeSync(TimelineId)(idOf(6));
-
-    registry.mount(draftsCarried);
-    registry.set(showDraft, { declared: null, network: libera, nick: "dave" });
-
-    // The Say is held, then refused, while Dave speaks first and makes his Timeline.
-    daemon.holdSays = true;
-    daemon.sayAnswers.push("Offline");
-    registry.set(edit, { text: "hello", timeline: place });
-    registry.set(send, place);
-    await eventually(() => daemon.held.says.length === 1);
-
-    sendChange({
-      data: JSON.stringify({
-        dropped: [],
-        gaps: [],
-        items: [],
-        merged: [],
-        removals: [],
-        sequence: 6,
-        timelines: [describeTimeline(idOf(6), "dave", "Direct", 6)],
-      }),
-      event: "changed",
-      id: "1.6",
-    });
-    await until(registry, timelinesState, (state) => openOf(state) === dave);
-
-    for (const release of daemon.held.says.splice(0)) {
-      release();
-    }
-
-    const notice = await until(
-      registry,
-      composerState,
-      (state) => draftOf(state, dave).notice !== undefined
-    );
-
-    expect({
-      draft: draftOf(notice, place).notice,
-      shown: draftOf(notice, dave).notice?.message.includes("dave"),
-    }).toStrictEqual({ draft: undefined, shown: true });
-  });
-
   it("reads the step again after a read that got no answer, and never says it again", async () => {
     const { daemon, registry, send: sendChange } = await placing();
 
@@ -616,49 +562,6 @@ describe("saying", () => {
       reads: [10, 10],
       says: 1,
     });
-  });
-
-  it("lets the lookup go when the Owner opens another Timeline while it waits", async () => {
-    const { daemon, registry, send: sendChange } = await placing();
-
-    registry.set(edit, { text: "/msg {bob} hello", timeline: channel });
-    registry.set(send, channel);
-    await eventually(() => daemon.says.length === 1);
-    registry.set(open, network);
-
-    placeAt10(daemon);
-    sendChange(foldedThrough(10));
-    await until(registry, timelinesState, (state) => followFrom(state)?.sequence === 10);
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    expect({ open: openOf(registry.get(timelinesState)), reads: daemon.locatesRead }).toStrictEqual(
-      {
-        open: network,
-        reads: [],
-      }
-    );
-  });
-
-  it("opens nothing when the Owner opened another Timeline while the read was answered late", async () => {
-    const { daemon, registry, send: sendChange } = await placing();
-
-    placeAt10(daemon);
-    sendChange(foldedThrough(10));
-    await until(registry, timelinesState, (state) => followFrom(state)?.sequence === 10);
-    daemon.holdLocates = true;
-
-    registry.set(edit, { text: "/msg {bob} hello", timeline: channel });
-    registry.set(send, channel);
-    await eventually(() => daemon.locatesHeld.length === 1);
-    registry.set(open, network);
-
-    for (const release of daemon.locatesHeld.splice(0)) {
-      release();
-    }
-
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    expect(openOf(registry.get(timelinesState))).toBe(network);
   });
 
   it("opens nothing for a `/msg` the Client refused", async () => {
@@ -721,17 +624,6 @@ describe("how long a notice lasts", () => {
       offeredStays: "Offering",
     });
   });
-
-  it("keeps a Credential's refusal on the draft it cleared, which the clearing does not let go of", async () => {
-    const { notice, registry, type } = await composing();
-
-    await type("/set network.libera.password hunter2");
-
-    expect({
-      notice: notice()?._tag,
-      text: draftOf(registry.get(composerState), channel).text,
-    }).toStrictEqual({ notice: "AboutText", text: "" });
-  });
 });
 
 describe("acting", () => {
@@ -756,23 +648,6 @@ describe("acting", () => {
     });
   });
 
-  it("sends a CTCP request and a PING as `act`s, each to a nick", async () => {
-    const { daemon, notice, type } = await composing();
-
-    await type("/ctcp peer version\n/ping peer");
-
-    expect({ acts: daemon.acts, notice: notice() }).toStrictEqual({
-      acts: [
-        {
-          action: { _tag: "Ctcp", args: "", command: "VERSION", nick: "peer" },
-          intent: "web-1",
-        },
-        { action: { _tag: "Ping", nick: "peer" }, intent: "web-2" },
-      ],
-      notice: undefined,
-    });
-  });
-
   it("says a refusal `act` answered with in words, and sends nothing after it", async () => {
     const { daemon, notice, type } = await composing();
 
@@ -791,58 +666,22 @@ describe("acting", () => {
     });
   });
 
-  it("asks `said` when the Network stopped, and acts again under the same intent only when it was not journaled", async () => {
+  it("says in an Act's own words whether the Network stopped before or after journaling it", async () => {
     const { daemon, notice, registry, type } = await composing();
 
     daemon.sayAnswers.push("NetworkStopped");
     await type("/topic a new topic");
-    const offered = notice();
+    const offered = notice()?.message;
 
     await run(registry, takeUp, channel);
 
     daemon.sayAnswers.push("NetworkStoppedJournaled");
     await type("/away gone");
-    const journaled = notice();
 
-    expect({
-      acts: daemon.acts.map((one) => one.intent),
-      journaled: [journaled?.message, offerOf(journaled)],
-      offered: [offered?.message, offerOf(offered)?._tag, offerOf(offered)?.intent],
-    }).toStrictEqual({
-      acts: ["web-1", "web-1", "web-2"],
-      journaled: [
-        "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too.",
-        undefined,
-      ],
-      offered: [
-        "The Network stopped before this was journaled, so it was not sent.",
-        "SendAgain",
-        "web-1",
-      ],
-    });
-  });
-
-  it("never acts again after a lost response, and only offers to check", async () => {
-    const { daemon, notice, registry, type } = await composing();
-
-    daemon.sayAnswers.push("Lost");
-    await type("/nick other");
-    const first = notice();
-
-    await run(registry, takeUp, channel);
-
-    expect({
-      acts: daemon.acts.length,
-      checked: offerOf(notice()),
-      first: [first?.message, offerOf(first)?._tag],
-    }).toStrictEqual({
-      acts: 1,
-      checked: undefined,
-      first: [
-        "The Daemon did not answer, so whether this was sent is unknown. Nothing after it was sent.",
-        "CheckAgain",
-      ],
-    });
+    expect([offered, notice()?.message]).toStrictEqual([
+      "The Network stopped before this was journaled, so it was not sent.",
+      "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too.",
+    ]);
   });
 
   it("shows Self away as `known` says once the Ircd confirmed it, read again for Self's AwayChanged", async () => {

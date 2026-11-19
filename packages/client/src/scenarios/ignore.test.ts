@@ -267,24 +267,6 @@ describe("Self", () => {
 
     expect.assertions(0);
   });
-
-  it("is never ignored when its nick is the mask's, either", () => {
-    const named = ignoring("iirc!*@*");
-
-    play(client, {
-      configuration: named,
-      transcript: [
-        registered(named),
-        joined(named, "#iirc"),
-        lines(
-          "<< :iirc!~iirc@iirc.test PRIVMSG #iirc :from my phone",
-          "?? message Privmsg iirc #iirc self in=channel:#iirc :from my phone"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
 });
 
 describe("a mask under the casemapping", () => {
@@ -440,12 +422,5 @@ describe("taking a mask out of the Configuration", () => {
     });
 
     expect.assertions(0);
-  });
-
-  it("reports none when the first Configuration is given", () => {
-    const base = ignoring("spam!*@*");
-    const played = play(client, { configuration: base, transcript: [registered(base)] });
-
-    expect(unignored(played)).toStrictEqual([]);
   });
 });

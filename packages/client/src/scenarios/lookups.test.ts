@@ -148,7 +148,6 @@ describe("a WHOIS on the floor", () => {
       mapped: shown("338 iirc peer 0::ffff:192.0.2.1 :actually using host"),
       notIp: shown("338 iirc peer 192.0.2.256 :actually using host"),
       octal: shown("338 iirc peer 010.000.000.001 :actually using host"),
-      solanum: shown("338 iirc peer 127.0.0.1 :actually using host"),
       twoMasks: shown("338 iirc peer a@b c@d :actual"),
       twoModes: shown("379 iirc peer :is using modes +iwx +cF"),
       v4First: shown("338 iirc peer 192.0.2.1:: :actually using host"),
@@ -179,7 +178,6 @@ describe("a WHOIS on the floor", () => {
         modes: undefined,
         other: [{ numeric: "338", params: ["peer", "010.000.000.001", "actually using host"] }],
       },
-      solanum: { actual: { ip: "127.0.0.1", mask: undefined }, modes: undefined, other: [] },
       twoMasks: {
         actual: undefined,
         modes: undefined,

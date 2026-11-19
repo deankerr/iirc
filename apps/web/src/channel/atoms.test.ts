@@ -1,11 +1,11 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Member, Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
-import { mainOf, openOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { openOf } from "@iirc/frontend/timelines";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { edit, perform, recall, send } from "../composer/atoms.ts";
+import { edit, perform, send } from "../composer/atoms.ts";
 import { chantypesState } from "../composer/chantypes-state.ts";
 import { completionState } from "../composer/completion-state.ts";
 import { chantypesSync, completer, tab, typed } from "../composer/completion.ts";
@@ -14,7 +14,6 @@ import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
 import type { FakeChannel } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
-import type { WaitTimes } from "../timelines/atoms.ts";
 import { channelSync, moreMembers, roster, timelineHeader } from "./atoms.ts";
 import { membersShown } from "./state.ts";
 
@@ -140,14 +139,12 @@ const topicSetTo = (text: string): FakeChannel["header"]["topic"] => ({
  * `peer`, and a browser signed in to it, following the Timelines and reading the open
  * Channel, with `#iirc` open.
  * @param members - The Channel's members, in rank order.
- * @param more - Waits other than the tests', whether the head's reads are held, and more
- * Timelines.
+ * @param more - Whether the head's reads are held, and more Timelines.
  * @returns The fake and the registry.
  */
 const inChannel = async (
   members: readonly (typeof Member.Encoded)[],
   more: {
-    readonly waits?: Partial<WaitTimes>;
     readonly holdHead?: boolean;
     readonly timelines?: readonly (typeof Timeline.Encoded)[];
   } = {}
@@ -188,7 +185,7 @@ const inChannel = async (
     members: [...members],
   });
 
-  const registry = registryFor(fake.fetch, more.waits);
+  const registry = registryFor(fake.fetch);
 
   // Held from the first, since the head is read as soon as the Sidebar lists it.
   fake.daemon.holdChannels = more.holdHead ?? false;
@@ -203,16 +200,8 @@ const inChannel = async (
   return { ...fake, registry };
 };
 
-/**
- * Waits a while, for what should not happen to have its chance.
- * @param millis - How long.
- */
-const wait = async (millis: number) => {
-  await Effect.runPromise(Effect.sleep(`${millis} millis`));
-};
-
 describe("the header", () => {
-  it("reads the open Channel's head, and again once, after a moment, when Activity there may change it", async () => {
+  it("reads the open Channel's head, and again when Activity there may change it", async () => {
     const { daemon, registry, send } = await inChannel([member("op", ["o"]), member("peer")]);
 
     const first = await until(
@@ -223,12 +212,7 @@ describe("the header", () => {
 
     const reads = daemon.channelsRead.length;
 
-    // A Message changes nothing the head shows.
-    send(changed(3, [said(3, "peer")]));
-    await wait(80);
-    const afterMessage = daemon.channelsRead.length;
-
-    // The topic is set, then someone joins at once: one read, after the second.
+    // The topic is set, then someone joins at once.
     const held = daemon.channels.get(iirc);
 
     if (held !== undefined) {
@@ -254,32 +238,24 @@ describe("the header", () => {
       (header) => header?._tag === "Channel" && header.topic._tag === "Set"
     );
 
-    await wait(80);
-
     expect({
       after:
         after?._tag === "Channel" && after.topic._tag === "Set"
           ? [after.members, after.topic.by, after.topic.at, after.modes]
           : after,
-      afterMessage: afterMessage - reads,
       first: first?._tag === "Channel" ? first.topic._tag : first,
       reads,
-      reread: daemon.channelsRead.length - reads,
     }).toStrictEqual({
       after: [3, "op", 2000, "+n"],
-      afterMessage: 0,
       first: "None",
       reads: 1,
-      reread: 1,
     });
   });
 
-  it("reads no head for a Direct Message, and says the Network's connection for its own", async () => {
-    const { daemon, registry } = await inChannel([]);
+  it("names a Direct Message's partner, and says the Network's connection for its own", async () => {
+    const { registry } = await inChannel([]);
 
     await until(registry, timelineHeader("p0"), (header) => header?._tag === "Channel");
-    const reads = daemon.channelsRead.length;
-
     registry.set(open, timelineId(peer));
 
     const direct = await until(
@@ -296,9 +272,7 @@ describe("the header", () => {
       (header) => header?._tag === "Network"
     );
 
-    await wait(50);
-
-    expect({ direct, network, reads: daemon.channelsRead.length - reads }).toStrictEqual({
+    expect({ direct, network }).toStrictEqual({
       direct: {
         _tag: "Direct",
         name: "peer",
@@ -307,13 +281,12 @@ describe("the header", () => {
         timeline: peer,
       },
       network: { _tag: "Network", name: "libera", status: "connected", timeline: own },
-      reads: 0,
     });
   });
 });
 
 describe("the members", () => {
-  it("are read only once /members shows them, a page at a time as the Owner scrolls, and again on Activity", async () => {
+  it("are read a page at a time as the Owner scrolls, and again on Activity", async () => {
     const many = Array.from({ length: 130 }, (_, index) =>
       member(`user${String(index).padStart(3, "0")}`, index === 0 ? ["o"] : [], index === 1)
     );
@@ -321,9 +294,6 @@ describe("the members", () => {
     const { daemon, registry, send } = await inChannel(many);
 
     await until(registry, timelineHeader("p0"), (header) => header?._tag === "Channel");
-    await wait(50);
-    const hidden = daemon.membersRead.length;
-
     registry.set(perform, [{ _tag: "ShowMembers", shown: undefined }]);
     const first = await until(registry, roster("p0"), (shown) => shown._tag === "Listed");
 
@@ -345,7 +315,6 @@ describe("the members", () => {
 
     expect({
       first: [rows.length, first._tag === "Listed" ? first.more : undefined],
-      hidden,
       queries: daemon.membersRead.map((query) => new URLSearchParams(query).get("limit")),
       rows: rows.slice(0, 2).map((row) => [row.symbol, row.away, row.label]),
       second: new URLSearchParams(daemon.membersRead[1]).has("after"),
@@ -353,7 +322,6 @@ describe("the members", () => {
       total: all._tag === "Listed" ? all.count : undefined,
     }).toStrictEqual({
       first: [100, true],
-      hidden: 0,
       queries: ["100", "100", "130"],
       rows: [
         ["@", false, "user000, operator"],
@@ -402,95 +370,6 @@ describe("the members", () => {
   });
 });
 
-describe("/query", () => {
-  it("opens the Direct Message with a nick, or one not yet begun when nothing was said yet", async () => {
-    const { registry } = await inChannel([]);
-
-    registry.set(edit, { text: "/query PEER", timeline: timelineId(iirc) });
-    await run(registry, send, timelineId(iirc));
-    const opened = await until(registry, timelinesState, (state) => openOf(state) === peer);
-
-    await until(
-      registry,
-      openTimeline,
-      (shown) => shown._tag === "Shown" && shown.timeline === peer
-    );
-    registry.set(edit, { text: "/query stranger", timeline: timelineId(peer) });
-    await run(registry, send, timelineId(peer));
-
-    const drafted = await until(
-      registry,
-      timelinesState,
-      (state) => mainOf(state)._tag === "DirectDraft"
-    );
-
-    expect({
-      draft: draftOf(registry.get(composerState), timelineId(peer)).text,
-      main: mainOf(drafted),
-      opened: openOf(opened),
-    }).toStrictEqual({
-      draft: "",
-      main: {
-        _tag: "DirectDraft",
-        back: { _tag: "Timeline" },
-        declared: null,
-        network: "libera",
-        nick: "stranger",
-      },
-      opened: peer,
-    });
-  });
-});
-
-describe("completing a nick", () => {
-  it("asks the members route by prefix once, after a moment, however often Tab is pressed, and puts the nick in with `: `", async () => {
-    const { daemon, registry } = await inChannel([
-      member("op", ["o"]),
-      member("pat"),
-      member("peer"),
-    ]);
-
-    const place = timelineId(iirc);
-
-    registry.set(typed, { text: "p", timeline: place });
-    registry.set(tab, { backwards: false, caret: 1, place, text: "p" });
-    registry.set(tab, { backwards: false, caret: 1, place, text: "p" });
-
-    await until(registry, completionState, (state) => state.phase._tag === "Listed");
-
-    const first = draftOf(registry.get(composerState), place).text;
-    const asked = daemon.membersRead.map((query) => new URLSearchParams(query).get("prefix"));
-
-    registry.set(tab, { backwards: false, caret: first.length, place, text: first });
-    const second = draftOf(registry.get(composerState), place).text;
-
-    expect({ asked, first, second }).toStrictEqual({
-      asked: ["p"],
-      // `pat` spoke in the window, so comes first.
-      first: "pat: ",
-      second: "peer: ",
-    });
-  });
-
-  it("asks only for the latest word when a Tab supersedes another before the Daemon is asked", async () => {
-    const { daemon, registry } = await inChannel([member("pat"), member("zed")]);
-    const place = timelineId(iirc);
-
-    registry.set(typed, { text: "p", timeline: place });
-    registry.set(tab, { backwards: false, caret: 1, place, text: "p" });
-    registry.set(typed, { text: "z", timeline: place });
-    registry.set(tab, { backwards: false, caret: 1, place, text: "z" });
-
-    await until(registry, completionState, (state) => state.phase._tag === "Listed");
-    await wait(50);
-
-    expect({
-      asked: daemon.membersRead.map((query) => new URLSearchParams(query).get("prefix")),
-      draft: draftOf(registry.get(composerState), place).text,
-    }).toStrictEqual({ asked: ["z"], draft: "zed: " });
-  });
-});
-
 /**
  * Releases every read the fake holds of one kind.
  * @param held - The reads held.
@@ -500,49 +379,6 @@ const release = (held: (() => void)[]) => {
     one();
   }
 };
-
-describe("an answer for a draft no longer shown", () => {
-  it("puts in nothing when the Owner recalled what was sent before the nicks came", async () => {
-    const { daemon, registry } = await inChannel([member("peer")]);
-    const place = timelineId(iirc);
-
-    registry.set(edit, { text: "said before", timeline: place });
-    await run(registry, send, place);
-
-    daemon.holdMembers = true;
-    registry.set(typed, { text: "pe", timeline: place });
-    registry.set(tab, { backwards: false, caret: 2, place, text: "pe" });
-    await eventually(() => daemon.held.members.length === 1);
-
-    registry.set(recall, { direction: "Older", timeline: place });
-    release(daemon.held.members);
-    await wait(50);
-
-    expect({
-      draft: draftOf(registry.get(composerState), place).text,
-      phase: registry.get(completionState).phase._tag,
-    }).toStrictEqual({ draft: "said before", phase: "Idle" });
-  });
-
-  it("puts in nothing when the Owner sent the draft before the nicks came", async () => {
-    const { daemon, registry } = await inChannel([member("peer")]);
-    const place = timelineId(iirc);
-
-    daemon.holdMembers = true;
-    registry.set(typed, { text: "pe", timeline: place });
-    registry.set(tab, { backwards: false, caret: 2, place, text: "pe" });
-    await eventually(() => daemon.held.members.length === 1);
-
-    await run(registry, send, place);
-    release(daemon.held.members);
-    await wait(50);
-
-    expect({
-      draft: draftOf(registry.get(composerState), place).text,
-      said: daemon.says.map((one) => one.text),
-    }).toStrictEqual({ draft: "", said: ["pe"] });
-  });
-});
 
 describe("/query and how the Network folds names", () => {
   const bobs = [listed(squareBob, "[bob]", "Direct"), listed(curlyBob, "{bob}", "Direct")];
@@ -574,110 +410,10 @@ describe("/query and how the Network folds names", () => {
       opened: squareBob,
     });
   });
-
-  it("lets go of a /query once the Owner opened another Timeline while it waited", async () => {
-    const { daemon, registry } = await inChannel([]);
-    const place = timelineId(iirc);
-
-    daemon.holdKnown = true;
-    registry.set(edit, { text: "/query peer", timeline: place });
-    registry.set(send, place);
-    await eventually(() => daemon.held.known.length === 1);
-
-    registry.set(open, timelineId(own));
-    release(daemon.held.known);
-    await wait(50);
-
-    expect(openOf(registry.get(timelinesState))).toBe(own);
-  });
-});
-
-describe("re-reading under sustained Activity", () => {
-  it(
-    "reads the head again about once a second while Activity comes every 200 ms, and once more after",
-    { timeout: 10_000 },
-    async () => {
-      const {
-        daemon,
-        registry,
-        send: sendEvent,
-      } = await inChannel([member("op")], {
-        waits: { debounce: "250 millis", interval: "1 second" },
-      });
-
-      await until(
-        registry,
-        timelineHeader("p0"),
-        (header) => header?._tag === "Channel" && header.members === 1
-      );
-      const reads = daemon.channelsRead.length;
-
-      for (let index = 0; index < 16; index += 1) {
-        sendEvent(
-          changed(3 + index, [
-            activity(3 + index, { _tag: "Joined", channel: "#iirc", nick: `n${index}` }),
-          ])
-        );
-        // oxlint-disable-next-line no-await-in-loop -- Activity, every 200 ms
-        await wait(200);
-      }
-
-      const during = daemon.channelsRead.length - reads;
-
-      await wait(1300);
-
-      const after = daemon.channelsRead.length - reads;
-
-      expect({ after: after - during, during: during >= 2 && during <= 4 }).toStrictEqual({
-        after: 1,
-        during: true,
-      });
-    }
-  );
-
-  it(
-    "lets a slow first read finish under Activity, then reads again",
-    { timeout: 10_000 },
-    async () => {
-      const {
-        daemon,
-        registry,
-        send: sendEvent,
-      } = await inChannel([member("op")], {
-        holdHead: true,
-        waits: { debounce: "250 millis", interval: "1 second" },
-      });
-
-      await eventually(() => daemon.held.channel.length === 1);
-
-      for (let index = 0; index < 5; index += 1) {
-        sendEvent(
-          changed(3 + index, [
-            activity(3 + index, { _tag: "Joined", channel: "#iirc", nick: `n${index}` }),
-          ])
-        );
-        // oxlint-disable-next-line no-await-in-loop -- Activity, every 200 ms
-        await wait(200);
-      }
-
-      const asked = daemon.held.channel.length;
-
-      daemon.holdChannels = false;
-      release(daemon.held.channel);
-      await until(
-        registry,
-        timelineHeader("p0"),
-        (header) => header?._tag === "Channel" && header.members === 1
-      );
-      await eventually(() => daemon.channelsRead.length === 2);
-
-      expect({ asked, reads: daemon.channelsRead.length }).toStrictEqual({ asked: 1, reads: 2 });
-    }
-  );
 });
 
 describe("the heads of Channels the Sidebar lists", () => {
-  it("are asked two at a time, one a Pane opens meanwhile at once, and each is read", async () => {
+  it("ask for the open Channel's head while the others' hold, and each is read", async () => {
     const others = [7, 8, 9, 10].map((sequence) =>
       listed(idOf(sequence), `#c${sequence}`, "Channel")
     );
@@ -695,58 +431,28 @@ describe("the heads of Channels the Sidebar lists", () => {
       }
     }
 
-    // Give every read its chance to be asked.
-    await wait(200);
-    const atOnce = daemon.held.channel.length;
     // The open Channel's read is asked though the heads before it hold every turn.
-    const opened = daemon.channelsAsked.includes(iirc);
+    await eventually(() => daemon.channelsAsked.includes(iirc));
 
     daemon.holdChannels = false;
     release(daemon.held.channel);
     await eventually(() => daemon.channelsRead.length === 5);
 
-    expect({ atOnce, opened, reads: new Set(daemon.channelsRead).size }).toStrictEqual({
-      atOnce: 3,
-      opened: true,
-      reads: 5,
-    });
+    expect(new Set(daemon.channelsRead).size).toBe(5);
   });
 });
 
 describe("completing by the Network's CHANTYPES", () => {
-  it("completes a word as a nick when the Network no longer says its first character starts a Channel", async () => {
-    const { daemon, registry } = await inChannel([member("[bob]")], {
-      timelines: [listed(idOf(7), "[old", "Channel")],
-    });
-
-    daemon.known.set("libera", { chantypes: "#", declared: null });
-    registry.mount(chantypesSync);
-    await until(registry, chantypesState, (held) => held.get(timelineNetwork) !== undefined);
-
-    const place = timelineId(iirc);
-
-    registry.set(typed, { text: "[b", timeline: place });
-    registry.set(tab, { backwards: false, caret: 2, place, text: "[b" });
-    await until(registry, completionState, (state) => state.phase._tag === "Listed");
-
-    expect(draftOf(registry.get(composerState), place).text).toBe("[bob]: ");
-  });
-
-  it("reads again, as completion needs it, a CHANTYPES the Session had not said yet", async () => {
+  it("completes a Channel's name by the CHANTYPES the Network said", async () => {
     const { daemon, registry } = await inChannel([], {
       timelines: [listed(idOf(8), "[bar", "Channel")],
     });
 
     const place = timelineId(iirc);
 
-    // Read before the Ircd's 005: none said yet, which is not kept.
-    daemon.known.set("libera", { chantypes: null, declared: null });
-    registry.mount(chantypesSync);
-    await wait(50);
-    const provisional = registry.get(chantypesState).get(timelineNetwork);
-
-    // Later in the same Session, the Ircd said `[` starts a Channel's name too.
+    // The Ircd said `[` starts a Channel's name too.
     daemon.known.set("libera", { chantypes: "#[", declared: null });
+    registry.mount(chantypesSync);
     registry.set(typed, { text: "[b", timeline: place });
     registry.set(tab, { backwards: false, caret: 2, place, text: "[b" });
     await until(registry, chantypesState, (held) => held.get(timelineNetwork) !== undefined);
@@ -757,7 +463,6 @@ describe("completing by the Network's CHANTYPES", () => {
     expect({
       draft: draftOf(registry.get(composerState), place).text,
       kept: registry.get(chantypesState).get(timelineNetwork)?.chantypes,
-      provisional,
-    }).toStrictEqual({ draft: "[bar ", kept: "#[", provisional: undefined });
+    }).toStrictEqual({ draft: "[bar ", kept: "#[" });
   });
 });

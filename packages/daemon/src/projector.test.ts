@@ -210,38 +210,6 @@ const foldedAfresh = (through: number) =>
   });
 
 describe("the projector", () => {
-  it("folds a Message into the Channel's Timeline as it arrives", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const world = yield* makeWorld();
-        const store = yield* makeMemoryTimelineStore;
-
-        return yield* Effect.gen(function* () {
-          const call = yield* joinFloor(world);
-
-          yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
-          yield* eventually(holds(store, "#iirc", "hi there"));
-
-          const timelines = yield* store.timelines(libera);
-
-          return {
-            channel: yield* textsIn(store, "#iirc"),
-            folded: yield* store.folded,
-            last: yield* lastSequence(world),
-            status: yield* Projector.use((projector) => projector.status),
-            timelines: timelines.map(({ kind, name }) => `${kind} ${name}`),
-          };
-        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
-      })
-    );
-
-    expect(result.timelines).toStrictEqual(["Network libera", "Channel #iirc"]);
-    expect(result.channel).toStrictEqual(["Activity", "hi there"]);
-    expect(result.folded.version).toBe(projectionVersion);
-    expect(result.folded.through).toBe(result.last);
-    expect(result.status).toStrictEqual({ _tag: "Running" });
-  });
-
   it("resumes after the last step it folded when the Daemon restarts, folding nothing twice", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -340,10 +308,7 @@ describe("the projector", () => {
     expect(result).toStrictEqual({ after: true, before: true, channel: false });
   });
 
-  it.each([
-    ["an older", projectionVersion - 1],
-    ["a newer", projectionVersion + 1],
-  ])("folds again from the start a store built by %s projection version", async (_, left) => {
+  it("folds again from the start a store built by another projection version", async () => {
     const result = await run(
       Effect.gen(function* () {
         const world = yield* makeWorld();
@@ -358,7 +323,7 @@ describe("the projector", () => {
 
         // As another version left it: something no fold of this Journal makes, and
         // further on than the Journal goes.
-        yield* store.reset(left);
+        yield* store.reset(projectionVersion - 1);
         yield* store.apply({
           changes: [
             {

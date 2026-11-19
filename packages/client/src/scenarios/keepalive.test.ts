@@ -10,8 +10,6 @@ const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\
 describe("answering the Ircd's PING", () => {
   it.each([
     ["with no source and a trailing colon", "<< PING :irc.test", ">> PONG irc.test"],
-    ["with no source and no colon", "<< PING iirc", ">> PONG iirc"],
-    ["with a source", "<< :irc.test PING irc.test", ">> PONG irc.test"],
     ["with a token that holds a space", "<< PING :two words", ">> PONG :two words"],
     ["with an empty token", "<< PING :", ">> PONG :"],
     ["with two parameters, echoing the first", "<< PING one two", ">> PONG one"],

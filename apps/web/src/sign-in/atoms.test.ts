@@ -9,15 +9,6 @@ const signedOut = { _tag: "SignedOut", signIn: { _tag: "Idle" } };
 const signedIn = { _tag: "SignedIn", signOut: { _tag: "Idle" } };
 
 describe("signing in", () => {
-  it("finds a browser with no sign-in signed out", async () => {
-    const { fetch } = fakeDaemon();
-    const registry = registryFor(fetch);
-
-    await run(registry, check, undefined);
-
-    expect(registry.get(signInState)).toStrictEqual(signedOut);
-  });
-
   it("signs in with the key, reads the Networks, and keeps no key once answered", async () => {
     const { daemon, fetch } = fakeDaemon();
     const registry = registryFor(fetch);

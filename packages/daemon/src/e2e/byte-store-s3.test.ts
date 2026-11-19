@@ -15,8 +15,8 @@ import { freePort, loopback } from "../testing/children.ts";
 import { startMinio } from "../testing/minio.ts";
 import type { Minio } from "../testing/minio.ts";
 
-// A law carries its own ten-second guard against a hang (`holds`), so Vitest waits longer.
-vi.setConfig({ testTimeout: 20_000 });
+// A law carries its own thirty-second guard against a hang (`holds`), so Vitest waits longer.
+vi.setConfig({ testTimeout: 60_000 });
 
 let minio: Minio;
 

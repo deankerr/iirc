@@ -40,11 +40,12 @@ import type {
   UploadsStatus,
 } from "@iirc/api";
 import { importTheme } from "@iirc/frontend/theme-import";
-import { Effect, Layer, Redacted, Result, Schema } from "effect";
+import { Clock, Effect, Layer, Redacted, Result, Schema, Scope } from "effect";
 import { Base64Url } from "effect/encoding";
 import { FetchHttpClient } from "effect/http";
 import { AtomRegistry } from "effect/reactivity";
 import type { Atom } from "effect/reactivity";
+import { TestClock } from "effect/testing";
 
 import { layerDaemonClient } from "../app/daemon-client.ts";
 import { IntentNames } from "../app/intent-names.ts";
@@ -2279,6 +2280,7 @@ export const fakeDaemon = () => {
  * @param notifier - The notifications' host, a test's, which shows none by default.
  * @param reader - The reader of themes, which reads at once, in the page, by default.
  * @param uploader - The sender of files, which hands each to `fetch` at once by default.
+ * @param clock - The runtime's clock, which is the world's unless a test holds one.
  * @returns The registry.
  */
 export const registryFor = (
@@ -2286,7 +2288,8 @@ export const registryFor = (
   waits: Partial<WaitTimes> = {},
   notifier: NotifierPort = testNotifier().port,
   reader: ThemeReaderPort = instantThemeReader,
-  uploader: UploaderPort = testUploader(fetch).port
+  uploader: UploaderPort = testUploader(fetch).port,
+  clock?: Clock.Clock
 ) => {
   let named = 0;
 
@@ -2317,6 +2320,7 @@ export const registryFor = (
           Layer.succeed(Notifier, notifier),
           Layer.succeed(ThemeReader, reader),
           Layer.succeed(Uploader, uploader),
+          clock === undefined ? Layer.empty : Layer.succeed(Clock.Clock, clock),
           // Intents named in order, web-1, web-2, and on, so a test can name them.
           Layer.succeed(IntentNames, () => {
             named += 1;
@@ -2328,6 +2332,17 @@ export const registryFor = (
     ],
   });
 };
+
+/**
+ * A clock that stands still, for a registry's runtime, so that no wait in it ends until the
+ * test says time has passed.
+ * @returns The clock, at its start.
+ */
+export const heldClock = () =>
+  Effect.runSync(
+    // It would print that time stands still, a moment after the first wait.
+    TestClock.make({ warningDelay: "1 hour" }).pipe(Scope.provide(Scope.makeUnsafe()))
+  );
 
 /**
  * Sets a command and waits until it has finished.
@@ -2403,12 +2418,16 @@ export const holds = (from: object, secret: string): boolean => {
   return false;
 };
 
+// How long a wait lasts before it is a failure, in milliseconds. It is for a hang, never for
+// a slow machine: two runs at once make a test several times slower, and that is no failure.
+const waitLimit = 20_000;
+
 /**
  * Waits until an atom's value holds, reading it each time it changes.
  * @param registry - The registry.
  * @param atom - The atom.
  * @param holds - What must hold.
- * @returns The value that held, or a rejection after two seconds.
+ * @returns The value that held, or a rejection after twenty seconds.
  */
 export const until = async <A>(
   registry: AtomRegistry.AtomRegistry,
@@ -2427,7 +2446,7 @@ export const until = async <A>(
 
   const timer = setTimeout(() => {
     reject(new Error("the atom never held"));
-  }, 2000);
+  }, waitLimit);
 
   try {
     return await promise;
@@ -2440,10 +2459,10 @@ export const until = async <A>(
 /**
  * Waits until something the fake holds is so, looking every few milliseconds.
  * @param holds - What must hold.
- * @returns Once it does, or a rejection after two seconds.
+ * @returns Once it does, or a rejection after twenty seconds.
  */
 export const eventually = async (holds: () => boolean): Promise<void> => {
-  for (let waited = 0; waited < 2000; waited += 5) {
+  for (let waited = 0; waited < waitLimit; waited += 5) {
     if (holds()) {
       return;
     }
@@ -2453,4 +2472,22 @@ export const eventually = async (holds: () => boolean): Promise<void> => {
   }
 
   throw new Error("it never held");
+};
+
+/**
+ * Moves a held clock on, a second at each look, until something the fake holds is so.
+ * @param clock - The clock.
+ * @param holds - What must hold.
+ * @returns Once it does, or a rejection after twenty seconds.
+ */
+export const passing = async (clock: TestClock.TestClock, holds: () => boolean): Promise<void> => {
+  await eventually(() => {
+    if (holds()) {
+      return true;
+    }
+
+    Effect.runFork(clock.adjust("1 second"));
+
+    return false;
+  });
 };

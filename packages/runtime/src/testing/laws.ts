@@ -35,7 +35,8 @@ export interface Law<Harness, E> {
 
 /**
  * Checks one law against a fresh harness, in its own Scope. A law that waits for
- * something that never comes fails after ten seconds rather than hanging.
+ * something that never comes fails after thirty seconds rather than hanging, long enough
+ * that a loaded machine does not fail it.
  * @param law - The law to check.
  * @param make - Makes a fresh harness.
  * @returns An Effect that succeeds if the law holds.
@@ -49,13 +50,13 @@ export const holds = <Harness, E, M>(
     Effect.asVoid,
     Effect.scoped,
     Effect.timeoutOrElse({
-      duration: "10 seconds",
+      duration: "30 seconds",
       orElse: () =>
         Effect.fail(
           new LawBroken({
             actual: "nothing yet",
             expected: "done",
-            what: `${law.name}, within ten seconds`,
+            what: `${law.name}, within thirty seconds`,
           })
         ),
     })

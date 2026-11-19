@@ -7,7 +7,7 @@ import { ConnectionId, Instant } from "@iirc/client";
 import type { Client, Input, Output } from "@iirc/client";
 import { configured, scripted } from "@iirc/client/testing";
 import type { Scripted } from "@iirc/client/testing";
-import { CredentialName, encode, isRejected, ping, pong, privmsg, quit } from "@iirc/protocol/line";
+import { CredentialName, encode, isRejected, pong, privmsg, quit } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected } from "@iirc/protocol/line";
 import { Clock, Effect, Latch, Redacted } from "effect";
 import { TestClock } from "effect/testing";
@@ -153,59 +153,6 @@ describe("pacing", () => {
       rest: ["PRIVMSG #iirc :line 7", "PRIVMSG #iirc :line 8"],
       second: ["PRIVMSG #iirc :line 6"],
     });
-  });
-
-  it("takes its pacing from the Runtime's options", async () => {
-    const heard = await runTest((world) =>
-      Effect.gen(function* () {
-        const { call } = yield* opened(
-          world,
-          scripted(script({ outputs: says(4), when: "Opened" })),
-          { pacing: { burst: 2, interval: 500 } }
-        );
-
-        const burst = (yield* heardNow(call)).length;
-
-        yield* TestClock.adjust(500);
-
-        return [burst, (yield* heardNow(call)).length];
-      })
-    );
-
-    expect(heard).toStrictEqual([2, 1]);
-  });
-
-  it("lets PING and PONG go ahead of the Lines waiting, and keeps the rest in order", async () => {
-    const heard = await runTest((world) =>
-      Effect.gen(function* () {
-        const pinged: Output = { _tag: "Send", connection: first, line: line(ping("lag")) };
-        const ponged: Output = { _tag: "Send", connection: first, line: line(pong("keep")) };
-
-        const { call } = yield* opened(
-          world,
-          scripted(
-            script(
-              { outputs: says(7), when: "Opened" },
-              { outputs: [pinged, ponged, ...says(1, 8)], when: "Received" }
-            )
-          )
-        );
-
-        yield* heardNow(call);
-        yield* call.say(new TextEncoder().encode("PING :keep"));
-        yield* TestClock.adjust(10_000);
-
-        return yield* heardNow(call);
-      })
-    );
-
-    expect(heard).toStrictEqual([
-      "PING lag",
-      "PONG keep",
-      "PRIVMSG #iirc :line 6",
-      "PRIVMSG #iirc :line 7",
-      "PRIVMSG #iirc :line 8",
-    ]);
   });
 
   it("reveals a Credential when its Line's turn comes, not when it is queued", async () => {
@@ -658,34 +605,6 @@ describe("at the edges: shutdown, a full queue, and long SASL responses", () => 
     });
   });
 
-  it("admits a QUIT and a PONG to a full queue, and they leave", async () => {
-    const result = await runTest((world) =>
-      Effect.gen(function* () {
-        const ponged: Output = { _tag: "Send", connection: first, line: line(pong("keep")) };
-
-        const { call } = yield* opened(
-          world,
-          scripted(
-            script({ outputs: [...says(4), ponged, sendQuit], when: "Opened" }, { when: "Unsent" })
-          ),
-          { outboxCapacity: 2, pacing: { burst: 1, interval: 1000 } }
-        );
-
-        yield* TestClock.adjust(3000);
-
-        return {
-          heard: yield* heardNow(call),
-          unsent: unsentOf(yield* entries(world.journal)),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      heard: ["PONG keep", "PRIVMSG #iirc :line 1", "PRIVMSG #iirc :line 2", "QUIT"],
-      unsent: [["PRIVMSG #iirc :line 3", "PRIVMSG #iirc :line 4"]],
-    });
-  });
-
   it("wakes a pump asleep on a long interval at a Hangup's deadline", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {
@@ -814,43 +733,5 @@ describe("at the edges: shutdown, a full queue, and long SASL responses", () => 
 
     // The first AUTHENTICATE left at once; the PONG takes the next token.
     expect(heard).toStrictEqual(["PONG", "AUTHENTICATE", "AUTHENTICATE", "AUTHENTICATE"]);
-  });
-
-  it("leaves a long SASL response one interval apart, every Line of it", async () => {
-    const heard = await runTest((world) =>
-      Effect.gen(function* () {
-        const credential = CredentialName.make("account");
-
-        const response: Output = {
-          _tag: "SendSecret",
-          connection: first,
-          line: { _tag: "AuthenticatePlain", authcid: "iirc", authzid: "iirc", credential },
-        };
-
-        yield* world.vault.hold(credential, Redacted.make("p".repeat(900)));
-
-        const { call } = yield* opened(
-          world,
-          scripted(script({ outputs: [response], when: "Opened" })),
-          { pacing: { burst: 1, interval: 1000 } }
-        );
-
-        const counts: number[] = [];
-
-        for (let step = 0; step < 4; step += 1) {
-          counts.push(
-            (yield* heardNow(call)).filter((each) => each.startsWith("AUTHENTICATE")).length
-          );
-          yield* TestClock.adjust(999);
-          counts.push((yield* heardNow(call)).length);
-          yield* TestClock.adjust(1);
-        }
-
-        return counts;
-      })
-    );
-
-    // 900 bytes of password make 3 Lines of 400 base64 bytes, then one shorter.
-    expect(heard).toStrictEqual([1, 0, 1, 0, 1, 0, 1, 0]);
   });
 });

@@ -48,7 +48,7 @@ import { CapName, FeatureName } from "../ids.ts";
 import type { IntentId } from "../ids.ts";
 
 /** The most labels awaiting an answer at once. */
-export const maxPending = 64;
+const maxPending = 64;
 
 /** The most batches of answers tracked at once. */
 const maxBatches = 64;

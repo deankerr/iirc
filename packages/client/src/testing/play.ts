@@ -303,12 +303,16 @@ interface Driver<State> {
   readonly steps: Step<State>[];
   /** Each step written down at once, to replay against, and to catch a step that changes an earlier state. */
   readonly snapshots: Snapshot[];
+  /** Whether each step is checked and written down. `fold` alone leaves it off. */
+  readonly checked: boolean;
 }
 
 const driver = <State>(
   client: Client<State>,
-  configuration: NetworkConfiguration
+  configuration: NetworkConfiguration,
+  checked = true
 ): Driver<State> => ({
+  checked,
   client,
   configuration,
   connection: ConnectionId.make(1),
@@ -361,9 +365,8 @@ const stepCopy = <State>(
   return returned;
 };
 
-const stepInput = <State>(at: Driver<State>, fed: Input): Step<State> => {
-  // The kit keeps its own copy of the input, to journal and replay, and the Client gets another.
-  const input = structuredClone(fed);
+// Steps an input with every check a reducer must pass, and writes the step down.
+const stepChecked = <State>(at: Driver<State>, input: Input): Step<State> => {
   const given = at.state;
   const before = at.snapshots.at(-1)?.state ?? hashText(canonical(given));
   const number = at.steps.length + 1;
@@ -390,6 +393,17 @@ const stepInput = <State>(at: Driver<State>, fed: Input): Step<State> => {
   }
 
   at.snapshots.push(snapshot(at.client, returned));
+
+  return returned;
+};
+
+const stepInput = <State>(at: Driver<State>, fed: Input): Step<State> => {
+  // The kit keeps its own copy of the input, to journal and replay, and the Client gets another.
+  const input = structuredClone(fed);
+
+  const returned = at.checked
+    ? stepChecked(at, input)
+    : at.client.step(at.state, structuredClone(input));
 
   // The kit reads its own copy of what the step said, so a Client that later changes the
   // arrays or values it returned cannot change what was matched.
@@ -958,6 +972,36 @@ const startsConfigured = (items: readonly Item[]): boolean => {
   return first?._tag === "Owner" && first.owner._tag === "Configure";
 };
 
+// A fixture's items, behind an `!! configure` where it does not start with one.
+const fixtureOf = (scenario: Scenario): readonly Item[] => {
+  const fixture = itemsOf(scenario);
+
+  return startsConfigured(fixture)
+    ? fixture
+    : [{ _tag: "Owner", owner: { _tag: "Configure", changes: [] } }, ...fixture];
+};
+
+/**
+ * Folds a recorded fixture, feeding it as `replay` does, and checks nothing: no step is
+ * written down, the inputs are not folded again, and nothing is asked of the State. It is
+ * for comparing many runs with each other, where `replay` has proved the fold exact.
+ * @param client - The Client.
+ * @param scenario - The Configuration and the fixture.
+ * @returns Where it ended, and each step's outputs and News.
+ */
+export const fold = <State>(
+  client: Client<State>,
+  scenario: Scenario
+): Pick<Played<State>, "state" | "steps"> => {
+  const at = driver(client, scenario.configuration, false);
+
+  for (const item of fixtureOf(scenario)) {
+    feed(at, item);
+  }
+
+  return { state: at.state, steps: at.steps };
+};
+
 /**
  * Replays a recorded fixture: feeds its `<<`, `==`, `+Ns`, and `!!` items, and reports
  * every output and News, without matching its `>>` and `->` items, which are the
@@ -971,12 +1015,7 @@ const startsConfigured = (items: readonly Item[]): boolean => {
  * @returns What happened. Its transcript is a report of every input, output, and News.
  */
 export const replay = <State>(client: Client<State>, scenario: Scenario): Played<State> => {
-  const fixture = itemsOf(scenario);
-
-  const items: readonly Item[] = startsConfigured(fixture)
-    ? fixture
-    : [{ _tag: "Owner", owner: { _tag: "Configure", changes: [] } }, ...fixture];
-
+  const items = fixtureOf(scenario);
   const at = driver(client, scenario.configuration);
   const report: string[] = [];
   const ignored: string[] = [];

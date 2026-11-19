@@ -1,8 +1,9 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-runtime-typeof -- The laws walk a Knowledge generically, so a fact added to it anywhere is checked without changing them. */
 /**
  * The four laws a Client and its Features keep, run over every set of caps `across`
- * gives. Each law replays the suite's transcript, so it needs no `>>` written, and
- * throws `LawBrokenError` at the first case that breaks it.
+ * gives. Each law feeds the suite's transcript as `replay` does, so it needs no `>>`
+ * written, and throws `LawBrokenError` at the first case that breaks it. `replays` alone
+ * checks exact replay. The others fold, and compare what the runs did.
  *
  * - **inert:** a Feature that is off changes nothing.
  * - **refines:** more caps only sharpen what fewer know.
@@ -17,7 +18,7 @@ import type { NetworkConfiguration } from "../configuration.ts";
 import type { Feature } from "../feature.ts";
 import type { CapName } from "../ids.ts";
 import { canonical, difference, impurity, textDifference } from "./plain.ts";
-import { replay } from "./play.ts";
+import { fold, replay } from "./play.ts";
 import type { Played } from "./play.ts";
 import { across } from "./preludes.ts";
 
@@ -43,6 +44,9 @@ export class LawBrokenError extends Error {
   override readonly name = "LawBrokenError";
 }
 
+/** What a law reads of a run: where it ended, and each step's outputs and News. */
+type Run<State> = Pick<Played<State>, "state" | "steps">;
+
 const capsOf = <State>(subject: Subject<State>): readonly string[] =>
   subject.caps ?? [...new Set(subject.features.flatMap(({ needs }) => needs.caps ?? []))];
 
@@ -51,16 +55,18 @@ const named = (caps: readonly string[]): string => (caps.length === 0 ? "no caps
 const differs = (left: unknown, right: unknown): string | undefined =>
   difference(left, right, ["one", "the other"]);
 
+// One run of a transcript, unchecked: `replays` checks exact replay for every set of caps,
+// and a law that compares thousands of runs would otherwise make that check for each.
 const run = <State>(
   subject: Subject<State>,
   transcript: string,
   configuration = subject.configuration
-): Played<State> => replay(subject.client, { configuration, transcript });
+): Run<State> => fold(subject.client, { configuration, transcript });
 
 // What a run did: everything it output and said, and where it ended up.
 // Written as canonical text at once, so a Client that hands back one shared view and
 // changes it on the next call cannot make two runs compare equal.
-const outcome = <State>(subject: Subject<State>, played: Played<State>): string =>
+const outcome = <State>(subject: Subject<State>, played: Run<State>): string =>
   canonical({
     inspection: subject.client.inspect(played.state),
     knowledge: subject.client.known(played.state),
@@ -338,7 +344,10 @@ const sameExceptStale = (had: unknown, never: unknown, path: string): string | u
  */
 export const replays = <State>(subject: Subject<State>): void => {
   for (const caps of across(capsOf(subject))) {
-    run(subject, subject.transcript(caps));
+    replay(subject.client, {
+      configuration: subject.configuration,
+      transcript: subject.transcript(caps),
+    });
   }
 };
 

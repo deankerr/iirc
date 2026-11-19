@@ -1,9 +1,12 @@
 /** The whole Daemon, on no Network, as it stops. */
-import { Effect } from "effect";
+import { Effect, Logger } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { startDaemon } from "./testing/running.ts";
 import { makeKey, temporaryDirectory } from "./testing/world.ts";
+
+// No logger, so what the code under test logs is not printed over the test run.
+const quiet = Logger.layer([]);
 
 /**
  * Reads a response's body to its end, and says whether it ended or broke.
@@ -62,7 +65,7 @@ describe("the Daemon, as it stops", () => {
 
           return yield* Effect.promise(async () => await Promise.all(readers.map(readToEnd)));
         })
-      )
+      ).pipe(Effect.provide(quiet))
     );
 
     expect(result).toStrictEqual(["ended", "ended", "ended"]);

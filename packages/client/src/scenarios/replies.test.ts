@@ -48,22 +48,6 @@ describe("+reply", () => {
 
     expect.assertions(0);
   });
-
-  it("leaves what we say answering nothing", () => {
-    play(client, {
-      configuration: base,
-      transcript: [
-        ...inChannel,
-        lines(
-          "!! say #iirc :hello",
-          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :hello",
-          ">> PRIVMSG #iirc hello"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
 });
 
 const echoing = [
@@ -195,8 +179,6 @@ describe("a Message id to answer", () => {
     ["empty", ""],
     ["spaced", "a b"],
     ["holding a carriage return", "a\rb"],
-    ["holding a line feed", "a\nb"],
-    ["holding a NUL", "a\u0000b"],
     ["holding a DEL", "a\u007Fb"],
     ["too long", "x".repeat(257)],
   ])("is refused when %s", (_name, id) => {

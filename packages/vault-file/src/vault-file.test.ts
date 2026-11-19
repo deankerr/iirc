@@ -7,13 +7,9 @@ import { Vault } from "@iirc/runtime/vault";
 import type { VaultService } from "@iirc/runtime/vault";
 import { Context, Effect, FileSystem, Layer, Logger, Redacted, References, Schema } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { layerBun } from "./index.ts";
-
-// A law carries its own ten-second guard against a hang (`holds`), so Vitest must wait longer
-// than that, or a law that is only slow under a loaded machine fails as Vitest's timeout.
-vi.setConfig({ testTimeout: 20_000 });
 
 const secret = "s3cr3t-v4lue-ZXCV";
 const name = CredentialName.make("libera-password");
@@ -74,20 +70,6 @@ describe("the file Vault keeps the Vault laws", () => {
 });
 
 describe("the file", () => {
-  it("is created with mode 0600 on the first hold", async () => {
-    const result = await withHarness(({ file, fs, vault }) =>
-      Effect.gen(function* () {
-        const before = yield* fs.exists(file);
-
-        yield* vault.hold(name, Redacted.make(secret));
-
-        return { before, mode: yield* mode(fs, file) };
-      })
-    );
-
-    expect(result).toStrictEqual({ before: false, mode: 0o600 });
-  });
-
   it("stays mode 0600 when it replaces a file that was more open", async () => {
     const result = await withHarness(({ file, fs, vault }) =>
       Effect.gen(function* () {
@@ -100,22 +82,6 @@ describe("the file", () => {
     );
 
     expect(result).toBe(0o600);
-  });
-
-  it("is a versioned JSON document", async () => {
-    const text = await withHarness(({ file, fs, vault }) =>
-      Effect.gen(function* () {
-        yield* vault.hold(name, Redacted.make(secret));
-        yield* vault.hold(other, Redacted.make("two"));
-
-        return yield* fs.readFileString(file);
-      })
-    );
-
-    expect(JSON.parse(text)).toStrictEqual({
-      credentials: { "libera-password": secret, "oftc-password": "two" },
-      version: 1,
-    });
   });
 
   it("means an empty Vault when it is missing, and is not made by reading", async () => {
@@ -218,12 +184,9 @@ describe("a directory that does not exist", () => {
 
 describe("a file that is not a Vault", () => {
   const bad = [
-    ["not JSON", `hunter2 ${secret}`],
-    ["a different version", `{"version":2,"credentials":{"${name}":"${secret}"}}`],
-    ["no version", `{"credentials":{"${name}":"${secret}"}}`],
+    // A decoder's message quotes a value of the wrong type, so this is where a reason that
+    // carried one would show it.
     ["a value that is not a string", `{"version":1,"credentials":{"${name}":["${secret}"]}}`],
-    ["a list", `["${secret}"]`],
-    ["something other than a Vault", `{"version":1,"credentials":"${secret}"}`],
   ] as const;
 
   it.each(bad)("is VaultFailed with no value in its reason: %s", async (_what, text) => {

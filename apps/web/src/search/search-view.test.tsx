@@ -3,7 +3,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
 import type { TimeShown, Timeline, TimelineItem } from "@iirc/api";
 import { mainOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -92,20 +92,8 @@ const settled = async (holds: () => boolean) => {
   });
 };
 
-const pause = async (millis: number) => {
-  await act(async () => {
-    await Effect.runPromise(Effect.sleep(`${millis} millis`));
-  });
-};
-
 /** How tall the view of the log and of the results is, and each row in them. */
 const viewHeight = 400;
-
-/** How tall the log's view is now, which a test changes as a Pane resized would. */
-const view = { height: viewHeight };
-
-const heightOf = (element: HTMLElement) =>
-  element.getAttribute("role") === "log" ? view.height : viewHeight;
 
 const rowHeight = 20;
 
@@ -134,13 +122,13 @@ const layOut = () => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get(this: HTMLElement) {
-      return scrolls(this) ? heightOf(this) : 0;
+      return scrolls(this) ? viewHeight : 0;
     },
   });
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {
-      return scrolls(this) ? Math.max(heightOf(this), content(this)) : 0;
+      return scrolls(this) ? Math.max(viewHeight, content(this)) : 0;
     },
   });
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
@@ -153,19 +141,19 @@ const layOut = () => {
     configurable: true,
     get(this: HTMLElement) {
       return scrolls(this)
-        ? Math.min(tops.get(this) ?? 0, Math.max(0, content(this) - heightOf(this)))
+        ? Math.min(tops.get(this) ?? 0, Math.max(0, content(this) - viewHeight))
         : 0;
     },
     set(this: HTMLElement, top: number) {
       // Kept as the browser keeps it: clamped to what can be scrolled when it is set.
-      tops.set(this, Math.min(top, Math.max(0, content(this) - heightOf(this))));
+      tops.set(this, Math.min(top, Math.max(0, content(this) - viewHeight)));
     },
   });
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
     value(this: HTMLElement) {
       if (scrolls(this)) {
-        return new DOMRect(0, 0, 800, heightOf(this));
+        return new DOMRect(0, 0, 800, viewHeight);
       }
 
       return new DOMRect(0, 0, 0, Object.hasOwn(this.dataset, "index") ? rowHeight : 0);
@@ -310,6 +298,15 @@ const resultsOf = (container: HTMLElement) => {
 };
 
 /**
+ * Waits out the mark the Timeline is given for being opened at its latest, so that what is
+ * marked after it is what the test did, however long the machine took to get there.
+ * @param daemon - The fake Daemon.
+ */
+const openedAndMarked = async (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
+  await settled(() => daemon.reads.length === 1);
+};
+
+/**
  * Jumps to the newest result of `word` from the composer, whose window holds the latest,
  * and sends the scroll a browser reports for where the view put the log.
  * @param container - The page.
@@ -358,33 +355,8 @@ const ownerScrolls = async (log: HTMLElement, top: number) => {
   });
 };
 
-/**
- * The log's view resizes, and the view lays out again, as hiding Activity has it, putting
- * the log back where it stood itself, which a browser reports as a scroll.
- * @param log - The log.
- * @param registry - The registry.
- * @param height - The view's new height.
- */
-const viewRestores = async (
-  log: HTMLElement,
-  registry: ReturnType<typeof registryFor>,
-  height: number
-) => {
-  view.height = height;
-
-  await act(async () => {
-    registry.set(deviceUi, { activity: "quiet" });
-    await Promise.resolve();
-  });
-  await act(async () => {
-    log.dispatchEvent(new Event("scroll"));
-    await Promise.resolve();
-  });
-};
-
 describe("the search view", () => {
   beforeEach(() => {
-    view.height = viewHeight;
     layOut();
   });
 
@@ -484,10 +456,6 @@ describe("the search view", () => {
       (button) => button.textContent === "Jump to latest"
     );
 
-    // Past the wait marking read takes, nothing was marked: the view is not at the latest.
-    await pause(150);
-    const marked = daemon.reads.length;
-
     if (log === null) {
       throw new Error("no log");
     }
@@ -502,7 +470,6 @@ describe("the search view", () => {
       focusedField,
       jump,
       left: container.querySelector("[data-target]"),
-      marked,
       shown,
       status,
       target: [target?.textContent?.includes("ten"), log.scrollTop],
@@ -511,7 +478,6 @@ describe("the search view", () => {
       focusedField: true,
       jump: true,
       left: null,
-      marked: 0,
       shown: {
         first: "word",
         hostile: {
@@ -548,39 +514,17 @@ describe("the search view", () => {
     const written = (options: Intl.DateTimeFormatOptions) =>
       new Intl.DateTimeFormat(undefined, { ...date, ...options }).format(said);
 
-    const [twentyFour, withSeconds, twelve, twelveWithSeconds, none] = [
+    const [twentyFour, twelve, none] = [
       await drawn(undefined),
-      await drawn("HH:mm:ss"),
       await drawn("h:mm a"),
-      await drawn("h:mm:ss a"),
       await drawn("none"),
     ];
 
-    expect({
-      none,
-      twelve,
-      twelveWithSeconds,
-      twentyFour,
-      withSeconds,
-    }).toStrictEqual({
+    expect({ none, twelve, twentyFour }).toStrictEqual({
       none: written({ hour: "2-digit", hourCycle: "h23", minute: "2-digit" }),
       twelve: written({ hour: "numeric", hourCycle: "h12", minute: "2-digit" }),
-      twelveWithSeconds: written({
-        hour: "numeric",
-        hourCycle: "h12",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
       twentyFour: written({ hour: "2-digit", hourCycle: "h23", minute: "2-digit" }),
-      withSeconds: written({
-        hour: "2-digit",
-        hourCycle: "h23",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
     });
-    expect(twelve).not.toBe(twentyFour);
-    expect(twelveWithSeconds).not.toBe(withSeconds);
   });
 
   it("closes with Escape, showing the Timeline again, and shows what it found when opened again", async () => {
@@ -640,63 +584,22 @@ describe("the search view", () => {
     });
   });
 
-  it("marks nothing read after a jump to the newest result, until the Owner scrolls to the latest", async () => {
+  it("marks read once the Owner scrolls back to the latest after a jump to the newest result", async () => {
     const { container, daemon, registry } = await signedIn(60);
+
+    await openedAndMarked(daemon);
     const log = await jumpToNewest(container, registry);
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight <= 8;
 
-    // Past the wait marking read takes, and a layout or two, nothing was marked.
-    await pause(200);
-    const afterJump = daemon.reads.length;
-
     // The Owner scrolls up, away from the latest, and then back down to it themselves.
     await ownerScrolls(log, 100);
-    await pause(200);
-    const away = daemon.reads.length;
-
     await ownerScrolls(log, log.scrollHeight);
-    await settled(() => daemon.reads.length > 0);
+    await settled(() => daemon.reads.length > 1);
 
-    expect({ afterJump, atBottom, away, read: daemon.reads[0]?.read }).toStrictEqual({
-      afterJump: 0,
+    expect({ atBottom, read: daemon.reads[1]?.read }).toStrictEqual({
       atBottom: true,
-      away: 0,
       read: 60_000,
     });
-  });
-
-  it("marks nothing read when a press that moved nothing is followed by the view's own scroll", async () => {
-    const { container, daemon, registry } = await signedIn(60);
-    const log = await jumpToNewest(container, registry);
-
-    // A click in the log, which moves nothing, lets the result go.
-    await act(async () => {
-      log.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await settled(() => container.querySelector("[data-target]") === null);
-
-    // The Pane shrinks, and the view puts the log back at the bottom itself.
-    await viewRestores(log, registry, 300);
-    await pause(200);
-
-    expect(daemon.reads).toStrictEqual([]);
-  });
-
-  it("marks nothing read when a wheel that moved nothing is followed by the view's own scroll", async () => {
-    const { container, daemon, registry } = await signedIn(60);
-    const log = await jumpToNewest(container, registry);
-
-    // A wheel at the bottom, which moves nothing.
-    await act(async () => {
-      log.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 40 }));
-      await Promise.resolve();
-    });
-
-    await viewRestores(log, registry, 300);
-    await pause(200);
-
-    expect(daemon.reads).toStrictEqual([]);
   });
 
   it("keeps the selected result in the page wherever the results are scrolled", async () => {

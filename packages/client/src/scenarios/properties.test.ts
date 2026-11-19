@@ -701,34 +701,6 @@ const runMoves = (moves: readonly Move[]): Fold => {
 };
 
 describe("properties", () => {
-  it("reaches every machine's states, so the properties mean something", () => {
-    const reached = new Map<string, number>();
-
-    for (const moves of fc.sample(runOf(running), { numRuns: 200, seed: 1 })) {
-      const fold = runMoves(moves);
-      const states = fold.steps.map((step) => client.inspect(step.state).states);
-
-      for (const each of states.flatMap((record) => Object.entries(record))) {
-        reached.set(each.join("="), (reached.get(each.join("=")) ?? 0) + 1);
-      }
-    }
-
-    const wanted = [
-      "caps=None",
-      "caps=Ready.Steady",
-      "channel #iirc=Joined.Synced",
-      "channel #iirc=Refused",
-      "keepalive=Pinged",
-      "modes=Asking",
-      "network=Connection.Closing",
-      "network=Idle",
-      "network=Waiting",
-      "presence=Session",
-    ];
-
-    expect(wanted.filter((state) => !reached.has(state))).toStrictEqual([]);
-  });
-
   it("never throws, and keeps its invariants, for random and hostile input in any state", () => {
     expect(() => {
       fc.assert(

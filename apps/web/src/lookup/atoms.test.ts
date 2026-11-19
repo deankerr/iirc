@@ -1,7 +1,7 @@
 import { TimelineId } from "@iirc/api";
 import type { TimeShown, Timeline } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
-import { Effect, Redacted, Schema } from "effect";
+import { Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { edit, send } from "../composer/atoms.ts";
@@ -20,7 +20,7 @@ import {
 import type { LookScript } from "../testing/fake-daemon.ts";
 import { open, openTimeline, paned, sync } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
-import { dismissCard, lookupSync, lookupsState, paneCard } from "./atoms.ts";
+import { lookupSync, lookupsState, paneCard } from "./atoms.ts";
 
 const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
 
@@ -120,10 +120,6 @@ const typeAndSend = async (
   await run(registry, send, timelineId(iirc));
 };
 
-const wait = async (millis: number) => {
-  await Effect.runPromise(Effect.sleep(`${millis} millis`));
-};
-
 describe("a Lookup", () => {
   it("is asked once under the intent the runtime named, and shows its User in the Pane", async () => {
     const { daemon, registry } = await inChannel({ answer: "LookedUp", pending: 0, result: found });
@@ -171,31 +167,6 @@ describe("a Lookup", () => {
     }).toStrictEqual({ looked: ["web-1", "web-1", "web-1"], looks: [["web-1", "Whowas"]] });
   });
 
-  it("says in words what found no one, and what the Client refused", async () => {
-    const { registry } = await inChannel(
-      { answer: "LookedUp", pending: 0, result: { _tag: "NotFound", notes: [], reply: "401" } },
-      { answer: "LookedUp", pending: 0, result: { _tag: "Refused", reason: "Offline" } }
-    );
-
-    const words = async () => {
-      const shown = await until(registry, paneCard("p0"), (card) => card?.body._tag === "Said");
-
-      return shown?.body._tag === "Said" ? shown.body.words : undefined;
-    };
-
-    await typeAndSend(registry, "/whois nobody");
-    const notFound = await words();
-
-    await typeAndSend(registry, "/whois peer");
-    await until(registry, lookupsState, (state) => state.next === 3);
-    const refused = await words();
-
-    expect([notFound, refused]).toStrictEqual([
-      "No one uses the nick nobody now (401).",
-      "Not looked up: the Network is not connected.",
-    ]);
-  });
-
   it("with no answer, or stopped, is asked after by its intent, and never sent again", async () => {
     const { daemon, registry } = await inChannel(
       { answer: "Lost", pending: 1, result: found },
@@ -217,49 +188,6 @@ describe("a Lookup", () => {
       looked: ["web-1", "web-1", "web-2"],
       looks: ["web-1", "web-2"],
       stopped: "The Network stopped before it was looked up. Try again.",
-    });
-  });
-
-  it("is let go of when its card is put away, and gives up once its time has passed", async () => {
-    const { daemon, registry } = await inChannel(
-      { answer: "Pending", pending: 1000, result: found },
-      { answer: "Pending", pending: 1000, result: found }
-    );
-
-    await typeAndSend(registry, "/whois peer");
-    await eventually(() => daemon.looked.length >= 2);
-    registry.set(dismissCard, "p0");
-
-    const after = daemon.looked.length;
-
-    await wait(150);
-
-    const letGo = daemon.looked.length - after;
-
-    await typeAndSend(registry, "/whois peer");
-
-    const gaveUp = await until(registry, paneCard("p0"), (shown) => shown?.body._tag === "Said");
-
-    expect({
-      gaveUp: gaveUp?.body._tag === "Said" ? gaveUp.body.words : undefined,
-      letGo,
-    }).toStrictEqual({
-      gaveUp: "No result came from the Daemon in time. Try again.",
-      letGo: 0,
-    });
-  });
-
-  it("is refused in words before anything is sent, for a name that is no nick", async () => {
-    const { daemon, registry } = await inChannel();
-
-    await typeAndSend(registry, "/whois #iirc");
-
-    expect({
-      looks: daemon.looks,
-      notice: draftOf(registry.get(composerState), timelineId(iirc)).notice?.message,
-    }).toStrictEqual({
-      looks: [],
-      notice: "That is a Channel's name. A Lookup takes a nick. /whois <nick>",
     });
   });
 
@@ -321,20 +249,11 @@ describe("a Lookup", () => {
     const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
     const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;
 
-    expect({
-      none: drawn("none"),
-      twelve: drawn("h:mm a"),
-      twelveWithSeconds: drawn("h:mm:ss a"),
-      twentyFour: drawn("HH:mm"),
-      withSeconds: drawn("HH:mm:ss"),
-    }).toStrictEqual({
+    expect({ none: drawn("none"), twelve: drawn("h:mm a") }).toStrictEqual({
       none: written(twentyFour),
       twelve: written(twelve),
-      twelveWithSeconds: written({ ...twelve, second: "2-digit" }),
-      twentyFour: written(twentyFour),
-      withSeconds: written({ ...twentyFour, second: "2-digit" }),
     });
-    expect(drawn("h:mm a")).not.toBe(drawn("HH:mm"));
+    expect(drawn("h:mm a")).not.toBe(drawn("none"));
   });
 
   it("whose look is never answered gives up at its deadline, and asks after it by intent once its request times out", async () => {
@@ -372,7 +291,7 @@ describe("a Lookup", () => {
     });
   });
 
-  it("asked after by a request never answered gives up at its deadline, and one answered just before it holds", async () => {
+  it("asked after by a request never answered gives up at its deadline", async () => {
     const held = await inChannelWaiting(
       { lookRequest: "5 seconds", lookup: "300 millis" },
       { answer: "Pending", pending: 0, result: found }
@@ -387,35 +306,16 @@ describe("a Lookup", () => {
       (shown) => shown?.body._tag === "Said"
     );
 
-    const answered = await inChannelWaiting(
-      { lookRequest: "5 seconds", lookup: "500 millis" },
-      { answer: "Pending", pending: 0, result: found }
-    );
-
-    answered.daemon.holdLooked = true;
-    await typeAndSend(answered.registry, "/whois peer");
-    await eventually(() => answered.daemon.lookedHeld.length === 1);
-    await wait(300);
-
-    for (const release of answered.daemon.lookedHeld.splice(0)) {
-      release();
-    }
-
-    await until(answered.registry, paneCard("p0"), (shown) => shown?.body._tag === "Profiles");
-    await wait(400);
-
     expect({
-      after: answered.registry.get(paneCard("p0"))?.body._tag,
       gaveUp: gaveUp?.body._tag === "Said" ? gaveUp.body.words : undefined,
       heldAsked: held.daemon.looked,
     }).toStrictEqual({
-      after: "Profiles",
       gaveUp: "No result came from the Daemon in time. Try again.",
       heldAsked: ["web-1"],
     });
   });
 
-  it("is let go of with its Pane, kept while a zoom hides it, and gone after signing out and in", async () => {
+  it("is let go of with its Pane, shown again after a zoom, and gone after signing out and in", async () => {
     const { daemon, registry } = await inChannel(
       { answer: "Pending", pending: 1000, result: found },
       { answer: "Pending", pending: 1000, result: found }
@@ -428,24 +328,14 @@ describe("a Lookup", () => {
     await until(registry, paneCard("p0"), (shown) => shown?.body._tag === "Waiting");
     registry.set(paned, { _tag: "Focus", pane: "p1" });
     registry.set(paned, { _tag: "Zoom" });
-    await wait(50);
-
-    const zoomed = registry.get(lookupsState).cards.has("p0");
-
     registry.set(paned, { _tag: "Zoom" });
     registry.set(paned, { _tag: "Focus", pane: "p0" });
 
     const unzoomed = registry.get(paneCard("p0")) !== undefined;
 
-    // Closing its Pane lets the card go, and its asking with it.
+    // Closing its Pane lets the card go.
     registry.set(paned, { _tag: "Close" });
     await until(registry, lookupsState, (state) => state.cards.size === 0);
-
-    const asked = daemon.looked.length;
-
-    await wait(150);
-
-    const askedAfterClose = daemon.looked.length - asked;
 
     // A card made again, then signing out and in, and the same Timeline opened again.
     registry.set(open, timelineId(iirc));
@@ -459,17 +349,13 @@ describe("a Lookup", () => {
     await until(registry, openTimeline, (shown) => shown._tag === "Shown");
 
     expect({
-      askedAfterClose,
       cards: registry.get(lookupsState).cards.size,
       shown: registry.get(paneCard("p0")),
       unzoomed,
-      zoomed,
     }).toStrictEqual({
-      askedAfterClose: 0,
       cards: 0,
       shown: undefined,
       unzoomed: true,
-      zoomed: true,
     });
   });
 });

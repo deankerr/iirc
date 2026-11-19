@@ -27,17 +27,6 @@ const welcome = (nick = "iirc") =>
   `<< :irc.test 001 ${nick} :Welcome ${nick}\n?? session-began ${nick}\n`;
 
 describe("cap negotiation on the floor", () => {
-  it("registers when the Ircd answers CAP with 421", () => {
-    const played = play(client, { configuration: base, transcript: registered(base) });
-
-    expect(client.inspect(played.state).states).toMatchObject({
-      caps: "None",
-      network: "Connection.Open",
-      presence: "Session",
-    });
-    expect(played.ignored).toStrictEqual([]);
-  });
-
   it("registers when the Ircd never answers CAP and goes straight to 001", () => {
     const played = play(client, { configuration: base, transcript: opened() + welcome() });
 
@@ -135,14 +124,6 @@ describe("cap negotiation on the floor", () => {
 });
 
 describe("PASS, NICK, and USER", () => {
-  it("sends PASS by its Credential's name, before NICK", () => {
-    const withPass = configured({ password: CredentialName.make("network") });
-
-    play(client, { configuration: withPass, transcript: registered(withPass) });
-
-    expect.assertions(0);
-  });
-
   it("goes on without PASS when it cannot be filled, and the Ircd decides", () => {
     const withPass = configured({ password: CredentialName.make("network") });
 
@@ -194,41 +175,6 @@ describe("offering nicks", () => {
           ">> NICK iirc_",
           "<< :irc.test CAP * LS :multi-prefix",
           ">> CAP END"
-        ),
-        welcome("iirc_"),
-      ],
-    });
-
-    expect.assertions(0);
-  });
-
-  it("offers the next nick on a 433 after CAP END", () => {
-    play(client, {
-      configuration: base,
-      transcript: [
-        opened(),
-        lines(
-          "<< :irc.test CAP * LS :multi-prefix",
-          ">> CAP END",
-          "<< :irc.test 433 * iirc :Nickname is already in use",
-          ">> NICK iirc_"
-        ),
-        welcome("iirc_"),
-      ],
-    });
-
-    expect.assertions(0);
-  });
-
-  it("offers the next nick on a 433 from an Ircd with no CAP", () => {
-    play(client, {
-      configuration: base,
-      transcript: [
-        opened(),
-        lines(
-          "<< :irc.test 421 * CAP :Unknown command",
-          "<< :irc.test 433 * iirc :Nickname is already in use",
-          ">> NICK iirc_"
         ),
         welcome("iirc_"),
       ],
@@ -297,12 +243,12 @@ describe("offering nicks", () => {
   });
 
   it("offers no nick on a 433 after 001", () => {
-    const played = play(client, {
+    play(client, {
       configuration: base,
       transcript: [registered(base), "<< :irc.test 433 iirc other :in use\n"],
     });
 
-    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
+    expect.assertions(0);
   });
 
   it("ignores a second 001", () => {

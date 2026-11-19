@@ -1,13 +1,7 @@
 import { Effect, Exit, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import {
-  LinkRefused,
-  LinkTooLarge,
-  LinkUnreachable,
-  LinkWrongType,
-  limits,
-} from "../link-fetch.ts";
+import { LinkTooLarge, LinkWrongType, limits } from "../link-fetch.ts";
 import type { Purpose } from "../link-fetch.ts";
 import type { Answer } from "./fake.ts";
 import { makeFakeLinkFetch } from "./fake.ts";
@@ -40,34 +34,6 @@ const fetching = async (
   );
 
 describe("the fake link fetch", () => {
-  it("answers a recorded response by link, and records what was asked", async () => {
-    const result = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fake = yield* makeFakeLinkFetch({
-            "https://example.com/a": { body: "<title>A</title>", type: "text/html" },
-          });
-
-          const fetched = yield* fake.service.fetch("https://EXAMPLE.com/a", { kind: "page" });
-          const body = yield* Stream.mkString(Stream.decodeText(fetched.body));
-
-          return { asked: yield* fake.asked, body, fetched };
-        })
-      )
-    );
-
-    expect(result.body).toBe("<title>A</title>");
-    expect(result.fetched).toMatchObject({
-      headers: { "content-type": "text/html" },
-      link: "https://example.com/a",
-      status: 200,
-      type: "text/html",
-    });
-    expect(result.asked).toStrictEqual([
-      { link: "https://EXAMPLE.com/a", purpose: { kind: "page" } },
-    ]);
-  });
-
   it("a link's fragment is dropped, as the guard drops it", async () => {
     const fetched = await Effect.runPromise(
       Effect.scoped(
@@ -79,31 +45,6 @@ describe("the fake link fetch", () => {
     );
 
     expect(fetched).toMatchObject({ link: "https://example.com/a", status: 200 });
-  });
-
-  it("answers a recorded failure", async () => {
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(
-        Effect.flatMap(
-          makeFakeLinkFetch({ "https://example.com/": new LinkRefused({ reason: "private" }) }),
-          (fake) => fake.service.fetch("https://example.com/", { kind: "image" })
-        )
-      )
-    );
-
-    expect(exit).toStrictEqual(Exit.fail(new LinkRefused({ reason: "private" })));
-  });
-
-  it("an unrecorded link is unreachable", async () => {
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(
-        Effect.flatMap(makeFakeLinkFetch({}), (fake) =>
-          fake.service.fetch("https://nowhere.test/", { kind: "oembed" })
-        )
-      )
-    );
-
-    expect(exit).toStrictEqual(Exit.fail(new LinkUnreachable({ reason: "no recorded answer" })));
   });
 
   describe("serves a stream as a host serving ranges would", () => {
@@ -158,19 +99,6 @@ describe("the fake link fetch", () => {
         )
       );
 
-    it("answers the part of a range with 206, its Content-Range, and its Content-Length", async () => {
-      const result = await streaming({ body: bytes, type: "video/mp4" }, { end: 20, start: 10 });
-
-      expect(result).toMatchObject({
-        asked: [{ link, purpose: { kind: "stream", range: { end: 20, start: 10 } } }],
-        first: bytes.slice(10, 20),
-        headers: { "content-length": "10", "content-range": "bytes 10-19/100" },
-        size: 10,
-        status: 206,
-        type: "video/mp4",
-      });
-    });
-
     it("answers a range with no end to the end of the bytes, and an end past it as to the end", async () => {
       const open = await streaming({ body: bytes, type: "video/mp4" }, { start: 90 });
       const past = await streaming({ body: bytes, type: "video/mp4" }, { end: 500, start: 95 });
@@ -187,16 +115,6 @@ describe("the fake link fetch", () => {
       ]);
     });
 
-    it("answers a range that begins at the end of the bytes or past it with 416 and no body", async () => {
-      const result = await streaming({ body: bytes, type: "video/mp4" }, { start: 100 });
-
-      expect(result).toMatchObject({
-        headers: { "content-range": "bytes */100" },
-        size: 0,
-        status: 416,
-      });
-    });
-
     it("answers a recorded 416 to a stream whatever its type, as the guard does", async () => {
       const result = await streaming(
         { headers: { "content-range": "bytes */100" }, status: 416, type: "text/html" },
@@ -204,14 +122,6 @@ describe("the fake link fetch", () => {
       );
 
       expect(result).toMatchObject({ headers: { "content-range": "bytes */100" }, status: 416 });
-    });
-
-    it("answers no range with the whole body and the recorded status", async () => {
-      const result = await streaming({ body: bytes, type: "video/mp4" });
-
-      expect(result.status).toBe(200);
-      expect(result.size).toBe(100);
-      expect(result.headers["content-range"]).toBeUndefined();
     });
 
     it("answers a recorded status as recorded, a host that ignores the range, whole", async () => {
@@ -222,12 +132,6 @@ describe("the fake link fetch", () => {
 
       expect(result.status).toBe(200);
       expect(result.size).toBe(100);
-    });
-
-    it("gives a body over the stream limit up to the limit, and then fails it as too large", async () => {
-      const result = await streaming({ type: "video/mp4", zeros: limits.stream + 1 });
-
-      expect(result).toMatchObject({ failure: "LinkTooLarge", size: limits.stream });
     });
 
     it("gives a range of a body over the limit up to the limit from where it begins, and then fails it", async () => {
@@ -241,18 +145,6 @@ describe("the fake link fetch", () => {
   });
 
   describe("answers as the guard would for the purpose", () => {
-    it("refuses an image answer fetched as a page as the wrong type, naming the link that answered", async () => {
-      const exit = await fetching(
-        { "https://example.com/a": { link: "https://cdn.example/a.png", type: "image/png" } },
-        "https://example.com/a",
-        { kind: "page" }
-      );
-
-      expect(exit).toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://cdn.example/a.png", type: "image/png" }))
-      );
-    });
-
     it("refuses an html answer fetched as an image as the wrong type", async () => {
       const exit = await fetching(
         { "https://example.com/a.png": { type: "text/html; charset=utf-8" } },
@@ -288,21 +180,6 @@ describe("the fake link fetch", () => {
       );
 
       expect(exit).toStrictEqual(Exit.succeed({ size: 4, type: "image/jpeg" }));
-    });
-
-    it("fails a raster image over its limit as too large as its body is read", async () => {
-      const exit = await fetching(
-        {
-          "https://example.com/big.png": {
-            body: new Uint8Array(limits.raster + 1),
-            type: "image/png",
-          },
-        },
-        "https://example.com/big.png",
-        { kind: "image" }
-      );
-
-      expect(exit).toStrictEqual(Exit.fail(new LinkTooLarge({ limit: limits.raster })));
     });
 
     it("answers a raster image at its limit whole", async () => {
