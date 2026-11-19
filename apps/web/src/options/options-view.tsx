@@ -674,7 +674,12 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
             }
           >
             {(group: OptionGroup) => (
-              <GridListSection id={group.heading}>
+              <GridListSection
+                // A heading can be an option's name, as a Network `libera.nicks` heads
+                // `network.libera.nicks`, which is libera's `nicks`, so its key is apart from
+                // theirs: an option's name never starts with a space.
+                id={` ${group.heading}`}
+              >
                 <GridListHeader className={styles.heading}>
                   {/* A Network's id is ASCII, so it needs no isolating. */}
                   {group.heading}

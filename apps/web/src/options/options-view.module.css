@@ -95,14 +95,11 @@
   outline: none;
 }
 
-/* What the options under it are named for, held at the top while they scroll under it. */
+/* What the options under it are named for, broken anywhere only when wider than the view. */
 .heading {
-  position: sticky;
-  z-index: 1;
-  top: 0;
+  overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3) var(--space-1);
   border-bottom: var(--border-width) solid var(--color-border);
-  background: var(--color-background);
   color: var(--color-muted);
 }
 

@@ -1359,6 +1359,22 @@ describe("the options under headings", () => {
     });
   });
 
+  it("heads a Network whose id is another's name and option apart from that option", async () => {
+    const shown = await uiShown(signedIn());
+
+    await shown.type("/network add libera.nicks irc.example.net me");
+    await shown.type("/set network.libera");
+    await settled(() => rowOf(shown.container, "network.libera.nicks.nicks") !== undefined);
+
+    expect({
+      headings: headingsOf(shown.container),
+      nicks: rowOf(shown.container, "network.libera.nicks")?.[1],
+    }).toStrictEqual({
+      headings: ["network.libera", "network.libera.nicks"],
+      nicks: "iirc",
+    });
+  });
+
   it("moves by arrows from option to option across a heading, edits on Enter, and asks on Delete", async () => {
     const shown = await uiShown(signedIn());
 
