@@ -1,6 +1,7 @@
 # The build gets only what it needs: the workspace's manifests and lockfile, and the sources
 # of apps/ and packages/. Nothing else in the checkout, such as a data directory bound into
-# the container, a secret, or a cache, reaches Docker.
+# the container, a secret, or a cache, reaches Docker, so a bound data directory belongs
+# anywhere but under apps/ or packages/.
 *
 !package.json
 !bun.lock
@@ -19,6 +20,7 @@
 **/coverage
 **/*.tsbuildinfo
 **/.vitest
+**/.DS_Store
 **/*.sqlite
 **/*.sqlite-*
 **/keys.json
