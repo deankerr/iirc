@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Authorization, signInCookie } from "@iirc/api";
+import { Authorization } from "@iirc/api";
 import { makeMemoryByteStore } from "@iirc/byte-store/testing";
 import type { ByteStoreHarness } from "@iirc/byte-store/testing";
 import { client } from "@iirc/client";
@@ -191,15 +191,16 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
         )
       )
     ),
-    SignIns.layer(dataDir).pipe(
-      Layer.provideMerge(ApiKeys.layer(dataDir)),
-      Layer.provide(platform)
-    ),
-    Logger.layer([
-      Logger.make(({ message }) => {
-        world.logged.push(JSON.stringify(message));
-      }),
-    ])
+    SignIns.layer(dataDir).pipe(Layer.provideMerge(ApiKeys.layer(dataDir)), Layer.provide(platform))
+  ).pipe(
+    // Beneath every other Layer, so what one says as it is built is kept too, not printed.
+    Layer.provideMerge(
+      Logger.layer([
+        Logger.make(({ message }) => {
+          world.logged.push(JSON.stringify(message));
+        }),
+      ])
+    )
   );
 };
 
@@ -211,18 +212,6 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
 export const presenting = (key: string | undefined) =>
   HttpApiMiddleware.layerClient(Authorization, ({ next, request }) =>
     next(key === undefined ? request : HttpClientRequest.bearerToken(request, key))
-  );
-
-/**
- * The client side of the key check as a browser does it: a sign-in's cookie, and no
- * key, with whatever a browser says of the request's origin.
- * @param token - The sign-in's token.
- * @param headers - Headers such as `sec-fetch-site` or `origin`.
- * @returns The Layer.
- */
-export const presentingSignIn = (token: string, headers: Readonly<Record<string, string>> = {}) =>
-  HttpApiMiddleware.layerClient(Authorization, ({ next, request }) =>
-    next(HttpClientRequest.setHeaders(request, { ...headers, cookie: `${signInCookie}=${token}` }))
   );
 
 /**

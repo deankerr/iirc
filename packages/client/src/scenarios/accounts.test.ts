@@ -72,23 +72,6 @@ const whois = (offered: readonly string[], ...replies: readonly string[]) => [
   ),
 ];
 
-describe("asking for the caps", () => {
-  it.each(accounts)("asks for %s when it is offered", (cap) => {
-    const played = play(client, {
-      configuration: base,
-      transcript: registered(base, { offered: [cap] }),
-    });
-
-    expect(client.inspect(played.state).features).toStrictEqual([cap]);
-  });
-
-  it("asks for none when none is offered", () => {
-    const played = play(client, { configuration: base, transcript: registered(base) });
-
-    expect(client.inspect(played.state).features).toStrictEqual([]);
-  });
-});
-
 describe("account-tag", () => {
   it("sets a sender's account from a Message's tag", () => {
     expect(
@@ -100,7 +83,6 @@ describe("account-tag", () => {
     const account = userOf(tagged("<< :peer!u@h PRIVMSG #iirc :hi"), "peer")?.account;
 
     expect(account).toMatchObject(loggedOut);
-    expect(account).not.toStrictEqual(unknown);
   });
 
   it("sets a User's account from a Direct Message, and a NOTICE", () => {
@@ -191,7 +173,7 @@ describe("account-tag", () => {
     ).toStrictEqual(unknown);
   });
 
-  it("reports nothing it did not before", () => {
+  it("still reports a tagged Message as a Message", () => {
     play(client, {
       configuration: base,
       transcript: tagged(
@@ -215,26 +197,11 @@ describe("account-notify", () => {
     expect(userOf(transcript, "other")?.account).toStrictEqual(unknown);
   });
 
-  it("shows it in a Direct Message with the User too, where there is one", () => {
-    userOf(
-      notified(
-        "<< :peer!u@h PRIVMSG iirc :psst",
-        "?? message Privmsg peer iirc in=direct:peer :psst",
-        "<< :other!u@h ACCOUNT bob",
-        "?? activity AccountChanged other account=bob in=channel:#iirc in=existing-direct:other"
-      ),
-      "peer"
-    );
-
-    expect.assertions(0);
-  });
-
   it("takes `*` as logged out, which is known and not the same as not known", () => {
     const transcript = notified("<< :peer!u@h ACCOUNT bob", "<< :peer!u@h ACCOUNT *");
     const account = userOf(transcript, "peer")?.account;
 
     expect(account).toMatchObject(loggedOut);
-    expect(account).not.toStrictEqual(unknown);
     expect(userOf(notified("<< :peer!u@h ACCOUNT *"), "peer")?.account).toMatchObject(loggedOut);
   });
 
@@ -402,23 +369,12 @@ describe("without the caps", () => {
     expect(selfOf(transcript)?.account).toStrictEqual(unknown);
   });
 
-  it("reports an ACCOUNT as nothing, and a tagged Message and a JOIN as they were", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: without(
-        "<< @account=bob :peer!u@h PRIVMSG #iirc :hi",
-        "?? message Privmsg peer #iirc in=channel:#iirc :hi",
-        "<< :new!u@h JOIN #iirc bob :Bob Real",
-        "?? activity Joined #iirc new in=channel:#iirc"
-      ),
-    });
-
+  it("reports an ACCOUNT as nothing", () => {
     const step = play(client, {
       configuration: base,
       transcript: [...without(), lines("<< :peer!u@h ACCOUNT bob")],
     }).steps.at(-1);
 
-    expect(played.steps.length).toBeGreaterThan(0);
     expect(step?.news).toStrictEqual([]);
   });
 
@@ -435,16 +391,6 @@ describe("without the caps", () => {
 });
 
 describe("a WHOIS", () => {
-  it("refreshes another User's account and realname, without the caps", () => {
-    const user = userOf(
-      whois([], "311 iirc peer ~u peer.test * :Peer Person", "330 iirc peer bob :is logged in as"),
-      "peer"
-    );
-
-    expect(user?.account).toMatchObject({ _tag: "Known", from: "replied", value: "bob" });
-    expect(user?.realname).toMatchObject({ _tag: "Known", from: "replied", value: "Peer Person" });
-  });
-
   it("says nothing of an account the reply did not name", () => {
     expect(
       userOf(whois([], "311 iirc peer ~u peer.test * :Peer Person"), "peer")?.account

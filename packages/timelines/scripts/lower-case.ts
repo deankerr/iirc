@@ -29,7 +29,7 @@ export const runtimeUnicode = (): string | undefined => process.versions.unicode
  * lower-cases to itself plus `delta`.
  * @returns The runs, in order.
  */
-export const generateRuns = (): readonly number[] => {
+const generateRuns = (): readonly number[] => {
   const mappings: (readonly [number, number])[] = [];
 
   for (let code = 0; code <= lastCodePoint; code += 1) {

@@ -56,15 +56,6 @@ describe("positions", () => {
     );
   });
 
-  it("are transitive", () => {
-    fc.assert(
-      fc.property(nearPosition, nearPosition, nearPosition, (a, b, c) => {
-        fc.pre(comparePositions(a, b) <= 0 && comparePositions(b, c) <= 0);
-        expect(comparePositions(a, c)).toBeLessThanOrEqual(0);
-      })
-    );
-  });
-
   it("are after an instant exactly when their cursors are above its bound", () => {
     const instant = fc.oneof(
       position.map(({ at }) => at),

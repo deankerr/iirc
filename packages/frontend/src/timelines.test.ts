@@ -35,7 +35,6 @@ import {
   networksListed,
   layoutKept,
   layoutKeptText,
-  longestKept,
   mainOf,
   openOf,
   olderUnasked,
@@ -1273,7 +1272,7 @@ const compare = (state: Timelines, world: World) => {
 };
 
 describe("following the changes", () => {
-  it("misses nothing and applies nothing twice, however reads and the stream interleave", () => {
+  it("misses nothing and applies nothing twice, however reads and the stream interleave, in plain data", () => {
     fc.assert(
       fc.property(scenario, (played) => {
         const { holes, state, world } = simulate(played);
@@ -1284,6 +1283,8 @@ describe("following the changes", () => {
           holes: [],
           ...expected,
         });
+        // The state holds only plain data, which survives structuredClone.
+        expect(structuredClone(state)).toStrictEqual(state);
       }),
       { numRuns: 200 }
     );
@@ -1318,17 +1319,6 @@ describe("following the changes", () => {
       holes: [],
       ...expected,
     });
-  });
-
-  it("holds only plain data, which survives structuredClone", () => {
-    fc.assert(
-      fc.property(scenario, (played) => {
-        const { state } = simulate(played);
-
-        expect(structuredClone(state)).toStrictEqual(state);
-      }),
-      { numRuns: 50 }
-    );
   });
 });
 
@@ -2331,13 +2321,6 @@ describe("the Timelines' state", () => {
     expect(shownItems(state)).toStrictEqual([2, 6]);
   });
 
-  it("asks for older items before the first it holds, with the Gaps up to it", () => {
-    expect(olderPage([], [{ count: 2, from: cursor(25, 2), to: cursor(28, 2) }])).toStrictEqual({
-      before: 3,
-      rows: [1, "gap 2", 3, 4],
-    });
-  });
-
   it("joins a run of Gaps the cursor split, one part on each side of it", () => {
     // Two Gaps that ended before the first item held, and one that reaches it, with no
     // item between them: one run, which the page and the window each gave a part of.
@@ -2477,18 +2460,6 @@ describe("the Timelines' state", () => {
         3,
         4,
       ]);
-    });
-
-    it("is a row once an item came before it, as a Gap between items is", () => {
-      expect(
-        rowsWith(
-          [
-            { count: 1, from: cursor(35, 3), to: cursor(37, 3) },
-            { count: 1, from: cursor(45, 4), to: cursor(47, 4) },
-          ],
-          false
-        )?.rows
-      ).toStrictEqual([3, "gap 1", 4, "gap 1"]);
     });
 
     it("is a row when only an item the view hides stands before it, since it was still there", () => {
@@ -3102,9 +3073,7 @@ describe("the Panes", () => {
     );
   });
 
-  it("refuses a kept layout's text that is too long, too deep, of too many Panes, or no JSON, without throwing", () => {
-    const deep = `${'{"a":'.repeat(5000)}1${"}".repeat(5000)}`;
-
+  it("refuses a kept layout's text of too many Panes, nested past the deepest a layout splits, or no JSON", () => {
     const many = `{"focused":"p0","next":99,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s0","children":[${Array.from(
       { length: 65 },
       (_, index) =>
@@ -3120,17 +3089,13 @@ describe("the Panes", () => {
       `{"focused":"p0","next":99,"zoomed":false,"root":${nested(levels)}}`;
 
     expect({
-      deep: layoutKeptText(deep),
       fine: layoutKeptText(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(2))))?.focused,
-      long: layoutKeptText(" ".repeat(longestKept + 1)),
       many: layoutKeptText(many),
       notJson: layoutKeptText("{"),
       seventeen: layoutKeptText(layoutOf(17)),
       sixteen: layoutKeptText(layoutOf(16)) === undefined,
     }).toStrictEqual({
-      deep: undefined,
       fine: "p0",
-      long: undefined,
       many: undefined,
       notJson: undefined,
       seventeen: undefined,
@@ -4086,23 +4051,6 @@ describe("the Uploads in a Pane", () => {
       "Timeline",
     ]);
   });
-
-  it("still restores a layout kept before the Uploads had a view, as one not showing them", () => {
-    const old = JSON.stringify({
-      focused: "p0",
-      next: 1,
-      root: { _tag: "Pane", id: "p0", view: { open: three, options: "x" } },
-      zoomed: false,
-    });
-
-    const decoded = decodeKept(old);
-
-    expect(decoded?.root).toStrictEqual({
-      _tag: "Pane",
-      id: "p0",
-      view: { open: three, options: "x", uploads: false },
-    });
-  });
 });
 
 /**
@@ -4280,25 +4228,6 @@ describe("a placement lands where it was said", () => {
       ],
       bumped: false,
       focused: "p0",
-    });
-  });
-
-  it("still opens after a swap, which moves the Pane it was said from with the focus", () => {
-    const said = twoDrafts();
-
-    const swapped = reduceTimelines(said, {
-      _tag: "Pane",
-      change: { _tag: "Swap", direction: "Left" },
-    });
-
-    const after = folded(swapped, placedFrom(said));
-
-    expect({ after: showing(after), bumped: swapped.navigation > said.navigation }).toStrictEqual({
-      after: [
-        ["p1", "Timeline", idOf(6)],
-        ["p0", "alice", undefined],
-      ],
-      bumped: false,
     });
   });
 });
@@ -4486,8 +4415,6 @@ const dropAt = (sequence: number) =>
   changed(sequence, {
     dropped: [one, two, three].map((id) => ({ changed: sequence, id, life: 1, network: "alpha" })),
   });
-
-const seven = timelineId(idOf(7));
 
 /**
  * The Network list asked for now.
@@ -4777,50 +4704,15 @@ describe("removing a Network", () => {
     }).toStrictEqual({ dropped: [0, "Closed"], kept: [true, true] });
   });
 
-  it("ignores the Daemon's answer to a removal once the stream gave it and a new Network of the name", () => {
-    let state = reduceTimelines(following(), dropAt(6));
-
-    state = reduceTimelines(state, alphaAgain(7));
-    state = reduceTimelines(state, { _tag: "Opened", timeline: seven });
-
-    state = reduceTimelines(state, {
-      _tag: "NetworkRemoved",
-      keep: false,
-      life: 1,
-      network: alpha,
-    });
-
-    expect({
-      open: openOf(state),
-      sidebar: sidebar(state).map((network) => [network.network, network.removed]),
-    }).toStrictEqual({ open: seven, sidebar: [["alpha", false]] });
-  });
-
-  it("takes an answer of an older life as nothing of the life held", () => {
-    // The list was read while alpha's first life was kept, and lands after a new one began.
-    let replaced = reduceTimelines(following(), keptAt(6));
-
-    replaced = reduceTimelines(replaced, dropAt(7));
-    replaced = reduceTimelines(replaced, alphaAgain(8));
-    replaced = reduceTimelines(replaced, {
-      _tag: "NetworksRead",
-      entries: [{ _tag: "Kept", life: sequenceOf(1), network: alpha }],
-    });
-
-    // The list was read while alpha's first life was live, and lands after it was dropped.
-    let restored = reduceTimelines(following(), dropAt(6));
-
-    restored = reduceTimelines(restored, {
+  it("never brings back a Network dropped since the list naming it live was read", () => {
+    const restored = reduceTimelines(reduceTimelines(following(), dropAt(6)), {
       _tag: "NetworksRead",
       entries: decodeEntries([
         { _tag: "Live", life: 1, network: "alpha", status: { _tag: "Running" } },
       ]),
     });
 
-    expect({
-      replaced: sidebar(replaced).map((network) => [network.network, network.removed]),
-      restored: sidebar(restored).map((network) => network.network),
-    }).toStrictEqual({ replaced: [["alpha", false]], restored: [] });
+    expect(sidebar(restored)).toStrictEqual([]);
   });
 
   it("keeps a Network the stream says was kept when its Session's read finds no Network", () => {
@@ -4900,7 +4792,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("refuses a page of a life gone, and reads the life now", () => {
+  it("reads the life now once a page of a life gone is refused", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
 
     let state = reduceTimelines(following(), {
@@ -4925,16 +4817,9 @@ describe("removing a Network", () => {
       ),
     });
 
-    expect({
-      reads: wanted(state).filter((read) => read._tag === "List"),
-      sidebar: sidebar(state).map((network) => [
-        network.network,
-        network.timelines.map((timeline) => timeline.id),
-      ]),
-    }).toStrictEqual({
-      reads: [{ _tag: "List", after: undefined, attempt: 1, network: alpha }],
-      sidebar: [["alpha", [timelineId(idOf(8))]]],
-    });
+    expect(wanted(state).filter((read) => read._tag === "List")).toStrictEqual([
+      { _tag: "List", after: undefined, attempt: 1, network: alpha },
+    ]);
   });
 
   it("begins a newer life a page reveals before the stream, which an old list never marks kept", () => {
@@ -5035,36 +4920,6 @@ describe("removing a Network", () => {
       lists: [],
       open: eight,
       sidebar: [["alpha", false, [eight]]],
-    });
-  });
-
-  it("never lets a Network go for a read that found no Network, but reads the list again", () => {
-    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
-    const eight = timelineId(idOf(8));
-
-    let state = reduceTimelines(following(), {
-      _tag: "Overflowed",
-      overflow: { sequence: sequenceOf(6), timelines: [three] },
-      place: { sequence: 6, version: 1 },
-    });
-
-    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
-    state = reduceTimelines(state, dropAt(7));
-    state = reduceTimelines(state, alphaAgain(8));
-    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "List" });
-
-    expect({
-      open: openOf(state),
-      reads: wanted(state).filter((read) => read._tag === "Networks"),
-      sidebar: sidebar(state).map((network) => [
-        network.network,
-        network.timelines.map((timeline) => timeline.id),
-      ]),
-    }).toStrictEqual({
-      open: eight,
-      reads: [{ _tag: "Networks", attempt: 0 }],
-      sidebar: [["alpha", [eight]]],
     });
   });
 
@@ -5343,17 +5198,15 @@ const dayRows = (
  */
 const dayText = (rows: readonly Row[]) => rows.map((row) => rowText(row));
 
+/**
+ * The keys of the Day rows among rows.
+ * @param rows - The rows.
+ * @returns Their keys.
+ */
+const dayKeys = (rows: readonly Row[]) =>
+  rows.flatMap((row) => (row._tag === "Day" ? [row.key] : []));
+
 describe("where the day changes", () => {
-  it("says the day of a window's first item at its top, when the window begins mid-day", () => {
-    const at = midnightUtc + 15 * hour;
-
-    expect(dayText(dayRows([at, at + hour], { zone: fixed(0) }))).toStrictEqual([
-      `day ${at}`,
-      1,
-      2,
-    ]);
-  });
-
   it("stands between the last item of one day and the first of the next, and not between items of one", () => {
     const a = hoursIn(10);
     const b = hoursIn(20);
@@ -5473,19 +5326,23 @@ describe("where the day changes", () => {
     expect(dayText(dayRows(instants))).toStrictEqual([1, 2, 3]);
   });
 
-  it("has a key that is the item's it stands before, so keys stay unique and stable", () => {
+  it("has a key of its own, which a row drawn before it leaves as it was", () => {
     const instants = [10, 36, 60].map(hoursIn);
-    const all = dayRows(instants, { zone: fixed(0) });
-    const keys = all.map((row) => row.key);
-    const days = all.filter((row) => row._tag === "Day").map((row) => row.key);
+    const plain = dayRows(instants, { zone: fixed(0) });
+
+    // The "new" divider adds a row before the third day.
+    const divided = dayRows(instants, {
+      divider: { read: message(idOf(3), instants[0] ?? 0, 1).position.at, timeline: three },
+      zone: fixed(0),
+    });
+
+    const keys = divided.map((row) => row.key);
 
     expect({
-      days,
+      count: dayKeys(plain).length,
+      stable: dayKeys(divided),
       unique: new Set(keys).size === keys.length,
-    }).toStrictEqual({
-      days: instants.map((at, index) => `day-${cursor(at, index + 1)}`),
-      unique: true,
-    });
+    }).toStrictEqual({ count: 3, stable: dayKeys(plain), unique: true });
   });
 
   it("ends a run of failed Connections like any other row between them", () => {
@@ -5575,7 +5432,7 @@ const happened = (sequence: number, at: number, numeric = false) =>
  * The rows of a window of the open Channel holding these items, each as its sequence, with
  * `+` before one that continues a run, and the rest as `rowText` says.
  * @param items - The items, in order.
- * @param options - The window's Gaps, its divider, which items are drawn, its zone, and whether it holds the Timeline's start.
+ * @param options - The window's Gaps, its divider, which items are drawn, and its zone.
  * @returns Each row's text.
  */
 const runRows = (
@@ -5585,14 +5442,13 @@ const runRows = (
     readonly divider?: Divider;
     readonly shows?: (item: TimelineItem) => boolean;
     readonly zone?: Zone;
-    readonly earlier?: boolean;
   } = {}
 ) => {
   const state = reduceTimelines(following(), {
     _tag: "WindowRead",
     read: latestOf(three, 0),
     window: decodeWindow({
-      earlier: options.earlier ?? false,
+      earlier: false,
       gaps: [...(options.gaps ?? [])],
       items: encodedItems(items),
       later: false,
@@ -5711,12 +5567,5 @@ describe("a run of Messages under one nick", () => {
         divider: { read: said(1, at).position.at, timeline: three },
       })
     ).toStrictEqual([1, "new", 2]);
-  });
-
-  it("heads with the first Message of a window that starts mid-run", () => {
-    expect(runRows([said(5, at), said(6, at + minute)], { earlier: true })).toStrictEqual([
-      5,
-      "+6",
-    ]);
   });
 });

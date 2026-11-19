@@ -146,7 +146,7 @@ Preludes write transcript text, and commit to how a Client registers. The Client
 
 ## The laws
 
-Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps, usually with `registered(configuration, { offered: caps })`. The laws replay, so `requested` need not be exact there. Each runs `replay` for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed. Every Knowledge and Inspection a law reads is copied, or written as canonical text, the moment it is obtained, so a Client that hands back one shared view cannot make two runs compare equal.
+Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps, usually with `registered(configuration, { offered: caps })`. The laws feed the transcript as `replay` does, so `requested` need not be exact there. Each runs it for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed. Only `replays` checks exact replay: the other three fold each run unchecked and compare what the runs did, so a suite runs `replays` beside them. Every Knowledge and Inspection a law reads is copied, or written as canonical text, the moment it is obtained, so a Client that hands back one shared view cannot make two runs compare equal.
 
 ```ts
 const subject = {

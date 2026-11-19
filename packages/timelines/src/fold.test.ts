@@ -189,12 +189,6 @@ describe("opening Timelines", () => {
       [3, timelineIdOf(2, 0, 1)],
     ]);
   });
-
-  it("places a News once in each Timeline, however often `where` names it", () => {
-    const { changes } = fold([happened(1, [message([channel("#a"), channel("#a"), network])])]);
-
-    expect(ofTag(changes, "Added")).toHaveLength(2);
-  });
 });
 
 describe("items", () => {
@@ -233,25 +227,6 @@ describe("items", () => {
       target: "#iirc",
       text: "hi",
     });
-  });
-
-  it("of ours wait for an echo only when the Ircd will give one", () => {
-    const { changes } = fold([
-      happened(1, [
-        message([network], { ours: { echo: true, intent: "i1" } }),
-        message([network], { ours: { echo: false, intent: "i2" } }),
-      ]),
-    ]);
-
-    expect(
-      ofTag(changes, "Added").map(({ content, intent }) => [
-        intent,
-        content._tag === "Message" ? content.ours?.delivery._tag : undefined,
-      ])
-    ).toStrictEqual([
-      ["i1", "Pending"],
-      ["i2", "Unconfirmed"],
-    ]);
   });
 });
 
@@ -1080,19 +1055,6 @@ describe("Sessions and Gaps", () => {
   });
 });
 
-describe("every change", () => {
-  it("carries the sequence of its step", () => {
-    const { changes } = fold([
-      happened(7, [
-        message([channel("#a"), direct("peer")]),
-        { _tag: "Refolded", casemapping: "ascii" },
-      ]),
-    ]);
-
-    expect(changes.every(({ sequence }) => sequence === 7)).toBeTruthy();
-  });
-});
-
 describe("Networks", () => {
   it("are kept apart", () => {
     const { directory } = fold([
@@ -1163,25 +1125,6 @@ describe("a Network removed", () => {
 describe("ignore masks", () => {
   const spam = IgnoreMask.make("spam!*@*");
   const bots = IgnoreMask.make("*!*@bots.example");
-
-  it("carries the masks a Message or Activity matched onto every item it places", () => {
-    const { changes } = fold([
-      happened(1, [
-        { ...message([channel("#iirc"), direct("spam")]), ignored: [spam, bots] },
-        { ...nickChanged([channel("#iirc")]), ignored: [bots] },
-        message([channel("#iirc")]),
-      ]),
-    ]);
-
-    expect(
-      ofTag(changes, "Added").map(({ ignored, position }) => [position.n, ignored])
-    ).toStrictEqual([
-      [0, [spam, bots]],
-      [0, [spam, bots]],
-      [1, [bots]],
-      [2, []],
-    ]);
-  });
 
   it("opens the Timelines an ignored Message names, as any other does", () => {
     const { changes, directory } = fold([

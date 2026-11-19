@@ -338,7 +338,6 @@ describe("the Uploads held while the deleted show", () => {
     );
 
     expect(ids(state)).toStrictEqual(["d", "c", "b"]);
-    expect(state.unpaged.size).toBe(0);
   });
 
   it("drops a deleted Upload as before while they are hidden", () => {

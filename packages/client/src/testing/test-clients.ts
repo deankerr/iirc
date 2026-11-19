@@ -621,10 +621,7 @@ export const toy = (flaws: Flaws = {}): Client<ToyState> => ({
   step: step(flaws),
 });
 
-/** The toy Client with no flaws, for the fresh-process check. */
-export const toyClient = toy();
-
-/** A scripted Client, for the fresh-process check. */
+/** A scripted Client, whose Inspection a test can wrap. */
 export const scriptedClient = scripted([
   {
     outputs: [

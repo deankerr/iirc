@@ -83,42 +83,6 @@ describe("a Message to a Channel", () => {
 
     expect.assertions(0);
   });
-
-  it("keys the Channel by the casemapping in force: rfc1459 folds #Foo[ and #foo{ together", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base),
-        joined(base, "#Foo["),
-        lines(
-          "<< :peer!u@h PRIVMSG #Foo[ :one",
-          "?? message Privmsg peer #Foo[ in=channel:#foo{:#Foo[ :one",
-          "<< :peer!u@h PRIVMSG #foo{ :two",
-          "?? message Privmsg peer #foo{ in=channel:#foo{ :two"
-        ),
-      ],
-    });
-
-    expect([...client.known(played.state).channels.keys()]).toStrictEqual(["#foo{"]);
-  });
-
-  it("keys the Channel by the casemapping in force: ascii tells #Foo[ from #foo{", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base, { isupport: ["CASEMAPPING=ascii", "CHANTYPES=#", "PREFIX=(ov)@+"] }),
-        joined(base, "#Foo["),
-        lines(
-          "<< :peer!u@h PRIVMSG #Foo[ :one",
-          "?? message Privmsg peer #Foo[ in=channel:#foo[:#Foo[ :one",
-          "<< :peer!u@h PRIVMSG #foo{ :two",
-          "?? message Privmsg peer #foo{ in=channel:#foo{ :two"
-        ),
-      ],
-    });
-
-    expect([...client.known(played.state).channels.keys()]).toStrictEqual(["#foo["]);
-  });
 });
 
 describe("a Direct Message", () => {

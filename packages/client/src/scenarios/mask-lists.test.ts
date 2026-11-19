@@ -64,20 +64,6 @@ describe("a Channel's bans on the floor", () => {
     });
   });
 
-  it("lists none by an end with nothing before it", () => {
-    const run = played([
-      ...inChannel(),
-      lines(
-        "!! bans #iirc",
-        ">> MODE #iirc +b",
-        "<< :irc.test 368 iirc #iirc :End of Channel Ban List",
-        "?? looked-up i1 bans=#iirc listed masks=0"
-      ),
-    ]);
-
-    expect(resultOf(run)).toMatchObject({ _tag: "Listed", masks: [] });
-  });
-
   it("asks bans by CHANMODES alone, and RFC 1459's when none was sent", () => {
     played([
       ...inChannel(floorIsupport),

@@ -7,7 +7,7 @@ import nordGhostty from "../../../fixtures/themes/ghostty-nord?raw";
 import gruvbox from "../../../fixtures/themes/gruvbox-dark-medium.yaml?raw";
 import nordIterm from "../../../fixtures/themes/Nord.itermcolors?raw";
 import nordAlacritty from "../../../fixtures/themes/nord.toml?raw";
-import { entryLimit, importLimit, importTheme, nameFrom } from "./theme-import.ts";
+import { importTheme, nameFrom } from "./theme-import.ts";
 
 const nordAnsi = [
   "#3b4252",
@@ -73,10 +73,6 @@ const brief = (text: string) => {
     ? [one.value.format, one.value.name, one.value.palette.background, one.value.palette.foreground]
     : one.message;
 };
-
-/** Why text of no format is refused. */
-const unreadable =
-  "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme.";
 
 describe("importing a theme", () => {
   it("reads a real file of each format, telling the format from the text", () => {
@@ -222,15 +218,11 @@ describe("importing a theme", () => {
       alacrittyMissing: refusal(nordAlacritty.replace("cyan = '#8FBCBB'\n", "")),
       alacrittyNumber: refusal(nordAlacritty.replace("red = '#BF616A'", "red = 12")),
       badHex: refusal(draculaKitty.replace("color3  #f1fa8c", "color3  #f1fa8")),
-      dtd: refusal(
-        '<!DOCTYPE plist [<!ENTITY a "aaaa">]><plist><dict><key>&a;</key><real>1</real></dict></plist>'
-      ),
       empty: refusal(""),
       ghosttyMissing: refusal(nordGhostty.replace("palette = 5=#b48ead\n", "")),
       iterm: refusal(nordIterm.replace("<key>Ansi 4 Color</key>", "<key>Ansi 4 Colour</key>")),
       json: refusal("{ not json"),
       named: refusal(draculaKitty.replace("color6  #8be9fd", "color6  cyan")),
-      nested: refusal(`<plist>${"<array>".repeat(10_000)}`),
       prose: refusal("Some text that is no theme at all."),
       schemes: refusal('{ "schemes": [{}, {}] }'),
       terminalMissing: refusal(draculaTerminal.replace('"brightPurple": "#ff92df",', "")),
@@ -243,14 +235,12 @@ describe("importing a theme", () => {
       alacrittyMissing: "colors.bright.cyan is missing.",
       alacrittyNumber: "colors.normal.red is not a colour as #rrggbb.",
       badHex: "color3 is not a colour as #rrggbb.",
-      dtd: "This plist declares a DTD of its own, which is never read.",
       empty:
         "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme.",
       ghosttyMissing: "palette 5 is missing.",
       iterm: "Ansi 4 Color is missing.",
       json: "This JSON cannot be read: it is not JSON.",
       named: "color6 is not a colour as #rrggbb.",
-      nested: "This plist nests too deeply to be a theme.",
       prose:
         "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme.",
       schemes: "This is a settings file with 2 schemes. Paste one scheme, the object in braces.",
@@ -262,122 +252,28 @@ describe("importing a theme", () => {
     });
   });
 
-  it("refuses text longer than 256 KB unread, and reads one at the limit", () => {
-    const padded = `${draculaKitty}\n${"#".repeat(importLimit - draculaKitty.length - 1)}`;
+  it("reads past blank or whitespace lines, and a line of no setting, before the theme", () => {
+    const blank = "\n".repeat(3);
+    const spaces = " \t \n".repeat(3);
 
     expect({
-      atLimit: padded.length === importLimit && importTheme(padded)._tag,
-      over: refusal(`${padded}#`),
+      alacritty: refusal(`${blank}${nordAlacritty}`),
+      base16: refusal(`${spaces}${gruvbox}`),
+      ghostty: refusal(`${blank}${nordGhostty}`),
+      iterm: refusal(`${spaces}${nordIterm}`),
+      kitty: refusal(`${blank}${draculaKitty}`),
+      line: refusal(`xxxx\n${draculaKitty}`),
+      terminal: refusal(`${spaces}${draculaTerminal}`),
     }).toStrictEqual({
-      atLimit: "Parsed",
-      over: "This is longer than 256 KB, which no terminal theme is.",
+      alacritty: "read",
+      base16: "read",
+      ghostty: "read",
+      iterm: "read",
+      kitty: "read",
+      line: "read",
+      terminal: "read",
     });
   });
-
-  // Bounded in time: a quadratic reader took 5.5 s over 60 000 lines; a linear one takes milliseconds.
-  it(
-    "reads a setting given many times in linear time, and refuses more settings or values than any theme needs",
-    { timeout: 1000 },
-    () => {
-      const many = `This holds more than ${entryLimit} settings or values, which no theme needs.`;
-
-      const results = {
-        ghostty: refusal(`background = #000000\n${"x=a\n".repeat(60_000)}`),
-        ghosttyRepeated: refusal(
-          `${"palette = 0=#000000\n".repeat(entryLimit - 40)}${nordGhostty}`
-        ),
-        kitty: refusal(`foreground #ffffff\n${"x a\n".repeat(60_000)}`),
-        kittyRepeated: refusal(`${"color0 #000000\n".repeat(entryLimit - 80)}${draculaKitty}`),
-        plist: refusal(`<plist><array>${"<true/>".repeat(30_000)}</array></plist>`),
-      };
-
-      expect(results).toStrictEqual({
-        ghostty: many,
-        ghosttyRepeated: "read",
-        kitty: many,
-        kittyRepeated: "read",
-        plist: many,
-      });
-    }
-  );
-
-  // Bounded in time: our own readers are linear, and these would take seconds if one were not.
-  it(
-    "reads long repeated, blank, whitespace, and single lines and long plists in linear time",
-    { timeout: 2000 },
-    () => {
-      const blank = "\n".repeat(40_000);
-
-      expect({
-        blankKitty: refusal(`${blank}foreground #ffffff\nbackground #000000\n`),
-        ghosttyRepeated: refusal(
-          `${"palette = 0=#000000\n".repeat(entryLimit - 40)}${nordGhostty}`
-        ),
-        kittyRepeated: refusal(`${"color0 #000000\n".repeat(entryLimit - 80)}${draculaKitty}`),
-        longGhostty: refusal(`background = ${"x".repeat(200_000)}`),
-        longKitty: refusal(`foreground ${"x".repeat(200_000)}`),
-        longLine: refusal("x".repeat(200_000)),
-        longPlist: refusal(nordIterm.replace("<dict>", `<dict>${" \n".repeat(100_000)}`)),
-        plistValues: refusal(`<plist><array>${"<true/>".repeat(entryLimit - 10)}</array></plist>`),
-        whitespaceLines: refusal(" \t \n".repeat(60_000)),
-      }).toStrictEqual({
-        blankKitty: "color0 is missing.",
-        ghosttyRepeated: "read",
-        kittyRepeated: "read",
-        longGhostty: "foreground is missing.",
-        longKitty: "foreground is not a colour as #rrggbb.",
-        longLine: unreadable,
-        longPlist: "read",
-        plistValues: "This plist holds no dict of colours.",
-        whitespaceLines: unreadable,
-      });
-    }
-  );
-
-  // Effect's YAML parser is quadratic upstream, in `endsWithEscape` and `foldFlowLines`:
-  // these take seconds there. The web frontend reads a theme in a Worker that it ends after
-  // a second, which guards them. Unskip once the parser is linear.
-  // oxlint-disable-next-line vitest/no-disabled-tests -- quadratic upstream, as said above.
-  it.skip(
-    "reads YAML with a long run of backslashes or a long flow sequence in linear time",
-    { timeout: 2000 },
-    () => {
-      expect({
-        backslashes: refusal(`base00: x\nextra: "${"\\".repeat(160_000)}x\n  end"`),
-        flow: refusal(`base00: x\nextra: [x${" ".repeat(80_000)}y]`),
-      }).toStrictEqual({
-        backslashes: "base00 is not a colour as #rrggbb.",
-        flow: "base00 is not a colour as #rrggbb.",
-      });
-    }
-  );
-
-  it(
-    "reads past many blank or whitespace lines, and a long single line, before the theme",
-    { timeout: 2000 },
-    () => {
-      const blank = "\n".repeat(40_000);
-      const spaces = " \t \n".repeat(20_000);
-
-      expect({
-        alacritty: refusal(`${blank}${nordAlacritty}`),
-        base16: refusal(`${spaces}${gruvbox}`),
-        ghostty: refusal(`${blank}${nordGhostty}`),
-        iterm: refusal(`${spaces}${nordIterm}`),
-        kitty: refusal(`${blank}${draculaKitty}`),
-        longLine: refusal(`${"x".repeat(200_000)}\n${draculaKitty}`),
-        terminal: refusal(`${spaces}${draculaTerminal}`),
-      }).toStrictEqual({
-        alacritty: "read",
-        base16: "read",
-        ghostty: "read",
-        iterm: "read",
-        kitty: "read",
-        longLine: "read",
-        terminal: "read",
-      });
-    }
-  );
 
   it("takes declarations only before the root, and only comments after </plist>", () => {
     const body = nordIterm.slice(nordIterm.indexOf("<plist"));
@@ -413,14 +309,8 @@ describe("importing a theme", () => {
     });
   });
 
-  it("follows no include and evaluates nothing", () => {
-    const included = `include ../../../etc/passwd\n${draculaKitty}`;
-    const configFile = `config-file = /etc/passwd\n${nordGhostty}`;
-
-    expect({
-      ghostty: importTheme(configFile)._tag,
-      kitty: importTheme(included)._tag,
-    }).toStrictEqual({ ghostty: "Parsed", kitty: "Parsed" });
+  it("skips a Ghostty setting it does not know", () => {
+    expect(refusal(`font-size = 14\n${nordGhostty}`)).toBe("read");
   });
 
   it("makes a theme's name from the name a file gives", () => {

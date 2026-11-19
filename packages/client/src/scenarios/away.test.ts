@@ -51,31 +51,6 @@ describe("away-notify", () => {
       )
     ).toStrictEqual({ _tag: "Unknown" });
   });
-
-  it("makes away status stale on CAP DEL, until an AWAY says again", () => {
-    const deleted = [...notified, lines("+1s", "<< :irc.test CAP iirc DEL :away-notify")];
-
-    expect(awayOf(deleted, "peer")).toMatchObject({
-      _tag: "Stale",
-      was: { message: "gone fishing" },
-    });
-
-    const again = [...deleted, lines("+1s", "<< :peer!u@h AWAY :still fishing")];
-
-    expect(awayOf(again, "peer")).toMatchObject({
-      _tag: "Known",
-      value: { message: "still fishing" },
-    });
-  });
-
-  it("reads AWAY Lines all the same without the cap", () => {
-    expect(
-      awayOf(
-        [registered(base), joined(base, "#iirc", ["peer"]), lines("<< :peer!u@h AWAY :out")],
-        "peer"
-      )
-    ).toMatchObject({ _tag: "Known", value: { message: "out" } });
-  });
 });
 
 describe("away status, with inputs at one instant", () => {

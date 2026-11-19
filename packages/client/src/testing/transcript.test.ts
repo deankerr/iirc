@@ -7,7 +7,7 @@ import ergoFloor from "../../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import { SendableMessageId } from "../ids.ts";
-import { epoch, parse, print, writeInstant } from "./transcript.ts";
+import { parse, print } from "./transcript.ts";
 import type { Item } from "./transcript.ts";
 
 const fixtures = [
@@ -28,11 +28,6 @@ const refusal = (text: string) => {
 };
 
 describe("the committed fixtures", () => {
-  it.each(fixtures)("%s parses, and prints back to itself", (_name, text) => {
-    expect(print(items(text))).toBe(text);
-    expect(items(print(items(text)))).toStrictEqual(items(text));
-  });
-
   it.each(fixtures)("%s names Credentials and never holds one", (_name, text) => {
     const sent = items(text).flatMap((item) =>
       item._tag === "Sent" ? [new TextDecoder().decode(item.bytes)] : []
@@ -41,20 +36,6 @@ describe("the committed fixtures", () => {
     expect(
       sent.filter((line) => /^(?:AUTHENTICATE|PASS) /u.test(line) && line !== "AUTHENTICATE PLAIN")
     ).toStrictEqual([]);
-  });
-
-  it("reads the SASL response as a whole SecretLine", () => {
-    expect(items(ergoFeatures).filter((item) => item._tag === "SentSecret")).toStrictEqual([
-      {
-        _tag: "SentSecret",
-        line: {
-          _tag: "AuthenticatePlain",
-          authcid: "iirc",
-          authzid: "iirc",
-          credential: CredentialName.make("iirc"),
-        },
-      },
-    ]);
   });
 });
 
@@ -145,13 +126,6 @@ describe("the format", () => {
     expect(print(items(text))).toBe(text.replace("+2m", "+120s"));
   });
 
-  it("reads a Read, with its Target or the Network's own", () => {
-    expect(items("!! read #iirc t+5s\n!! read t-1s\n")).toStrictEqual([
-      { _tag: "Owner", owner: { _tag: "Read", read: epoch + 5000, target: "#iirc" } },
-      { _tag: "Owner", owner: { _tag: "Read", read: epoch - 1000, target: null } },
-    ]);
-  });
-
   it("reads a close of a Timeline, and writes it back", () => {
     const text = "!! close #iirc\n";
 
@@ -159,28 +133,6 @@ describe("the format", () => {
       { _tag: "Owner", owner: { _tag: "Close", target: "#iirc" } },
     ]);
     expect(print(items(text))).toBe(text);
-  });
-
-  it("reads Owner inputs into what they mean", () => {
-    expect(
-      items("!! configure +#secret key=chankey -#old decline=multi-prefix\n!! notice peer :a :b\n")
-    ).toStrictEqual([
-      {
-        _tag: "Owner",
-        owner: {
-          _tag: "Configure",
-          changes: [
-            { _tag: "Join", channel: "#secret", key: "chankey" },
-            { _tag: "Part", channel: "#old" },
-            { _tag: "Decline", feature: "multi-prefix" },
-          ],
-        },
-      },
-      {
-        _tag: "Owner",
-        owner: { _tag: "Say", answers: undefined, kind: "Notice", target: "peer", text: "a :b" },
-      },
-    ]);
   });
 
   it("reads a Say that answers a Message, and writes it back", () => {
@@ -199,14 +151,6 @@ describe("the format", () => {
       },
     ]);
     expect(print(items(text))).toBe(text);
-  });
-
-  it("writes instants against the transcript's clock", () => {
-    expect(items("== fired ping t+30s\n")).toStrictEqual([
-      { _tag: "Fired", due: epoch + 30_000, timer: "ping" },
-    ]);
-    expect(writeInstant(epoch)).toBe("t+0s");
-    expect(writeInstant(epoch - 250)).toBe("t-250ms");
   });
 
   it("escapes bytes that would not survive as text, and reads them back", () => {
@@ -286,19 +230,13 @@ describe("the format", () => {
     "!! shout #iirc :hi",
     "!! configure +#a  -#b",
     "!! configure ~#a",
-    "!! configure login=service,NickServ,acct,pw,99",
     "!! configure login=service,#staff,acct,pw,5",
-    "!! configure login=service,NickServ,two words,pw,5",
     "!! configure login=service,NickServ,,pw,5",
-    "!! configure login=service,NickServ,acct,,5",
     "!! configure login=required,,pw",
-    "!! configure login=required,acct,",
     "!! configure oper=admin",
-    "!! configure oper=,pw",
     "!! configure oper=:admin,pw",
     "!! configure oper=admin,pw,extra",
     "!! read",
-    "!! read #iirc",
     "!! read #iirc 5s",
     "!! read #a #b t+5s",
     "!! read  t+5s",

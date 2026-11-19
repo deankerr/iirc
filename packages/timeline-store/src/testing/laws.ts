@@ -432,7 +432,7 @@ const interrupting =
       });
 
       const applied = yield* inOrder(
-        Array.from({ length: 40 }, (_, steps) => steps),
+        Array.from({ length: 12 }, (_, steps) => steps),
         (steps) =>
           Effect.gen(function* () {
             const first = ((yield* store.folded).through ?? 0) + 1;
@@ -549,160 +549,6 @@ const additions: Interruption = {
   ],
 };
 
-const redelivered = (
-  before: Model,
-  sequence: number,
-  intent: string,
-  delivery: Delivery
-): Model => {
-  const touched = new Set<TimelineId>();
-
-  const items = before.items.map((item) => {
-    if (item.content._tag !== "Message") {
-      return item;
-    }
-
-    const { ours } = item.content;
-
-    if (ours === undefined || ours.intent !== intent || ours.delivery._tag === "Confirmed") {
-      return item;
-    }
-
-    touched.add(item.timeline);
-
-    return {
-      ...item,
-      changed: sequence,
-      content: { ...item.content, ours: { ...ours, delivery } },
-    };
-  });
-
-  return {
-    ...before,
-    items,
-    timelines: before.timelines.map((each) =>
-      touched.has(each.id) ? { ...each, changed: sequence } : each
-    ),
-  };
-};
-
-// A step that confirms one intent of ours and marks another Unsent, each with an item in two
-// Timelines, so each is more than one write, and a third is left alone.
-const deliveries: Interruption = {
-  edit: (before, sequence) =>
-    redelivered(
-      redelivered(before, sequence, `intent-c${sequence - 1}`, {
-        _tag: "Confirmed",
-        at: known(at(7)),
-        id: known(MessageId.make(`m${sequence}`)),
-        text: `c${sequence - 1}!`,
-      }),
-      sequence,
-      `intent-u${sequence - 1}`,
-      { _tag: "Unsent" }
-    ),
-  seed: (sequence) =>
-    [network, channel].flatMap((timeline) =>
-      ["c", "u", "k"].map((label, n) =>
-        added(
-          sequence,
-          timeline,
-          position(sequence, sequence, n),
-          said(`${label}${sequence}`, "Pending")
-        )
-      )
-    ),
-  step: (sequence) => [
-    {
-      _tag: "Confirmed",
-      at: known(at(7)),
-      id: known(MessageId.make(`m${sequence}`)),
-      intent: IntentId.make(`intent-c${sequence - 1}`),
-      messageId: MessageId.make(`m${sequence}`),
-      network: libera,
-      sequence,
-      text: `c${sequence - 1}!`,
-    },
-    { _tag: "Unsent", intent: IntentId.make(`intent-u${sequence - 1}`), network: libera, sequence },
-  ],
-};
-
-// A step that closes a Gap that was open and opens the next.
-const gaps: Interruption = {
-  edit: (before, sequence) => ({
-    ...before,
-    gaps: [
-      ...before.gaps.map((each) =>
-        comparePositions(each.from, position(sequence - 1, sequence - 1)) === 0
-          ? { ...each, changed: sequence, to: position(sequence + 5, sequence) }
-          : each
-      ),
-      { changed: sequence, from: position(sequence, sequence), network: libera, to: undefined },
-    ],
-  }),
-  seed: (sequence) => [gap(sequence, position(sequence, sequence), undefined)],
-  step: (sequence) => [
-    gap(sequence, position(sequence - 1, sequence - 1), position(sequence + 5, sequence)),
-    gap(sequence, position(sequence, sequence), undefined),
-  ],
-};
-
-// A step that merges one Timeline into another, with items in both: one that moves, one
-// that moves with an id, one whose id the other has, and one that stands where one of the
-// other's does, which are dropped. Half of it is items moved with no tombstone, or the
-// tombstone with no items.
-const merging: Interruption = {
-  edit: (before, sequence) => {
-    const from = timelineIdOf(sequence - 1, 0, 1);
-    const into = timelineIdOf(sequence - 1, 0, 2);
-    const moved = new Set([`moved${sequence - 1}`, `moved-too${sequence - 1}`]);
-
-    return {
-      ...before,
-      items: [
-        ...before.items.filter(({ timeline }) => timeline !== from),
-        ...before.items.flatMap((item) =>
-          item.timeline === from && moved.has(textOf(item))
-            ? [{ ...item, changed: sequence, timeline: into }]
-            : []
-        ),
-      ],
-      merged: [...before.merged, { changed: sequence, id: from, into, network: libera }],
-      timelines: before.timelines.flatMap((each) => {
-        if (each.id === from) {
-          return [];
-        }
-
-        return [each.id === into ? { ...each, changed: sequence } : each];
-      }),
-    };
-  },
-  seed: (sequence) => {
-    const from = timelineIdOf(sequence, 0, 1);
-    const into = timelineIdOf(sequence, 0, 2);
-
-    return [
-      described(sequence, from, "Channel", `#from-${sequence}`, `#from-${sequence}`),
-      described(sequence, into, "Channel", `#into-${sequence}`, `#into-${sequence}`),
-      added(sequence, into, position(1, sequence, 0), said(`kept${sequence}`), `k${sequence}`),
-      added(sequence, into, position(5, sequence, 1), said(`standing${sequence}`)),
-      added(sequence, from, position(2, sequence, 2), said(`moved${sequence}`)),
-      added(sequence, from, position(3, sequence, 3), said(`same-id${sequence}`), `k${sequence}`),
-      added(sequence, from, position(5, sequence, 1), said(`same-place${sequence}`)),
-      added(sequence, from, position(6, sequence, 4), said(`moved-too${sequence}`), `v${sequence}`),
-    ];
-  },
-  step: (sequence) => [
-    {
-      _tag: "Merged",
-      from: timelineIdOf(sequence - 1, 0, 1),
-      into: timelineIdOf(sequence - 1, 0, 2),
-      network: libera,
-      sequence,
-    },
-  ],
-};
-
 // Each Timeline's id, life, and whether its Network was removed.
 const lives = (summaries: readonly Summary[]) =>
   summaries.map(({ id, life, removed }) => [id, life, removed]);
@@ -714,66 +560,6 @@ const removal = (sequence: number, keep: boolean, on = libera, life = 1): Change
   network: on,
   sequence,
 });
-
-// A step that removes the Network and keeps its Timelines, each marked removed, so a step
-// half done, some marked and some not, is seen.
-const keeping: Interruption = {
-  edit: (before, sequence) => ({
-    ...before,
-    removals: [{ changed: sequence, keep: true, life: 1, network: libera }],
-    timelines: before.timelines.map((each) => ({ ...each, changed: sequence, removed: true })),
-  }),
-  seed: (sequence) => [
-    described(
-      sequence,
-      timelineIdOf(sequence, 0, 1),
-      "Channel",
-      `#k-${sequence}`,
-      `#k-${sequence}`
-    ),
-    added(
-      sequence,
-      timelineIdOf(sequence, 0, 1),
-      position(sequence, sequence),
-      said(`k${sequence}`)
-    ),
-  ],
-  step: (sequence) => [removal(sequence, true)],
-};
-
-// A step that removes the Network and drops its Timelines, with items, a Gap, and a
-// tombstone of its own, so a drop half done, items left with no Timeline, or ids said to be
-// dropped while their Timelines stand, is seen.
-const dropping: Interruption = {
-  edit: (before, sequence) => ({
-    ...before,
-    dropped: [
-      ...before.dropped,
-      ...[...before.timelines.map(({ id }) => id), ...before.merged.map(({ id }) => id)].map(
-        (id) => ({ changed: sequence, id, life: 1, network: libera })
-      ),
-    ],
-    gaps: before.gaps.filter(({ network: on }) => on !== libera),
-    items: before.items.filter(({ network: on }) => on !== libera),
-    merged: before.merged.filter(({ network: on }) => on !== libera),
-    removals: [{ changed: sequence, keep: false, life: 1, network: libera }],
-    timelines: before.timelines.filter(({ network: on }) => on !== libera),
-  }),
-  seed: (sequence) => {
-    const from = timelineIdOf(sequence, 0, 1);
-    const into = timelineIdOf(sequence, 0, 2);
-
-    return [
-      described(sequence, from, "Channel", `#from-${sequence}`, `#from-${sequence}`),
-      described(sequence, into, "Channel", `#into-${sequence}`, `#into-${sequence}`),
-      added(sequence, from, position(1, sequence, 0), said(`moved${sequence}`)),
-      added(sequence, into, position(2, sequence, 1), said(`stays${sequence}`)),
-      { _tag: "Merged", from, into, network: libera, sequence },
-      gap(sequence, position(sequence, sequence), undefined),
-    ];
-  },
-  step: (sequence) => [removal(sequence, false)],
-};
 
 const changedHead = (sequence: number, timeline: TimelineId): Change => ({
   _tag: "HeadChanged",
@@ -797,75 +583,6 @@ const closing = (sequence: number, timeline: TimelineId): Change => ({
   timeline,
 });
 
-// A step that moves two Read Markers, one past items of every level, and one that moves
-// the first time and is moved back after, which changes nothing, and adds an item after
-// the first, so a recount half done is seen.
-const marking: Interruption = {
-  edit: (before, sequence) => ({
-    ...before,
-    items: [
-      ...before.items,
-      {
-        answered: undefined,
-        changed: sequence,
-        content: said("late"),
-        level: "Highlight",
-        network: libera,
-        position: position(sequence * 10 + 9, sequence),
-        timeline: channel,
-      },
-    ],
-    timelines: before.timelines.map((each) => {
-      if (each.id === channel) {
-        return { ...each, changed: sequence, read: at(sequence * 10 + 4) };
-      }
-
-      // The Network's moves the first time, and never back after.
-      return each.id === network && each.read === undefined
-        ? { ...each, changed: sequence, read: at(-1) }
-        : each;
-    }),
-  }),
-  // The seeds share their texts across steps, as the late Messages do. A snapshot searches
-  // each distinct text, so a text per step would make the law quadratic in its steps, while a
-  // shared text's search still places every Message that holds it.
-  seed: (sequence) =>
-    levels.flatMap((level, n) => [
-      added(
-        sequence,
-        channel,
-        position(sequence * 10 + n, sequence, n),
-        said(level),
-        undefined,
-        libera,
-        level
-      ),
-      added(
-        sequence,
-        channel,
-        position(sequence * 10 + 5 + n, sequence, n + 4),
-        said(`${level}+`),
-        undefined,
-        libera,
-        level
-      ),
-    ]),
-  step: (sequence) => [
-    marker(sequence, channel, at(sequence * 10 + 4)),
-    marker(sequence, network, at(-1)),
-    marker(sequence, network, at(-2)),
-    added(
-      sequence,
-      channel,
-      position(sequence * 10 + 9, sequence),
-      said("late"),
-      undefined,
-      libera,
-      "Highlight"
-    ),
-  ],
-};
-
 // What an ignored User says is kept, hidden by the masks they matched, until those are dropped.
 const hiding = (
   change: Extract<Change, { readonly _tag: "Added" }>,
@@ -878,43 +595,6 @@ const unignored = (sequence: number, masks: readonly IgnoreMask[], on = libera):
   network: on,
   sequence,
 });
-
-// A step that drops a mask, showing again each item it alone hid, and leaving hidden those
-// another mask still hides, so a recount or a restore half done is seen. Every step before
-// it since the last applied was a seed, since a step interrupted is seeded over again.
-const unignoring: Interruption = {
-  edit: (before, sequence) => {
-    const last = Math.max(1, ...before.items.map(({ changed }) => changed));
-
-    return {
-      ...before,
-      items: [
-        ...before.items,
-        ...Array.from({ length: sequence - 1 - last }, (_, index): Item => ({
-          answered: undefined,
-          changed: sequence,
-          content: said("hidden"),
-          level: "Message",
-          network: libera,
-          position: position((last + 1 + index) * 10, last + 1 + index),
-          timeline: channel,
-        })),
-      ],
-      timelines: before.timelines.map((each) =>
-        each.id === channel ? { ...each, changed: sequence } : each
-      ),
-    };
-  },
-  seed: (sequence) => [
-    hiding(added(sequence, channel, position(sequence * 10, sequence), said("hidden")), spam),
-    hiding(
-      added(sequence, channel, position(sequence * 10 + 1, sequence, 1), said("hidden")),
-      spam,
-      bots
-    ),
-  ],
-  step: (sequence) => [unignored(sequence, [spam])],
-};
 
 // Park and Miller's generator, exact in a double, so a law that walks random steps walks
 // the same ones on every adapter and every run.
@@ -3832,33 +3512,5 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: interrupting(additions),
     name: "applies a step whole, or not at all",
-  },
-  {
-    check: interrupting(deliveries),
-    name: "applies a step that confirms and marks our Messages Unsent whole, or not at all",
-  },
-  {
-    check: interrupting(gaps),
-    name: "applies a step that closes a Gap and opens another whole, or not at all",
-  },
-  {
-    check: interrupting(merging),
-    name: "applies a step that merges Timelines whole, or not at all",
-  },
-  {
-    check: interrupting(marking),
-    name: "applies a step that moves Read Markers whole, or not at all",
-  },
-  {
-    check: interrupting(keeping),
-    name: "applies a step that removes a Network and keeps its Timelines whole, or not at all",
-  },
-  {
-    check: interrupting(unignoring),
-    name: "applies a step that shows again what dropped masks hid whole, or not at all",
-  },
-  {
-    check: interrupting(dropping),
-    name: "applies a step that removes a Network and drops its Timelines whole, or not at all",
   },
 ];

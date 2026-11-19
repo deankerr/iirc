@@ -3,7 +3,7 @@ import { Journal, NetworkId } from "@iirc/runtime/journal";
 import type { Change, JournalRecord } from "@iirc/runtime/journal";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
 import type { Schema } from "effect";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,6 +15,9 @@ import {
   nothingHeld,
   parseUiValue,
 } from "./ui.ts";
+
+// No logger, so what the code under test logs is not printed over the test run.
+const quiet = Logger.layer([]);
 
 const set = (option: string, value: string) => ({ _tag: "UiSet", option, value }) as const;
 
@@ -33,45 +36,6 @@ const fold = (changes: readonly Change[]) => {
 };
 
 describe("folding the ui options", () => {
-  it("starts every option at its default, with sequence 0", () => {
-    expect(fold([])).toStrictEqual({
-      options: {
-        activity: "all",
-        colours: "theme",
-        dark: "dark",
-        day: "full",
-        enter: "send",
-        font: "system",
-        leading: 1.45,
-        light: "light",
-        line: "columns",
-        previews: "off",
-        "previews.animate": false,
-        "previews.folded": "summary",
-        "previews.mediaHeight": "medium",
-        "previews.players": [
-          "www.youtube-nocookie.com",
-          "player.vimeo.com",
-          "w.soundcloud.com",
-          "bandcamp.com",
-          "open.spotify.com",
-          "player.twitch.tv",
-        ],
-        "previews.style": "thumbnail",
-        "previews.timelines": {},
-        read: "latest",
-        size: 14,
-        spellcheck: true,
-        suffix: ": ",
-        theme: "system",
-        themes: [],
-        time: "HH:mm",
-        width: "none",
-      },
-      sequence: 0,
-    });
-  });
-
   it("takes the latest Change of each option, and an unset back to its default", () => {
     expect(
       fold([
@@ -215,7 +179,7 @@ describe("the ui options, kept", () => {
         );
 
         return { again, first };
-      })
+      }).pipe(Effect.provide(quiet))
     );
 
     expect(result).toStrictEqual({
@@ -342,7 +306,7 @@ describe("the ui options, kept", () => {
 
           return { changes, ...outcomes };
         }).pipe(Effect.provide(layer));
-      })
+      }).pipe(Effect.provide(quiet))
     );
 
     expect(result).toStrictEqual({

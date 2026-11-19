@@ -180,7 +180,7 @@ The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser se
 
 ## Tests
 
-`bun run test` renders the Frontend in happy-dom against the fake Daemon in `src/testing/fake-daemon.ts`. The fake answers at the `fetch` level, so every test goes through the real `DaemonClient` and the API's own decoding. The browser itself runs end to end in `apps/iirc`'s `bun run e2e`, against the built frontend on a real `iirc daemon --web`.
+`bun run test` renders the Frontend in happy-dom against the fake Daemon in `src/testing/fake-daemon.ts`. The fake answers at the `fetch` level, so every test goes through the real `DaemonClient` and the API's own decoding. A test that turns on how long something lasted gives the runtime a clock it holds, and moves it. The browser itself runs end to end in `apps/iirc`'s `bun run e2e`, against the built frontend on a real `iirc daemon --web`.
 
 ## Not yet
 

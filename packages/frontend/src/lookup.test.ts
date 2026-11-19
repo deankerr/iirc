@@ -26,7 +26,6 @@ import {
   isLookupNick,
   listedChannels,
   listLookOf,
-  lookOf,
   nickRulesOf,
   parseLookupNick,
   reduceLookups,
@@ -340,13 +339,6 @@ describe("reading the nick of a Lookup", () => {
       space: "Give one nick. /whois <nick>",
     });
   });
-
-  it("reads by the head's CHANTYPES and ranks, or the Client's before an Ircd says", () => {
-    expect([nickRulesOf(undefined), nickRulesOf(head)]).toStrictEqual([
-      { chantypes: "#&", symbols: "@+" },
-      { chantypes: "#&", symbols: "~@+" },
-    ]);
-  });
 });
 
 describe("/whois and /whowas", () => {
@@ -355,9 +347,16 @@ describe("/whois and /whowas", () => {
 
     expect(interpret("/whois peer", context)).toStrictEqual({
       _tag: "Parsed",
-      value: [lookOf("Whois", "peer", network, timelineId(iirc), head)],
+      value: [
+        {
+          _tag: "Look",
+          lookup: { _tag: "Whois", nick: "peer" },
+          network,
+          ranks: head.ranks,
+          timeline: timelineId(iirc),
+        },
+      ],
     });
-    expect(lookOf("Whois", "peer", network, timelineId(iirc), head).ranks).toBe(head.ranks);
 
     expect(interpret("/WHOWAS old", contextOf(world(peer)))).toStrictEqual({
       _tag: "Parsed",
@@ -373,18 +372,13 @@ describe("/whois and /whowas", () => {
     });
   });
 
-  it("need a Timeline open and its Network's Session, and a nick", () => {
-    const command = commandNamed("whois");
-
-    expect(command?.arguments).toBe("Required");
-    expect(
-      command === undefined ? undefined : unmet(command.when, contextOf(world(undefined)))
-    ).toMatchInlineSnapshot(`"Open a Timeline first."`);
-
+  it("need a Timeline open and its Network's Session", () => {
+    const when = commandNamed("whois")?.when ?? [];
     const offline = { ...contextOf(world(iirc)), session: false };
 
-    expect(command === undefined ? undefined : unmet(command.when, offline)).toBeDefined();
-    expect(interpret("/whois #iirc", contextOf(world(iirc)))._tag).toBe("Invalid");
+    expect([unmet(when, contextOf(world(undefined))), unmet(when, offline)]).not.toContain(
+      undefined
+    );
   });
 });
 
@@ -457,15 +451,6 @@ describe("the Lookups", () => {
     expect(shownCard(state, world(other), "p0")).toBeUndefined();
     expect(shownCard(state, world(undefined), "p0")).toBeUndefined();
     expect(shownCard(state, world(iirc), "p1")).toBeUndefined();
-  });
-
-  it("survive structuredClone", () => {
-    const state = fold([
-      { _tag: "Asked", look: whois(), pane: "p0" },
-      { _tag: "Answered", id: 1, result: found(profile({ channels: [] })) },
-    ]);
-
-    expect(structuredClone(state)).toStrictEqual(state);
   });
 });
 
@@ -814,6 +799,25 @@ const refusedChange = (intent: string) =>
 const removals = (shown: ReturnType<typeof cardShown>) =>
   shown.body._tag === "Masks" ? shown.body.masks.map((one) => one.remove !== undefined) : [];
 
+/**
+ * A command read as a Look of a Channel's list, from `#iirc`.
+ * @param kind - The list.
+ * @param channel - The Channel.
+ * @returns What it reads as.
+ */
+const looked = (kind: "Bans" | "Exceptions" | "Invitations", channel: string) => ({
+  _tag: "Parsed",
+  value: [
+    {
+      _tag: "Look",
+      lookup: { _tag: kind, channel },
+      network,
+      ranks: rfcRanks,
+      timeline: timelineId(iirc),
+    },
+  ],
+});
+
 describe("/bans, /exceptions, and /invexes", () => {
   const context = inIirc();
 
@@ -825,11 +829,11 @@ describe("/bans, /exceptions, and /invexes", () => {
       interpret("/invexes", context),
       interpret("/invitations &local", context),
     ]).toStrictEqual([
-      { _tag: "Parsed", value: [listLookOf("Bans", "#iirc", network, timelineId(iirc))] },
-      { _tag: "Parsed", value: [listLookOf("Exceptions", "#Other", network, timelineId(iirc))] },
-      { _tag: "Parsed", value: [listLookOf("Exceptions", "#iirc", network, timelineId(iirc))] },
-      { _tag: "Parsed", value: [listLookOf("Invitations", "#iirc", network, timelineId(iirc))] },
-      { _tag: "Parsed", value: [listLookOf("Invitations", "&local", network, timelineId(iirc))] },
+      looked("Bans", "#iirc"),
+      looked("Exceptions", "#Other"),
+      looked("Exceptions", "#iirc"),
+      looked("Invitations", "#iirc"),
+      looked("Invitations", "&local"),
     ]);
   });
 

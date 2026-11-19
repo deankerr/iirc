@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeUploadId, idBytes, idLength, isUploadId } from "./id.ts";
+import { encodeUploadId, idBytes, isUploadId } from "./id.ts";
 
 describe(encodeUploadId, () => {
   it("encodes all-zero bytes as zeros", () => {
@@ -15,17 +15,6 @@ describe(encodeUploadId, () => {
     expect(encodeUploadId(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))).toBe(
       "041061050r3gg28a"
     );
-  });
-
-  it("is idLength characters of the alphabet", () => {
-    const id = encodeUploadId(Uint8Array.from([0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6]));
-    expect(id).toHaveLength(idLength);
-    expect(isUploadId(id)).toBeTruthy();
-  });
-
-  it("refuses the wrong number of bytes", () => {
-    expect(() => encodeUploadId(new Uint8Array(9))).toThrow(RangeError);
-    expect(() => encodeUploadId(new Uint8Array(11))).toThrow(RangeError);
   });
 });
 

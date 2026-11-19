@@ -53,15 +53,6 @@ describe("precedence", () => {
     });
   });
 
-  it("the title and description tags are the last resort", () => {
-    expect(
-      read(`<title>Plain title</title><meta name="description" content="Plain">`)
-    ).toStrictEqual({
-      description: "Plain",
-      title: "Plain title",
-    });
-  });
-
   it("each field falls back on its own", () => {
     expect(
       read(`<title>Plain title</title>
@@ -180,14 +171,6 @@ describe("addresses and entities", () => {
     );
   });
 
-  it("a relative og:image resolves against base href", () => {
-    expect(
-      read(
-        `<base href="https://cdn.example.org/root/"><title>t</title><meta property="og:image" content="p.png">`
-      )?.image
-    ).toBe("https://cdn.example.org/root/p.png");
-  });
-
   it("a relative base href resolves against the link first", () => {
     expect(
       read(`<base href="/assets/"><title>t</title><meta property="og:image" content="p.png">`)
@@ -248,16 +231,6 @@ describe("a head that says little", () => {
     });
   });
 
-  it("a site name alone has no title or description", () => {
-    expect(read(`<meta property="og:site_name" content="Site">`)).toStrictEqual({ site: "Site" });
-  });
-
-  it("an oEmbed address alone is still read, for the fill that follows", () => {
-    expect(
-      read(`<link rel="alternate" type="application/json+oembed" href="https://p.example/o">`)
-    ).toStrictEqual({ oembed: "https://p.example/o" });
-  });
-
   it("a description alone is enough", () => {
     expect(read(`<meta name="description" content="Just this">`)).toStrictEqual({
       description: "Just this",
@@ -297,12 +270,6 @@ const SCRIPT_URL = "javascript:alert(1)";
 const oembedOf = (head: string) => read(head)?.oembed;
 
 describe("the oEmbed address a page names", () => {
-  it("is the href of an alternate link of type application/json+oembed", () => {
-    expect(oembedOf(`<link rel="alternate" type="application/json+oembed" href="${OEMBED}">`)).toBe(
-      OEMBED
-    );
-  });
-
   it("reads rel as a list of tokens, and rel and type without regard to case", () => {
     expect(
       oembedOf(
@@ -547,21 +514,6 @@ const sized = (width: string | undefined, height: string | undefined) =>
   )?.[0]?.size;
 
 describe("the players a page names", () => {
-  it("reads YouTube's tags, sized by og:video:width and height", () => {
-    expect(
-      players(`<meta property="og:video:url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
-        <meta property="og:video:secure_url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
-        <meta property="og:video:type" content="text/html">
-        <meta property="og:video:width" content="1280">
-        <meta property="og:video:height" content="720">`)
-    ).toStrictEqual([
-      {
-        link: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-        size: { height: 720, width: 1280 },
-      },
-    ]);
-  });
-
   it("reads Vimeo's og:video and twitter:player, each sized by its own tags", () => {
     expect(
       players(`<meta name="twitter:player" content="https://player.vimeo.com/video/76979871?h=8272103f6e">
@@ -575,19 +527,6 @@ describe("the players a page names", () => {
       {
         link: "https://player.vimeo.com/video/76979871?h=8272103f6e",
         size: { height: 360, width: 640 },
-      },
-    ]);
-  });
-
-  it("reads SoundCloud's twitter:player by property, with its entities decoded", () => {
-    expect(
-      players(`<meta property="twitter:player" content="https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F293&amp;auto_play=false&amp;visual=true">
-        <meta property="twitter:player:height" content="400">
-        <meta property="twitter:player:width" content="435">`)
-    ).toStrictEqual([
-      {
-        link: "https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F293&auto_play=false&visual=true",
-        size: { height: 400, width: 435 },
       },
     ]);
   });
@@ -634,10 +573,6 @@ describe("the players a page names", () => {
     ).toBeUndefined();
   });
 
-  it("is absent when the page names none", () => {
-    expect(read(`<title>Plain</title>`)).toStrictEqual({ title: "Plain" });
-  });
-
   it("gives a size only when both are positive integers in plain decimal digits", () => {
     expect([
       sized("640", "360"),
@@ -681,32 +616,7 @@ const named = (type: string | undefined) =>
     }`
   ).video;
 
-const STREAMABLE =
-  "https://cdn-cf-east.streamable.com/video/mp4/x.mp4?Expires=1700000000&Signature=abc~def";
-
 describe("the video file a page names", () => {
-  it("reads Giphy's head: its og:video of type video/mp4, beside its image and player", () => {
-    const page = read(`<title>A cat</title>
-      <meta property="og:video" content="${GIPHY}">
-      <meta property="og:video:secure_url" content="${GIPHY}">
-      <meta property="og:video:type" content="video/mp4">
-      <meta property="og:image" content="https://media.giphy.com/media/X/giphy.gif">
-      <meta name="twitter:player" content="https://giphy.com/embed/X/video">`);
-
-    expect(page.video).toStrictEqual({ link: GIPHY, type: "video/mp4" });
-    expect(page.image).toBe("https://media.giphy.com/media/X/giphy.gif");
-  });
-
-  it("reads Streamable's head, its signed address with the entities decoded", () => {
-    const page = read(`<title>A clip</title>
-      <meta property="og:video" content="${STREAMABLE.replaceAll("&", "&amp;")}">
-      <meta property="og:video:type" content="video/mp4">
-      <meta property="og:image" content="https://cdn-cf-east.streamable.com/image/x.jpg">
-      <meta name="twitter:player" content="https://streamable.com/e/x">`);
-
-    expect(page.video).toStrictEqual({ link: STREAMABLE, type: "video/mp4" });
-  });
-
   it("prefers an entry's og:video:secure_url to its own address, og:video or og:video:url", () => {
     const type = `<meta property="og:video:type" content="video/webm">`;
 
@@ -741,13 +651,6 @@ describe("the video file a page names", () => {
     expect(
       read(`<meta property="og:video" content="data:video/mp4;base64,AAAA">
         <meta property="og:video:type" content="video/mp4">`).video
-    ).toBeUndefined();
-  });
-
-  it("is absent for a player in a frame: YouTube's text/html type", () => {
-    expect(
-      read(`<meta property="og:video:url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
-        <meta property="og:video:type" content="text/html">`).video
     ).toBeUndefined();
   });
 

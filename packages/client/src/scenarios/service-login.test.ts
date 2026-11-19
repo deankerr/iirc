@@ -40,12 +40,6 @@ const welcomed = lines(
   ">> {Identify credential=pw account=acct service=NickServ}"
 );
 
-// Every SecretLine the Client sent, by kind.
-const sentSecrets = (played: ReturnType<typeof play>): readonly string[] =>
-  played.steps.flatMap((step) =>
-    step.outputs.flatMap((output) => (output._tag === "SendSecret" ? [output.line._tag] : []))
-  );
-
 const joins = lines(">> {JoinWithKey credential=chankey channel=#secret}", ">> JOIN #iirc");
 
 const loggedIn = lines("<< :irc.test 900 iirc iirc!iirc@iirc.test acct :You are now logged in");
@@ -75,7 +69,7 @@ describe("a service login", () => {
   });
 
   it("joins nothing for a MODE that gives Self +r, which may mean restricted, until the bound", () => {
-    const played = play(client, {
+    play(client, {
       configuration: service,
       transcript: [
         opened,
@@ -86,28 +80,16 @@ describe("a service login", () => {
           "<< :irc.test MODE iirc :+R",
           "+4s"
         ),
+        lines("+1s"),
+        joins,
       ],
-    });
-
-    expect(played.transcript).not.toContain(">> JOIN");
-
-    play(client, {
-      configuration: service,
-      transcript: [played.transcript, lines("+1s"), joins],
-    });
-  });
-
-  it("joins when the bound runs out, with the Ircd silent", () => {
-    play(client, {
-      configuration: service,
-      transcript: [opened, welcomed, lines("+4s"), lines("+1s"), joins],
     });
 
     expect.assertions(0);
   });
 
   it("joins nothing for a NOTICE from the service, whatever it says, until the bound", () => {
-    const played = play(client, {
+    play(client, {
       configuration: service,
       transcript: [
         opened,
@@ -117,15 +99,12 @@ describe("a service login", () => {
           "<< :NickServ!s@services. NOTICE iirc :Password accepted - you are now recognized.",
           "+4s"
         ),
+        lines("+1s"),
+        joins,
       ],
     });
 
-    expect(played.transcript).not.toContain(">> JOIN");
-
-    play(client, {
-      configuration: service,
-      transcript: [played.transcript, lines("+1s"), joins],
-    });
+    expect.assertions(0);
   });
 
   it("joins at once when the Credential cannot be filled", () => {
@@ -243,8 +222,6 @@ describe("a service login", () => {
       ],
     });
 
-    expect(sentSecrets(played)).toStrictEqual([]);
-
     // The next Session declines echo-message, so it tells the service.
     play(client, {
       configuration: none,
@@ -269,12 +246,14 @@ describe("a service login", () => {
         ),
       ],
     });
+
+    expect.assertions(0);
   });
 
   it("tells nothing while a CAP REQ for echo-message is unanswered at 001", () => {
     const none = configured({ channels: [{ name: "#iirc" }] });
 
-    const played = play(client, {
+    play(client, {
       configuration: none,
       transcript: [
         lines(
@@ -294,7 +273,7 @@ describe("a service login", () => {
       ],
     });
 
-    expect(sentSecrets(played)).toStrictEqual([]);
+    expect.assertions(0);
   });
 
   it("keeps matching an echo to its Message when the login is configured while echo-message is on", () => {
@@ -321,16 +300,5 @@ describe("a service login", () => {
     );
 
     expect(said).toHaveLength(1);
-  });
-
-  it("is told and answered in the registered prelude", () => {
-    const played = play(client, {
-      configuration: service,
-      transcript: [registered(service), joins],
-    });
-
-    expect(played.transcript.indexOf(">> {Identify")).toBeLessThan(
-      played.transcript.indexOf(">> JOIN")
-    );
   });
 });

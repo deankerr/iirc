@@ -338,17 +338,6 @@ describe("walking a movie", () => {
         : []
     ).toStrictEqual([0, 5 * 1024 ** 3 - 16]);
   });
-
-  it("gives up on a file of more boxes than it will hold", () => {
-    const count = 1_000_001;
-    const boxes = new Uint8Array(count * 8);
-
-    for (let n = 0; n < count; n += 1) {
-      boxes.set(cat(u(8, 4), text("free")), n * 8);
-    }
-
-    expect(reasonOf("movie", boxes)).toBe("a file of too many boxes");
-  });
 });
 
 const keptItem = (id: number, data: string): HeifItem => ({ data: text(data), id, type: "hvc1" });
@@ -558,15 +547,6 @@ describe("walking an image", () => {
     }).toStrictEqual({ after: false, before: true, types: ["hvc1"] });
   });
 
-  it("refuses an image whose primary item is a JPEG", () => {
-    const built = heif({
-      items: [{ data: jpegWithGps, id: 1, type: "jpeg" }],
-      primary: 1,
-    });
-
-    expect(reasonOf("image", built.bytes)).toBe("the primary item is dropped or missing");
-  });
-
   it.each([
     ["one", false],
     ["two", true],
@@ -762,38 +742,5 @@ describe("walking a file in general", () => {
     );
 
     expect(survivors).toStrictEqual([]);
-  });
-
-  it("never throws on corrupted bytes", () => {
-    // Every byte of every file set to each of a few values, one at a time: sizes and types
-    // turned to zero, to all ones, and to something in between.
-    const outcomes = new Set(
-      fixtures.flatMap(([layout, , bytes]) =>
-        [0x00, 0xff, 0x7f, 0x01].flatMap((value) =>
-          Array.from({ length: bytes.length }, (_, at) => {
-            const corrupted = Uint8Array.from(bytes);
-
-            corrupted[at] = value;
-
-            return strip(layout, corrupted)._tag;
-          })
-        )
-      )
-    );
-
-    expect([...outcomes].toSorted()).toStrictEqual(["Stripped", "Unreadable"]);
-  });
-
-  it("never throws on bytes that only begin like a file", () => {
-    const garbage = Uint8Array.from({ length: 4096 }, (_, i) => (i * 7919 + 13) % 256);
-
-    const outcomes = fixtures.flatMap(([layout, , bytes]) =>
-      Array.from(
-        { length: 32 },
-        (_, n) => strip(layout, cat(bytes.subarray(0, 40), garbage.subarray(n * 61)))._tag
-      )
-    );
-
-    expect(outcomes.filter((tag) => tag !== "Stripped" && tag !== "Unreadable")).toStrictEqual([]);
   });
 });

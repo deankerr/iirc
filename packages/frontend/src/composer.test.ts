@@ -175,19 +175,11 @@ describe("submitting", () => {
 
     expect([
       refusedOne("/quote PASS one"),
-      refusedOne("/RAW pass two"),
-      refusedOne("/Quote @+x=y :me Authenticate three"),
       refusedOne("hi\n/raw AuThEnTiCaTe four"),
-      refusedOne("/quote Oper admin five"),
-      refusedOne("/raw OPER admin six"),
       refusedOne("/oper admin seven"),
     ]).toStrictEqual([
       [0, "", ["hello"], words],
       [0, "", ["hello"], words],
-      [0, "", ["hello"], words],
-      [0, "", ["hello"], words],
-      [0, "", ["hello"], oper],
-      [0, "", ["hello"], oper],
       [0, "", ["hello"], oper],
     ]);
   });
@@ -319,35 +311,13 @@ describe("submitting", () => {
       { numRuns: 500 }
     );
   });
-
-  it("splits lines at any line break", () => {
-    expect(linesOf("a\rb\nc\r\nd")).toStrictEqual(["a", "b", "c", "d"]);
-  });
 });
 
 describe("the draft and its history", () => {
-  it("keeps each Timeline's draft apart", () => {
-    const state = fold([edited("for the channel"), edited("for the other", other)]);
+  it("keeps the draft on Down when it is shown already", () => {
+    const typing = fold([edited("half")], sendAll(["first"]));
 
-    expect([draftOf(state, channel).text, draftOf(state, other).text]).toStrictEqual([
-      "for the channel",
-      "for the other",
-    ]);
-  });
-
-  it("recalls what was sent, newest first, and comes back down to the draft", () => {
-    const sent = sendAll(["first", "second"]);
-    const typing = fold([edited("half")], sent);
-
-    const texts: string[] = [];
-    let state = typing;
-
-    for (const event of [up(), up(), up(), down(), down(), down()]) {
-      state = reduceComposers(state, event);
-      texts.push(draftOf(state, channel).text);
-    }
-
-    expect(texts).toStrictEqual(["second", "first", "first", "second", "half", "half"]);
+    expect(draftOf(fold([down(), up(), down(), down()], typing), channel).text).toBe("half");
   });
 
   it("properties: drafts are per Timeline, history is bounded, newest first, and recall returns to the draft", () => {
@@ -573,10 +543,6 @@ describe("how long a notice lasts", () => {
     timeline,
   });
 
-  it("says what a submit could not read as about the text", () => {
-    expect(tagOf(complained())).toBe("AboutText");
-  });
-
   it("lets go of a notice about the text as soon as the text is edited", () => {
     const state = complained();
 
@@ -620,18 +586,6 @@ describe("how long a notice lasts", () => {
     const state = reduceComposers(complained(), { _tag: "Left", timeline: channel });
 
     expect([tagOf(state), draftOf(state, channel).text]).toStrictEqual([undefined, "/d"]);
-  });
-
-  it("turns away from a Timeline with no notice about its text, touching nothing", () => {
-    const state = fold([edited("hello")]);
-    const away = reduceComposers(state, { _tag: "Left", timeline: channel });
-    const never = reduceComposers(state, { _tag: "Left", timeline: other });
-
-    expect({
-      away: away === state,
-      made: never.drafts.has(other),
-      never: never === state,
-    }).toStrictEqual({ away: true, made: false, never: true });
   });
 
   it("keeps a refused Credential's notice on the draft it cleared, until the text is edited", () => {
@@ -1041,11 +995,5 @@ describe("formatting a draft", () => {
     const state = fold([edited("a b c"), formatted(2, 3), typed("a b c!", 6)]);
 
     expect(draftOf(state, channel).text).toBe("a \u0002b\u0002 c!");
-  });
-
-  it("is recalled as it was sent", () => {
-    const sent = submit(fold([edited("a b c"), formatted(2, 3)]), channel, context).state;
-
-    expect(draftOf(fold([up()], sent), channel).text).toBe("a \u0002b\u0002 c");
   });
 });

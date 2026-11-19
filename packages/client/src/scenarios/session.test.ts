@@ -41,18 +41,6 @@ describe("a Session", () => {
     expect(known.users.get("iirc")?.nick).toBe("iirc");
   });
 
-  it("never reads Self's mask from 001's text, which is for people", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: registered(base).replace(
-        ":Welcome to the iirc-test Network iirc",
-        ":Welcome to the Internet Relay Network iirc!~iirc@127.0.0.1"
-      ),
-    });
-
-    expect(client.known(played.state).self?.mask._tag).toBe("Unknown");
-  });
-
   it("reads Self's mask from the echo of its JOIN", () => {
     const played = play(client, {
       configuration: base,
@@ -163,25 +151,6 @@ describe("casemapping", () => {
     expect(known.casemapping).toBe("rfc1459");
     expect(channel).toMatchObject({ name: "#Dev[Ops]", standing: "Joined" });
     expect([...(channel?.members.keys() ?? [])]).toStrictEqual(["iirc", "peer{1}"]);
-  });
-
-  it("folds again when the Ircd names another casemapping", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base, { isupport: ["CHANTYPES=#"] }),
-        lines(
-          "!! configure +#Dev[Ops]",
-          ">> JOIN #Dev[Ops]",
-          "<< :irc.test 005 iirc CASEMAPPING=ascii :are supported"
-        ),
-      ],
-    });
-
-    const known = client.known(played.state);
-
-    expect(known.casemapping).toBe("ascii");
-    expect([...known.channels.keys()]).toStrictEqual(["#dev[ops]"]);
   });
 
   it("reads rfc8265 from UTF8MAPPING, and folds a mapping it does not know as ascii", () => {

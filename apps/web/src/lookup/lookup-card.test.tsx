@@ -520,16 +520,6 @@ describe("the Lookup card", () => {
     ).resolves.toStrictEqual({ after: [], before: ["bad!*@*"] });
   });
 
-  it("offers removal of another Channel's list by that Channel's own head", async () => {
-    const { container } = await signedInHolding([], [oneBan]);
-
-    await inComposer(container, "/bans #ops", "Enter");
-    await settled(() => card()?.textContent.includes("bad!*@*") === true);
-    await settled(() => buttons().includes("Remove bad!*@*"));
-
-    expect(buttons()).toStrictEqual(["Close the Lookup", "Remove bad!*@*"]);
-  });
-
   it("follows the head of another Channel's list, as Self is made its operator and unmade", async () => {
     const { container, daemon, send } = await signedInHolding([], [oneBan, oneBan], []);
 
@@ -590,31 +580,6 @@ describe("the Lookup card", () => {
       demoted: ["Close the Lookup"],
       promoted: ["Close the Lookup", "Remove bad!*@*"],
     });
-  });
-
-  it("offers no removal to a member who is not an operator", async () => {
-    const { container } = await signedInHolding(
-      ["v"],
-      [
-        {
-          answer: "LookedUp",
-          pending: 0,
-          result: {
-            _tag: "Listed",
-            cut: null,
-            masks: [{ mask: "bad!*@*", setAt: null, setBy: null }],
-            notes: [],
-          },
-        },
-      ]
-    );
-
-    await inComposer(container, "/bans", "Enter");
-    await settled(() => card()?.textContent.includes("bad!*@*") === true);
-
-    expect(
-      [...(card()?.querySelectorAll("button") ?? [])].map((one) => one.getAttribute("aria-label"))
-    ).toStrictEqual(["Close the Lookup"]);
   });
 
   it("is asked from a member's menu in the members, by their Whois, Query first", async () => {

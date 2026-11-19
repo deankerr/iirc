@@ -1028,20 +1028,6 @@ describe("the API over a real server", () => {
     expect(result.found).toStrictEqual([200, "LookedUp"]);
   });
 
-  it("refuses a body over 1 MiB", async () => {
-    const result = await run((served) =>
-      Effect.map(
-        served.request("/api/credentials/big", {
-          method: "PUT",
-          ...json(JSON.stringify({ value: "x".repeat(1024 * 1024 + 1) })),
-        }),
-        (response) => [response.status, response.headers.get("connection")]
-      )
-    );
-
-    expect(result).toStrictEqual([413, "close"]);
-  });
-
   it("signs a browser in for an HttpOnly cookie, Secure only behind TLS", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {

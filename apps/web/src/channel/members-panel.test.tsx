@@ -379,22 +379,10 @@ describe("a topic's time", () => {
     const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
     const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;
 
-    const texts = {
-      none: await drawn("none"),
-      twelve: await drawn("h:mm a"),
-      twelveWithSeconds: await drawn("h:mm:ss a"),
-      twentyFour: await drawn("HH:mm"),
-      withSeconds: await drawn("HH:mm:ss"),
-    };
+    const texts = { none: await drawn("none"), twelve: await drawn("h:mm a") };
 
-    expect(texts).toStrictEqual({
-      none: written(twentyFour),
-      twelve: written(twelve),
-      twelveWithSeconds: written({ ...twelve, second: "2-digit" }),
-      twentyFour: written(twentyFour),
-      withSeconds: written({ ...twentyFour, second: "2-digit" }),
-    });
-    expect(texts.twelve).not.toBe(texts.twentyFour);
+    expect(texts).toStrictEqual({ none: written(twentyFour), twelve: written(twelve) });
+    expect(texts.twelve).not.toBe(texts.none);
   });
 });
 

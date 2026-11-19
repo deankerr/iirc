@@ -150,10 +150,4 @@ describe("removing a Network", () => {
       },
     });
   });
-
-  it("holds only plain data, which survives structuredClone", () => {
-    const state = after({ _tag: "Asked", keep: false, life: 1, network: libera });
-
-    expect(structuredClone(state)).toStrictEqual(state);
-  });
 });

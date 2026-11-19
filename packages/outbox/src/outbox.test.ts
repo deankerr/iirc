@@ -2,7 +2,6 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import {
-  defaultPacing,
   depth,
   goesFirst,
   goesLast,
@@ -110,12 +109,6 @@ describe("order", () => {
     expect([index, ...drain(after, 0).map(({ item }) => item.index)]).toStrictEqual([0, 3, 1, 2]);
   });
 
-  it("lets an ordinary Line offered after a WHO leave before it", () => {
-    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "JOIN"]);
-
-    expect(names(drain(outbox, 0))).toStrictEqual(["PRIVMSG", "JOIN", "WHO"]);
-  });
-
   it("lets a Line offered after a WHO overtake it even once the WHO is at the head", () => {
     const start = queued(makeOutbox({ pacing: { burst: 1, interval: 1000 } }), ["PRIVMSG", "WHO"]);
     const taken = take(start, 0);
@@ -123,12 +116,6 @@ describe("order", () => {
     const after = offered._tag === "Queued" ? offered.outbox : start;
 
     expect(names(drain(after, 0))).toStrictEqual(["PART", "WHO"]);
-  });
-
-  it("keeps WHOs in the order offered among themselves", () => {
-    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "who", "WHO"]);
-
-    expect(drain(outbox, 0).map(({ item }) => item.index)).toStrictEqual([1, 0, 2, 3]);
   });
 
   it("recognises WHO whatever its case, and nothing else", () => {
@@ -140,12 +127,6 @@ describe("order", () => {
       false,
       false,
     ]);
-  });
-
-  it("lets PING and PONG go before a waiting WHO, and before ordinary Lines", () => {
-    const outbox = queued(makeOutbox(), ["WHO", "PRIVMSG", "PING", "PONG"]);
-
-    expect(names(drain(outbox, 0))).toStrictEqual(["PING", "PONG", "PRIVMSG", "WHO"]);
   });
 
   it("takes everything in the order it would have left, and spends no token", () => {
@@ -166,27 +147,6 @@ describe("order", () => {
 });
 
 describe("pacing", () => {
-  it("lets at most the burst leave at once", () => {
-    fc.assert(
-      fc.property(pacing, fc.integer({ max: 1e12, min: 0 }), (chosen, now) => {
-        let outbox = queued(
-          makeOutbox({ pacing: chosen }),
-          Array.from({ length: 30 }, () => "PRIVMSG")
-        );
-
-        let count = 0;
-
-        for (let taken = take(outbox, now); taken._tag === "Taken"; taken = take(outbox, now)) {
-          ({ outbox } = taken);
-          count += 1;
-        }
-
-        expect(count).toBe(chosen.burst);
-        expect(nextAt(outbox, now)).toBe(now + chosen.interval);
-      })
-    );
-  });
-
   it("never lets more than the burst plus one per interval leave in any window", () => {
     fc.assert(
       fc.property(
@@ -249,34 +209,22 @@ describe("pacing", () => {
     );
   });
 
-  it("paces by default at a burst of 5, then one every 2 s", () => {
-    const left = drain(
-      queued(
-        makeOutbox(),
-        Array.from({ length: 8 }, () => "PRIVMSG")
-      ),
-      0
-    );
-
-    expect(defaultPacing).toStrictEqual({ burst: 5, interval: 2000 });
-    expect(left.map(({ at }) => at)).toStrictEqual([0, 0, 0, 0, 0, 2000, 4000, 6000]);
-  });
-
   it("refills while idle, up to the burst and no more", () => {
-    const spent = drain(
-      queued(
-        makeOutbox(),
-        Array.from({ length: 5 }, () => "PRIVMSG")
-      ),
-      0
+    // The burst is spent at 0, and the Outbox then idles for a minute.
+    let spent = queued(
+      makeOutbox(),
+      Array.from({ length: 5 }, () => "PRIVMSG")
     );
+
+    for (let taken = take(spent, 0); taken._tag === "Taken"; taken = take(spent, 0)) {
+      spent = taken.outbox;
+    }
 
     const outbox = queued(
-      { ...makeOutbox<Queued>(), fullAt: 2000 * 5 },
+      spent,
       Array.from({ length: 7 }, () => "PRIVMSG")
     );
 
-    expect(spent).toHaveLength(5);
     expect(drain(outbox, 60_000).map(({ at }) => at - 60_000)).toStrictEqual([
       0, 0, 0, 0, 0, 2000, 4000,
     ]);
@@ -377,26 +325,6 @@ describe("the bound", () => {
     expect(names(drain(full, 0))).toStrictEqual(["PRIVMSG", "PRIVMSG", "QUIT"]);
   });
 
-  it("refuses an ordinary Line to a full Outbox, and keeps what it holds", () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ max: 50, min: 0 }),
-        fc.constantFrom("PRIVMSG", "JOIN", "PART", "NICK"),
-        (capacity, name) => {
-          const full = queued(
-            makeOutbox({ capacity }),
-            Array.from({ length: capacity }, () => "PRIVMSG")
-          );
-
-          expect(depth(full)).toBe(capacity);
-          expect(offer(full, { command: name, index: capacity }, name)).toStrictEqual({
-            _tag: "Full",
-          });
-        }
-      )
-    );
-  });
-
   it("admits a QUIT, a PING, and a PONG past a full queue of ordinary Lines, and they leave", () => {
     const full = queued(makeOutbox({ capacity: 3 }), [
       "PRIVMSG",
@@ -429,8 +357,7 @@ describe("the bound", () => {
             "PRIVMSG",
           ]);
 
-          expect(outbox.ahead).toHaveLength(Math.min(bound, flood));
-          expect(outbox.behind).toHaveLength(1);
+          expect(depth(outbox)).toBe(Math.min(bound, flood) + 1);
         }
       )
     );

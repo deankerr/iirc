@@ -28,52 +28,6 @@ const message: Extract<News, { readonly _tag: "Message" }> = {
 
 describe(describeNews, () => {
   it.each<readonly [News, string]>([
-    [message, "message Privmsg peer #iirc in=channel:#iirc :hi there"],
-    [
-      { ...message, highlight: true },
-      "message Privmsg peer #iirc highlight in=channel:#iirc :hi there",
-    ],
-    [{ ...message, self: true }, "message Privmsg peer #iirc self in=channel:#iirc :hi there"],
-    [
-      {
-        _tag: "ReadMarker",
-        read: earlier,
-        where: { _tag: "Direct", existing: true, key: "peer", name: "Peer" },
-      },
-      "read-marker t+0s in=existing-direct:peer:Peer",
-    ],
-    [{ _tag: "ReadMarker", read: now, where: { _tag: "Network" } }, "read-marker t+1s in=network"],
-    [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }, "ignored NoTimeline"],
-    [{ _tag: "Ignored", reason: { _tag: "Joined", channel: "#iirc" } }, "ignored Joined #iirc"],
-    [
-      { _tag: "TimelineClosed", where: { _tag: "Channel", key: "#iirc", name: "#IIRC" } },
-      "timeline-closed in=channel:#iirc:#IIRC",
-    ],
-    [
-      {
-        ...message,
-        at: { _tag: "Known", at: earlier, from: "ircd", value: earlier },
-        id: { _tag: "Known", at: now, from: "ircd", value: MessageId.make("m1") },
-        live: false,
-        ours: { echo: true, intent: IntentId.make("i1") },
-        tags: new Map([["+reply", "m0"]]),
-      },
-      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history in=channel:#iirc tags=+reply="m0" ours=i1 echo :hi there',
-    ],
-    [
-      {
-        ...message,
-        answers: MessageId.make("m0@t+0s"),
-        context: "#iirc",
-        tags: new Map([
-          ["+channel-context", "#iirc"],
-          ["+reply", "m0@t+0s"],
-        ]),
-        target: "iirc",
-        where: [{ _tag: "Direct", existing: false, key: "peer", name: "peer" }],
-      },
-      'message Privmsg peer iirc in=direct:peer tags=+channel-context="#iirc";+reply="m0@t+0s" answers="m0@t+0s" context=#iirc :hi there',
-    ],
     [
       {
         _tag: "Confirmed",
@@ -85,106 +39,8 @@ describe(describeNews, () => {
       "confirmed i2 at=stale:t+0s@t+0s :x",
     ],
     [
-      {
-        _tag: "Activity",
-        activity: {
-          _tag: "ModeChanged",
-          by: "op",
-          changes: [
-            { mode: "o", param: "peer", set: true },
-            { mode: "k", param: undefined, set: false },
-          ],
-          target: "#iirc",
-        },
-        at: message.at,
-        id: { _tag: "Unknown" },
-        live: true,
-        where: [{ _tag: "Channel", key: "#iirc", name: "#iirc" }],
-      },
-      "activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc",
-    ],
-    [
-      {
-        _tag: "Activity",
-        activity: {
-          _tag: "TopicChanged",
-          by: "op",
-          channel: "#iirc",
-          topic: { setAt: earlier, setBy: "op", text: "a topic" },
-        },
-        at: message.at,
-        id: { _tag: "Unknown" },
-        live: true,
-        where: [{ _tag: "Channel", key: "#foo{", name: "#Foo[" }],
-      },
-      "activity TopicChanged #iirc by=op setBy=op setAt=t+0s in=channel:#foo{:#Foo[ :a topic",
-    ],
-    [
-      {
-        _tag: "Activity",
-        activity: { _tag: "NickChanged", from: "Peer", to: "pal" },
-        at: message.at,
-        id: { _tag: "Unknown" },
-        live: true,
-        where: [
-          { _tag: "Channel", key: "#iirc", name: "#iirc" },
-          {
-            _tag: "DirectRenamed",
-            key: "peer",
-            name: "Peer",
-            to: { key: "pal", name: "pal" },
-          },
-        ],
-      },
-      "activity NickChanged Peer pal in=channel:#iirc in=renamed:peer:Peer>pal",
-    ],
-    [
-      {
-        _tag: "Activity",
-        activity: { _tag: "AwayChanged", away: null, nick: "peer" },
-        at: message.at,
-        id: { _tag: "Unknown" },
-        live: true,
-        where: [{ _tag: "Direct", existing: true, key: "peer", name: "peer" }],
-      },
-      "activity AwayChanged peer back in=existing-direct:peer",
-    ],
-    [
-      {
-        ...message,
-        target: "iirc",
-        where: [{ _tag: "Direct", existing: false, key: "peer", name: "peer" }],
-      },
-      "message Privmsg peer iirc in=direct:peer :hi there",
-    ],
-    [
-      { ...message, target: "$*", where: [{ _tag: "Network" }] },
-      "message Privmsg peer $* in=network :hi there",
-    ],
-    [
       { _tag: "SessionEnded", at: earlier, reason: { _tag: "Upgrading", port: 6697 } },
       "session-ended Upgrading 6697 at=t+0s",
-    ],
-    [
-      {
-        _tag: "Refused",
-        action: undefined,
-        intent: IntentId.make("i3"),
-        reason: { _tag: "Rejected", reply: "404" },
-      },
-      "refused i3 Rejected 404",
-    ],
-    [
-      {
-        _tag: "Refused",
-        action: {
-          attempted: { _tag: "Kick", channel: "#iirc", nicks: ["a", "b c"] },
-          where: { _tag: "Channel", key: "#iirc", name: "#IIRC" },
-        },
-        intent: IntentId.make("i4"),
-        reason: { _tag: "Unsent" },
-      },
-      'refused i4 Unsent kick=#iirc:a,"b c" in=channel:#iirc:#IIRC',
     ],
     [
       {

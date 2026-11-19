@@ -146,11 +146,10 @@ describe("joining", () => {
   it("refuses a Channel whose name cannot be sent, until the Configuration changes", () => {
     const played = play(client, {
       configuration: base,
-      transcript: [registered(base), "!! configure +#a,b\n"],
+      transcript: [registered(base), "!! configure +#a,b\n+50s\n"],
     });
 
     expect(client.known(played.state).channels.get("#a,b")?.standing).toBe("Refused");
-    expect(client.inspect(played.state).timers.size).toBe(1);
   });
 });
 
@@ -288,19 +287,19 @@ describe("refused, kicked, and parted", () => {
   });
 
   it("rejoins after a kick, on a timer", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base),
-        joined(base, "#iirc", ["@op"]),
-        "<< :op!u@h KICK #iirc iirc :bye\n",
-      ],
-    });
+    const kicked = [
+      registered(base),
+      joined(base, "#iirc", ["@op"]),
+      "<< :op!u@h KICK #iirc iirc :bye\n",
+    ];
+
+    const played = play(client, { configuration: base, transcript: kicked });
 
     const channel = client.known(played.state).channels.get("#iirc");
 
     expect(channel).toMatchObject({ members: new Map(), standing: "Kicked" });
-    expect([...client.inspect(played.state).timers.keys()]).toContain("rejoin #iirc");
+
+    play(client, { configuration: base, transcript: [...kicked, "+2s\n>> JOIN #iirc\n"] });
   });
 
   it("parts a Channel no longer wanted, and forgets it", () => {

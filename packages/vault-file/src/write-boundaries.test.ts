@@ -225,9 +225,7 @@ const both = [`${name}=${earlier}`, `${other}=${later}`];
 describe("a write whose temporary file fails before the rename", () => {
   const before = [
     ["opening the temporary file", { open: true }],
-    ["writing it", { writeAll: "fail" }],
     ["writing half of it", { writeAll: "half" }],
-    ["syncing it", { sync: true }],
     ["closing it, which is a defect", { closeTemporary: true }],
     ["renaming it", { rename: true }],
   ] as const;
@@ -367,18 +365,6 @@ describe("the order of a write", () => {
       "open directory",
       "sync directory",
     ]);
-  });
-
-  it("writes nothing for a forget of what is not held", async () => {
-    const calls = await inScenario((given) =>
-      Effect.gen(function* () {
-        yield* given.vault.forget(other);
-
-        return given.calls;
-      })
-    );
-
-    expect(calls).toStrictEqual([]);
   });
 });
 

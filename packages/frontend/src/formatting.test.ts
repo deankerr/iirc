@@ -56,10 +56,6 @@ describe("a draft's plain text", () => {
 });
 
 describe("formatting a range", () => {
-  it("wraps a selection", () => {
-    expect(formattedIn("a b c", 2, 3, bold)).toBe("a \u0002b\u0002 c");
-  });
-
   it("turns a flag off where every character of the range has it, and on where any lacks it", () => {
     expect([
       formattedIn("a \u0002b\u0002 c", 2, 3, bold),

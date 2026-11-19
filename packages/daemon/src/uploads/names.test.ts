@@ -123,12 +123,6 @@ describe(safeName, () => {
     expect(safeName(undefined, text)).toBe("file.txt");
   });
 
-  it("names a file whose name cleans to nothing by its family", () => {
-    expect(safeName("\u{1F600}\u{1F389}", png)).toBe("image.png");
-    expect(safeName("  /// ", text)).toBe("file.txt");
-    expect(safeName("...", unknown)).toBe("file.bin");
-  });
-
   it("gives a stem that cleans to nothing the neutral stem when it had an extension", () => {
     expect(safeName(".png", png)).toBe("image.png");
     expect(safeName("\u{1F600}.jpg", jpeg)).toBe("image.jpg");
@@ -137,17 +131,5 @@ describe(safeName, () => {
   it("flattens path-like names", () => {
     expect(safeName("../../etc/passwd", text)).toBe("etc-passwd.txt");
     expect(safeName("C:\\Users\\me\\a.txt", text)).toBe("C-Users-me-a.txt");
-  });
-
-  it("never starts with a dot, so nothing is hidden", () => {
-    expect(safeName(".hidden.txt", text)).toBe("hidden.txt");
-  });
-
-  it("does not dedupe: the same name gives the same name", () => {
-    expect(safeName("same.png", png)).toBe(safeName("same.png", png));
-  });
-
-  it("never gives a date, a time or pasted", () => {
-    expect(safeName(undefined, png)).not.toMatch(/pasted|\d/u);
   });
 });

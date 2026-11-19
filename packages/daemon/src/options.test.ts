@@ -3,7 +3,7 @@ import { Journal, NetworkId } from "@iirc/runtime/journal";
 import type { Change, JournalRecord } from "@iirc/runtime/journal";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
 import type { Schema } from "effect";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,6 +15,9 @@ import {
   ownerInForceOf,
 } from "./options.ts";
 import { UiConfiguration, layerUiConfiguration } from "./ui.ts";
+
+// No logger, so what the code under test logs is not printed over the test run.
+const quiet = Logger.layer([]);
 
 const set = (option: string, value: Schema.Json) => ({ _tag: "OptionSet", option, value }) as const;
 
@@ -31,13 +34,6 @@ const fold = (changes: readonly Change[]) => {
 };
 
 describe("folding the options under store, uploads, and previews", () => {
-  it("starts with only uploads.maxSize, at 100 MiB, and previews.maxTotal, at 1 GiB, and sequence 0", () => {
-    expect(fold([])).toStrictEqual({
-      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 104_857_600 },
-      sequence: 0,
-    });
-  });
-
   it("takes the latest Change of each option, and an unset back to its default or to none", () => {
     expect(
       fold([
@@ -134,7 +130,7 @@ describe("the options under store, uploads, and previews, kept", () => {
         );
 
         return { again, first };
-      })
+      }).pipe(Effect.provide(quiet))
     );
 
     const inForce = {

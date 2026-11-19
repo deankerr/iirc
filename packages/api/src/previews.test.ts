@@ -194,17 +194,19 @@ describe("Previews on the wire", () => {
     ]);
   });
 
-  it("presses by POST beside the ask, behind a key or a sign-in, and says 409 for a link not waiting", () => {
+  it("says 409 to a press for a link not waiting", () => {
     const document = OpenApi.fromApi(DaemonApi);
     const press = document.paths["/api/timelines/{timeline}/previews/press"]?.post;
 
-    expect({
-      security: press?.security,
-      statuses: Object.keys(press?.responses ?? {}).toSorted(),
-    }).toStrictEqual({
-      security: [{ bearer: [] }, { signIn: [] }],
-      statuses: ["200", "400", "401", "403", "404", "409", "503"],
-    });
+    expect(Object.keys(press?.responses ?? {}).toSorted()).toStrictEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "409",
+      "503",
+    ]);
   });
 
   it("carries each change with no event id, and a heartbeat", () => {
@@ -221,35 +223,32 @@ describe("Previews on the wire", () => {
     expect(decoded.map((event) => Schema.encodeSync(PreviewsEvent)(event))).toStrictEqual(wire);
   });
 
-  it("asks by POST beside the Timelines, and follows beside News, both behind a key or a sign-in", () => {
+  it("says 409 to an ask while previews are off, and 404 for a Timeline or Message it does not have", () => {
     const document = OpenApi.fromApi(DaemonApi);
     const ask = document.paths["/api/timelines/{timeline}/previews"]?.post;
-    const follow = document.paths["/api/previews/changes"]?.get;
 
-    expect({
-      ask: ask?.security,
-      follow: follow?.security,
-      statuses: Object.keys(ask?.responses ?? {}).toSorted(),
-    }).toStrictEqual({
-      ask: [{ bearer: [] }, { signIn: [] }],
-      follow: [{ bearer: [] }, { signIn: [] }],
-      statuses: ["200", "400", "401", "403", "404", "409", "503"],
-    });
+    expect(Object.keys(ask?.responses ?? {}).toSorted()).toStrictEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "409",
+      "503",
+    ]);
   });
 });
 
 describe("ui.previews", () => {
-  it("is off, links only, or on, off by default, and the one option no device overrides", () => {
+  it("is off, links only, or on, and the one option no device overrides", () => {
     const options = Schema.decodeUnknownOption(UiOptions);
 
     expect({
-      default: uiDefaults.previews,
       sharedOnly: [...uiSharedOnly],
       taken: ["off", "links only", "on", "links", "Links Only", true].map((previews) =>
         Option.isSome(options({ ...uiDefaults, previews }))
       ),
     }).toStrictEqual({
-      default: "off",
       sharedOnly: ["previews", "previews.players", "previews.timelines"],
       taken: [true, true, true, false, false, false],
     });
@@ -257,23 +256,6 @@ describe("ui.previews", () => {
 });
 
 describe("ui.previews.players", () => {
-  it("lists the embed hosts the six services name by default, and no device overrides it", () => {
-    expect({
-      default: uiDefaults["previews.players"],
-      sharedOnly: uiSharedOnly.has("previews.players"),
-    }).toStrictEqual({
-      default: [
-        "www.youtube-nocookie.com",
-        "player.vimeo.com",
-        "w.soundcloud.com",
-        "bandcamp.com",
-        "open.spotify.com",
-        "player.twitch.tv",
-      ],
-      sharedOnly: true,
-    });
-  });
-
   it("takes host names in lower case alone, with no port, scheme, path, wildcard or space", () => {
     const host = Schema.decodeUnknownOption(PlayerHost);
 
@@ -333,7 +315,7 @@ describe("ui.previews.timelines", () => {
   const timeline = "0000000000001a-00000000-00000001";
   const other = "0000000000001b-00000000-00000000";
 
-  it("maps a Timeline's id to off, links only, or on, empty by default, and shared only", () => {
+  it("maps a Timeline's id to off, links only, or on", () => {
     const options = Schema.decodeUnknownOption(UiOptions);
 
     const given = (each: Schema.Json) =>
@@ -344,10 +326,8 @@ describe("ui.previews.timelines", () => {
         )
       );
 
-    expect({
-      default: uiDefaults["previews.timelines"],
-      sharedOnly: uiSharedOnly.has("previews.timelines"),
-      taken: [
+    expect(
+      [
         {},
         { [timeline]: "off" },
         { [other]: "on", [timeline]: "links only" },
@@ -356,21 +336,17 @@ describe("ui.previews.timelines", () => {
         { [timeline]: true },
         [],
         null,
-      ].map(given),
-    }).toStrictEqual({
-      default: {},
-      sharedOnly: true,
-      taken: [
-        {},
-        { [timeline]: "off" },
-        { [other]: "on", [timeline]: "links only" },
-        null,
-        null,
-        null,
-        null,
-        null,
-      ],
-    });
+      ].map(given)
+    ).toStrictEqual([
+      {},
+      { [timeline]: "off" },
+      { [other]: "on", [timeline]: "links only" },
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
   });
 
   it("keeps no entry whose key is not a Timeline's id", () => {

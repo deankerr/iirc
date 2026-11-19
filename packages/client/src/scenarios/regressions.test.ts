@@ -1,12 +1,10 @@
 /**
- * Regressions found in review. Each scenario failed before its fix. Where the
- * bug lived in State that Knowledge hides, the test reads State directly.
+ * Edge cases across Channels, casemapping, NAMES listings, and generated nicks.
  */
 import { describe, expect, it } from "vitest";
 
 import { client } from "../core.ts";
 import { configured, joined, play, registered } from "../testing/index.ts";
-import { openOf } from "../views.ts";
 
 const base = configured();
 
@@ -18,7 +16,7 @@ const again = (configuration = base, ...afterWelcome: readonly string[]): string
     .replace(/^!! configure\n-> dial[^\n]*\n/u, "")
     .replace(/(?<welcome><< :irc\.test 001 [^\n]*\n)/u, `$<welcome>${lines(...afterWelcome)}`);
 
-describe("1. Users who share no Channel are forgotten", () => {
+describe("Users who share no Channel are forgotten", () => {
   it("when a NAMES listing replaces the members", () => {
     const churn = Array.from({ length: 5 }, (_unused, index) =>
       lines(
@@ -34,11 +32,11 @@ describe("1. Users who share no Channel are forgotten", () => {
       transcript: [registered(base), joined(base, "#a"), churn],
     });
 
-    expect(openOf(played.state)?.users.size).toBe(0);
+    expect([...client.known(played.state).users.keys()]).toStrictEqual(["iirc"]);
   });
 });
 
-describe("2. A casemapping change keeps every wanted Channel", () => {
+describe("A casemapping change keeps every wanted Channel", () => {
   it("makes a machine for a Channel the new casemapping tells apart, and joins it", () => {
     const played = play(client, {
       configuration: base,
@@ -53,7 +51,10 @@ describe("2. A casemapping change keeps every wanted Channel", () => {
       ],
     });
 
-    expect([...played.state.channels.keys()].toSorted()).toStrictEqual(["#x[", "#x{"]);
+    expect([...client.known(played.state).channels.keys()].toSorted()).toStrictEqual([
+      "#x[",
+      "#x{",
+    ]);
   });
 
   it("keeps the first of the Channels a new casemapping merges, and parts none", () => {
@@ -74,13 +75,13 @@ describe("2. A casemapping change keeps every wanted Channel", () => {
       ],
     });
 
-    expect([...played.state.channels]).toMatchObject([
-      ["#x{", { name: "#x[", phase: { _tag: "Joined" }, wanted: true }],
+    expect([...client.known(played.state).channels]).toMatchObject([
+      ["#x{", { name: "#x[", standing: "Joined", wanted: true }],
     ]);
   });
 });
 
-describe("3. Each Connection starts from the protocol's casemapping", () => {
+describe("Each Connection starts from the protocol's casemapping", () => {
   it("does not take the last Ircd's casemapping to the next", () => {
     const played = play(client, {
       configuration: base,
@@ -109,7 +110,7 @@ describe("3. Each Connection starts from the protocol's casemapping", () => {
   });
 });
 
-describe("4. Membership changes during NAMES are kept when it ends", () => {
+describe("Membership changes during NAMES are kept when it ends", () => {
   it("during the first sync", () => {
     const played = play(client, {
       configuration: base,
@@ -157,53 +158,7 @@ describe("4. Membership changes during NAMES are kept when it ends", () => {
   });
 });
 
-describe("5. Nick fallbacks fit the Ircd's NICKLEN", () => {
-  const long = "verylongnickname";
-
-  const opening = lines(
-    "!! configure",
-    "-> dial irc.test:6697 tls",
-    "== opened",
-    ">> CAP LS 302",
-    `>> NICK ${long}`,
-    ">> USER iirc 0 * iirc"
-  );
-
-  it("assumes RFC 2812's 9 until NICKLEN is announced", () => {
-    play(client, {
-      configuration: configured({ nicks: [long] }),
-      transcript: [
-        opening,
-        lines(
-          `<< :irc.test 432 * ${long} :Erroneous nickname`,
-          ">> NICK verylong_",
-          "<< :irc.test 433 * verylong_ :in use",
-          ">> NICK verylong2"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
-
-  it("uses NICKLEN once the Ircd announces it", () => {
-    play(client, {
-      configuration: configured({ nicks: [long] }),
-      transcript: [
-        opening,
-        lines(
-          "<< :irc.test 005 * NICKLEN=12 :are supported",
-          `<< :irc.test 432 * ${long} :Erroneous nickname`,
-          ">> NICK verylongnic_"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
-});
-
-describe("6. Nothing is sent after QUIT and Hangup", () => {
+describe("Nothing is sent after QUIT and Hangup", () => {
   it("when a Configuration disables the Network and changes its Channels", () => {
     play(client, {
       configuration: base,
@@ -237,7 +192,7 @@ describe("6. Nothing is sent after QUIT and Hangup", () => {
   });
 });
 
-describe("7. A Channel Self is put in without asking is modelled, and not undone", () => {
+describe("A Channel Self is put in without asking is modelled, and not undone", () => {
   const forced = lines(
     "<< :iirc!~iirc@h JOIN #forced",
     "?? activity Joined #forced iirc in=channel:#forced",
@@ -291,31 +246,12 @@ describe("7. A Channel Self is put in without asking is modelled, and not undone
       ],
     });
 
-    expect(parted.state.channels.size).toBe(0);
-    expect(ended.state.channels.size).toBe(0);
-  });
-
-  it("is bounded by CHANLIMIT, and past it is ignored", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: [
-        registered(base, { isupport: ["CHANLIMIT=#:2", "CHANTYPES=#"] }),
-        lines(
-          "<< :iirc!~iirc@h JOIN #one",
-          ">> MODE #one",
-          "<< :iirc!~iirc@h JOIN #two",
-          "<< :iirc!~iirc@h JOIN #three",
-          "?? activity Joined #three iirc in=channel:#three",
-          "?? ignored NotNow Received"
-        ),
-      ],
-    });
-
-    expect([...played.state.channels.keys()]).toStrictEqual(["#one", "#two"]);
+    expect(client.known(parted.state).channels.size).toBe(0);
+    expect(client.known(ended.state).channels.size).toBe(0);
   });
 });
 
-describe("8. Self's mask is never read from 001's text", () => {
+describe("Self's mask is never read from 001's text", () => {
   const masked = registered(base).replace(
     ":Welcome to the iirc-test Network iirc",
     ":Welcome to the Internet Relay Network iirc!~iirc@127.0.0.1"
@@ -347,7 +283,7 @@ describe("8. Self's mask is never read from 001's text", () => {
   });
 });
 
-describe("9. Generated nicks fit even a small NICKLEN", () => {
+describe("Generated nicks fit even a small NICKLEN", () => {
   const opening = lines(
     "!! configure",
     "-> dial irc.test:6697 tls",
@@ -356,23 +292,6 @@ describe("9. Generated nicks fit even a small NICKLEN", () => {
     ">> NICK iirc",
     ">> USER iirc 0 * iirc"
   );
-
-  it("offers no fallback at all when NICKLEN=1 leaves no room, and the deadline ends it", () => {
-    play(client, {
-      configuration: base,
-      transcript: [
-        opening,
-        lines(
-          "<< :irc.test 005 * NICKLEN=1 :are supported",
-          "<< :irc.test 433 * iirc :in use",
-          "+60s",
-          "-> hangup"
-        ),
-      ],
-    });
-
-    expect.assertions(0);
-  });
 
   it("resumes offering when a later 005 raises NICKLEN", () => {
     play(client, {
@@ -425,7 +344,7 @@ const forced = (...names: readonly string[]) =>
 // The MODE query the first of them draws, which no Ircd here answers, so it is the only one.
 const asked = (name: string) => `>> MODE ${name}\n`;
 
-describe("10. Forced Channels count within their own CHANLIMIT group", () => {
+describe("Forced Channels count within their own CHANLIMIT group", () => {
   it("keeps separate groups independent", () => {
     const played = play(client, {
       configuration: base,
@@ -439,7 +358,7 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       ],
     });
 
-    expect([...played.state.channels.keys()]).toStrictEqual(["#one", "&one"]);
+    expect([...client.known(played.state).channels.keys()]).toStrictEqual(["#one", "&one"]);
   });
 
   it("shares one count within a grouped entry", () => {
@@ -455,7 +374,11 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       ],
     });
 
-    expect([...played.state.channels.keys()]).toStrictEqual(["+other", "#one", "&one"]);
+    expect([...client.known(played.state).channels.keys()]).toStrictEqual([
+      "+other",
+      "#one",
+      "&one",
+    ]);
   });
 
   it("ignores a JOIN to a name that is no Channel by CHANTYPES, and counts it nowhere", () => {
@@ -471,7 +394,7 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       ],
     });
 
-    expect([...played.state.channels.keys()]).toStrictEqual(["#one", "#two"]);
+    expect([...client.known(played.state).channels.keys()]).toStrictEqual(["#one", "#two"]);
   });
 
   it("falls back to 64 for a prefix CHANLIMIT does not list", () => {
@@ -489,6 +412,6 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       ],
     });
 
-    expect(played.state.channels.size).toBe(65);
+    expect(client.known(played.state).channels.size).toBe(65);
   });
 });

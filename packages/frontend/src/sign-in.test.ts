@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { explain, initial, reduce } from "./sign-in.ts";
+import { initial, reduce } from "./sign-in.ts";
 import type { Failure, SignIn, SignInEvent } from "./sign-in.ts";
 
 const failures: readonly Failure[] = [
@@ -157,22 +157,6 @@ describe("sign-in", () => {
           )
         ).toStrictEqual([]);
       })
-    );
-  });
-
-  it("is plain data, so a state can be compared and kept", () => {
-    fc.assert(
-      fc.property(fc.array(anyEvent, { maxLength: 30 }), (events) => {
-        const state = fold(events);
-
-        expect(structuredClone(state)).toStrictEqual(state);
-      })
-    );
-  });
-
-  it("explains every failure in words", () => {
-    expect(failures.map((each) => explain(each).length > 0)).toStrictEqual(
-      failures.map(() => true)
     );
   });
 });

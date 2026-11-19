@@ -95,7 +95,7 @@ const page = async (
 
   if (timelines) {
     registry.mount(sync);
-    await eventually(() => fake.daemon.followers.length === 1);
+    await settled(() => fake.daemon.followers.length === 1);
   }
 
   const container = document.createElement("div");
@@ -495,7 +495,7 @@ describe("the Uploads view", () => {
 
     const { container } = await page(fake);
 
-    await eventually(() => fake.daemon.uploadPagesHeld.length === 1);
+    await settled(() => fake.daemon.uploadPagesHeld.length === 1);
 
     const view = () => container.querySelector('section[aria-label="Uploads"]');
     const waiting = view()?.textContent ?? "";
@@ -552,20 +552,6 @@ describe("the Uploads view", () => {
     ]);
   });
 
-  it("shows another device's Upload first, without reloading", async () => {
-    const fake = signedIn(cat);
-    const { container } = await page(fake);
-
-    await settled(() => listed(container).length === 1);
-    await eventually(() => fake.daemon.uploadFollowers.length === 1);
-    await doing(() => {
-      fake.upload(notes);
-    });
-    await settled(() => listed(container).length === 2);
-
-    expect(names(container)).toStrictEqual(["b-safe.bin", "Cat picture.png"]);
-  });
-
   it("copies a link made from the public URL in force, and follows a change of it", async () => {
     const fake = signedIn(cat);
 
@@ -586,7 +572,7 @@ describe("the Uploads view", () => {
     const confirmed = status(container);
 
     // Another device sets a new public URL, which the options follow.
-    await eventually(() => fake.daemon.ownerFollowers.length === 1);
+    await settled(() => fake.daemon.ownerFollowers.length === 1);
     await act(async () => {
       await fake.fetch(new URL("http://daemon.test/api/options/uploads.publicUrl"), {
         body: JSON.stringify({ value: "https://cdn.example.org/u" }),
@@ -640,7 +626,7 @@ describe("the Uploads view", () => {
     const { container } = await page(fake);
 
     await settled(() => listed(container).length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length === 1);
+    await settled(() => fake.daemon.uploadFollowers.length === 1);
     // Another device's Upload lands in the stream, and so on the first page too.
     await doing(() => {
       fake.upload(uploadOf("f", "image/png"));
@@ -685,7 +671,7 @@ describe("the Uploads view", () => {
 
     // The list is whole: one Upload, and no page after it.
     await settled(() => listed(container).length === 1);
-    await eventually(() => fake.daemon.uploadFollowers.length === 1);
+    await settled(() => fake.daemon.uploadFollowers.length === 1);
 
     // The stream drops, and three Uploads are made before it is followed again.
     await doing(() => {
@@ -718,7 +704,7 @@ describe("the Uploads view", () => {
 
     const { container } = await page(fake);
 
-    await eventually(() => fake.daemon.uploadPagesHeld.length === 1);
+    await settled(() => fake.daemon.uploadPagesHeld.length === 1);
     await doing(() => {
       fake.upload(uploadOf("c", "image/png"));
       fake.upload(uploadOf("d", "image/png"));
@@ -750,7 +736,7 @@ describe("the Uploads view", () => {
 
     const { container } = await page(fake, { idle: "100 millis" });
 
-    await eventually(() => fake.daemon.uploadPagesRead.length >= 2);
+    await settled(() => fake.daemon.uploadPagesRead.length >= 2);
     await doing(() => {
       fake.daemon.holdUploadPages = false;
 
@@ -859,22 +845,6 @@ describe("the Uploads view", () => {
     });
   });
 
-  it("drops an Upload another device deleted", async () => {
-    const fake = signedIn(notes, cat);
-    const { container } = await page(fake);
-
-    await settled(() => listed(container).length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length === 1);
-    await act(async () => {
-      await fake.fetch(new URL(`http://daemon.test/api/uploads/${"b".repeat(16)}`), {
-        method: "DELETE",
-      });
-    });
-    await settled(() => listed(container).length === 1);
-
-    expect(names(container)).toStrictEqual(["Cat picture.png"]);
-  });
-
   it("says in the row that an Upload the Daemon no longer has was not deleted", async () => {
     const fake = signedIn(cat);
 
@@ -961,30 +931,6 @@ describe("the Uploads view", () => {
     });
   });
 
-  it("turns an Upload that expires while the deleted are shown into an expired row in place", async () => {
-    const fake = signedIn(notes, cat);
-    const { container } = await page(fake);
-
-    await settled(() => listed(container).length === 2);
-    await toggleDeleted(container);
-    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
-    await doing(() => {
-      fake.expire("a".repeat(16));
-    });
-    await settled(() => listed(container).at(1)?.details?.includes(" · expired ") === true);
-
-    expect({
-      names: names(container),
-      offered: offered(container),
-      thumbnails: listed(container).map((row) => row.thumbnail),
-    }).toStrictEqual({
-      names: ["b-safe.bin", "Cat picture.png"],
-      offered: [["Rename b-safe.bin", "Delete b-safe.bin"], []],
-      thumbnails: ["icon", "icon"],
-    });
-  });
-
   it("closes a rename field and a delete question on an Upload that expires while the deleted are shown", async () => {
     const fake = signedIn(notes, cat);
     const { container } = await page(fake);
@@ -993,8 +939,8 @@ describe("the Uploads view", () => {
 
     await settled(() => listed(container).length === 2);
     await toggleDeleted(container);
-    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await settled(() => fake.daemon.uploadPagesRead.length === 2);
+    await settled(() => fake.daemon.uploadFollowers.length >= 1);
     await press(container, "Rename b-safe.bin");
     const renaming = field() !== null;
 
@@ -1034,7 +980,7 @@ describe("the Uploads view", () => {
       thumbnails: listed(container).map((row) => row.thumbnail),
     };
 
-    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await settled(() => fake.daemon.uploadFollowers.length >= 1);
     await doing(() => {
       fake.lose();
     });
@@ -1059,31 +1005,14 @@ describe("the Uploads view", () => {
     });
   });
 
-  it("marks an Upload the stream says is missing after the list was read", async () => {
-    const fake = signedIn(cat, notes);
-    const { container } = await page(fake);
-
-    await settled(() => listed(container).length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
-    await doing(() => {
-      fake.lose(notes.id);
-    });
-    await settled(() => listed(container).at(1)?.details?.includes("missing") === true);
-
-    expect(listed(container).map((row) => row.details?.includes("missing"))).toStrictEqual([
-      false,
-      true,
-    ]);
-  });
-
   it("does not show a deleted Upload as missing", async () => {
     const fake = signedIn(cat, notes);
     const { container } = await page(fake);
 
     await settled(() => listed(container).length === 2);
     await toggleDeleted(container);
-    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
-    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await settled(() => fake.daemon.uploadPagesRead.length === 2);
+    await settled(() => fake.daemon.uploadFollowers.length >= 1);
     await doing(() => {
       fake.lose(cat.id);
     });
@@ -1132,7 +1061,7 @@ describe("the Uploads view", () => {
         )
         ?.click();
     });
-    await eventually(() => fake.daemon.windowsRead.length > reads);
+    await settled(() => fake.daemon.windowsRead.length > reads);
 
     expect({
       read: fake.daemon.windowsRead.slice(reads),

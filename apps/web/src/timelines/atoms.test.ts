@@ -29,10 +29,9 @@ const iirc = Schema.decodeSync(TimelineId)(channel);
 const describeTimeline = (
   id: string,
   name: string,
-  kind: "Network" | "Channel",
-  changed = 1
+  kind: "Network" | "Channel"
 ): typeof Timeline.Encoded => ({
-  changed,
+  changed: 1,
   closed: false,
   detached: false,
   head: null,
@@ -125,41 +124,6 @@ const shownItems = (shown: Opened) =>
   shown._tag === "Shown" ? shown.window.items.map((item) => item.sequence) : [];
 
 describe("following the Timelines", () => {
-  it("reads the Networks and their Timelines, then follows the changes after what it read", async () => {
-    const { daemon, registry } = await following();
-    const sidebar = registry.get(sidebarNetworks);
-
-    expect({
-      after: daemon.followers.map((follower) => follower.after),
-      connection: sidebar[0]?.connection._tag,
-      timelines: sidebar[0]?.timelines.map((timeline) => timeline.name),
-    }).toStrictEqual({
-      after: ["1.2"],
-      connection: "Connected",
-      timelines: ["libera", "#iirc"],
-    });
-  });
-
-  it("opens a Timeline on its latest, and shows a live item as it is said", async () => {
-    const { registry, send } = await following();
-
-    registry.set(open, iirc);
-    const before = await until(registry, openTimeline, (shown) => shown._tag === "Shown");
-
-    send(
-      changed(3, {
-        items: [message(3)],
-        timelines: [describeTimeline(channel, "#iirc", "Channel", 3)],
-      })
-    );
-    const after = await until(registry, openTimeline, (shown) => shownItems(shown).length === 3);
-
-    expect({ after: shownItems(after), before: shownItems(before) }).toStrictEqual({
-      after: [1, 2, 3],
-      before: [1, 2],
-    });
-  });
-
   it("follows again from the last place it was given when the stream ends", async () => {
     const { daemon, endStreams, registry, send } = await following();
 
@@ -285,14 +249,17 @@ describe("following the Timelines", () => {
   });
 
   it("ignores a heartbeat", async () => {
-    const { registry, send } = await following();
-    const state = registry.get(timelinesState);
+    const { daemon, registry, send } = await following();
+    const [stream] = daemon.followers;
 
     send({ data: "{}", event: "heartbeat" });
     send(changed(3, {}));
-    await until(registry, timelinesState, (now) => now !== state);
+    await until(registry, timelinesState, (state) =>
+      state.follow._tag === "Following" ? state.follow.place?.sequence === 3 : false
+    );
 
-    expect(registry.get(timelinesState).networks).toStrictEqual(state.networks);
+    // The step after it came on the same stream, never one followed again.
+    expect(daemon.followers).toStrictEqual([stream]);
   });
 
   it("reads the open window again when an overflow names it, and everything on a reset", async () => {

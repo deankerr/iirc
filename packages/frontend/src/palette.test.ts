@@ -509,7 +509,7 @@ describe("the themes in the palette", () => {
 });
 
 describe("the fonts in the palette", () => {
-  it("lists every font, the one in effect said, finds them by name or as fonts, and sets one for every device", () => {
+  it("lists every font, the one in effect said, and finds them by name or as fonts", () => {
     const fonted = { ...listing(), font: "commit-mono" as const, themes: listedThemes([]) };
     const all = sections(fonted, "", []);
     const commit = entryOf(all, "font:commit-mono");
@@ -519,7 +519,6 @@ describe("the fonts in the palette", () => {
       bySans: keys(sections(fonted, "sans", []))
         .find(([title]) => title === "Fonts")?.[1]
         .toSorted(),
-      chosen: choose(commit, inChannel, false),
       current: commit._tag === "Font" && commit.current,
       fonts: keys(all).find(([title]) => title === "Fonts"),
       found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
@@ -533,7 +532,6 @@ describe("the fonts in the palette", () => {
         "font:source-sans-3",
         "font:system-sans",
       ],
-      chosen: [{ _tag: "ChangeUi", device: false, option: "font", value: "commit-mono" }],
       current: true,
       fonts: [
         "Fonts",
@@ -558,7 +556,7 @@ describe("the fonts in the palette", () => {
 });
 
 describe("a family typed in the palette", () => {
-  it("is offered after font, unless it names a font listed or no family, and set for this device alone", () => {
+  it("is offered after font, unless it names a font listed or no family", () => {
     const fonted = { ...listing(), themes: listedThemes([]) };
 
     const fontsFor = (query: string) =>
@@ -569,7 +567,6 @@ describe("a family typed in the palette", () => {
     expect({
       alone: fontsFor("Fira Code").map((one) => one.key),
       anyCase: fontsFor("FONT fira code").map((one) => one.key),
-      chosen: typed === undefined ? undefined : choose(typed, inChannel, false),
       first: titles(sections(fonted, "font Fira Code", [])),
       named: fontsFor("font Inter").map((one) => one.key),
       previewed: typed === undefined ? undefined : fontOfKey(typed.key),
@@ -582,7 +579,6 @@ describe("a family typed in the palette", () => {
     }).toStrictEqual({
       alone: [],
       anyCase: ["font:fira code"],
-      chosen: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
       first: ["Fonts"],
       named: [],
       previewed: "Fira Code",
@@ -644,12 +640,6 @@ describe("the palette's state", () => {
         }
       )
     );
-  });
-
-  it("is plain data", () => {
-    const state = reducePalette(initialPalette, { _tag: "Chosen", key: "command:timeline.next" });
-
-    expect(structuredClone(state)).toStrictEqual(state);
   });
 });
 

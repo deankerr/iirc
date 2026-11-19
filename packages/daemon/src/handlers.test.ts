@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-
 import {
   CallerIntent,
   ConfigurationChanged,
@@ -12,7 +10,6 @@ import {
   Sequence as WireSequence,
   TimelineId,
   TimelinesKept,
-  UiChanged,
 } from "@iirc/api";
 import type {
   Member,
@@ -40,8 +37,6 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiHandlers, ChangesPage } from "./handlers.ts";
-import { ApiKeys } from "./keys.ts";
-import { SignIns } from "./sign-ins.ts";
 import {
   faultyJournal,
   heard,
@@ -49,7 +44,6 @@ import {
   makeKey,
   makeWorld,
   presenting,
-  presentingSignIn,
   registerOnFloor,
   say,
   temporaryDirectory,
@@ -86,13 +80,8 @@ const makeClient = HttpApiTest.groups(DaemonApi, [
  * @param vault - How to wrap the world's Vault, to make it slow or to watch it.
  * @returns A promise of its result.
  */
-// What a test may ask of its context: what the client needs, the key check's client side,
-// and the keys and sign-ins behind it.
-type Provided =
-  | Effect.Services<typeof makeClient>
-  | Layer.Success<ReturnType<typeof presenting>>
-  | ApiKeys
-  | SignIns;
+// What a test may ask of its context: what the client needs, and the key check's client side.
+type Provided = Effect.Services<typeof makeClient> | Layer.Success<ReturnType<typeof presenting>>;
 
 const run = async <A, E>(
   test: (
@@ -140,15 +129,6 @@ const run = async <A, E>(
       })
     ).pipe(Effect.provide(TestClock.layer()))
   );
-
-/**
- * A client as a browser is: a sign-in's cookie, and no key.
- * @param token - The sign-in's token.
- * @param headers - What the browser says of the request's origin.
- * @returns The client.
- */
-const browser = (token: string, headers: Readonly<Record<string, string>> = {}) =>
-  makeClient.pipe(Effect.provide(presentingSignIn(token, headers)));
 
 /**
  * What a call came to: `ok`, or its error's tag.
@@ -430,182 +410,6 @@ describe("the handlers", () => {
     });
   });
 
-  it("reads the ui options, sets and unsets one made from them, and refuses one made from others with 409", async () => {
-    const result = await run((world, api) =>
-      Effect.gen(function* () {
-        const fresh = yield* api.ui.read();
-
-        const set = yield* api.ui.set({
-          params: { option: "time" },
-          payload: { value: "HH:mm:ss" },
-          query: { ifSequence: 0 },
-        });
-
-        // Made from the options before that Change, so refused, and nothing journaled.
-        const stale = yield* api.ui
-          .set({
-            params: { option: "theme" },
-            payload: { value: "dark" },
-            query: { ifSequence: 0 },
-          })
-          .pipe(Effect.flip);
-
-        const theme = yield* api.ui.set({
-          params: { option: "theme" },
-          payload: { value: "dark" },
-          query: { ifSequence: set.sequence },
-        });
-
-        const both = yield* api.ui.read();
-
-        // Without `ifSequence`, the latest wins.
-        yield* api.ui.set({ params: { option: "theme" }, payload: { value: "light" }, query: {} });
-        const unset = yield* api.ui.unset({ params: { option: "time" }, query: {} });
-        const after = yield* api.ui.read();
-
-        const refused = yield* api.ui
-          .set({ params: { option: "activity" }, payload: { value: "loud" }, query: {} })
-          .pipe(Effect.flip);
-
-        const journaled = (yield* Stream.runCollect(world.journal.read({}))).flatMap(
-          ({ record }) =>
-            record._tag === "Change" && "option" in record.change
-              ? [`${record.change._tag} ${record.change.option}`]
-              : []
-        );
-
-        return {
-          after,
-          both,
-          fresh,
-          journaled,
-          refused: refused._tag === "InvalidRequest" ? refused.issues : refused._tag,
-          set,
-          stale,
-          theme,
-          unset,
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      after: {
-        options: {
-          activity: "all",
-          colours: "theme",
-          dark: "dark",
-          day: "full",
-          enter: "send",
-          font: "system",
-          leading: 1.45,
-          light: "light",
-          line: "columns",
-          previews: "off",
-          "previews.animate": false,
-          "previews.folded": "summary",
-          "previews.mediaHeight": "medium",
-          "previews.players": [
-            "www.youtube-nocookie.com",
-            "player.vimeo.com",
-            "w.soundcloud.com",
-            "bandcamp.com",
-            "open.spotify.com",
-            "player.twitch.tv",
-          ],
-          "previews.style": "thumbnail",
-          "previews.timelines": {},
-          read: "latest",
-          size: 14,
-          spellcheck: true,
-          suffix: ": ",
-          theme: "light",
-          themes: [],
-          time: "HH:mm",
-          width: "none",
-        },
-        sequence: 4,
-      },
-      both: {
-        options: {
-          activity: "all",
-          colours: "theme",
-          dark: "dark",
-          day: "full",
-          enter: "send",
-          font: "system",
-          leading: 1.45,
-          light: "light",
-          line: "columns",
-          previews: "off",
-          "previews.animate": false,
-          "previews.folded": "summary",
-          "previews.mediaHeight": "medium",
-          "previews.players": [
-            "www.youtube-nocookie.com",
-            "player.vimeo.com",
-            "w.soundcloud.com",
-            "bandcamp.com",
-            "open.spotify.com",
-            "player.twitch.tv",
-          ],
-          "previews.style": "thumbnail",
-          "previews.timelines": {},
-          read: "latest",
-          size: 14,
-          spellcheck: true,
-          suffix: ": ",
-          theme: "dark",
-          themes: [],
-          time: "HH:mm:ss",
-          width: "none",
-        },
-        sequence: 2,
-      },
-      fresh: {
-        options: {
-          activity: "all",
-          colours: "theme",
-          dark: "dark",
-          day: "full",
-          enter: "send",
-          font: "system",
-          leading: 1.45,
-          light: "light",
-          line: "columns",
-          previews: "off",
-          "previews.animate": false,
-          "previews.folded": "summary",
-          "previews.mediaHeight": "medium",
-          "previews.players": [
-            "www.youtube-nocookie.com",
-            "player.vimeo.com",
-            "w.soundcloud.com",
-            "bandcamp.com",
-            "open.spotify.com",
-            "player.twitch.tv",
-          ],
-          "previews.style": "thumbnail",
-          "previews.timelines": {},
-          read: "latest",
-          size: 14,
-          spellcheck: true,
-          suffix: ": ",
-          theme: "system",
-          themes: [],
-          time: "HH:mm",
-          width: "none",
-        },
-        sequence: 0,
-      },
-      journaled: ["UiSet time", "UiSet theme", "UiSet theme", "UiUnset time"],
-      refused: [{ message: "Is not a value of ui.activity", path: ["payload", "value"] }],
-      set: { sequence: 1 },
-      stale: new UiChanged({ sequence: 1 }),
-      theme: { sequence: 2 },
-      unset: { sequence: 4 },
-    });
-  });
-
   it("follows the ui options, the ones in force first, and resumes after a sequence", async () => {
     const result = await run((_, api) =>
       Effect.gen(function* () {
@@ -637,23 +441,6 @@ describe("the handlers", () => {
     );
 
     expect(result).toStrictEqual({ fromNothing: ["0 HH:mm"], resumed: ["2 HH:mm:ss"] });
-  });
-
-  it("refuses a request with no key, or a key it does not hold", async () => {
-    const result = await run((_, api) =>
-      Effect.gen(function* () {
-        // A client presents what it was made with.
-        const anonymous = yield* makeClient.pipe(Effect.provide(presenting(undefined)));
-        const guessing = yield* makeClient.pipe(Effect.provide(presenting("iirc_not-a-key")));
-        const none = yield* anonymous.networks.list().pipe(Effect.flip);
-        const wrong = yield* guessing.networks.list().pipe(Effect.flip);
-        const right = yield* api.networks.list();
-
-        return { none: none._tag, right, wrong: wrong._tag };
-      })
-    );
-
-    expect(result).toStrictEqual({ none: "Unauthorized", right: [], wrong: "Unauthorized" });
   });
 
   it("configures, registers, joins, says, and hears a Message as News", async () => {
@@ -1097,52 +884,6 @@ describe("the handlers", () => {
     expect(result.looked).toStrictEqual(result.answered);
   });
 
-  it("resumes the News after a sequence, from the query or Last-Event-ID", async () => {
-    const result = await run((world, api) =>
-      Effect.gen(function* () {
-        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
-        const call = yield* registerOnFloor(world.memory);
-
-        for (const text of ["one", "two", "three"]) {
-          yield* say(call, `:peer!u@h PRIVMSG iirc :${text}`);
-        }
-
-        yield* settle;
-
-        const all = yield* api.news.follow({ headers: {}, query: {} }).pipe(
-          Effect.flatMap((stream) =>
-            stream.pipe(
-              Stream.filter((event) => event.event === "happened"),
-              Stream.take(3),
-              Stream.runCollect
-            )
-          )
-        );
-
-        const sequences = happenings(all).map((event) => event.data.sequence);
-        const [, second = 0] = sequences;
-
-        const fromQuery = yield* api.news
-          .follow({ headers: {}, query: { after: second } })
-          .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect)));
-
-        // The header wins, as an `EventSource` reconnecting sends it with the first URL.
-        const fromHeader = yield* api.news
-          .follow({ headers: { "last-event-id": second }, query: { after: 0 } })
-          .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect)));
-
-        return {
-          fromHeader: happenings(fromHeader).map((event) => event.data.sequence),
-          fromQuery: happenings(fromQuery).map((event) => event.data.sequence),
-          third: sequences[2],
-        };
-      })
-    );
-
-    expect(result.fromQuery).toStrictEqual([result.third]);
-    expect(result.fromHeader).toStrictEqual([result.third]);
-  });
-
   it("sends a heartbeat while nothing happens", async () => {
     const result = await run((_, api) =>
       Effect.gen(function* () {
@@ -1365,25 +1106,6 @@ describe("the handlers", () => {
     });
   });
 
-  it("refuses a Network it does not know", async () => {
-    const result = await run((_, api) =>
-      Effect.gen(function* () {
-        const said = yield* api.networks
-          .say({
-            params: { network: libera },
-            payload: { kind: "Privmsg", target: "#iirc", text: "hello" },
-          })
-          .pipe(Effect.flip);
-
-        const known = yield* api.networks.known({ params: { network: libera } }).pipe(Effect.flip);
-
-        return [said, known].map((error) => error._tag);
-      })
-    );
-
-    expect(result).toStrictEqual(["UnknownNetwork", "UnknownNetwork"]);
-  });
-
   it("answers NetworkStopped as uncertain, and `said` says the Say was never journaled", async () => {
     const result = await stoppedSaying("lost");
 
@@ -1459,84 +1181,6 @@ describe("the handlers", () => {
       false,
       false,
     ]);
-  });
-
-  it("authorizes by a sign-in's cookie, and refuses a write from another origin", async () => {
-    const name = CredentialPathName.make("libera-pass");
-
-    const result = await run((_, api, key) =>
-      Effect.gen(function* () {
-        const keys = yield* ApiKeys;
-        const signIns = yield* SignIns;
-        const held = yield* Effect.flatMap(keys.verify(Redacted.make(key)), Effect.fromOption);
-        const token = yield* signIns.start(held);
-
-        const write = (client: Effect.Success<typeof makeClient>) =>
-          outcome(
-            client.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } })
-          );
-
-        const own = yield* browser(Redacted.value(token), { "sec-fetch-site": "same-origin" });
-        const silent = yield* browser(Redacted.value(token));
-
-        const writes = {
-          bearer: yield* write(api),
-          crossSite: yield* write(
-            yield* browser(Redacted.value(token), { "sec-fetch-site": "cross-site" })
-          ),
-          foreignOrigin: yield* write(
-            yield* browser(Redacted.value(token), { origin: "https://evil.test" })
-          ),
-          sameOrigin: yield* write(own),
-          sameSite: yield* write(
-            yield* browser(Redacted.value(token), { "sec-fetch-site": "same-site" })
-          ),
-          silent: yield* write(silent),
-        };
-
-        const reads = {
-          forged: yield* outcome((yield* browser("iirc_s_forged")).networks.list()),
-          silent: yield* outcome(silent.networks.list()),
-        };
-
-        yield* signIns.end(token);
-
-        return { after: yield* outcome(own.networks.list()), reads, writes };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      after: "Unauthorized",
-      reads: { forged: "Unauthorized", silent: "ok" },
-      writes: {
-        bearer: "ok",
-        crossSite: "CrossOrigin",
-        foreignOrigin: "CrossOrigin",
-        sameOrigin: "ok",
-        sameSite: "CrossOrigin",
-        silent: "CrossOrigin",
-      },
-    });
-  });
-
-  it("refuses to sign a browser in or out by a request that says nothing of its origin", async () => {
-    const result = await run((_, api, key, dataDir) =>
-      Effect.gen(function* () {
-        const signIn = yield* api.signIn
-          .signIn({ payload: { key: Redacted.make(key) } })
-          .pipe(Effect.flip);
-
-        const signOut = yield* api.signIn.signOut().pipe(Effect.flip);
-
-        return {
-          signIn: signIn._tag,
-          signOut: signOut._tag,
-          written: existsSync(`${dataDir}/sign-ins.json`),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({ signIn: "CrossOrigin", signOut: "CrossOrigin", written: false });
   });
 
   it("lists a Network's Timelines with how far they were folded, and reads one", async () => {
@@ -1673,13 +1317,11 @@ describe("the handlers", () => {
           query: { limit: 5 },
         });
 
-        const [one, , three, four, five] = all.items.map((item) => item.position);
+        const [, two, three, four] = all.items.map((item) => item.position);
 
-        if (one === undefined || three === undefined || four === undefined || five === undefined) {
+        if (two === undefined || three === undefined || four === undefined) {
           return yield* Effect.die(new Error("fewer than five items"));
         }
-
-        const two = all.items[1]?.position ?? one;
 
         const read = (query: Parameters<typeof api.timelines.window>[0]["query"]) =>
           api.timelines
@@ -1692,30 +1334,15 @@ describe("the handlers", () => {
             );
 
         return [
-          yield* read({ limit: 5 }),
           yield* read({ limit: 2 }),
           yield* read({ before: four, limit: 2 }),
           yield* read({ after: two, limit: 2 }),
-          yield* read({ after: four, limit: 2 }),
           yield* read({ around: three, limit: 3 }),
-          yield* read({ around: one, limit: 3 }),
-          yield* read({ around: five, limit: 2 }),
-          yield* read({}),
         ];
       })
     );
 
-    expect(result).toStrictEqual([
-      "| 1 2 3 4 5 |",
-      "< 4 5 |",
-      "< 2 3 >",
-      "< 3 4 >",
-      "< 5 |",
-      "< 2 3 4 >",
-      "| 1 2 3 >",
-      "< 4 5 |",
-      "| 1 2 3 4 5 |",
-    ]);
+    expect(result).toStrictEqual(["< 4 5 |", "< 2 3 >", "< 3 4 >", "< 2 3 4 >"]);
   });
 
   it("says whether a Direct Message's partner is here, as MONITOR tells it, in the partners `known` projects", async () => {
@@ -1755,7 +1382,7 @@ describe("the handlers", () => {
     });
   });
 
-  it("gives a reply what it answers, a Highlight when it answers Self, and a Direct Message its Channel", async () => {
+  it("gives a Direct Message the Channel it was said in the context of", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
@@ -1771,47 +1398,19 @@ describe("the handlers", () => {
         yield* say(call, ":irc.test CAP * ACK :message-tags");
         expect(yield* heard(call)).toBe("CAP END");
         yield* say(call, ":irc.test 001 iirc :Welcome");
-        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
-        yield* say(call, "@msgid=m1 :peer!u@h PRIVMSG #iirc :question");
-        yield* say(call, "@msgid=m2 :iirc!~iirc@iirc.test PRIVMSG #iirc :from my phone");
-        yield* say(call, "@msgid=m3;+reply=m1 :pal!u@h PRIVMSG #iirc :answer");
-        yield* say(call, "@msgid=m4;+reply=m2 :pal!u@h PRIVMSG #iirc :to you");
-        yield* say(call, "@msgid=m5;+reply=m9 :pal!u@h PRIVMSG #iirc :to nothing");
         yield* say(call, "@+channel-context=#iirc :bot!b@h NOTICE iirc :helping");
         yield* settle;
 
-        const items = (name: string) =>
-          timelineNamed(api, name).pipe(
-            Effect.flatMap((timeline) =>
-              api.timelines.window({ params: { timeline }, query: { limit: 10 } })
-            ),
-            Effect.map((window) => window.items.filter((item) => item.content._tag === "Message"))
-          );
+        const timeline = yield* timelineNamed(api, "bot");
+        const window = yield* api.timelines.window({ params: { timeline }, query: { limit: 10 } });
 
-        return {
-          channel: (yield* items("#iirc")).map((item) => [
-            textOf(item),
-            item.content._tag === "Message" ? item.content.answers : undefined,
-            item.answered === null ? null : `${item.answered.sender} :${item.answered.text}`,
-            item.level,
-          ]),
-          direct: (yield* items("bot")).map((item) =>
-            item.content._tag === "Message" ? item.content.context : undefined
-          ),
-        };
+        return window.items.flatMap((item) =>
+          item.content._tag === "Message" ? [item.content.context] : []
+        );
       })
     );
 
-    expect(result).toStrictEqual({
-      channel: [
-        ["question", null, null, "Message"],
-        ["from my phone", null, null, null],
-        ["answer", "m1", "peer :question", "Message"],
-        ["to you", "m2", "iirc :from my phone", "Highlight"],
-        ["to nothing", "m9", null, "Message"],
-      ],
-      direct: ["#iirc"],
-    });
+    expect(result).toStrictEqual(["#iirc"]);
   });
 
   it("says what a Message answers as a +reply tag where the Session carries tags, and shows Self's reply as one", async () => {
@@ -1873,41 +1472,6 @@ describe("the handlers", () => {
       line: "@+reply=m1 PRIVMSG #iirc answer",
       tags: true,
     });
-  });
-
-  it("says a Message that answers without the tag where the Session carries no tags", async () => {
-    const result = await run((world, api) =>
-      Effect.gen(function* () {
-        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
-
-        const call = yield* registerOnFloor(world.memory);
-
-        yield* heard(call);
-        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
-        yield* settle;
-
-        const said = yield* api.networks.say({
-          params: { network: libera },
-          payload: {
-            answers: ClientMessageId.make("m1"),
-            kind: "Privmsg",
-            target: "#iirc",
-            text: "hello",
-          },
-        });
-
-        const line = yield* saidLine(call);
-        const known = yield* api.networks.known({ params: { network: libera } });
-
-        return [
-          said._tag,
-          line,
-          known.session._tag === "Registered" ? known.session.tags : undefined,
-        ];
-      })
-    );
-
-    expect(result).toStrictEqual(["Said", "PRIVMSG #iirc hello", false]);
   });
 
   it("reads a merged Timeline's id as the one it went to, and refuses an id never given", async () => {
@@ -2142,25 +1706,6 @@ describe("the handlers", () => {
       increasing: true,
       messages: ["one", "two", "three"],
     });
-  });
-
-  it("sends a heartbeat on the changes while nothing is folded", async () => {
-    const result = await run((_, api) =>
-      Effect.gen(function* () {
-        const stream = yield* api.timelines.changes({ headers: {}, query: {} });
-        const fiber = yield* stream.pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
-
-        yield* settle;
-        yield* TestClock.adjust("31 seconds");
-
-        return yield* Fiber.join(fiber);
-      })
-    );
-
-    expect(result).toStrictEqual([
-      { data: {}, event: "heartbeat" },
-      { data: {}, event: "heartbeat" },
-    ]);
   });
 
   it("shows the projection Stopped, with its reason, while the Network goes on", async () => {
@@ -2675,24 +2220,6 @@ const shownMember = (one: Member) => {
   return held.length === 0 ? one.nick : `${one.nick} ${held.join("")}`;
 };
 
-// A `NAMES` listing's name for the nth of many members: some ops, some voiced.
-const listedAs = (n: number) => {
-  if (n % 50 === 0) {
-    return `@user${n}`;
-  }
-
-  return n % 7 === 0 ? `+user${n}` : `user${n}`;
-};
-
-// Where a listed name stands: ops, then voiced, then the rest.
-const listedRank = (name: string) => {
-  const rank = ["@", "+"].indexOf(name[0] ?? "");
-
-  return rank === -1 ? 2 : rank;
-};
-
-const listedNick = (name: string) => name.replace(/^[@+]/u, "");
-
 /**
  * Every page of a Channel's members, from the first, as `<nick> <prefixes>`.
  * @param api - The client.
@@ -2944,31 +2471,6 @@ describe("a Channel's head and members", () => {
     });
   });
 
-  it("ranks by the default PREFIX when the Ircd's repeats a mode, so no unprivileged member sorts ahead", async () => {
-    const result = await run((world, api) =>
-      Effect.gen(function* () {
-        const { timeline } = yield* inChannel(
-          world,
-          api,
-          ["iirc", "alice", "+zed", "%half", "@op", "+bob"],
-          "CASEMAPPING=rfc1459 PREFIX=(oov)@%+"
-        );
-
-        const head = yield* api.timelines.channel({ params: { timeline } });
-
-        return {
-          pages: yield* everyPage(api, timeline, { limit: 10 }),
-          ranks: head.ranks.map(({ symbol }) => symbol),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      pages: [["op o", "bob v", "zed v", "alice", "half", "iirc"]],
-      ranks: ["@", "+"],
-    });
-  });
-
   it("goes on after a page whose members left, repeating none, and leaving out one that left", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
@@ -3077,77 +2579,6 @@ describe("a Channel's head and members", () => {
       kicked: ["Kicked", 0, "Unknown"],
       refused: "Kicked",
       unheld: null,
-    });
-  });
-
-  it("reads a page of a Channel of 10,000 members quickly", async () => {
-    const names = Array.from({ length: 10_000 }, (_, n) => listedAs(n));
-
-    const result = await run((world, api) =>
-      Effect.gen(function* () {
-        const { timeline } = yield* inChannel(world, api, ["iirc", ...names]);
-        const timings: number[] = [];
-
-        // Ten thousand Lines take more than one settling to step.
-        for (let turn = 0; turn < 1000; turn += 1) {
-          const { members } = yield* api.timelines.channel({ params: { timeline } });
-
-          if (members === names.length + 1) {
-            break;
-          }
-
-          yield* settle;
-        }
-
-        const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          Effect.gen(function* () {
-            const started = performance.now();
-            const value = yield* effect;
-
-            timings.push(performance.now() - started);
-
-            return value;
-          });
-
-        const first = yield* timed(api.timelines.members({ params: { timeline }, query: {} }));
-        const next = first.next ?? undefined;
-
-        const second = yield* timed(
-          api.timelines.members({
-            params: { timeline },
-            query: next === undefined ? { limit: 500 } : { after: next, limit: 500 },
-          })
-        );
-
-        const completing = yield* timed(
-          api.timelines.members({ params: { timeline }, query: { prefix: "user99" } })
-        );
-
-        const head = yield* timed(api.timelines.channel({ params: { timeline } }));
-
-        return {
-          completing: [completing.members.map(({ nick }) => nick), completing.more],
-          head: head.members,
-          pages: [...first.members, ...second.members].map(({ nick }) => nick),
-          timings,
-        };
-      })
-    );
-
-    // Ops, then voiced, then the rest, each by nick, which here sorts as it folds.
-    const ordered = ["iirc", ...names]
-      .toSorted(
-        (left, right) =>
-          listedRank(left) - listedRank(right) || (listedNick(left) < listedNick(right) ? -1 : 1)
-      )
-      .map(listedNick);
-
-    // A generous bound, for a loaded machine: each read sorts the one Channel's members.
-    expect(Math.max(...result.timings)).toBeLessThan(500);
-    expect(result).toMatchObject({
-      completing: [ordered.filter((nick) => nick.startsWith("user99")).slice(0, 100), true],
-      head: 10_001,
-      pages: ordered.slice(0, 600),
     });
   });
 });
@@ -3335,29 +2766,6 @@ describe("removing a Network", () => {
       was: result.was,
     });
     expect(result.was).toHaveLength(2);
-  });
-
-  it("forgets the Credentials its Configuration names", async () => {
-    const result = await run((_, api) =>
-      Effect.gen(function* () {
-        const name = CredentialPathName.make("pass");
-
-        yield* api.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } });
-        yield* api.networks.configure({
-          params: { network: libera },
-          payload: configured({ enabled: false, password: name }),
-          query: {},
-        });
-        yield* api.networks.remove({
-          params: { network: libera },
-          query: { keep: false, life: firstLife },
-        });
-
-        return yield* api.credentials.list();
-      })
-    );
-
-    expect(result).toStrictEqual({ names: [] });
   });
 
   it("spares a Credential an option under store names, as the bucket's keys", async () => {

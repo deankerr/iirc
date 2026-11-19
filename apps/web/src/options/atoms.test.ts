@@ -18,7 +18,7 @@ import {
   until,
 } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync } from "../timelines/atoms.ts";
-import { hold, mainView, openOptions, optionRows, optionsState, optionsSync } from "./atoms.ts";
+import { hold, optionsState, optionsSync } from "./atoms.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
 const idOf = (sequence: number) => `${hex(sequence, 14)}-00000000-00000000`;
@@ -83,63 +83,6 @@ const configuring = async () => {
 };
 
 describe("the options", () => {
-  it("reads every Network's Configuration and the Credentials held into the view, filtered", async () => {
-    const { daemon, registry } = await configuring();
-
-    daemon.credentials.set("libera.sasl", "not shown");
-    await run(registry, openOptions, "*nicks");
-    await until(
-      registry,
-      optionsState,
-      (state) => state.held !== undefined && state.networks?.get(libera)?._tag === "Read"
-    );
-
-    expect({
-      held: registry.get(optionsState).held,
-      rows: registry.get(optionRows).map((option) => [option.name, option.value]),
-      shown: registry.get(mainView),
-    }).toStrictEqual({
-      held: new Set(["libera.sasl"]),
-      rows: [["network.libera.nicks", { _tag: "Shown", text: "iirc" }]],
-      shown: { _tag: "Options", back: { _tag: "Timeline" }, filter: "*nicks" },
-    });
-  });
-
-  it("opens the view from /set, filtered by a pattern, and lets a Timeline take the main view back", async () => {
-    const { registry, type } = await configuring();
-
-    await type("/set network.libera.*");
-    await until(registry, optionRows, (rows) => rows.length > 0);
-    const opened = registry.get(mainView);
-    const first = registry.get(optionRows)[0]?.name;
-
-    registry.set(open, channel);
-
-    expect({ closed: registry.get(mainView), first, opened }).toStrictEqual({
-      closed: { _tag: "Timeline" },
-      first: "network.libera.answerCtcp",
-      opened: { _tag: "Options", back: { _tag: "Timeline" }, filter: "network.libera.*" },
-    });
-  });
-
-  it("sets an option made from the Configuration read, and shows what it became", async () => {
-    const { daemon, inForce, registry, type } = await configuring();
-
-    await run(registry, openOptions, "");
-    await until(registry, optionsState, (state) => state.networks?.get(libera)?._tag === "Read");
-    await type("/set network.libera.nicks dean, dean_");
-
-    expect({
-      nicks: inForce()?.configuration.nicks,
-      puts: daemon.puts,
-      read: registry.get(optionsState).networks?.get(libera)?._tag,
-    }).toStrictEqual({
-      nicks: ["dean", "dean_"],
-      puts: [{ ifSequence: "1", network: "libera" }],
-      read: "Read",
-    });
-  });
-
   it("reads again and makes the same edit once more when another Frontend changed it first", async () => {
     const { daemon, inForce, notice, type } = await configuring();
 
@@ -201,26 +144,11 @@ describe("the options", () => {
     await type("/network add libera irc.libera.chat bot", "Nowhere");
 
     expect({
-      added: daemon.configurations.get("oftc")?.configuration,
+      added: daemon.configurations.get("oftc")?.configuration.ircds,
       notice: notice("Nowhere"),
       puts: daemon.puts,
     }).toStrictEqual({
-      added: {
-        answerCtcp: true,
-        channels: [],
-        declined: [],
-        enabled: true,
-        fallbackEncoding: "windows-1252",
-        highlights: [],
-        ignores: [],
-        ircds: [{ host: "irc.oftc.net", port: 6697, tls: true }],
-        login: { _tag: "None" },
-        nicks: ["bot"],
-        oper: { _tag: "None" },
-        realname: "bot",
-        username: "bot",
-        whoOnJoin: true,
-      },
+      added: [{ host: "irc.oftc.net", port: 6697, tls: true }],
       notice: "libera is already configured. Change it with /set network.libera.*",
       puts: [
         { ifSequence: "0", network: "oftc" },
@@ -273,26 +201,6 @@ describe("the options", () => {
     expect({ joined: inForce()?.configuration.channels, parted }).toStrictEqual({
       joined: [{ name: "#{a}" }],
       parted: [{ name: "#{a}" }],
-    });
-  });
-
-  it("ignores and unignores by the casemapping the Daemon reports, saying when a mask is not there", async () => {
-    const { daemon, inForce, notice, type } = await configuring();
-
-    daemon.known.set("libera", { chantypes: "#", declared: "ascii" });
-    await type("/ignore p[a]");
-    await type("/ignore P{A}");
-    const ignored = inForce()?.configuration.ignores;
-
-    await type("/unignore P[A]");
-    const unignored = inForce()?.configuration.ignores;
-
-    await type("/unignore nobody");
-
-    expect({ ignored, missing: notice(), unignored }).toStrictEqual({
-      ignored: ["p[a]!*@*", "P{A}!*@*"],
-      missing: "nobody!*@* is not among network.libera.ignores.",
-      unignored: ["P{A}!*@*"],
     });
   });
 

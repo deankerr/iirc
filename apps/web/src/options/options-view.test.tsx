@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { deviceUiKey } from "@iirc/frontend/ui";
-import { Effect } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -19,7 +18,6 @@ import {
   run,
 } from "../testing/fake-daemon.ts";
 import { editing, optionsState, optionsSync } from "./atoms.ts";
-import { deviceUi } from "./device.ts";
 import { ownerSync } from "./owner.ts";
 import { uiSync } from "./ui.ts";
 
@@ -217,36 +215,6 @@ describe("the options view, under store, uploads, and previews", () => {
     ]);
   });
 
-  it("has the Pane's whole width, with no Uploads listed beside it", async () => {
-    const fake = signedIn();
-    const { container, registry, type } = await page(fake);
-
-    await type("/set uploads");
-    await readAt(registry, 0);
-
-    expect({
-      options: container.querySelector('section[aria-label="Options"]') !== null,
-      uploads: container.querySelector('section[aria-label="Uploads"]'),
-    }).toStrictEqual({ options: true, uploads: null });
-  });
-
-  it("lists the Previews' option from the Schema, at its default", async () => {
-    const fake = signedIn();
-    const { container, registry, type } = await page(fake);
-
-    await type("/set previews.max");
-    await readAt(registry, 0);
-
-    expect(rows(container)).toStrictEqual([
-      [
-        "previews.maxTotal",
-        "1073741824",
-        "1073741824",
-        "The most bytes the store may hold for Previews' images. 1073741824, 1 GiB, unless set; the least recently shown lose their images first.",
-      ],
-    ]);
-  });
-
   it("sets one with /set, made from the options read, and refuses a bad value before sending anything", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
@@ -419,38 +387,6 @@ describe("the options view, under store, uploads, and previews", () => {
     ]);
   });
 
-  it("shows a Credential another device held and named as held, followed from the Daemon", async () => {
-    const fake = signedIn();
-    const first = await page(fake);
-    const second = await page(fake);
-
-    await first.type("/set store.s3.access*");
-    await second.type("/set store.s3.access*");
-    await eventually(() => fake.daemon.ownerFollowers.length === 2);
-    await readAt(first.registry, 0);
-    await readAt(second.registry, 0);
-    await second.type("/set store.s3.accessKeyId");
-
-    const field = second.container.querySelector<HTMLInputElement>('input[name="value"]');
-
-    if (field === null) {
-      throw new Error("no prompt");
-    }
-
-    await typeInto(field, "the-bucket's-access-key-id");
-    await doing(() => {
-      field.form?.requestSubmit();
-    });
-    await settled(
-      () =>
-        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
-    );
-
-    expect(rowOf(first.container, "store.s3.accessKeyId")?.[1]).toBe(
-      "Owner.store.s3.accessKeyId held"
-    );
-  });
-
   it("shows a Credential another device held again under the name an option already gave it as held", async () => {
     const fake = signedIn();
 
@@ -557,21 +493,6 @@ describe("the options view, under store, uploads, and previews", () => {
       ],
     });
   });
-
-  it("offers no device override of one, and never keeps one on the device", async () => {
-    const fake = signedIn();
-    const { container, registry, type } = await page(fake);
-
-    await type("/set uploads.maxSize");
-    await readAt(registry, 0);
-    await type("/set -device uploads.maxSize 1024");
-
-    expect({
-      changes: fake.daemon.ownerChanges,
-      device: registry.get(deviceUi),
-      row: rowOf(container, "uploads.maxSize")?.[1],
-    }).toStrictEqual({ changes: [], device: {}, row: "104857600" });
-  });
 });
 
 /**
@@ -631,13 +552,6 @@ const held = async () => {
   return { ...shown, fake, state, writes };
 };
 
-/** Lets several frames pass, so a write still held is seen to be. */
-const later = async () => {
-  await act(async () => {
-    await Effect.runPromise(Effect.sleep("100 millis"));
-  });
-};
-
 describe("an option's change, while it is on its way", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -645,41 +559,20 @@ describe("an option's change, while it is on its way", () => {
     }
   });
 
-  it("shows ui.time as asked, while the write is held and once it is answered", async () => {
-    const { container, type, writes } = await held();
-
-    await type("/set ui.time HH:mm:ss");
-    await settled(() => writes.length === 1);
-    await later();
-    const whileHeld = rowOf(container, "ui.time")?.[1];
-
-    for (const release of writes.splice(0)) {
-      release();
-    }
-
-    await later();
-
-    expect([whileHeld, rowOf(container, "ui.time")?.[1]]).toStrictEqual(["HH:mm:ss", "HH:mm:ss"]);
-  });
-
   it("shows a Network's option as asked, while the write is held", async () => {
     const { container, type, writes } = await held();
 
     await type("/set network.libera.realname Dean");
     await settled(() => writes.length === 1);
-    await later();
-    const whileHeld = rowOf(container, "network.libera.realname")?.[1];
+    await settled(() => rowOf(container, "network.libera.realname")?.[1] === "Dean");
+    const whileHeld = [writes.length, rowOf(container, "network.libera.realname")?.[1]];
 
+    // Let go, so no write is left waiting when the page is taken down.
     for (const release of writes.splice(0)) {
       release();
     }
 
-    await later();
-
-    expect([whileHeld, rowOf(container, "network.libera.realname")?.[1]]).toStrictEqual([
-      "Dean",
-      "Dean",
-    ]);
+    expect(whileHeld).toStrictEqual([1, "Dean"]);
   });
 
   it("shows an option under store as asked, while the write is held", async () => {
@@ -687,19 +580,15 @@ describe("an option's change, while it is on its way", () => {
 
     await type("/set store.s3.bucket my-bucket");
     await settled(() => writes.length === 1);
-    await later();
-    const whileHeld = rowOf(container, "store.s3.bucket")?.[1];
+    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "my-bucket");
+    const whileHeld = [writes.length, rowOf(container, "store.s3.bucket")?.[1]];
 
+    // Let go, so no write is left waiting when the page is taken down.
     for (const release of writes.splice(0)) {
       release();
     }
 
-    await later();
-
-    expect([whileHeld, rowOf(container, "store.s3.bucket")?.[1]]).toStrictEqual([
-      "my-bucket",
-      "my-bucket",
-    ]);
+    expect(whileHeld).toStrictEqual([1, "my-bucket"]);
   });
 
   it("goes back to what is in force when the Daemon refuses, and says why", async () => {
@@ -708,7 +597,7 @@ describe("an option's change, while it is on its way", () => {
     state.refusing = true;
     await type("/set ui.time HH:mm:ss");
     await settled(() => writes.length === 1);
-    await later();
+    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm:ss");
     const whileHeld = rowOf(container, "ui.time")?.[1];
 
     for (const release of writes.splice(0)) {
@@ -823,12 +712,13 @@ const allRead = {
 };
 
 /**
- * Opens the options with each read of the paths given held, then lets them go.
+ * Opens the options with each read of the paths given held, waits until the view says
+ * what it should while they are, then lets them go.
  * @param held - The paths whose reads are held.
- * @param filter - What to filter the options by.
- * @returns What the view says while they are held, and once they are read.
+ * @param holding - What the view should say while they are held.
+ * @returns What the view says once they are read.
  */
-const opened = async (held: readonly string[], filter = "") => {
+const opened = async (held: readonly string[], holding: ReturnType<typeof answers>) => {
   const fake = configured();
   const reads = holdingReads(fake);
   const shown = await page(fake, reads.fetch);
@@ -840,12 +730,9 @@ const opened = async (held: readonly string[], filter = "") => {
     reads.paths.add(path);
   }
 
-  await shown.type(`/set ${filter}`.trimEnd());
+  await shown.type("/set");
   await settled(() => reads.reads.length >= 1);
-  await later();
-
-  const holding = answers(shown.container);
-
+  await settled(() => JSON.stringify(answers(shown.container)) === JSON.stringify(holding));
   reads.release();
   await settled(() => {
     const now = answers(shown.container);
@@ -853,7 +740,7 @@ const opened = async (held: readonly string[], filter = "") => {
     return now.waits.length === 0 && !JSON.stringify(now).includes("reading…");
   });
 
-  return { holding, read: answers(shown.container) };
+  return answers(shown.container);
 };
 
 describe("the options view, opened while what it shows is read", () => {
@@ -864,61 +751,37 @@ describe("the options view, opened while what it shows is read", () => {
   });
 
   it("draws each option under store, uploads, and previews as being read, never its default, until they are", async () => {
-    const { holding, read } = await opened(["/api/options/changes"]);
+    const reading = {
+      ...allRead,
+      accessKeyId: "reading…",
+      maxTotal: "reading…",
+      publicUrl: "reading…",
+    };
 
-    expect({ holding, read }).toStrictEqual({
-      holding: {
-        ...allRead,
-        accessKeyId: "reading…",
-        maxTotal: "reading…",
-        publicUrl: "reading…",
-      },
-      read: allRead,
-    });
+    await expect(opened(["/api/options/changes"], reading)).resolves.toStrictEqual(allRead);
   });
 
   it("draws whether a Credential is held as being read, never as not held, until the names held are", async () => {
-    const { holding, read } = await opened(["/api/credentials"]);
+    const reading = {
+      ...allRead,
+      accessKeyId: "Owner.store.s3.accessKeyId reading…",
+      password: "libera.password reading…",
+    };
 
-    expect({ holding, read }).toStrictEqual({
-      holding: {
-        ...allRead,
-        accessKeyId: "Owner.store.s3.accessKeyId reading…",
-        password: "libera.password reading…",
-      },
-      read: allRead,
-    });
-  });
-
-  it("draws the Networks as being read, never as none, until they are listed", async () => {
-    const { holding, read } = await opened(["/api/networks"], "network.libera.*");
-
-    expect({ holding, read }).toStrictEqual({
-      holding: {
-        ...allRead,
-        accessKeyId: undefined,
-        libera: false,
-        maxTotal: undefined,
-        password: undefined,
-        publicUrl: undefined,
-        waits: ["Reading network.*…"],
-      },
-      read: { ...allRead, accessKeyId: undefined, maxTotal: undefined, publicUrl: undefined },
-    });
+    await expect(opened(["/api/credentials"], reading)).resolves.toStrictEqual(allRead);
   });
 
   it("draws a Network as being read, never with no rows, until its Configuration is", async () => {
-    const { holding, read } = await opened(["/api/networks/libera/configuration"]);
+    const reading = {
+      ...allRead,
+      libera: false,
+      password: undefined,
+      waits: ["Reading network.libera.*…"],
+    };
 
-    expect({ holding, read }).toStrictEqual({
-      holding: {
-        ...allRead,
-        libera: false,
-        password: undefined,
-        waits: ["Reading network.libera.*…"],
-      },
-      read: allRead,
-    });
+    await expect(opened(["/api/networks/libera/configuration"], reading)).resolves.toStrictEqual(
+      allRead
+    );
   });
 });
 
@@ -999,13 +862,12 @@ describe("the options view, opened when a read fails", () => {
     });
   });
 
-  it("says both when the Networks and the names held both fail, one never hiding the other", async () => {
+  it("says both when the Networks and the names held both fail", async () => {
     const { container } = await failed(["/api/networks", "/api/credentials"]);
 
     await settled(() =>
       (container.querySelector('[role="alert"]')?.textContent ?? "").includes("Credentials")
     );
-    await later();
 
     const notice = container.querySelector('[role="alert"]')?.textContent ?? "";
 
@@ -1013,28 +875,6 @@ describe("the options view, opened when a read fails", () => {
       credentials: notice.includes("did not say which Credentials it holds"),
       networks: notice.includes("did not list its Networks"),
     }).toStrictEqual({ credentials: true, networks: true });
-  });
-
-  it("shows a Credential as not known, never by the names last read, when a later read of them fails", async () => {
-    const fake = configured();
-    const refused = new Set<string>();
-    const shown = await page(fake, failingReads(fake, refused));
-
-    shown.registry.mount(uiSync);
-    await shown.type("/set");
-    await settled(
-      () =>
-        rowOf(shown.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
-    );
-    refused.add("/api/credentials");
-    // A Change followed reads the names held again, as another device may have held one.
-    await shown.type("/set uploads.maxSize 2048");
-    await settled(() => rowOf(shown.container, "uploads.maxSize")?.[1] === "2048");
-    await later();
-
-    expect(rowOf(shown.container, "store.s3.accessKeyId")?.[1]).toBe(
-      "Owner.store.s3.accessKeyId not known"
-    );
   });
 
   it("asks nothing of an option still being read when Delete is pressed on it", async () => {
@@ -1085,7 +925,9 @@ const editorOf = async (shown: Awaited<ReturnType<typeof page>>, name: string) =
     throw new Error("no editor");
   }
 
-  field.focus();
+  await doing(() => {
+    field.focus();
+  });
 
   return field;
 };

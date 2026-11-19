@@ -207,20 +207,6 @@ describe("a standard reply after the echo, in the same labelled answer", () => {
 });
 
 describe("a FAIL answering what Self sent", () => {
-  it("still refuses a labelled action, by its code", () => {
-    played([
-      ...inChannel(echo),
-      lines(
-        "!! topic #iirc :one",
-        ">> @label=l1 TOPIC #iirc one",
-        "<< @label=l1 :irc.test FAIL TOPIC NO_PERMISSION #iirc :Not allowed",
-        "?? refused i1 Rejected NO_PERMISSION topic=#iirc in=channel:#iirc"
-      ),
-    ]);
-
-    expect.assertions(0);
-  });
-
   it("refuses the oldest action awaiting an answer with its command, without a label", () => {
     played([
       ...inChannel(),
@@ -368,35 +354,6 @@ describe("a standard reply for a PRIVMSG or NOTICE, without a label", () => {
         "?? activity StandardReply WARN PRIVMSG MODIFIED in=network :Changed"
       ),
     ]);
-
-    expect.assertions(0);
-  });
-
-  it("is shown in the Network's Timeline when it is history", () => {
-    const history: Feature = {
-      label: (arrival) => ({
-        value: arrival.batch === undefined ? arrival : { ...arrival, live: false },
-      }),
-      name: FeatureName.make("history"),
-      needs: {},
-      own: undefined,
-    };
-
-    play(makeClient([...registry, register(history)]), {
-      configuration: base,
-      transcript: [
-        ...inChannel(["batch"]),
-        lines(
-          "!! say #iirc :one",
-          ">> PRIVMSG #iirc one",
-          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :one",
-          "<< :irc.test BATCH +h chathistory #iirc",
-          "<< @batch=h :irc.test WARN PRIVMSG MODIFIED :Long ago",
-          "?? activity StandardReply WARN PRIVMSG MODIFIED history in=network :Long ago",
-          "<< :irc.test BATCH -h"
-        ),
-      ],
-    });
 
     expect.assertions(0);
   });

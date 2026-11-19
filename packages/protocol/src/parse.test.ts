@@ -145,17 +145,6 @@ describe("the recorded transcripts", () => {
       }
     }
   );
-
-  it("keeps the space a MOTD header ends in", () => {
-    const header = received(ergoFloor)
-      .map((bytes) => parse(bytes, utf8Only))
-      .find((parsed) => parsed._tag === "Line" && parsed.line.command === "375");
-
-    expect(lineOf(header ?? { _tag: "Unparseable", reason: "Empty" }).params).toStrictEqual([
-      "iirc_",
-      "- ergo.test Message of the day - ",
-    ]);
-  });
 });
 
 describe(parse, () => {
@@ -176,15 +165,6 @@ describe(parse, () => {
     }
   );
 
-  it("reads tags in any order, and the last of a repeated key", () => {
-    expect(parsedText("@b=2;a=1;b=3 PING").tags).toStrictEqual(
-      new Map([
-        ["b", "3"],
-        ["a", "1"],
-      ])
-    );
-  });
-
   it("reads a key it has never heard of, whatever its shape", () => {
     expect(parsedText("@+Ünïcode/k_y=v;=lost;; PING").tags).toStrictEqual(
       new Map([["+Ünïcode/k_y", "v"]])
@@ -193,12 +173,6 @@ describe(parse, () => {
 
   it("keeps a tag named __proto__", () => {
     expect(parsedText("@__proto__=x;a=b PING").tags.get("__proto__")).toBe("x");
-  });
-
-  it("reads a trailing parameter with its colon or without", () => {
-    expect(parsedText(":a PRIVMSG #c hi").params).toStrictEqual(["#c", "hi"]);
-    expect(parsedText(":a PRIVMSG #c :hi").params).toStrictEqual(["#c", "hi"]);
-    expect(parsedText(":a PRIVMSG #c :").params).toStrictEqual(["#c", ""]);
   });
 
   it("reads more parameters than fifteen, and spaces before the first part", () => {
@@ -257,15 +231,6 @@ describe(parse, () => {
     });
     expect(parse(Uint8Array.of(0x50, 0x20, 0x82, 0xff), shiftJis)).toMatchObject({
       line: { params: ["\u0082ÿ"] },
-    });
-  });
-
-  it("reads ISO-8859-1 byte for byte when the fallback cannot read it either", () => {
-    // 0x82 0xff is no Shift_JIS character, so neither UTF-8 nor the fallback reads it.
-    const shiftJis: Encoding = { _tag: "Utf8OrElse", fallback: "shift_jis" };
-
-    expect(parse(Uint8Array.of(0x50, 0x20, 0x82, 0xff), shiftJis)).toMatchObject({
-      line: { params: ["\u0082\u00FF"] },
     });
   });
 

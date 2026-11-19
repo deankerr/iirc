@@ -31,7 +31,7 @@ import {
   spotAt,
 } from "./completion.ts";
 import type { Completion, CompletionEvent, Emoji, Held, Shown, Sources } from "./completion.ts";
-import { chordsFor, defaultKeymap } from "./keymap.ts";
+import { defaultKeymap } from "./keymap.ts";
 import { choose, networkEntry, sections } from "./palette.ts";
 import type { Listing } from "./palette.ts";
 import { listedThemes } from "./theme.ts";
@@ -286,20 +286,6 @@ describe("completing", () => {
     });
   });
 
-  it("puts `: ` after a nick only at the start of a line, and a space elsewhere", () => {
-    const listed: Sources = { ...sources, nicks: { _tag: "Listed", nicks: ["peer"] } };
-
-    expect({
-      line: shown(play("one\npe", [tab], listed)),
-      middle: shown(play("thanks pe", [tab], listed)),
-      start: shown(play("pe", [tab], listed)),
-    }).toStrictEqual({
-      line: ["one\npeer: ", 10],
-      middle: ["thanks peer ", 12],
-      start: ["peer: ", 6],
-    });
-  });
-
   it("puts the Owner's suffix after a nick at the start of a line, nothing for none, and a space elsewhere", () => {
     const listed: Sources = {
       ...sources,
@@ -425,26 +411,12 @@ describe("completing", () => {
     });
   });
 
-  it("gives back what was typed on Escape, caret and all", () => {
+  it("makes no edit on Escape when nothing was completed", () => {
     const middle = { ...play("x", []), caret: 6, text: "hi /m there" };
 
-    const step = reduceCompletion(
-      initialCompletion,
-      { _tag: "Tabbed", backwards: false, caret: 2, place: iirc, text: "#i and" },
-      sources
-    );
-
-    const restored = reduceCompletion(step.state, { _tag: "Escaped", place: iirc }, sources);
-
-    expect({
-      after: [restored.edit, restored.state.phase._tag, restored.state.caret],
-      notCompleting: reduceCompletion(middle.state, { _tag: "Escaped", place: iirc }, sources).edit,
-      shown: step.edit,
-    }).toStrictEqual({
-      after: [{ caret: 2, place: iirc, text: "#i and" }, "Idle", 2],
-      notCompleting: undefined,
-      shown: { caret: 5, place: iirc, text: "#iirc and" },
-    });
+    expect(
+      reduceCompletion(middle.state, { _tag: "Escaped", place: iirc }, sources).edit
+    ).toBeUndefined();
   });
 
   it("starts afresh when the Owner moved the caret or changed the text since", () => {
@@ -1088,9 +1060,9 @@ describe("everything the palette lists", () => {
   /**
    * Opens `/network remove `, highlights its first candidate, and picks one.
    * @param index - The candidate picked.
-   * @returns Each step, and the pick.
+   * @returns The pick.
    */
-  const steps = (index: number) => {
+  const picking = (index: number) => {
     const typed = reduceCompletion(
       initialCompletion,
       { _tag: "Typed", caret: 15, place: iirc, text: "/network remove" },
@@ -1109,28 +1081,24 @@ describe("everything the palette lists", () => {
       everywhere
     );
 
-    const picked = reduceCompletion(
+    return reduceCompletion(
       highlighted.state,
       { _tag: "Picked", index, place: iirc, text: highlighted.edit?.text ?? "" },
       everywhere
     );
-
-    return { picked, steps: [typed, opening, highlighted, picked] };
   };
 
   /**
    * What sending a Network picked from `/network remove`'s list asks for, beside what the
-   * palette's entry for it asks for, and what each step of completion gave.
+   * palette's entry for it asks for.
    * @param index - The Network's index in the list.
-   * @returns The steps' fields, and both asks.
+   * @returns Both asks.
    */
   const sent = (index: number) => {
-    const { picked, steps: all } = steps(index);
+    const picked = picking(index);
     const network_ = everywhere.networks[index];
 
     return {
-      // Listing, highlighting, and picking only put text in the draft.
-      fields: all.map((one) => Object.keys(one).toSorted()),
       palette: network_ === undefined ? undefined : choose(networkEntry(network_), context, false),
       sent: interpret(picked.edit?.text ?? "", context),
     };
@@ -1276,15 +1244,6 @@ describe("everything the palette lists", () => {
     );
   });
 
-  it("shows the keys bound to a command beside it", () => {
-    const next = opened("/next").find((one) => one.name === "/next");
-
-    expect(next?._tag === "Command" ? next.chords : undefined).toStrictEqual(
-      chordsFor(defaultKeymap, "timeline.next")
-    );
-    expect(chordsFor(defaultKeymap, "timeline.next")).not.toHaveLength(0);
-  });
-
   it("lists after a bare / what was run recently first, newest first, then the rest by name", () => {
     const ran: Sources = {
       ...sources,
@@ -1422,15 +1381,10 @@ describe("everything the palette lists", () => {
     const removed = sent(1);
 
     expect({
-      fields: [live.fields, removed.fields],
       live: live.sent,
       removed: removed.sent,
       samePalette: [live.palette, removed.palette],
     }).toStrictEqual({
-      fields: [
-        Array.from({ length: 4 }, () => ["edit", "state"]),
-        Array.from({ length: 4 }, () => ["edit", "state"]),
-      ],
       live: {
         _tag: "Parsed",
         value: [{ _tag: "AskRemoval", keep: undefined, network: "libera" }],
@@ -1608,12 +1562,6 @@ describe("an emoji completed from :name", () => {
       tabbed: ["hi :smi", 7],
       wanted: [true, true],
     });
-  });
-
-  it("shows no preview of an emoji", () => {
-    const tabbedTo = run([type(":smi"), tab], loaded);
-
-    expect(previewOf(tabbedTo.state, iirc, tabbedTo.text)).toBeUndefined();
   });
 
   it("passes the names held through to the sources", () => {

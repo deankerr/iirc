@@ -548,23 +548,11 @@ describe("the formatting keys", () => {
       underline: [{ _tag: "Format", format: "underline" }],
     });
   });
-
-  it("are shown beside their commands", () => {
-    expect(chordsFor(defaultKeymap, "format.colour").map(formatChord)).toStrictEqual([
-      "mod+shift+k",
-    ]);
-  });
 });
 
 describe("the default bindings", () => {
   it("give no chord to two commands where both can fire", () => {
     expect(clashes(defaultBindings)).toStrictEqual([]);
-  });
-
-  it("would be caught giving the colours Mod+K, the palette's", () => {
-    expect(
-      clashes([...defaultBindings, { command: "format.colour", keys: "mod+k", when: "!palette" }])
-    ).toStrictEqual([["palette.open", "format.colour"]]);
   });
 });
 

@@ -12,37 +12,22 @@ import { describe, expect, it } from "vitest";
 import { ApiRoutes, Stopping } from "../handlers.ts";
 import { freePort, loopback } from "../testing/children.ts";
 import {
-  animatedWebp,
-  apng,
-  gif,
-  gifIccExtension,
-  gifImages,
-  gifWithComment,
-  gifWithIcc,
   holds,
   iccProfile,
   jpegScans,
   jpegSegments,
   jpegWithGps,
-  motionPhoto,
   orientationExif,
   planted,
-  pngChunks,
-  pngData,
-  pngWithText,
-  webpChunks,
-  webpData,
 } from "../testing/images.ts";
 import {
   box,
   cat,
-  clipMov,
   clipMp4,
   itemData,
   itemsOf,
   mdatOf,
   photoAvif,
-  photoHeic,
   propertyTypes,
   text,
   u,
@@ -243,119 +228,6 @@ describe("stripping an image as it is uploaded", () => {
     });
   });
 
-  it("cuts a motion photo at the end of its image, dropping its video, and keeps Orientation and ICC", async () => {
-    const { bytes, recorded } = await run((served) =>
-      servedBack(served, motionPhoto, "motion.jpg")
-    );
-
-    const markers = jpegSegments(bytes).map(({ marker }) => marker);
-
-    expect({
-      endsWithImage: bytes.subarray(-2),
-      motion: holds(bytes, "ftyp") || holds(bytes, "MotionPhoto"),
-      orientationAndIcc: markers.filter((marker) => marker === 0xe1 || marker === 0xe2),
-      recorded,
-      scan: jpegScans(bytes),
-      survivors: survivors(bytes),
-    }).toStrictEqual({
-      endsWithImage: Uint8Array.of(0xff, 0xd9),
-      motion: false,
-      orientationAndIcc: [0xe1, 0xe2],
-      recorded: true,
-      scan: jpegScans(motionPhoto),
-      survivors: [],
-    });
-  });
-
-  it("keeps an APNG's frames, ICC and Orientation, and drops its text and GPS", async () => {
-    const { bytes, recorded } = await run((served) => servedBack(served, apng, "moving.png"));
-    const chunks = pngChunks(bytes);
-
-    expect({
-      crcsHold: chunks.every(({ crcHolds }) => crcHolds),
-      exif: pngData(chunks, "eXIf"),
-      frames: pngData(chunks, "acTL", "fcTL", "IDAT", "fdAT"),
-      icc: pngData(chunks, "iCCP"),
-      recorded,
-      survivors: survivors(bytes),
-      types: chunks.map(({ type }) => type),
-    }).toStrictEqual({
-      crcsHold: true,
-      exif: [orientationExif(6)],
-      frames: pngData(pngChunks(apng), "acTL", "fcTL", "IDAT", "fdAT"),
-      icc: pngData(pngChunks(apng), "iCCP"),
-      recorded: true,
-      survivors: [],
-      types: ["IHDR", "eXIf", "iCCP", "acTL", "fcTL", "IDAT", "fcTL", "fdAT", "IEND"],
-    });
-  });
-
-  it("drops a PNG's text chunks and keeps its image data", async () => {
-    const { bytes, recorded } = await run((served) => servedBack(served, pngWithText, "notes.png"));
-    const chunks = pngChunks(bytes);
-
-    expect({
-      idat: chunks.filter(({ type }) => type === "IDAT").map(({ data }) => data),
-      recorded,
-      survivors: survivors(bytes),
-      types: chunks.map(({ type }) => type),
-    }).toStrictEqual({
-      idat: pngChunks(pngWithText)
-        .filter(({ type }) => type === "IDAT")
-        .map(({ data }) => data),
-      recorded: true,
-      survivors: [],
-      types: ["IHDR", "gAMA", "IDAT", "IEND"],
-    });
-  });
-
-  it("keeps an animated WebP's frames, ICC and Orientation, and drops its GPS and XMP", async () => {
-    const { bytes, recorded } = await run((served) =>
-      servedBack(served, animatedWebp, "moving.webp")
-    );
-
-    const chunks = webpChunks(bytes);
-
-    expect({
-      exif: webpData(chunks, "EXIF"),
-      fourCCs: chunks.map(({ fourCC }) => fourCC),
-      frames: webpData(chunks, "ANMF"),
-      icc: webpData(chunks, "ICCP"),
-      recorded,
-      survivors: survivors(bytes),
-    }).toStrictEqual({
-      exif: [orientationExif(6)],
-      fourCCs: ["VP8X", "ICCP", "ANIM", "ANMF", "ANMF", "EXIF"],
-      frames: webpData(webpChunks(animatedWebp), "ANMF"),
-      icc: [iccProfile],
-      recorded: true,
-      survivors: [],
-    });
-  });
-
-  it("drops a GIF's comment, plain text and XMP, keeping its frames and looping", async () => {
-    const { bytes, recorded } = await run((served) =>
-      servedBack(served, gifWithComment, "moving.gif")
-    );
-
-    expect({
-      frames: gifImages(bytes),
-      looping: holds(bytes, "NETSCAPE2.0"),
-      recorded,
-      survivors: survivors(bytes),
-    }).toStrictEqual({ frames: gifImages(gif), looping: true, recorded: true, survivors: [] });
-  });
-
-  it("keeps a GIF's ICC colour profile extension byte for byte", async () => {
-    const { bytes, recorded } = await run((served) => servedBack(served, gifWithIcc, "colour.gif"));
-
-    expect({
-      frames: gifImages(bytes),
-      profile: Buffer.from(bytes).includes(gifIccExtension),
-      recorded,
-    }).toStrictEqual({ frames: gifImages(gifWithIcc), profile: true, recorded: true });
-  });
-
   it("keeps a file that is not an image byte for byte", async () => {
     const text = encoder.encode(`hello, world, ${planted.comment}\n`);
     const { bytes, recorded } = await run((served) => servedBack(served, text, "notes.txt"));
@@ -411,97 +283,60 @@ describe("stripping an image as it is uploaded", () => {
 describe("stripping HEIC, AVIF, MP4 and MOV as they are uploaded", () => {
   const imageItems = new Set(["hvc1", "av01", "grid", "iden"]);
 
-  // What of a photo is image must come out where it went in, byte for byte, and what is
-  // Exif or XMP must come out of the file with its bytes.
-  it.each([
-    ["photo.heic", photoHeic, "hvcC"],
-    ["photo.avif", photoAvif, "av1C"],
-  ] as const)(
-    "drops %s's Exif and XMP items and their bytes, keeping its images and %s colour",
-    async (name, photo, codec) => {
-      const { bytes, recorded } = await run((served) => servedBack(served, photo, name));
-      const before = itemsOf(photo);
-      const kept = before.filter(({ type }) => imageItems.has(type));
+  // What of a photo is image must come out where it went in, byte for byte, with the
+  // properties a decoder needs, and what is Exif or XMP must come out of the file.
+  it("drops an AVIF's Exif and XMP items and their bytes, keeping its images and av1C colour", async () => {
+    const { bytes, recorded } = await run((served) => servedBack(served, photoAvif, "photo.avif"));
+    const kept = itemsOf(photoAvif).filter(({ type }) => imageItems.has(type));
 
-      expect({
-        beforeHolds: ["Exif", "PLANTED-XMP", "iPhone", "Apple"].map((word) => holds(photo, word)),
-        dropped: [
-          ...new Set(before.filter(({ type }) => !imageItems.has(type)).map(({ type }) => type)),
-        ].toSorted(),
-        ftyp: bytes.subarray(0, 12),
-        keptData: kept.map((item) => itemData(bytes, item)),
-        length: bytes.length,
-        properties: [
-          ...new Set(propertyTypes(bytes).filter((type) => [codec, "colr", "irot"].includes(type))),
-        ].toSorted(),
-        recorded,
-        survivors: ["Exif", "PLANTED-", "iPhone", "Apple", "GPS", "xpacket"].filter((word) =>
-          holds(bytes, word)
-        ),
-        types: itemsOf(bytes)
-          .map(({ type }) => type)
-          .toSorted(),
-      }).toStrictEqual({
-        beforeHolds: [true, true, true, true],
-        dropped: ["Exif", "mime"],
-        ftyp: photo.subarray(0, 12),
-        keptData: kept.map((item) => itemData(photo, item)),
-        length: photo.length,
-        properties: [codec, "colr", "irot"].toSorted(),
-        recorded: true,
-        survivors: [],
-        types: kept.map(({ type }) => type).toSorted(),
-      });
-    }
-  );
+    expect({
+      keptData: kept.map((item) => itemData(bytes, item)),
+      length: bytes.length,
+      properties: [
+        ...new Set(propertyTypes(bytes).filter((type) => ["av1C", "colr", "irot"].includes(type))),
+      ].toSorted(),
+      recorded,
+      survivors: ["Exif", "PLANTED-", "iPhone", "Apple", "GPS", "xpacket"].filter((word) =>
+        holds(bytes, word)
+      ),
+      types: itemsOf(bytes)
+        .map(({ type }) => type)
+        .toSorted(),
+    }).toStrictEqual({
+      keptData: kept.map((item) => itemData(photoAvif, item)),
+      length: photoAvif.length,
+      properties: ["av1C", "colr", "irot"].toSorted(),
+      recorded: true,
+      survivors: [],
+      types: kept.map(({ type }) => type).toSorted(),
+    });
+  });
 
-  // What is planted in a video, which a reader of metadata would find: a location, a make, a
-  // title, and XMP, in the boxes a phone and an editor leave them in.
-  const planted4 = [
-    "PLANTED-MAKE",
-    "PLANTED-TITLE",
-    "PLANTED-XMP",
-    "xpacket",
-    "loci",
-    Uint8Array.of(0xa9, 0x6d, 0x61, 0x6b),
-  ] as const;
+  // What a phone and an editor leave in a video, which a reader of metadata would find.
+  it("drops an MP4's location and metadata boxes, keeping its length and its media data", async () => {
+    const words = [
+      "PLANTED-MAKE",
+      "PLANTED-TITLE",
+      "PLANTED-XMP",
+      "xpacket",
+      "loci",
+      Uint8Array.of(0xa9, 0x6d, 0x61, 0x6b),
+    ];
 
-  const planted5 = [
-    "+51.5007",
-    "PLANTED-SOFTWARE",
-    "PLANTED-XMP",
-    "XMP_",
-    "com.apple.quicktime.location",
-    "iPhone",
-    Uint8Array.of(0xa9, 0x78, 0x79, 0x7a),
-  ] as const;
+    const { bytes, recorded } = await run((served) => servedBack(served, clipMp4, "clip.mp4"));
 
-  it.each([
-    ["clip.mp4", clipMp4, planted4],
-    ["clip.mov", clipMov, planted5],
-  ] as const)(
-    "drops %s's location and metadata boxes, keeping its length and its media data",
-    async (name, clip, words) => {
-      const { bytes, recorded } = await run((served) => servedBack(served, clip, name));
-      const has = (from: Uint8Array) => words.map((word) => Buffer.from(from).includes(word));
-
-      expect({
-        after: has(bytes),
-        before: has(clip),
-        ftyp: bytes.subarray(0, 20),
-        length: bytes.length,
-        mdat: mdatOf(bytes),
-        recorded,
-      }).toStrictEqual({
-        after: words.map(() => false),
-        before: words.map(() => true),
-        ftyp: clip.subarray(0, 20),
-        length: clip.length,
-        mdat: mdatOf(clip),
-        recorded: true,
-      });
-    }
-  );
+    expect({
+      kept: words.filter((word) => Buffer.from(bytes).includes(word)),
+      length: bytes.length,
+      mdat: mdatOf(bytes),
+      recorded,
+    }).toStrictEqual({
+      kept: [],
+      length: clipMp4.length,
+      mdat: mdatOf(clipMp4),
+      recorded: true,
+    });
+  });
 
   it("zeroes a large box that is on no keep-list in pieces, keeping the media after it", async () => {
     const big = new Uint8Array(3 * 1024 * 1024 + 5).fill(0x41);

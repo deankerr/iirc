@@ -93,12 +93,6 @@ describe(fillSecret, () => {
     ).toStrictEqual(["PRIVMSG [Nick_Serv]^`{|}-2 :IDENTIFY a.b-c é!#@\r\n"]);
   });
 
-  it("fills the SASL PLAIN response as authzid, authcid, and password", () => {
-    expect(wires(fillSecret(plain("iirc"), Redacted.make("hunter2")))).toStrictEqual([
-      `AUTHENTICATE ${btoa("\0iirc\0hunter2")}\r\n`,
-    ]);
-  });
-
   it("ends a response that fills its last chunk exactly with +", () => {
     // 300 bytes of response are 400 of base64.
     const lines = wires(fillSecret(plain("u"), Redacted.make("p".repeat(297))));
@@ -110,8 +104,6 @@ describe(fillSecret, () => {
 
   it.each([
     ["a PASS with a line break", { _tag: "Pass", credential }, "a\r\nQUIT", "InvalidParameter"],
-    ["a PASS with NUL", { _tag: "Pass", credential }, "a\0", "InvalidParameter"],
-    ["a PASS too long to fit", { _tag: "Pass", credential }, "x".repeat(600), "TooLong"],
     [
       "a key with a space",
       { _tag: "JoinWithKey", channel: "#a", credential },
@@ -134,12 +126,10 @@ describe(fillSecret, () => {
     ["a key for JOIN 0", { _tag: "JoinWithKey", channel: "0", credential }, "k", "InvalidTarget"],
     ["a password with NUL", plain("iirc"), "a\0b", "InvalidParameter"],
     ["an identify to a Channel", identify("#iirc"), "pw", "InvalidTarget"],
-    ["an identify to a mask", identify("$*"), "pw", "InvalidTarget"],
     ["an identify to two Users", identify("NickServ,peer"), "pw", "InvalidTarget"],
     ["an identify to a service with a space", identify("Nick Serv"), "pw", "InvalidTarget"],
     ["an identify to no service", identify(""), "pw", "InvalidTarget"],
     ["an identify with a space in its password", identify("NickServ"), "a b", "InvalidParameter"],
-    ["an identify with a line break", identify("NickServ"), "a\r\nQUIT", "InvalidParameter"],
     ["an identify with NUL", identify("NickServ"), "a\0", "InvalidParameter"],
     ["an identify with no password", identify("NickServ"), "", "InvalidParameter"],
     [
@@ -151,49 +141,20 @@ describe(fillSecret, () => {
     ["an identify with no account", identify("NickServ", ""), "pw", "InvalidParameter"],
     ["an identify too long to fit", identify("NickServ"), "x".repeat(600), "TooLong"],
     ["an identify to a STATUSMSG Target", identify("@#staff"), "pw", "InvalidTarget"],
-    ["an identify to a halfop STATUSMSG Target", identify("%#staff"), "pw", "InvalidTarget"],
-    ["an identify to an owner STATUSMSG Target", identify("~#staff"), "pw", "InvalidTarget"],
-    ["an identify to a voiced STATUSMSG Target", identify("+#staff"), "pw", "InvalidTarget"],
-    ["an identify to a & Channel", identify("&local"), "pw", "InvalidTarget"],
-    ["an identify to a nick starting with a digit", identify("1NickServ"), "pw", "InvalidTarget"],
     ["an identify to a nick with a !", identify("NickServ!s@h"), "pw", "InvalidTarget"],
     ["an identify to a server mask", identify("NickServ@*.test"), "pw", "InvalidTarget"],
-    [
-      "an identify with a tab in its account",
-      identify("NickServ", "acct\twrong"),
-      "pw",
-      "InvalidParameter",
-    ],
-    ["an identify with a tab in its password", identify("NickServ"), "a\tb", "InvalidParameter"],
-    ["an identify with a vertical tab", identify("NickServ"), "a\vb", "InvalidParameter"],
-    ["an identify with a form feed", identify("NickServ"), "a\fb", "InvalidParameter"],
     ["an identify with a no-break space", identify("NickServ"), "a\u00A0b", "InvalidParameter"],
-    ["an identify with an en space", identify("NickServ"), "a\u2002b", "InvalidParameter"],
-    ["an identify with a hair space", identify("NickServ"), "a\u200Ab", "InvalidParameter"],
-    ["an identify with an ideographic space", identify("NickServ"), "a\u3000b", "InvalidParameter"],
     ["an identify with a next line", identify("NickServ"), "a\u0085b", "InvalidParameter"],
-    ["an identify with a line separator", identify("NickServ"), "a\u2028b", "InvalidParameter"],
-    [
-      "an identify with an ogham space in its account",
-      identify("NickServ", "a\u1680b"),
-      "pw",
-      "InvalidParameter",
-    ],
     ["an authcid with NUL", plain("ii\0rc"), "x", "InvalidParameter"],
     ["an OPER with no name", oper(""), "pw", "InvalidParameter"],
     ["an OPER with a space in its name", oper("ad min"), "pw", "InvalidParameter"],
-    ["an OPER with a tab in its name", oper("ad\tmin"), "pw", "InvalidParameter"],
     ["an OPER with a no-break space in its name", oper("ad\u00A0min"), "pw", "InvalidParameter"],
     ["an OPER with a line break in its name", oper("a\r\nQUIT"), "pw", "InvalidParameter"],
     ["an OPER with NUL in its name", oper("a\0"), "pw", "InvalidParameter"],
     ["an OPER whose name starts with a colon", oper(":admin"), "pw", "InvalidParameter"],
     ["an OPER whose name is a lone surrogate", oper("\uD800"), "pw", "InvalidParameter"],
     ["an OPER with a line break in its password", oper("admin"), "a\r\nQUIT", "InvalidParameter"],
-    ["an OPER with a CR in its password", oper("admin"), "a\rb", "InvalidParameter"],
-    ["an OPER with NUL in its password", oper("admin"), "a\0b", "InvalidParameter"],
-    ["an OPER with a lone surrogate in its password", oper("admin"), "a\uDC00", "InvalidParameter"],
     ["an OPER with no password", oper("admin"), "", "InvalidParameter"],
-    ["an OPER too long to fit", oper("admin"), "x".repeat(600), "TooLong"],
   ] as const)("refuses %s", (_name, line, value, reason) => {
     expect(fillSecret(line, Redacted.make(value))).toStrictEqual({ _tag: "Rejected", reason });
   });

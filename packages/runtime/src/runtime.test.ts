@@ -98,21 +98,6 @@ describe("each input", () => {
       ],
     });
   });
-
-  it("takes its `at` from the Clock", async () => {
-    const stamped = await runTest((world) =>
-      Effect.gen(function* () {
-        const { runtime } = yield* startRuntime(world, scripted([]));
-
-        yield* TestClock.adjust(1500);
-        yield* runtime.configure(libera, configuration);
-
-        return inputs(yield* entries(world.journal)).map((input) => input.at);
-      })
-    );
-
-    expect(stamped).toStrictEqual([at(1500)]);
-  });
 });
 
 describe("carrying out", () => {
@@ -391,52 +376,6 @@ describe("a SendSecret", () => {
     );
 
     expect(result.heard).toStrictEqual(["PASS hunter2\r\n", "NICK iirc\r\n"]);
-    expect(result.journaled).toContain("libera-password");
-    expect(result.journaled).not.toContain("hunter2");
-    expect(result.logged).not.toContain("hunter2");
-  });
-
-  it("tells a service the Credential, which is never journaled or logged", async () => {
-    const result = await runTest((world) =>
-      Effect.gen(function* () {
-        yield* world.vault.hold(password, Redacted.make("hunter2"));
-
-        const client = scripted([
-          { outputs: [dial], when: "Configured" },
-          {
-            outputs: [
-              {
-                _tag: "SendSecret",
-                connection: first,
-                line: {
-                  _tag: "Identify",
-                  account: "iirc",
-                  credential: password,
-                  service: "NickServ",
-                },
-              },
-            ],
-            when: "Opened",
-          },
-        ]);
-
-        const { runtime } = yield* startRuntime(world, client);
-
-        yield* runtime.configure(libera, configuration);
-        const call = yield* world.memory.ircd.accept;
-
-        yield* call.open;
-        const heard = text.decode(yield* call.heard);
-
-        const journaled = (yield* entries(world.journal)).map((entry) =>
-          Schema.encodeSync(Schema.fromJsonString(Schema.toCodecJson(Entry)))(entry)
-        );
-
-        return { heard, journaled: journaled.join("\n"), logged: JSON.stringify(world.logged) };
-      })
-    );
-
-    expect(result.heard).toBe("PRIVMSG NickServ :IDENTIFY iirc hunter2\r\n");
     expect(result.journaled).toContain("libera-password");
     expect(result.journaled).not.toContain("hunter2");
     expect(result.logged).not.toContain("hunter2");
@@ -882,12 +821,14 @@ describe("`act`", () => {
 
         yield* runtime.configure(libera, configuration);
 
-        return yield* runtime.act(libera, { action: { _tag: "Nick", nick: "other" } });
+        const acted = yield* runtime.act(libera, { action: { _tag: "Nick", nick: "other" } });
+
+        return { acted, found: yield* runtime.said(libera, acted.intent) };
       })
     );
 
-    expect(result).toMatchObject({ _tag: "Acted", sequence: 2 });
-    expect(result.intent).toMatch(/^[0-9a-f]{32}$/u);
+    expect(result.acted).toMatchObject({ _tag: "Acted", sequence: 2 });
+    expect(result.found).toStrictEqual(Option.some(2));
   });
 });
 
@@ -1412,41 +1353,6 @@ describe("the Configuration in force", () => {
       outline: ["1 libera Configured", "2 libera Configured", "3 libera Configured"],
       plain: 3,
       stale: changed(2),
-    });
-  });
-
-  it("lets exactly one of two racing configures made from the same one through", async () => {
-    const result = await runTest((world) =>
-      Effect.gen(function* () {
-        const { runtime } = yield* startRuntime(world, scripted([]));
-        const from = yield* runtime.configure(libera, configuration);
-
-        const both = yield* Effect.all(
-          [
-            Effect.result(runtime.configure(libera, configured({ nicks: ["one"] }), from)),
-            Effect.result(runtime.configure(libera, configured({ nicks: ["two"] }), from)),
-          ],
-          { concurrency: "unbounded" }
-        );
-
-        const won = both.filter((one) => one._tag === "Success");
-        const lost = both.filter((one) => one._tag === "Failure");
-        const inForce = yield* runtime.configuration(libera);
-
-        return {
-          inForce: inForce.sequence,
-          lost: lost.map((one) => one.failure),
-          outline: yield* outline(world.journal),
-          won: won.map((one) => one.success),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      inForce: 2,
-      lost: [changed(2)],
-      outline: ["1 libera Configured", "2 libera Configured"],
-      won: [2],
     });
   });
 

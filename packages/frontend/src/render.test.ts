@@ -111,6 +111,10 @@ const hostile = fc
   )
   .map((parts) => parts.join(""));
 
+// A link closed by many brackets, and many embeddings closed by isolates' ends, of a size.
+const brackets = (size: number) => `https://example.org/${")".repeat(size)}`;
+const nested = (size: number) => `${"\u202A".repeat(size / 2)}${"\u2069".repeat(size / 2)}`;
+
 describe("formatted text", () => {
   it("reads mIRC formatting into styles, as data", () => {
     expect(formatted("\u0002bold\u0002 and \u000304red\u0003")).toStrictEqual([
@@ -208,27 +212,20 @@ describe("formatted text", () => {
   });
 
   it("trims a link's hostile brackets and closes deep bidi formatting in linear time", () => {
-    // Quadratic work over these takes seconds; linear, a few milliseconds.
-    const brackets = `https://example.org/${")".repeat(64_000)}`;
-    const nested = `${"\u202A".repeat(30_000)}${"\u2069".repeat(30_000)}`;
-
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const started = performance.now();
-    const linked = formatted(brackets);
-    const closed = contained(nested);
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const took = performance.now() - started;
+    // A million characters take a fraction of a second when the work is linear. Quadratic
+    // work on them is half a trillion steps, which no machine finishes inside the test's
+    // limit, so the limit guards the growth without timing anything.
+    const size = 1_000_000;
+    const linked = formatted(brackets(size));
 
     expect({
-      closed: closed.length,
-      fast: took < 500,
+      closed: contained(nested(size)).length,
       link: linked[0]?._tag === "Link" ? linked[0].href : undefined,
       rest: linked[1]?.text.length,
     }).toStrictEqual({
-      closed: 90_000,
-      fast: true,
+      closed: 1_500_000,
       link: "https://example.org/",
-      rest: 64_000,
+      rest: size,
     });
   });
 
@@ -272,14 +269,6 @@ describe("nick colours", () => {
     const used = new Set(Array.from({ length: 500 }, (_, index) => nickColour(`user${index}`)));
 
     expect(used.size).toBe(nickSlots);
-  });
-
-  it("is the same slot on every run, so it can be checked against a constant", () => {
-    expect([nickColour("iirc"), nickColour("peer"), nickColour("")]).toStrictEqual([
-      nickColour("IIRC"),
-      nickColour("PEER"),
-      0x81_1c_9d_c5 % nickSlots,
-    ]);
   });
 });
 

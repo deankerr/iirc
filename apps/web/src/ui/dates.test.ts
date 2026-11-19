@@ -64,10 +64,21 @@ describe("the device's zone", () => {
   });
 
   it("keeps the seconds of a historical offset, so the instant plus it is the local time", () => {
-    // Paris kept its mean time, 9 minutes 21 seconds east, until 1911: under TZ=Europe/Paris
-    // these two fall either side of local midnight, which an offset in minutes would miss.
+    // Paris kept its mean time, 9 minutes 21 seconds east, until 1911: these two fall either
+    // side of local midnight there, which an offset in minutes would miss.
     const instants = [Date.UTC(1890, 0, 1, 23, 50, 38), Date.UTC(1890, 0, 1, 23, 50, 39)];
+    const before = process.env.TZ;
 
-    expect(instants.map(asUtc)).toStrictEqual(instants.map(asLocal));
+    try {
+      process.env.TZ = "Europe/Paris";
+
+      expect(instants.map(asUtc)).toStrictEqual(instants.map(asLocal));
+    } finally {
+      if (before === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = before;
+      }
+    }
   });
 });

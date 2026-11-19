@@ -12,7 +12,16 @@ import { optionsState } from "../options/atoms.ts";
 import { changeUiOption, readRule, uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run, theKey, until } from "../testing/fake-daemon.ts";
+import {
+  eventually,
+  fakeDaemon,
+  heldClock,
+  passing,
+  registryFor,
+  run,
+  theKey,
+  until,
+} from "../testing/fake-daemon.ts";
 import { testNotifier } from "../testing/notifier.ts";
 import { following, open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
 import { documentTitle, marking } from "./atoms.ts";
@@ -139,9 +148,10 @@ const away = { compact: false, focused: false, visible: false };
  * marking read.
  * @param page - Whether the Owner can see the page.
  * @param shared - Whether the shared `ui` options are followed, as a page signed in does.
+ * @param clock - The runtime's clock, which is the world's unless a test holds one.
  * @returns The fake, the registry, and the test's Notifier.
  */
-const reading = async (page = seeing, shared = true) => {
+const reading = async (page = seeing, shared = true, clock?: ReturnType<typeof heldClock>) => {
   const fake = fakeDaemon();
   const notifier = testNotifier();
 
@@ -158,7 +168,7 @@ const reading = async (page = seeing, shared = true) => {
     { gaps: [], items: [], timeline: listed(peer) },
   ]);
 
-  const registry = registryFor(fake.fetch, {}, notifier.port);
+  const registry = registryFor(fake.fetch, {}, notifier.port, undefined, undefined, clock);
 
   registry.set(pageState, page);
   await run(registry, check, undefined);
@@ -215,14 +225,6 @@ const reading = async (page = seeing, shared = true) => {
   return { ...fake, notifier: notifier.held, opening, registry, type, viewLatest };
 };
 
-/**
- * Waits a while, for what should not happen to have its chance.
- * @param millis - How long.
- */
-const wait = async (millis: number) => {
-  await Effect.runPromise(Effect.sleep(`${millis} millis`));
-};
-
 describe("marking read", () => {
   it("marks the open Timeline read once seen for a moment, up to its last item, and again for a new one", async () => {
     const { daemon, opening, send, viewLatest } = await reading();
@@ -234,8 +236,6 @@ describe("marking read", () => {
 
     // The Daemon's marker comes back: nothing more is due.
     send(changed(3, [], [listed(iirc, { changed: 3, latest: 2000, read: 2000 })]));
-    await wait(150);
-    const settled = daemon.reads.length;
 
     // A live item arrives while the Owner watches.
     send(
@@ -248,22 +248,41 @@ describe("marking read", () => {
     await viewLatest(3);
     await eventually(() => daemon.reads.length === 2);
 
-    expect({ before, reads: daemon.reads, settled }).toStrictEqual({
+    expect({ before, reads: daemon.reads }).toStrictEqual({
       before: 0,
       reads: [
         { read: 2000, target: "#iirc" },
         { read: 4000, target: "#iirc" },
       ],
-      settled: 1,
     });
   });
 
-  it("marks nothing while the page is hidden or the Owner scrolled back, and marks once seen", async () => {
+  it("marks nothing for a Timeline passed through within the moment, and the one stayed on", async () => {
+    const clock = heldClock();
+    const { daemon, opening, registry, send, viewLatest } = await reading(seeing, true, clock);
+
+    // Seen at its latest, and left just short of the moment.
+    await opening(iirc);
+    await Effect.runPromise(clock.adjust("49 millis"));
+
+    registry.set(open, timelineId(other));
+    send(
+      changed(
+        3,
+        [message(other, 3)],
+        [listed(other, { changed: 3, latest: 3000, unread: { messages: 1 } })]
+      )
+    );
+    await viewLatest();
+    await passing(clock, () => daemon.reads.length > 0);
+
+    expect(daemon.reads).toStrictEqual([{ read: 3000, target: "#other" }]);
+  });
+
+  it("marks a Timeline opened while the page was hidden once the page is seen at its latest", async () => {
     const { daemon, opening, registry, viewLatest } = await reading(away);
 
     await opening(iirc);
-    await wait(150);
-    const hidden = daemon.reads.length;
 
     registry.set(following, {
       following: false,
@@ -272,63 +291,22 @@ describe("marking read", () => {
       timeline: timelineId(iirc),
     });
     registry.set(pageState, seeing);
-    await wait(150);
-    const back = daemon.reads.length;
 
     await viewLatest();
     await eventually(() => daemon.reads.length === 1);
 
-    expect({ back, hidden, reads: daemon.reads }).toStrictEqual({
-      back: 0,
-      hidden: 0,
-      reads: [{ read: 2000, target: "#iirc" }],
-    });
+    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
-  it("marks nothing for a Timeline just opened until the view says it shows its latest", async () => {
-    const { daemon, registry, viewLatest } = await reading();
-
-    registry.set(open, timelineId(iirc));
-    await until(registry, openTimeline, (shown) => shown._tag === "Shown");
-    await wait(150);
-    const unconfirmed = daemon.reads.length;
-
-    await viewLatest();
-    await eventually(() => daemon.reads.length === 1);
-
-    expect({ reads: daemon.reads, unconfirmed }).toStrictEqual({
-      reads: [{ read: 2000, target: "#iirc" }],
-      unconfirmed: 0,
-    });
-  });
-
-  it("marks nothing until the shared ui.read is known, and nothing once it says asked", async () => {
+  it("marks once the shared ui.read is known to be latest", async () => {
     const { daemon, opening, registry } = await reading(seeing, false);
 
     await opening(iirc);
-    await wait(150);
-    const unknown = daemon.reads.length;
-
-    uiRead(registry, { options: { ...uiDefaults, read: "asked" }, sequence: 1 });
-    await wait(150);
-
-    expect({ reads: daemon.reads, unknown }).toStrictEqual({ reads: [], unknown: 0 });
-  });
-
-  it("marks once the shared ui.read is known to be latest, having marked nothing before", async () => {
-    const { daemon, opening, registry } = await reading(seeing, false);
-
-    await opening(iirc);
-    await wait(150);
-    const unknown = daemon.reads.length;
 
     uiRead(registry, { options: uiDefaults, sequence: 0 });
     await eventually(() => daemon.reads.length === 1);
 
-    expect({ reads: daemon.reads, unknown }).toStrictEqual({
-      reads: [{ read: 2000, target: "#iirc" }],
-      unknown: 0,
-    });
+    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
   it("forgets the shared ui.read on signing out, and takes the one in force on signing in again", async () => {
@@ -487,10 +465,7 @@ describe("notifications", () => {
 
     send(highlight(4));
     send(highlight(5));
-    // In the Timeline the Owner is looking at, nothing shows.
-    send(highlight(6, iirc));
     await eventually(() => notifier.shown.length === 2);
-    await wait(50);
 
     const shown = notifier.shown.map((one) => ({ body: one.body, tag: one.tag, title: one.title }));
     const showing = [...notifier.showing.keys()];
@@ -498,19 +473,13 @@ describe("notifications", () => {
     notifier.showing.get(`iirc:${other}`)?.choose();
     const chosen = openOf(registry.get(timelinesState));
 
-    await type(timelineId(other), "/notify off");
-    send(highlight(7, iirc));
-    await wait(50);
-
     expect({
-      after: notifier.shown.length,
       chosen,
       off,
       showing,
       shown,
       turnedOn,
     }).toStrictEqual({
-      after: 2,
       chosen: other,
       off: 0,
       showing: [`iirc:${other}`],

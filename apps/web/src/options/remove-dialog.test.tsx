@@ -100,7 +100,9 @@ const signedIn = async () => {
   });
 
   mounted.push(() => {
-    root.unmount();
+    act(() => {
+      root.unmount();
+    });
     container.remove();
   });
 

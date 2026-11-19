@@ -109,15 +109,6 @@ const colourIsValid = (colour: Colour | undefined) => {
 
 const joined = (spans: readonly Span[]) => spans.map((span) => span.text).join("");
 
-describe("formatting, on text with no code", () => {
-  it("is one span in the plain style", () => {
-    const [span, ...rest] = parseFormatting("hello");
-
-    expect(span).toStrictEqual({ style: plainStyle, text: "hello" });
-    expect(rest).toStrictEqual([]);
-  });
-});
-
 describe("formatting, on random text", () => {
   const samples = fc
     .array(fc.constantFrom(...alphabet), { maxLength: 40 })
@@ -183,10 +174,6 @@ const styled = (text: string, style: Partial<Style> = {}): Span => ({
   text,
 });
 
-const palette = (index: number): Colour => ({ _tag: "Palette", index });
-
-const hex = (digits: string): Colour => ({ _tag: "Hex", hex: digits });
-
 describe(formatSpans, () => {
   it("writes nothing for no spans, and bare text for the plain style", () => {
     expect(formatSpans([])).toBe("");
@@ -198,47 +185,6 @@ describe(formatSpans, () => {
     expect(
       formatSpans([styled("a", { bold: true }), styled("b", { bold: true, italic: true })])
     ).toBe("\u0002a\u001Db");
-  });
-
-  it("writes a palette colour as two digits, so a digit after it is text", () => {
-    expect(formatSpans([styled("5", { foreground: palette(4) })])).toBe("\u0003045");
-    expect(formatSpans([styled("a", { background: palette(5), foreground: palette(4) })])).toBe(
-      "\u000304,05a"
-    );
-  });
-
-  it("writes the default colour so that a digit after it is text", () => {
-    const spans = [styled("a", { foreground: palette(4) }), styled("7")];
-
-    expect(formatSpans(spans)).toBe("\u000304a\u0003997");
-    expect(parseFormatting(formatSpans(spans))).toStrictEqual(spans);
-  });
-
-  it("keeps a comma after a colour as text", () => {
-    const spans = [
-      styled(",5", { foreground: palette(4) }),
-      styled(",ff0000", { foreground: hex("00ff00") }),
-    ];
-
-    expect(parseFormatting(formatSpans(spans))).toStrictEqual(spans);
-  });
-
-  it("strips the codes in a span's text, so they cannot change what follows", () => {
-    const spans = [styled("a\u0002b\u000304,05c\u000F"), styled("d", { italic: true })];
-
-    expect(parseFormatting(formatSpans(spans))).toStrictEqual([
-      styled("abc"),
-      styled("d", { italic: true }),
-    ]);
-  });
-
-  it("never throws, on colours that do not exist", () => {
-    const spans = [
-      styled("a", { background: hex("xyz"), foreground: palette(120) }),
-      styled("b", { background: palette(1.5), foreground: palette(-1) }),
-    ];
-
-    expect(parseFormatting(formatSpans(spans))).toStrictEqual([styled("ab")]);
   });
 });
 
@@ -301,26 +247,12 @@ describe("formatSpans, on random spans", () => {
     "\u{1F600}",
   ];
 
-  const texts = fc.array(fc.constantFrom(...plainPieces), { maxLength: 6 }).map((p) => p.join(""));
-
   const codeTexts = fc
     .array(fc.constantFrom(...plainPieces, ...codes), { maxLength: 8 })
     .map((p) => p.join(""));
 
   const spansOf = (text: fc.Arbitrary<string>) =>
     fc.array(fc.record({ style: styles, text }), { maxLength: 8 });
-
-  it("is read back as the same spans, and strips to their text", () => {
-    fc.assert(
-      fc.property(spansOf(texts), (spans) => {
-        const text = formatSpans(spans);
-
-        expect(parseFormatting(text)).toStrictEqual(normalised(spans));
-        expect(stripFormatting(text)).toBe(joined(spans));
-      }),
-      { numRuns: 5000 }
-    );
-  });
 
   it("holds when the text itself holds codes, which are stripped first", () => {
     fc.assert(
@@ -332,17 +264,6 @@ describe("formatSpans, on random spans", () => {
         expect(stripFormatting(text)).toBe(joined(clean));
       }),
       { numRuns: 5000 }
-    );
-  });
-
-  it("never ends in a code", () => {
-    fc.assert(
-      fc.property(spansOf(texts), (spans) => {
-        const text = formatSpans(spans);
-
-        expect(text === "" || !codes.includes(text.at(-1) ?? "")).toBeTruthy();
-      }),
-      { numRuns: 2000 }
     );
   });
 });

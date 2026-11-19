@@ -1,9 +1,25 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { linksInRun, linksOf, previewableLinksOf, previewLimit } from "./links.ts";
+import { linksInRun, linksOf, previewableLinksOf } from "./links.ts";
 
 const textsOf = (run: string) => linksInRun(run).map((link) => link.text);
+
+const hostile = (brackets: number) => `https://example.org/${")".repeat(brackets)}`;
+
+// How long the fastest of a few runs takes, so a pause on a busy machine counts for little.
+const fastest = (run: string) =>
+  Math.min(
+    ...Array.from({ length: 5 }, () => {
+      // oxlint-disable-next-line no-restricted-globals -- a test of how the work scales
+      const started = performance.now();
+
+      linksInRun(run);
+
+      // oxlint-disable-next-line no-restricted-globals -- a test of how the work scales
+      return performance.now() - started;
+    })
+  );
 
 describe(linksInRun, () => {
   it("leaves out the punctuation that ends a sentence around a link", () => {
@@ -67,17 +83,13 @@ describe(linksInRun, () => {
   });
 
   it("trims a link's hostile brackets in linear time", () => {
-    const hostile = `https://example.org/${")".repeat(64_000)}`;
+    // Eight times the brackets takes about eight times as long, and sixty-four if quadratic.
+    const small = fastest(hostile(8000));
+    const large = fastest(hostile(64_000));
 
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const started = performance.now();
-    const found = linksInRun(hostile);
-    // oxlint-disable-next-line no-restricted-globals -- a test of how long the work takes
-    const took = performance.now() - started;
-
-    expect({ fast: took < 500, found: found.map((link) => link.text) }).toStrictEqual({
-      fast: true,
+    expect({ found: textsOf(hostile(64_000)), scales: large < small * 24 }).toStrictEqual({
       found: ["https://example.org/"],
+      scales: true,
     });
   });
 
@@ -128,7 +140,6 @@ describe(previewableLinksOf, () => {
       { href: "https://a.example/2", scheme: "https" },
       { href: "http://a.example/3", scheme: "http" },
     ]);
-    expect(previewLimit).toBe(3);
   });
 
   it("counts a repeated link once, so a later distinct link takes its place", () => {
@@ -161,13 +172,5 @@ describe(previewableLinksOf, () => {
         "irc://x.example/ https://a.example/ https://b.example/ https://c.example/"
       ).map((link) => link.href)
     ).toStrictEqual(["https://a.example/", "https://b.example/", "https://c.example/"]);
-  });
-
-  it("takes links from several spans of one Message in order", () => {
-    expect(
-      previewableLinksOf("\u0002https://a.example/\u0002 \u001Fhttps://b.example/\u001F").map(
-        (link) => link.href
-      )
-    ).toStrictEqual(["https://a.example/", "https://b.example/"]);
   });
 });

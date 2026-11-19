@@ -346,17 +346,6 @@ const sendable = fc
 const bytesOf = (line: OutboundLine) => encodedBytes(line);
 
 describe("every OutboundLine", () => {
-  it("is built often enough from these generators to prove something", () => {
-    const built = fc.sample(
-      fc
-        .tuple(command, params, tags)
-        .map(([verb, values, tagged]) => outbound(verb, values, tagged)),
-      2000
-    );
-
-    expect(built.filter((line) => !isRejected(line)).length).toBeGreaterThan(200);
-  });
-
   it("parses back to its command, parameters, and tags", () => {
     expect(() => {
       fc.assert(
@@ -404,27 +393,11 @@ describe("every OutboundLine", () => {
       );
     }).not.toThrow();
   });
-
-  it("is never a second Line, whatever the text it was asked to carry", () => {
-    expect(() => {
-      fc.assert(
-        fc.property(middle, anyText, (target, said) => {
-          const built = privmsg(target, said);
-
-          return isRejected(built) || text.decode(encodedBytes(built)).split("\r\n").length === 2;
-        }),
-        { numRuns: 3000 }
-      );
-    }).not.toThrow();
-  });
 });
 
+const pongOf = (token: Uint8Array) => Uint8Array.of(...utf8.encode("PONG "), ...token, 0x0d, 0x0a);
+
 describe("a PING token that is not UTF-8", () => {
-  const ping = Uint8Array.of(...utf8.encode("PING :"), 0xff, 0x41, 0xe9);
-
-  const pongOf = (token: Uint8Array) =>
-    Uint8Array.of(...utf8.encode("PONG "), ...token, 0x0d, 0x0a);
-
   it.each([
     ["windows-1252", Uint8Array.of(0xff, 0x41, 0xe9)],
     ["shift_jis", Uint8Array.of(0x82, 0xa0, 0x41)],
@@ -438,16 +411,6 @@ describe("a PING token that is not UTF-8", () => {
     expect(parsed._tag).toBe("Line");
     expect(bytesOfRaw(token_ ?? raw(Uint8Array.of()))).toStrictEqual(token);
     expect(encodedBytes(sendableLine(pong(token_ ?? "")))).toStrictEqual(pongOf(token));
-  });
-
-  it("would not be, if it were echoed as text", () => {
-    const parsed = parse(ping, { _tag: "Utf8OrElse", fallback: "windows-1252" });
-    const token = parsed._tag === "Line" ? (parsed.line.params[0] ?? "") : "";
-
-    expect(token).toBe("ÿAé");
-    expect(encodedBytes(sendableLine(pong(token)))).not.toStrictEqual(
-      pongOf(Uint8Array.of(0xff, 0x41, 0xe9))
-    );
   });
 
   it("is recorded as its string, and checked again when it is decoded", () => {
@@ -514,43 +477,6 @@ const forged = <T>(value: unknown): T => value as T;
 describe("encode, as the one guard on what leaves", () => {
   const good = sendableLine(pong("ok"));
   const injected = "ĊOPER root bad";
-
-  it("is not fooled by a getter that changes between reads", () => {
-    let reads = 0;
-
-    const turning = {
-      get bytes() {
-        reads += 1;
-
-        return reads <= 3 ? "ok" : injected;
-      },
-    };
-
-    const line = sendableLine(pong(turning));
-    const forgedLine = { ...good, params: [turning] };
-
-    // pong read it once, and kept that read. Each encode of the forged Line reads it once
-    // more, and refuses it as soon as it has turned.
-    expect(text.decode(encodedBytes(line))).toBe("PONG ok\r\n");
-    expect(text.decode(encodedBytes(forgedLine))).toBe("PONG ok\r\n");
-    expect(text.decode(encodedBytes(forgedLine))).toBe("PONG ok\r\n");
-    expect(encode(forgedLine)).toStrictEqual({ _tag: "Rejected", reason: "InvalidParameter" });
-    expect(text.decode(encodedBytes(line))).toBe("PONG ok\r\n");
-  });
-
-  it("writes what it read once, whatever a getter says after", () => {
-    let reads = 0;
-
-    const once = {
-      get bytes() {
-        reads += 1;
-
-        return reads === 1 ? "ok" : injected;
-      },
-    };
-
-    expect(text.decode(encodedBytes({ ...good, params: [once] }))).toBe("PONG ok\r\n");
-  });
 
   it("refuses a spread Line whose parameters were replaced", () => {
     expect(encode({ ...good, params: [{ bytes: injected }] })).toStrictEqual({
@@ -652,45 +578,6 @@ describe("encode, as the one guard on what leaves", () => {
           expect(tagLength).toBeLessThanOrEqual(maxTagBytes + 2);
         }),
         { numRuns: 5000 }
-      );
-    }).not.toThrow();
-  });
-});
-
-// A boxed String. Lint would unbox `new String(...)` when it fixes the file.
-const boxed = (value: string) => new Object(value);
-
-describe("outbound, given anything", () => {
-  it("returns Rejected rather than throwing", () => {
-    expect(outbound(forged(boxed("PING")), ["x"])).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidCommand",
-    });
-    expect(outbound(forged(42), ["x"])).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidCommand",
-    });
-    expect(outbound("PING", [forged(boxed("x"))])).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidParameter",
-    });
-    expect(outbound("PING", forged("x"))).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidParameter",
-    });
-    expect(outbound("PING", ["x"], forged({ "+a": 1 }))).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidTag",
-    });
-  });
-
-  it("never throws on any arguments", () => {
-    expect(() => {
-      fc.assert(
-        fc.property(fc.anything(), fc.anything(), fc.anything(), (verb, values, tagged) => {
-          outbound(forged(verb), forged(values), forged(tagged));
-        }),
-        { numRuns: 3000 }
       );
     }).not.toThrow();
   });

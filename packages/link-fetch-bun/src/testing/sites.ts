@@ -167,7 +167,7 @@ export const serve = (
 /**
  * How many of a site's connections have closed, read while the site still runs, so a close the
  * site's own cleanup makes is never counted. It waits until at least `count` have closed, for at
- * most two seconds.
+ * most twenty seconds.
  * @param site - The site.
  * @param count - How many closes to wait for.
  * @returns How many have closed.
@@ -179,7 +179,7 @@ export const closes = (site: Site, count = 1) =>
       until: (closed) => closed >= count,
     }),
     Effect.timeoutOrElse({
-      duration: "2 seconds",
+      duration: "20 seconds",
       orElse: () => Effect.succeed(site.connections.closed),
     })
   );

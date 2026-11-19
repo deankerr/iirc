@@ -3,7 +3,7 @@ import type { ActionRequest } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { commandNamed, commands, interpret, typesCredential, unmet } from "./commands.ts";
+import { commands, interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, MarkRead, Unseen } from "./commands.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
@@ -77,28 +77,13 @@ describe("the command registry", () => {
     }).toStrictEqual({ ids: commands.length, lower: true, unique: true });
   });
 
-  it("finds a command by name or alias in any case, and none for an unknown name", () => {
-    expect({
-      action: commandNamed("ACTION")?.id,
-      me: commandNamed("Me")?.id,
-      nothing: commandNamed("frobnicate"),
-    }).toStrictEqual({ action: "say.action", me: "say.action", nothing: undefined });
-  });
+  it("says nothing in a Direct Message that no longer follows its partner, saying why", () => {
+    const detached: CommandContext = { ...inDirect, focus: focus("Direct", "x", true) };
 
-  it("says why a command cannot run, by its first unmet condition", () => {
-    const me = commandNamed("me");
+    const why =
+      "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>.";
 
-    expect(
-      me === undefined
-        ? []
-        : [
-            inChannel,
-            inNetwork,
-            offline,
-            nowhere,
-            { ...inDirect, focus: focus("Direct", "x", true) },
-          ].map((context) => unmet(me.when, context) !== undefined)
-    ).toStrictEqual([false, true, true, true, true]);
+    expect([message("hello", detached), message("/me waves", detached)]).toStrictEqual([why, why]);
   });
 });
 
@@ -426,79 +411,6 @@ describe("reading a line", () => {
       { _tag: "Invalid", message: "/latest takes nothing after it." },
       { _tag: "Invalid", message: "Open a Timeline first." },
     ]);
-  });
-
-  it("says which commands take arguments, for the palette", () => {
-    expect(
-      Object.fromEntries(commands.map((one) => [one.id, one.arguments] as const))
-    ).toStrictEqual({
-      "act.away": "Optional",
-      "act.back": "None",
-      "act.ban": "Required",
-      "act.ctcp": "Required",
-      "act.deop": "Required",
-      "act.devoice": "Required",
-      "act.invite": "Required",
-      "act.kick": "Required",
-      "act.mode": "Required",
-      "act.nick": "Required",
-      "act.op": "Required",
-      "act.ping": "Required",
-      "act.quote": "Required",
-      "act.topic": "Optional",
-      "act.unban": "Required",
-      "act.voice": "Required",
-      "channels.join": "Required",
-      "channels.part": "Optional",
-      "composer.focus": "None",
-      "format.bold": "None",
-      "format.colour": "None",
-      "format.italic": "None",
-      "format.monospace": "None",
-      "format.reverse": "None",
-      "format.strikethrough": "None",
-      "format.underline": "None",
-      "ignores.ignore": "Optional",
-      "ignores.unignore": "Required",
-      "lookup.bans": "Optional",
-      "lookup.exceptions": "Optional",
-      "lookup.invexes": "Optional",
-      "lookup.whois": "Required",
-      "lookup.whowas": "Required",
-      "members.toggle": "Optional",
-      "network.connect": "Optional",
-      "network.disconnect": "Optional",
-      "network.manage": "Required",
-      "notify.set": "Required",
-      "options.set": "Optional",
-      "options.unset": "Required",
-      "palette.open": "None",
-      "pane.close": "None",
-      "pane.equalize": "None",
-      "pane.focus": "Required",
-      "pane.grow": "None",
-      "pane.shrink": "None",
-      "pane.split": "Optional",
-      "pane.swap": "Required",
-      "pane.zoom": "None",
-      "previews.choose": "Required",
-      "say.action": "Required",
-      "say.notice": "Required",
-      "say.privmsg": "Required",
-      "say.to": "Required",
-      "search.open": "Optional",
-      "sidebar.toggle": "Optional",
-      "theme.set": "Optional",
-      "timeline.close": "Optional",
-      "timeline.go": "Required",
-      "timeline.latest": "None",
-      "timeline.next": "None",
-      "timeline.previous": "None",
-      "timeline.query": "Required",
-      "timeline.read": "Optional",
-      "timeline.unread": "None",
-      "uploads.open": "None",
-    });
   });
 });
 

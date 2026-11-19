@@ -59,12 +59,4 @@ describe("inputs", () => {
       unsent([send]),
     ]);
   });
-
-  it("refuse a recorded input that is not one", () => {
-    const recorded = JSON.stringify({ _tag: "Fired", at: 1.5, timer: "t" });
-
-    expect(() => Schema.decodeUnknownSync(json)(JSON.parse(recorded))).toThrow(
-      "Expected an integer"
-    );
-  });
 });

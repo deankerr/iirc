@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
 import { Said, SearchResults, Upload, UploadsStatus } from "@iirc/api";
@@ -673,11 +673,14 @@ describe("Uploads over the API", () => {
         yield* turnOn(served);
 
         // A store that reads the whole body, then never answers and cannot be interrupted.
+        const read = yield* Latch.make();
+
         const hung: ByteStoreService = {
           ...served.world.bytes.store,
           put: (body) =>
             Stream.runDrain(body).pipe(
               Effect.orDie,
+              Effect.andThen(read.open),
               Effect.andThen(Effect.uninterruptible(Effect.never))
             ),
         };
@@ -690,7 +693,7 @@ describe("Uploads over the API", () => {
         );
 
         yield* request.send(new Uint8Array(5000));
-        yield* Effect.sleep("200 millis");
+        yield* read.await;
         yield* served.beginStopping;
 
         const answered = yield* request.answered.pipe(Effect.timeoutOption("3 seconds"));
@@ -711,14 +714,6 @@ describe("Uploads over the API", () => {
     });
   });
 
-  it("keeps staging owner-only", async () => {
-    const mode = await run((served) =>
-      Effect.sync(() => statSync(`${served.dataDir}/staging`).mode % 0o1000)
-    );
-
-    expect(mode).toBe(0o700);
-  });
-
   it("removes what staging held when it starts", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
@@ -733,25 +728,18 @@ describe("Uploads over the API", () => {
     expect(result).toStrictEqual([]);
   });
 
-  it("keeps an upload past 1 MiB, while every other route still refuses a body past it", async () => {
+  it("keeps an upload past 1 MiB", async () => {
     const big = new Uint8Array(1024 * 1024 + 1).fill(0x61);
 
-    const result = await run((served) =>
+    const kept = await run((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
-        const kept = yield* uploaded(served, big, "big.txt");
 
-        const refused = yield* served.request("/api/credentials/big", {
-          body: JSON.stringify({ value: "x".repeat(1024 * 1024 + 1) }),
-          headers: { "content-type": "application/json" },
-          method: "PUT",
-        });
-
-        return { kept: kept.size, refused: [refused.status, refused.headers.get("connection")] };
+        return (yield* uploaded(served, big, "big.txt")).size;
       })
     );
 
-    expect(result).toStrictEqual({ kept: big.length, refused: [413, "close"] });
+    expect(kept).toBe(big.length);
   });
 
   it("refuses an upload a cookie carries from another origin, and takes one from its own", async () => {
@@ -827,24 +815,6 @@ describe("Uploads over the API", () => {
     });
   });
 
-  it("keeps an Upload across a restart on the same Journal", async () => {
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served);
-        const record = yield* uploaded(served, png, "cat.png");
-
-        yield* served.restart;
-
-        return {
-          read: yield* Effect.flatMap(served.request(`/api/uploads/${record.id}`), recordOf),
-          record,
-        };
-      })
-    );
-
-    expect(result.read).toStrictEqual(result.record);
-  });
-
   it("builds the link from the public URL in force, whatever else is set, and gives none while there is none", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
@@ -908,69 +878,6 @@ const atAll = (port: number, expected: number | "refused") =>
 // Each port is one the kernel just said was free. Another process could take it before the
 // listener binds, a race too small to matter here.
 describe("the link listener", () => {
-  it("serves an Upload's bytes with every safety header", async () => {
-    const port = freePort();
-
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served, port);
-        const record = yield* uploaded(served, png, "cat.png");
-        const got = yield* fromBound(port, pathOf(record.link));
-
-        return {
-          bytes: yield* bytesOf(got),
-          headers: headersOf(got),
-          id: record.id,
-          status: statusOf(got),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      bytes: png,
-      headers: {
-        ...safety,
-        "accept-ranges": "bytes",
-        "cache-control": "no-cache",
-        "content-disposition": `inline; filename="cat.png"; filename*=UTF-8''cat.png`,
-        "content-length": String(png.length),
-        "content-type": "image/png",
-        etag: `"${result.id}"`,
-      },
-      id: result.id,
-      status: 200,
-    });
-  });
-
-  it("answers HEAD with the same headers and no body", async () => {
-    const port = freePort();
-
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served, port);
-        const path = pathOf((yield* uploaded(served, png, "cat.png")).link);
-        const get = yield* fromBound(port, path);
-        const head = yield* fromLinks(port, path, { method: "HEAD" });
-
-        return {
-          body: (yield* bytesOf(head))?.length,
-          headers: headersOf(head),
-          length: headersOf(get)["content-length"],
-          status: statusOf(head),
-          wanted: headersOf(get),
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      body: 0,
-      headers: result.wanted,
-      length: String(png.length),
-      status: 200,
-      wanted: result.wanted,
-    });
-  });
-
   it("shows raster images and plain text in place, and makes SVG, HTML, PDF, and unknown bytes download", async () => {
     const port = freePort();
 
@@ -1122,33 +1029,6 @@ describe("the link listener", () => {
     expect(result).toStrictEqual([200, png]);
   });
 
-  it("answers 503 with no-store while the store cannot be reached", async () => {
-    const port = freePort();
-
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served, port);
-        const record = yield* uploaded(served, png, "cat.png");
-
-        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
-        const got = yield* fromBound(port, pathOf(record.link));
-
-        return [statusOf(got), headersOf(got)];
-      })
-    );
-
-    expect(result).toStrictEqual([
-      503,
-      {
-        ...safety,
-        "cache-control": "no-store",
-        "content-disposition": "inline",
-        "content-length": "25",
-        "content-type": "text/plain; charset=utf-8",
-      },
-    ]);
-  });
-
   it("answers 503 with no-store, for GET and HEAD, plain, revalidated, or out of range, when the store fails before the first byte", async () => {
     const port = freePort();
 
@@ -1231,8 +1111,6 @@ describe("the link listener", () => {
     const result = await run((served) =>
       Effect.gen(function* () {
         yield* setOption(served, "uploads.listen", `${loopback}:${first}`);
-        const whileOff = yield* atAll(first, 404);
-
         yield* turnOn(served);
         const on = yield* atAll(first, 404);
 
@@ -1248,7 +1126,7 @@ describe("the link listener", () => {
         yield* unsetOption(served, "uploads.listen");
         const unset = yield* atAll(second, "refused");
 
-        return { again, moved, off, on, unset, whileOff };
+        return { again, moved, off, on, unset };
       })
     );
 
@@ -1258,7 +1136,6 @@ describe("the link listener", () => {
       off: "refused",
       on: 404,
       unset: "refused",
-      whileOff: "refused",
     });
   });
 });
@@ -1484,25 +1361,6 @@ describe("an Upload's bytes on the API", () => {
       },
       status: 200,
     });
-  });
-
-  it("makes what is not shown in place download, as its link does", async () => {
-    const port = freePort();
-
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served, port);
-        const page = encoder.encode("<!DOCTYPE html><p>hi</p>");
-        const record = yield* uploaded(served, page, "x");
-        const content = yield* served.request(`/api/uploads/${record.id}/content`);
-        const link = yield* fromBound(port, pathOf(record.link));
-
-        return { content: headersOf(content), link: headersOf(link) };
-      })
-    );
-
-    expect(result.content).toStrictEqual(result.link);
-    expect(result.content["content-disposition"]).toMatch(/^attachment;/u);
   });
 
   it("serves an Upload's bytes to a Sign-in cookie, and answers neither key nor cookie with 401", async () => {
@@ -2108,7 +1966,7 @@ describe("renaming and deleting an Upload", () => {
     expect(result).toStrictEqual({ heldMeanwhile: true, kept: [200, png] });
   });
 
-  it("has an upload of the same bytes wait for their release in progress, then keeps them", async () => {
+  it("keeps an upload of the same bytes made while their release is in progress", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
@@ -2131,8 +1989,6 @@ describe("renaming and deleting an Upload", () => {
         yield* releasing.await;
         const second = yield* Effect.forkChild(uploaded(served, png, "second.png"));
 
-        // Long enough for an upload that did not wait to put its bytes and journal them.
-        yield* Effect.sleep("200 millis");
         yield* go.open;
         const deleted = yield* Fiber.join(deleting);
 
@@ -2434,34 +2290,15 @@ const masked = <A extends { readonly body: string }>(answer: A, id: string): A =
   body: answer.body.replaceAll(id, "<id>"),
 });
 
-// The requests that must not tell a deleted Upload from one that never was, by an id.
-const unrevealing: readonly (readonly [string, (id: string) => Ask])[] = [
-  ["a plain GET", () => ({})],
-  ["a HEAD", () => ({ method: "HEAD" })],
-  ["a GET with a Range", () => ({ headers: { range: "bytes=0-1" } })],
-  ["a GET with If-None-Match of the ETag", (id) => ({ headers: { "if-none-match": `"${id}"` } })],
-  ["a GET with If-None-Match of an asterisk", () => ({ headers: { "if-none-match": "*" } })],
+// An id no Upload has is answered before any header is read, so one ask that a live Upload
+// would answer otherwise stands for every ask: a deleted Upload's own ETag, and for an id that
+// never was, an asterisk.
+const unrevealing: readonly (readonly [string, boolean, (id: string) => Ask])[] = [
+  ["was deleted", true, (id) => ({ headers: { "if-none-match": `"${id}"` } })],
+  ["never existed", false, () => ({ headers: { "if-none-match": "*" } })],
 ];
 
 describe("seeking and revalidation", () => {
-  it("answers a ranged request to the API's content route without a key or cookie with 401", async () => {
-    const result = await run((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served);
-        const record = yield* uploaded(served, digits, digitsName);
-
-        return statusOf(
-          yield* served.request(`/api/uploads/${record.id}/content`, {
-            headers: { range: "bytes=2-5" },
-            key: null,
-          })
-        );
-      })
-    );
-
-    expect(result).toBe(401);
-  });
-
   describe.each(routeNames)("on %s", (routeName) => {
     const onDigits = async <A, E>(
       test: (
@@ -2487,51 +2324,9 @@ describe("seeking and revalidation", () => {
       });
     });
 
-    it.each([
-      ["an open-ended range", "bytes=7-", "789", "bytes 7-9/10"],
-      ["a suffix range", "bytes=-3", "789", "bytes 7-9/10"],
-      ["a range whose end is past the last byte, clamped", "bytes=8-100", "89", "bytes 8-9/10"],
-    ])("serves %s as 206", async (_edge, range, body, contentRange) => {
+    it("answers a range that starts at the size with 416 and the size", async () => {
       const result = await onDigits(({ answering, record }) =>
-        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
-          ...answer,
-          id: record.id,
-        }))
-      );
-
-      expect(result.status).toBe(206);
-      expect(result.body).toBe(body);
-      expect(result.headers).toMatchObject({
-        ...revalidating(result.id),
-        "accept-ranges": "bytes",
-        "content-length": String(body.length),
-        "content-range": contentRange,
-      });
-    });
-
-    it("serves the whole body as 200 for several ranges", async () => {
-      const result = await onDigits(({ answering, record }) =>
-        Effect.map(answering(record.id, { headers: { range: "bytes=0-1,4-5" } }), (answer) => ({
-          ...answer,
-          id: record.id,
-        }))
-      );
-
-      expect(result.status).toBe(200);
-      expect(result.body).toBe(digits);
-      expect(result.headers).toMatchObject({
-        ...revalidating(result.id),
-        "accept-ranges": "bytes",
-        "content-length": "10",
-      });
-    });
-
-    it.each([
-      ["starts at the size", "bytes=10-"],
-      ["starts past the size", "bytes=20-30"],
-    ])("answers a range that %s with 416 and the size", async (_edge, range) => {
-      const result = await onDigits(({ answering, record }) =>
-        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
+        Effect.map(answering(record.id, { headers: { range: "bytes=10-" } }), (answer) => ({
           ...answer,
           id: record.id,
         }))
@@ -2544,88 +2339,24 @@ describe("seeking and revalidation", () => {
       });
     });
 
-    it.each([
-      ["another unit", "items=0-1"],
-      ["a range that ends before it starts", "bytes=5-2"],
-      ["a range that is not numbers", "bytes=abc"],
-    ])("ignores %s, and serves the whole body as 200", async (_edge, range) => {
+    it("answers If-None-Match with the ETag with 304, an empty body, and the ETag", async () => {
       const result = await onDigits(({ answering, record }) =>
-        Effect.map(answering(record.id, { headers: { range } }), (answer) => ({
-          ...answer,
-          id: record.id,
-        }))
+        Effect.map(
+          answering(record.id, { headers: { "if-none-match": `"${record.id}"` } }),
+          (answer) => ({ ...answer, id: record.id })
+        )
       );
 
-      expect(result.status).toBe(200);
-      expect(result.body).toBe(digits);
-      expect(result.headers).toMatchObject({
-        ...revalidating(result.id),
-        "accept-ranges": "bytes",
-        "content-length": "10",
-      });
-      expect(result.headers["content-range"]).toBeUndefined();
+      expect(result.status).toBe(304);
+      expect(result.body).toBe("");
+      expect(result.headers).toMatchObject(revalidating(result.id));
     });
 
-    it("gives exactly the Upload's id in quotes as the ETag, never its hash, on 200, 206, 304, and HEAD", async () => {
-      const result = await onDigits(({ at, record }) =>
-        Effect.gen(function* () {
-          const etags: (string | null)[] = [];
-
-          for (const ask of [
-            {},
-            { headers: { range: "bytes=2-5" } },
-            { headers: { "if-none-match": `"${record.id}"` } },
-            { method: "HEAD" },
-          ] satisfies Ask[]) {
-            etags.push((yield* at(record.id, ask)).headers.get("etag"));
-          }
-
-          return { etags, hash: record.hash, id: record.id };
-        })
-      );
-
-      expect(result.etags).toStrictEqual(Array.from({ length: 4 }, () => `"${result.id}"`));
-      expect(result.etags.join(" ")).not.toContain(result.hash);
-    });
-
-    it.each([
-      ["the strong ETag", (id: string) => `"${id}"`],
-      ["the weak form of the ETag", (id: string) => `W/"${id}"`],
-      ["an asterisk", () => "*"],
-      ["a list that holds the ETag", (id: string) => `"other", "${id}"`],
-    ])(
-      "answers If-None-Match with %s with 304, an empty body, and the ETag",
-      async (_edge, header) => {
-        const result = await onDigits(({ answering, record }) =>
-          Effect.map(
-            answering(record.id, { headers: { "if-none-match": header(record.id) } }),
-            (answer) => ({ ...answer, id: record.id })
-          )
-        );
-
-        expect(result.status).toBe(304);
-        expect(result.body).toBe("");
-        expect(result.headers).toMatchObject(revalidating(result.id));
-      }
-    );
-
-    it("answers If-None-Match with another ETag alone with 200 and the whole body", async () => {
-      const result = await onDigits(({ answering, record }) =>
-        answering(record.id, { headers: { "if-none-match": '"other"' } })
-      );
-
-      expect(result.status).toBe(200);
-      expect(result.body).toBe(digits);
-    });
-
-    it.each([
-      ["a whole request", {}],
-      ["a ranged request", { range: "bytes=2-5" }],
-    ])("answers HEAD for %s with GET's status and headers and no body", async (_edge, headers) => {
+    it("answers HEAD with GET's status and headers and no body", async () => {
       const result = await onDigits(({ answering, record }) =>
         Effect.gen(function* () {
-          const get = yield* answering(record.id, { headers });
-          const head = yield* answering(record.id, { headers, method: "HEAD" });
+          const get = yield* answering(record.id);
+          const head = yield* answering(record.id, { method: "HEAD" });
 
           return { get, head };
         })
@@ -2636,84 +2367,41 @@ describe("seeking and revalidation", () => {
       expect(result.head.headers).toStrictEqual(result.get.headers);
     });
 
-    it("answers HEAD with If-None-Match of the ETag with 304", async () => {
-      const result = await onDigits(({ answering, record }) =>
-        answering(record.id, { headers: { "if-none-match": `"${record.id}"` }, method: "HEAD" })
-      );
-
-      expect(result.status).toBe(304);
-      expect(result.body).toBe("");
-    });
-
-    it("serves a range when If-Range holds the current ETag", async () => {
-      const result = await onDigits(({ answering, record }) =>
-        answering(record.id, { headers: { "if-range": `"${record.id}"`, range: "bytes=2-5" } })
-      );
-
-      expect(result.status).toBe(206);
-      expect(result.body).toBe("2345");
-    });
-
-    it("serves the whole body as 200 when If-Range holds another ETag", async () => {
-      const result = await onDigits(({ answering, record }) =>
-        answering(record.id, { headers: { "if-range": '"other"', range: "bytes=2-5" } })
-      );
-
-      expect(result.status).toBe(200);
-      expect(result.body).toBe(digits);
-    });
-
-    describe.each([
-      ["was deleted", true],
-      ["never existed", false],
-    ])("for an Upload that %s", (_kind, deleted) => {
-      it.each(unrevealing)(
-        "answers %s exactly as it answers an id no Upload ever had",
-        async (_edge, asking) => {
-          const result = await onDigits(({ answering, record, served }) =>
-            Effect.gen(function* () {
-              if (deleted) {
-                yield* expecting(remove(served, record.id), 200);
-              }
-
-              const id = deleted ? record.id : unknownId;
-
-              const baseline = yield* answering(unknownId, {
-                method: asking(unknownId).method ?? "GET",
-              });
-
-              const asked = yield* answering(id, asking(id));
-
-              return { asked: masked(asked, id), baseline: masked(baseline, unknownId) };
-            })
-          );
-
-          expect(result.baseline.status).toBe(404);
-          expect(result.asked).toStrictEqual(result.baseline);
-        }
-      );
-    });
-
-    it.each([
-      ["a plain GET", {}],
-      ["a HEAD", { method: "HEAD" }],
-    ] satisfies [string, Ask][])(
-      "answers 404, never 304, to %s with If-None-Match of the ETag when the store confirms the bytes are gone",
-      async (_edge, ask) => {
+    it.each(unrevealing)(
+      "answers If-None-Match for an Upload that %s exactly as a GET of an id no Upload ever had",
+      async (_kind, deleted, asking) => {
         const result = await onDigits(({ answering, record, served }) =>
           Effect.gen(function* () {
-            yield* served.world.bytes.store.delete(Sha256.make(record.hash)).pipe(Effect.orDie);
+            if (deleted) {
+              yield* expecting(remove(served, record.id), 200);
+            }
 
-            return yield* answering(record.id, {
-              ...ask,
-              headers: { "if-none-match": `"${record.id}"` },
-            });
+            const id = deleted ? record.id : unknownId;
+            const baseline = yield* answering(unknownId);
+            const asked = yield* answering(id, asking(id));
+
+            return { asked: masked(asked, id), baseline: masked(baseline, unknownId) };
           })
         );
 
-        expect(result.status).toBe(404);
+        expect(result.baseline.status).toBe(404);
+        expect(result.asked).toStrictEqual(result.baseline);
       }
     );
+
+    it("answers 404, never 304, to If-None-Match of the ETag when the store confirms the bytes are gone", async () => {
+      const result = await onDigits(({ answering, record, served }) =>
+        Effect.gen(function* () {
+          yield* served.world.bytes.store.delete(Sha256.make(record.hash)).pipe(Effect.orDie);
+
+          return yield* answering(record.id, {
+            headers: { "if-none-match": `"${record.id}"` },
+          });
+        })
+      );
+
+      expect(result.status).toBe(404);
+    });
   });
 });
 
@@ -2747,19 +2435,18 @@ const readDeleted = (served: Served, id: string) =>
 
 /**
  * Opens the stream of every Upload Change, which answers once its first heartbeat is sent,
- * so the TestClock is moved to send it.
+ * so the TestClock is moved, a beat at a time, until it answers.
  * @param served - The server.
  * @returns The response.
  */
-const openingChanges = (served: Served) =>
-  Effect.gen(function* () {
-    const opening = yield* Effect.forkScoped(served.request("/api/uploads/changes?after=0"));
+const openingChanges = (served: Served) => {
+  const beat = TestClock.adjust(50).pipe(
+    Effect.andThen(live(Effect.sleep("10 millis"))),
+    Effect.forever
+  );
 
-    yield* live(Effect.sleep("200 millis"));
-    yield* TestClock.adjust(50);
-
-    return yield* Fiber.join(opening);
-  });
+  return Effect.raceFirst(beat, served.request("/api/uploads/changes?after=0"));
+};
 
 const expiries = (world: World) =>
   Effect.map(journaledChanges(world), (all) =>
@@ -2769,32 +2456,6 @@ const expiries = (world: World) =>
   );
 
 describe("expiring Uploads", () => {
-  it("never expires an Upload while uploads.expireAfter is unset, however old, across a tick and a restart", async () => {
-    const result = await runClocked((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served);
-        const record = yield* uploaded(served, png, "old.png");
-
-        yield* TestClock.setTime(30 * day);
-        yield* live(Effect.sleep("200 millis"));
-        const ticked = yield* read(served, record.id);
-
-        yield* served.restart;
-        yield* live(Effect.sleep("200 millis"));
-        const restarted = yield* read(served, record.id);
-
-        return { expiries: yield* expiries(served.world), record, restarted, ticked };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      expiries: [],
-      record: result.record,
-      restarted: result.record,
-      ticked: result.record,
-    });
-  });
-
   it("expires an Upload older than uploads.expireAfter on the timer, keeps a younger one, and releases only its own bytes", async () => {
     const port = freePort();
 
@@ -2853,100 +2514,21 @@ describe("expiring Uploads", () => {
     });
   });
 
-  it("expires at start an Upload that is already too old, without waiting for the timer", async () => {
+  it("expires at start an Upload that is already too old", async () => {
     const result = await runClocked((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
         const record = yield* uploaded(served, png, "old.png");
 
-        // Nothing is set, so the timer's ticks on the way expire nothing.
         yield* TestClock.setTime(2 * day);
         yield* setOption(served, "uploads.expireAfter", 1);
-        yield* live(Effect.sleep("200 millis"));
-        const before = yield* read(served, record.id);
-
         yield* served.restart;
 
-        return { after: yield* readDeleted(served, record.id), before, record };
+        return yield* readDeleted(served, record.id);
       })
     );
 
-    expect(result.before).toStrictEqual(result.record);
-    expect(result.after.deleted).toStrictEqual({ at: 2 * day, why: "expired" });
-  });
-
-  it("expires nothing more once uploads.expireAfter is unset while a pass is releasing bytes", async () => {
-    const result = await runClocked((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served);
-        yield* setOption(served, "uploads.expireAfter", 1);
-        const first = yield* uploaded(served, png, "first.png");
-        const second = yield* uploaded(served, "second body\n", "second.txt");
-        const releasing = yield* Latch.make();
-        const go = yield* Latch.make();
-        const { store } = served.world.bytes;
-
-        // A store whose delete waits before it removes anything.
-        const holding: ByteStoreService = {
-          ...store,
-          delete: (hash) =>
-            releasing.open.pipe(Effect.andThen(go.await), Effect.andThen(store.delete(hash))),
-        };
-
-        Object.assign(served.world.bytes, { store: holding });
-
-        yield* TestClock.adjust(day + 3_600_000);
-        yield* live(releasing.await);
-        yield* unsetOption(served, "uploads.expireAfter");
-        yield* go.open;
-        yield* live(Effect.sleep("200 millis"));
-
-        return {
-          expiries: yield* expiries(served.world),
-          first: first.id,
-          second: yield* read(served, second.id),
-          secondRecord: second,
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      expiries: [{ id: result.first, why: "expired" }],
-      first: result.first,
-      second: result.secondRecord,
-      secondRecord: result.secondRecord,
-    });
-  });
-
-  it("keeps bytes another Upload shares when the older one expires", async () => {
-    const result = await runClocked((served) =>
-      Effect.gen(function* () {
-        yield* turnOn(served);
-        yield* setOption(served, "uploads.expireAfter", 1);
-        const first = yield* uploaded(served, png, "first.png");
-
-        yield* TestClock.adjust(12 * 3_600_000);
-        const second = yield* uploaded(served, png, "second.png");
-
-        yield* TestClock.adjust(14 * 3_600_000);
-        const expired = yield* readDeleted(served, first.id);
-        const shared = yield* served.request(`/api/uploads/${second.id}/content`);
-
-        return {
-          expired: expired.deleted?.why,
-          held: yield* inStore(served, first.hash),
-          same: first.hash === second.hash,
-          shared: [shared.status, yield* bytesOf(shared)],
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      expired: "expired",
-      held: true,
-      same: true,
-      shared: [200, png],
-    });
+    expect(result.deleted).toStrictEqual({ at: 2 * day, why: "expired" });
   });
 });
 

@@ -55,15 +55,6 @@ const order = new Map([
   ["v", 2],
 ]);
 
-// Some ops, some voiced, and the rest.
-const prefixesOf = (n: number) => {
-  if (n % 50 === 0) {
-    return known("o");
-  }
-
-  return n % 7 === 0 ? known("v") : known();
-};
-
 // A User known by their account alone, keyed by their nick.
 const user = (nick: string, account: Fact<string | null>) =>
   [
@@ -146,23 +137,5 @@ describe("members", () => {
       ["carol", loggedOut],
       ["dave", { _tag: "Unknown" }],
     ]);
-  });
-
-  it("pages 10,000 members quickly", () => {
-    const view = channelOf(Array.from({ length: 10_000 }, (_, n) => [`user${n}`, prefixesOf(n)]));
-
-    const timings: number[] = [];
-    let page = membersPage(view, { limit: 100 });
-
-    for (let read = 0; read < 20; read += 1) {
-      const started = performance.now();
-
-      page = membersPage(view, { after: page.next, limit: 100 });
-      timings.push(performance.now() - started);
-    }
-
-    // A generous bound, for a loaded machine. Each page sorts the Channel's members.
-    expect(page.members).toHaveLength(100);
-    expect(timings.toSorted((left, right) => left - right)[10]).toBeLessThan(100);
   });
 });

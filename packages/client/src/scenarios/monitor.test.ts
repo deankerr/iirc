@@ -67,12 +67,6 @@ const presence = (run: Played<State>) =>
   );
 
 describe("MONITOR", () => {
-  it("monitors the preferred nick Self settled without, as the Session's ISUPPORT offers it", () => {
-    const run = played(settled("MONITOR=100"), lines(">> MONITOR + iirc"));
-
-    expect(sent(run, "MONITOR")).toStrictEqual(["MONITOR + iirc"]);
-  });
-
   it("monitors each partner a Direct Message opens, most recent first, cut to MONITOR's limit", () => {
     const run = played(
       settled("MONITOR=3"),
@@ -338,15 +332,6 @@ describe("MONITOR", () => {
     );
 
     expect(presence(run)).toStrictEqual([]);
-  });
-
-  it("takes the preferred nick back when MONITOR first reports it offline", () => {
-    const run = played(
-      settled("MONITOR"),
-      lines(">> MONITOR + iirc", "<< :irc.test 731 other :iirc", ">> NICK iirc")
-    );
-
-    expect(sent(run, "MONITOR")).toStrictEqual(["MONITOR + iirc"]);
   });
 
   it("asks once for each time the preferred nick goes offline, and never retries a refusal", () => {

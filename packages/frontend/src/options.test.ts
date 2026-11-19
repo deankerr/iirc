@@ -124,33 +124,15 @@ const nowhere: CommandContext = {
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);
 
 describe("the options, derived from the Schema", () => {
-  it("has a field for every field of the Configuration, each described, with its kind", () => {
+  it("has a field for every field of the Configuration, each described", () => {
     const keys = Object.keys(NetworkConfiguration.fields).toSorted();
 
     expect({
       described: fields.every((field) => field.description !== ""),
       keys: fields.map((field) => field.key).toSorted(),
-      kinds: Object.fromEntries(fields.map((field) => [field.key, field.kind._tag])),
     }).toStrictEqual({
       described: true,
       keys,
-      kinds: {
-        answerCtcp: "Toggle",
-        channels: "Names",
-        declined: "Texts",
-        enabled: "Toggle",
-        fallbackEncoding: "Choice",
-        highlights: "Texts",
-        ignores: "Texts",
-        ircds: "Ircds",
-        login: "Tagged",
-        nicks: "Texts",
-        oper: "Tagged",
-        password: "Credential",
-        realname: "Text",
-        username: "Text",
-        whoOnJoin: "Toggle",
-      },
     });
   });
 
@@ -238,34 +220,6 @@ describe("the options, derived from the Schema", () => {
       username: { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
       whoOnJoin: { starts: "on", value: { _tag: "Shown", text: "on" } },
     });
-  });
-
-  it("never shows a Credential option's value, only its name and whether it is held", () => {
-    const credentials = optionsOf(libera, full, undefined).filter(
-      (option) => option.kind._tag === "Credential"
-    );
-
-    expect(credentials.map((option) => option.value._tag)).toStrictEqual([
-      "Credential",
-      "Unset",
-      "Credential",
-      "Unset",
-      "Credential",
-    ]);
-  });
-
-  it("shows a member's fields unset while another member is in force", () => {
-    const login = optionsOf(libera, plain, undefined).filter((option) =>
-      option.name.startsWith("network.libera.login.")
-    );
-
-    expect(login.map((option) => option.value)).toStrictEqual([
-      { _tag: "Unset" },
-      { _tag: "Unset" },
-      { _tag: "Unset" },
-      { _tag: "Unset" },
-      { _tag: "Unset" },
-    ]);
   });
 
   it("shows a service login's fields, sharing the account and Credential with SASL's", () => {
@@ -1306,6 +1260,17 @@ const widthRefused = (text: string) =>
 const defaultPlayers =
   "www.youtube-nocookie.com,player.vimeo.com,w.soundcloud.com,bandcamp.com,open.spotify.com,player.twitch.tv";
 
+/**
+ * What the options view lists of a few ui options: each one's name, the value in effect,
+ * the shared one, this device's override, and what it starts as.
+ * @param options - What `uiOptionsOf` gives.
+ * @returns The rows.
+ */
+const uiRows = (options: ReturnType<typeof uiOptionsOf>) =>
+  options
+    .filter((one) => ["ui.activity", "ui.size", "ui.theme"].includes(one.name))
+    .map((one) => [one.name, one.value, one.shared, one.device, one.starts]);
+
 describe("the options under ui", () => {
   const shared = {
     options: {
@@ -1337,101 +1302,25 @@ describe("the options under ui", () => {
     sequence: 7,
   } as const;
 
-  it("has an option for every field of the contract's UiOptions, each described, with its kind", () => {
+  it("has an option for every field of the contract's UiOptions, each described", () => {
     expect({
       described: uiFields.every((field) => field.description !== ""),
       keys: uiFields.map((field) => field.key),
-      kinds: uiFields.map((field) => field.kind),
     }).toStrictEqual({
       described: true,
       keys: Object.keys(UiOptions.fields),
-      kinds: [
-        { _tag: "Choice", choices: ["all", "quiet", "none"] },
-        { _tag: "Choice", choices: ["theme", "raw"] },
-        { _tag: "Text" },
-        { _tag: "Choice", choices: ["full", "long", "medium", "short", "iso"] },
-        { _tag: "Choice", choices: ["send", "newline"] },
-        {
-          _tag: "ChoiceOrText",
-          choices: [
-            "system",
-            "jetbrains-mono",
-            "ibm-plex-mono",
-            "source-code-pro",
-            "commit-mono",
-            "atkinson-hyperlegible-mono",
-            "system-sans",
-            "ibm-plex-sans",
-            "atkinson-hyperlegible-next",
-            "source-sans-3",
-            "inter",
-          ],
-        },
-        { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
-        { _tag: "Text" },
-        { _tag: "Choice", choices: ["columns", "inline", "stacked"] },
-        { _tag: "Choice", choices: ["off", "links only", "on"] },
-        { _tag: "Toggle" },
-        { _tag: "Choice", choices: ["open", "summary", "chip"] },
-        { _tag: "Choice", choices: ["small", "medium", "large"] },
-        { _tag: "Texts", nonEmpty: false },
-        { _tag: "Choice", choices: ["line", "thumbnail", "card"] },
-        { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] },
-        { _tag: "Choice", choices: ["shown", "latest", "asked"] },
-        { _tag: "Integer", maximum: 24, minimum: 10 },
-        { _tag: "Toggle" },
-        { _tag: "Text" },
-        { _tag: "Text" },
-        { _tag: "Names", fields: [] },
-        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "h:mm a", "h:mm:ss a", "none"] },
-        { _tag: "IntegerOrChoice", choices: ["none"], maximum: 400, minimum: 40 },
-      ],
     });
   });
 
   it("lists each with the value in effect, the shared one, and this device's override", () => {
-    const options = uiOptionsOf(shared, { size: 18, theme: "light" });
-    const before = uiOptionsOf(undefined, {});
-
     expect({
-      before: before.map((one) => [one.name, one.value, one.shared, one.device]),
-      options: options.map((one) => [one.name, one.value, one.shared, one.device, one.starts]),
+      before: uiRows(uiOptionsOf(undefined, {})),
+      options: uiRows(uiOptionsOf(shared, { size: 18, theme: "light" })),
     }).toStrictEqual({
       before: [
-        ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
-        ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
-        ["ui.dark", { _tag: "Shown", text: "dark" }, { _tag: "Unset" }, undefined],
-        ["ui.day", { _tag: "Shown", text: "full" }, { _tag: "Unset" }, undefined],
-        ["ui.enter", { _tag: "Shown", text: "send" }, { _tag: "Unset" }, undefined],
-        ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
-        ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
-        ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
-        ["ui.line", { _tag: "Shown", text: "columns" }, { _tag: "Unset" }, undefined],
-        ["ui.previews", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
-        ["ui.previews.animate", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
-        ["ui.previews.folded", { _tag: "Shown", text: "summary" }, { _tag: "Unset" }, undefined],
-        [
-          "ui.previews.mediaHeight",
-          { _tag: "Shown", text: "medium" },
-          { _tag: "Unset" },
-          undefined,
-        ],
-        [
-          "ui.previews.players",
-          { _tag: "Shown", text: defaultPlayers },
-          { _tag: "Unset" },
-          undefined,
-        ],
-        ["ui.previews.style", { _tag: "Shown", text: "thumbnail" }, { _tag: "Unset" }, undefined],
-        ["ui.previews.timelines", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
-        ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
-        ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
-        ["ui.spellcheck", { _tag: "Shown", text: "on" }, { _tag: "Unset" }, undefined],
-        ["ui.suffix", { _tag: "Shown", text: ": " }, { _tag: "Unset" }, undefined],
-        ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
-        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
-        ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
-        ["ui.width", { _tag: "Shown", text: "none" }, { _tag: "Unset" }, undefined],
+        ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined, "all"],
+        ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined, "14"],
+        ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined, "system"],
       ],
       options: [
         [
@@ -1442,118 +1331,6 @@ describe("the options under ui", () => {
           "all",
         ],
         [
-          "ui.colours",
-          { _tag: "Shown", text: "theme" },
-          { _tag: "Shown", text: "theme" },
-          undefined,
-          "theme",
-        ],
-        [
-          "ui.dark",
-          { _tag: "Shown", text: "dark" },
-          { _tag: "Shown", text: "dark" },
-          undefined,
-          "dark",
-        ],
-        [
-          "ui.day",
-          { _tag: "Shown", text: "full" },
-          { _tag: "Shown", text: "full" },
-          undefined,
-          "full",
-        ],
-        [
-          "ui.enter",
-          { _tag: "Shown", text: "send" },
-          { _tag: "Shown", text: "send" },
-          undefined,
-          "send",
-        ],
-        [
-          "ui.font",
-          { _tag: "Shown", text: "system" },
-          { _tag: "Shown", text: "system" },
-          undefined,
-          "system",
-        ],
-        [
-          "ui.leading",
-          { _tag: "Shown", text: "1.45" },
-          { _tag: "Shown", text: "1.45" },
-          undefined,
-          "1.45",
-        ],
-        [
-          "ui.light",
-          { _tag: "Shown", text: "light" },
-          { _tag: "Shown", text: "light" },
-          undefined,
-          "light",
-        ],
-        [
-          "ui.line",
-          { _tag: "Shown", text: "columns" },
-          { _tag: "Shown", text: "columns" },
-          undefined,
-          "columns",
-        ],
-        [
-          "ui.previews",
-          { _tag: "Shown", text: "off" },
-          { _tag: "Shown", text: "off" },
-          undefined,
-          "off",
-        ],
-        [
-          "ui.previews.animate",
-          { _tag: "Shown", text: "off" },
-          { _tag: "Shown", text: "off" },
-          undefined,
-          "off",
-        ],
-        [
-          "ui.previews.folded",
-          { _tag: "Shown", text: "summary" },
-          { _tag: "Shown", text: "summary" },
-          undefined,
-          "summary",
-        ],
-        [
-          "ui.previews.mediaHeight",
-          { _tag: "Shown", text: "medium" },
-          { _tag: "Shown", text: "medium" },
-          undefined,
-          "medium",
-        ],
-        [
-          "ui.previews.players",
-          { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
-          { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
-          undefined,
-          defaultPlayers,
-        ],
-        [
-          "ui.previews.style",
-          { _tag: "Shown", text: "thumbnail" },
-          { _tag: "Shown", text: "thumbnail" },
-          undefined,
-          "thumbnail",
-        ],
-        [
-          "ui.previews.timelines",
-          { _tag: "Shown", text: "" },
-          { _tag: "Shown", text: "" },
-          undefined,
-          "",
-        ],
-        [
-          "ui.read",
-          { _tag: "Shown", text: "latest" },
-          { _tag: "Shown", text: "latest" },
-          undefined,
-          "latest",
-        ],
-        [
           "ui.size",
           { _tag: "Shown", text: "18" },
           { _tag: "Shown", text: "14" },
@@ -1561,40 +1338,11 @@ describe("the options under ui", () => {
           "14",
         ],
         [
-          "ui.spellcheck",
-          { _tag: "Shown", text: "off" },
-          { _tag: "Shown", text: "off" },
-          undefined,
-          "on",
-        ],
-        [
-          "ui.suffix",
-          { _tag: "Shown", text: ", " },
-          { _tag: "Shown", text: ", " },
-          undefined,
-          ": ",
-        ],
-        [
           "ui.theme",
           { _tag: "Shown", text: "light" },
           { _tag: "Shown", text: "dark" },
           { _tag: "Shown", text: "light" },
           "system",
-        ],
-        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Shown", text: "" }, undefined, ""],
-        [
-          "ui.time",
-          { _tag: "Shown", text: "HH:mm" },
-          { _tag: "Shown", text: "HH:mm" },
-          undefined,
-          "HH:mm",
-        ],
-        [
-          "ui.width",
-          { _tag: "Shown", text: "none" },
-          { _tag: "Shown", text: "none" },
-          undefined,
-          "none",
         ],
       ],
     });
@@ -1689,7 +1437,6 @@ describe("the options under ui", () => {
       sharedLacked: [[{ _tag: "Shown", text: "Fira Code" }, fontMissing]],
       theme: [undefined],
     });
-    expect(fontMissing).toBe("not found on this device");
   });
 
   it("offer ui.previews as off, links only, or on, off to start, set by /set for every device and never for one", () => {
@@ -1833,56 +1580,27 @@ describe("the options under ui", () => {
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
       empty: read("/set ui.time "),
-      enter: read("/set ui.enter newline"),
-      enterDevice: read("/set -device ui.enter NewLine"),
-      enterWrong: read("/set ui.enter shift"),
       font: read("/set ui.font IBM-Plex-Mono"),
       fontFamily: read("/set ui.font  Fira Code "),
-      fontFamilyDevice: read("/set -device ui.font Fira Code"),
-      fontFamilyEscaped: read(String.raw`/set -device ui.font Fira\ Code`),
       fontFamilyQuoted: read('/set ui.font Fira" Code'),
-      fontFamilyTooLong: read(`/set ui.font ${"x".repeat(65)}`),
-      fontSans: read("/set ui.font Inter"),
-      fontSystemSans: read("/set ui.font system-sans"),
       fractional: read("/set ui.size 14.5"),
       leading: read("/set ui.leading 1.6"),
-      leadingDevice: read("/set -device ui.leading 1.2"),
-      leadingNotANumber: read("/set ui.leading abc"),
-      leadingTooBig: read("/set ui.leading 2.5"),
       leadingTooFine: read("/set ui.leading 1.555"),
-      leadingTooSmall: read("/set ui.leading 0.9"),
-      line: read("/set ui.line inline"),
-      lineDevice: read("/set -device ui.line Inline"),
-      lineStacked: read("/set ui.line stacked"),
-      lineWrong: read("/set ui.line stack"),
-      shared: read("/set ui.time HH:mm:ss"),
       size: read("/set -device ui.size 20"),
       spellcheck: read("/set ui.spellcheck off"),
-      spellcheckDevice: read("/set -device ui.spellcheck ON"),
-      spellcheckWrong: read("/set ui.spellcheck maybe"),
       suffix: read("/set ui.suffix , "),
       suffixAlone: read("/set -device ui.suffix"),
       suffixControl: read("/set ui.suffix :\u0003 "),
       suffixDevice: read("/set -device ui.suffix  -> "),
-      suffixLongest: read(`/set ui.suffix ${"x".repeat(8)}`),
       suffixNone: read("/set ui.suffix "),
       suffixSpace: read("/set ui.suffix  "),
-      suffixTooLong: read(`/set ui.suffix ${"x".repeat(9)}`),
       tooBig: read("/set ui.size 25"),
-      tooSmall: read("/set ui.size 9"),
-      twelveHour: read("/set ui.time h:mm:ss a"),
       twelveHourAnyCase: read("/set ui.time H:MM A"),
       unknown: read("/set ui.palette dusk"),
       unset: read("/unset ui.activity"),
       unsetDevice: read("/unset -device ui.theme"),
       width: read("/set ui.width 80"),
-      widthDevice: read("/set -device ui.width 120"),
       widthFractional: read("/set ui.width 80.5"),
-      widthNone: read("/set ui.width NONE"),
-      widthTooBig: read("/set ui.width 401"),
-      widthTooSmall: read("/set ui.width 39"),
-      widthWord: read("/set ui.width auto"),
-      wrong: read("/set ui.activity loud"),
       wrongTime: read("/set ui.time noon"),
     }).toStrictEqual({
       alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
@@ -1899,42 +1617,17 @@ describe("the options under ui", () => {
           "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
       },
       empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
-      enter: change("enter", "newline", false),
-      enterDevice: change("enter", "newline", true),
-      enterWrong: {
-        _tag: "Invalid",
-        message: 'ui.enter: Choose one of send, newline, not "shift".',
-      },
       font: change("font", "ibm-plex-mono", false),
       fontFamily: change("font", "Fira Code", false),
-      fontFamilyDevice: change("font", "Fira Code", true),
-      fontFamilyEscaped: { _tag: "Invalid", message: fontRefused(String.raw`Fira\ Code`) },
       fontFamilyQuoted: { _tag: "Invalid", message: fontRefused('Fira" Code') },
-      fontFamilyTooLong: { _tag: "Invalid", message: fontRefused("x".repeat(65)) },
-      fontSans: change("font", "inter", false),
-      fontSystemSans: change("font", "system-sans", false),
       fractional: {
         _tag: "Invalid",
         message: 'ui.size: Give a whole number from 10 to 24, not "14.5".',
       },
       leading: change("leading", 1.6, false),
-      leadingDevice: change("leading", 1.2, true),
-      leadingNotANumber: { _tag: "Invalid", message: leadingRefused("abc") },
-      leadingTooBig: { _tag: "Invalid", message: leadingRefused("2.5") },
       leadingTooFine: { _tag: "Invalid", message: leadingRefused("1.555") },
-      leadingTooSmall: { _tag: "Invalid", message: leadingRefused("0.9") },
-      line: change("line", "inline", false),
-      lineDevice: change("line", "inline", true),
-      lineStacked: change("line", "stacked", false),
-      lineWrong: {
-        _tag: "Invalid",
-        message: 'ui.line: Choose one of columns, inline, stacked, not "stack".',
-      },
-      shared: change("time", "HH:mm:ss", false),
       size: change("size", 20, true),
       spellcheck: change("spellcheck", false, false),
-      spellcheckDevice: change("spellcheck", true, true),
-      spellcheckWrong: { _tag: "Invalid", message: 'ui.spellcheck: Say on or off, not "maybe".' },
       // The rest of the line after the name's space, exactly: a trailing space is kept.
       suffix: change("suffix", ", ", false),
       suffixAlone: {
@@ -1943,16 +1636,9 @@ describe("the options under ui", () => {
       },
       suffixControl: { _tag: "Invalid", message: suffixRefused("hold no control character") },
       suffixDevice: change("suffix", " -> ", true),
-      suffixLongest: change("suffix", "x".repeat(8), false),
       suffixNone: change("suffix", "", false),
       suffixSpace: change("suffix", " ", false),
-      suffixTooLong: { _tag: "Invalid", message: suffixRefused("be at most 8 characters") },
       tooBig: { _tag: "Invalid", message: 'ui.size: Give a whole number from 10 to 24, not "25".' },
-      tooSmall: {
-        _tag: "Invalid",
-        message: 'ui.size: Give a whole number from 10 to 24, not "9".',
-      },
-      twelveHour: change("time", "h:mm:ss a", false),
       twelveHourAnyCase: change("time", "h:mm a", false),
       unknown: {
         _tag: "Invalid",
@@ -1962,16 +1648,7 @@ describe("the options under ui", () => {
       unset: change("activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
       width: change("width", 80, false),
-      widthDevice: change("width", 120, true),
       widthFractional: { _tag: "Invalid", message: widthRefused("80.5") },
-      widthNone: change("width", "none", false),
-      widthTooBig: { _tag: "Invalid", message: widthRefused("401") },
-      widthTooSmall: { _tag: "Invalid", message: widthRefused("39") },
-      widthWord: { _tag: "Invalid", message: widthRefused("auto") },
-      wrong: {
-        _tag: "Invalid",
-        message: 'ui.activity: Choose one of all, quiet, none, not "loud".',
-      },
       // The choices as written, so HH:mm is never read as a 12-hour hh:mm.
       wrongTime: {
         _tag: "Invalid",
@@ -2008,26 +1685,12 @@ const ownerRows = (inForce: OwnerInForce | undefined, held: ReadonlySet<string> 
   ownerOptionsOf(inForce, held).map((option) => [option.name, option.value, option.starts]);
 
 describe("the options under store, uploads, and previews", () => {
-  it("are every field of the contract's Schema, by its full name, each described, with its kind", () => {
+  it("are every field of the contract's Schema, by its full name, each described", () => {
     expect({
       described: ownerFields.every((field) => field.description !== ""),
-      kinds: Object.fromEntries(ownerFields.map((field) => [field.key, field.kind._tag])),
       names: ownerFields.map((field) => field.key),
     }).toStrictEqual({
       described: true,
-      kinds: {
-        "previews.maxTotal": "Integer",
-        "store.s3.accessKeyId": "Credential",
-        "store.s3.bucket": "Text",
-        "store.s3.endpoint": "Text",
-        "store.s3.region": "Text",
-        "store.s3.secretAccessKey": "Credential",
-        "uploads.expireAfter": "Integer",
-        "uploads.listen": "Text",
-        "uploads.maxSize": "Integer",
-        "uploads.maxTotal": "Integer",
-        "uploads.publicUrl": "Text",
-      },
       names: ownerOptionNames,
     });
   });

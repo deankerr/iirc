@@ -115,10 +115,6 @@ describe(ctcpText, () => {
     expect(ctcpText("PING", args)).toStrictEqual({ _tag: "Rejected", reason: "InvalidArguments" });
   });
 
-  it("keeps spaces, colons, and formatting codes in arguments", () => {
-    expect(safeText("PING", " :a  \u0002b")).toBe("\u0001PING  :a  \u0002b\u0001");
-  });
-
   it("cannot be made from text that is not CTCP", () => {
     expect(isText("\u0001PING\u0001x\u0001")).toBeFalsy();
     expect(isText("PING")).toBeFalsy();

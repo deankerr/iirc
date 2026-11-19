@@ -249,7 +249,7 @@ describe("an operator login", () => {
     expect(sentSecrets(played)).toStrictEqual(["Identify", "Oper"]);
   });
 
-  it("decodes a Configured written before operator logins as none", () => {
+  it("decodes a Configured with no operator login as none", () => {
     const { oper: _oper, ...rest } = Schema.encodeSync(NetworkConfiguration)(opering);
 
     expect(Schema.decodeSync(NetworkConfiguration)(rest).oper).toStrictEqual({

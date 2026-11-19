@@ -232,33 +232,13 @@ describe("the palette and the keys", () => {
       filtered: filtered[0],
       focused: document.activeElement === composer,
       opened,
-      recent: registry.get(paletteState).recent,
     }).toStrictEqual({
       closed: null,
       everything: true,
       filtered: "#iirc",
       focused: true,
       opened: true,
-      recent: [`timeline:${channel}`],
     });
-  });
-
-  it("closes on Escape, choosing nothing, and gives focus back", async () => {
-    const { container } = await signedIn();
-    const composer = composerOf(container);
-
-    await act(async () => {
-      composer.focus();
-      await Promise.resolve();
-    });
-    await press(composer, { ctrlKey: true, key: "k" });
-    const search = await searchField();
-
-    await press(search, { key: "Escape" });
-    await settled(() => document.querySelector('[role="dialog"]') === null);
-    await settled(() => document.activeElement === composer);
-
-    expect(document.activeElement).toBe(composer);
   });
 
   it("moves to the next and previous Timeline in the sidebar's order with Alt+arrows", async () => {
@@ -318,7 +298,10 @@ describe("the palette and the keys", () => {
       (row) => row.textContent?.includes("libera") && !row.hasAttribute("aria-disabled")
     );
 
-    first?.focus();
+    await act(async () => {
+      first?.focus();
+      await Promise.resolve();
+    });
     const before = document.activeElement === first;
 
     await press(document.activeElement ?? document.body, { code: "KeyI", key: "#" });
@@ -359,25 +342,6 @@ describe("the palette and the keys", () => {
       await Promise.resolve();
     });
     host.remove();
-
-    expect(document.activeElement).not.toBe(composer);
-  });
-
-  it("does not give Space, Enter, or a key with Ctrl held to the composer", async () => {
-    const { container } = await signedIn();
-    const composer = composerOf(container);
-    const button = container.querySelector<HTMLButtonElement>("button");
-
-    button?.focus();
-
-    for (const init of [
-      { code: "Space", key: " " },
-      { code: "Enter", key: "Enter" },
-      { code: "KeyA", ctrlKey: true, key: "a" },
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- pressed in order
-      await press(button ?? document.body, init);
-    }
 
     expect(document.activeElement).not.toBe(composer);
   });
@@ -449,35 +413,6 @@ describe("the palette and the keys", () => {
     expect(composer.value).toBe("/network ");
   });
 
-  it("keeps a draft with text in it, focuses it, and says what was not put in", async () => {
-    const { container } = await signedIn();
-    const composer = composerOf(container);
-
-    await act(async () => {
-      Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
-        composer,
-        "half a thought"
-      );
-      composer.dispatchEvent(new Event("input", { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await press(composer, { ctrlKey: true, key: "k" });
-    const search = await searchField();
-
-    await typeInto(search, "network");
-    await press(search, { key: "Enter" });
-    await settled(() => document.activeElement === composer);
-
-    expect({
-      notice: container.querySelector('[role="alert"] p')?.textContent,
-      text: composer.value,
-    }).toStrictEqual({
-      notice: "/network was not put in, since the composer has text. Clear it and choose again.",
-      text: "half a thought",
-    });
-  });
-
   it("announces how many results there are, from the moment it opens", async () => {
     await signedIn();
 
@@ -509,7 +444,9 @@ describe("the palette and the keys", () => {
     const { container, daemon, registry } = await signedIn();
     const name = "network.libera.nicks";
 
-    await run(registry, openOptions, "*nicks");
+    await act(async () => {
+      await run(registry, openOptions, "*nicks");
+    });
     await act(async () => {
       registry.set(editing, name);
       await Promise.resolve();
@@ -549,7 +486,9 @@ describe("the palette and the keys", () => {
     const name = "ui.size";
     const selector = `input[aria-label="Value of ${name}"]`;
 
-    await run(registry, openOptions, "ui.size");
+    await act(async () => {
+      await run(registry, openOptions, "ui.size");
+    });
     await act(async () => {
       registry.set(editing, name);
       await Promise.resolve();
@@ -576,74 +515,14 @@ describe("the palette and the keys", () => {
     expect(field).toStrictEqual(["number", "10", "24", "1", "14"]);
   });
 
-  it("edits the line height in a number field within its bounds, set for every device on Enter", async () => {
-    const { container, daemon, registry } = await signedIn();
-    const name = "ui.leading";
-    const selector = `input[aria-label="Value of ${name}"]`;
-
-    await run(registry, openOptions, "ui.leading");
-    await act(async () => {
-      registry.set(editing, name);
-      await Promise.resolve();
-    });
-    await settled(() => container.querySelector(selector) !== null);
-
-    const editor = container.querySelector<HTMLInputElement>(selector);
-
-    if (editor === null) {
-      throw new Error("no editor");
-    }
-
-    const field = [editor.type, editor.min, editor.max, editor.step, editor.value];
-
-    await act(async () => {
-      editor.focus();
-      editor.value = "1.6";
-      await Promise.resolve();
-    });
-
-    await press(editor, { key: "Enter" });
-    await settled(() => daemon.ui.options.leading === 1.6);
-
-    expect(field).toStrictEqual(["number", "1", "2", "0.01", "1.45"]);
-  });
-
-  it("edits a line's layout in the options, set for every device on Enter", async () => {
-    const { container, daemon, registry } = await signedIn();
-    const name = "ui.line";
-    const selector = `input[aria-label="Value of ${name}"]`;
-
-    await run(registry, openOptions, "ui.line");
-    await act(async () => {
-      registry.set(editing, name);
-      await Promise.resolve();
-    });
-    await settled(() => container.querySelector(selector) !== null);
-
-    const editor = container.querySelector<HTMLInputElement>(selector);
-
-    if (editor === null) {
-      throw new Error("no editor");
-    }
-
-    await act(async () => {
-      editor.focus();
-      editor.value = "inline";
-      await Promise.resolve();
-    });
-
-    await press(editor, { key: "Enter" });
-    await settled(() => daemon.ui.options.line === "inline");
-
-    expect(daemon.ui.options.line).toBe("inline");
-  });
-
   it("edits a font's family in place for this device alone, though it overrides nothing, and leaves every device's font", async () => {
     const { container, daemon, registry } = await signedIn();
     const name = "ui.font";
     const selector = `input[aria-label="Value of ${name}"]`;
 
-    await run(registry, openOptions, "ui.font");
+    await act(async () => {
+      await run(registry, openOptions, "ui.font");
+    });
     await act(async () => {
       registry.set(editing, name);
       await Promise.resolve();

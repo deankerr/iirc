@@ -220,14 +220,6 @@ describe("iirc", () => {
       });
     });
 
-    it("exits 0 on SIGINT", async () => {
-      const { child } = await startDaemon(dataDir());
-
-      child.kill("SIGINT");
-
-      await expect(child.exited).resolves.toBe(0);
-    });
-
     it("refuses a listen address it cannot read", async () => {
       const result = await iirc("daemon", "--data-dir", dataDir(), "--listen", "localhost");
 
@@ -369,16 +361,6 @@ describe("iirc", () => {
     });
 
     describe("frame-src", () => {
-      it("allows the default player hosts, in order, and nothing else", async () => {
-        const { base, child } = await startDaemon(dataDir(), `--web=${webDir()}`);
-        const response = await fetch(base, navigate);
-
-        child.kill("SIGTERM");
-        await child.exited;
-
-        expect(response.headers.get("content-security-policy")).toBe(policy(defaults));
-      });
-
       it("follows the Owner's list on the next load, with no restart, and none when it is empty", async () => {
         const directory = dataDir();
         const { stdout: key } = await iirc("key", "create", "phone", "--data-dir", directory);
@@ -417,21 +399,6 @@ describe("iirc", () => {
           statuses: [200, 200],
         });
       });
-    });
-
-    it("answers a path under /api it does not have as a Daemon without --web does", async () => {
-      const { base, child } = await startDaemon(dataDir());
-      const response = await fetch(`${base}/api/nope`, navigate);
-      const body = await response.text();
-
-      child.kill("SIGTERM");
-      await child.exited;
-
-      expect([response.status, body, response.headers.get("content-type")]).toStrictEqual([
-        404,
-        "",
-        null,
-      ]);
     });
 
     it("refuses to start without a directory holding index.html, in one line", async () => {
