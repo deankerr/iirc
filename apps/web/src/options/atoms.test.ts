@@ -18,7 +18,8 @@ import {
   until,
 } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync } from "../timelines/atoms.ts";
-import { hold, optionsState, optionsSync } from "./atoms.ts";
+import { confirmLeaving, leavingState } from "../timelines/closing.ts";
+import { change, hold, optionsState, optionsSync } from "./atoms.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
 const idOf = (sequence: number) => `${hex(sequence, 14)}-00000000-00000000`;
@@ -224,5 +225,113 @@ describe("the options", () => {
       prompting: undefined,
       wiped: false,
     });
+  });
+});
+
+/**
+ * A browser signed in to a fake Daemon whose `PUT`s to a path the pattern matches wait,
+ * while `holding` says, until a test releases them.
+ * @param pattern - The paths held.
+ * @returns The fake, the registry, the writes held, and whether to hold.
+ */
+const holdingPuts = async (pattern: RegExp) => {
+  const fake = fakeDaemon();
+  const writes: (() => void)[] = [];
+  const state = { holding: true };
+
+  fake.daemon.signedIn = true;
+
+  const registry = registryFor(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+
+    if (state.holding && init?.method === "PUT" && pattern.test(url.pathname)) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      writes.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+    }
+
+    return await fake.fetch(input, init);
+  });
+
+  await run(registry, check, undefined);
+
+  const release = () => {
+    state.holding = false;
+
+    for (const write of writes.splice(0)) {
+      write();
+    }
+  };
+
+  return { ...fake, registry, release, writes };
+};
+
+describe("a Network's changes, one at a time", () => {
+  it("unsets a Credential option on the Daemon when unset while its value is on its way to the Vault", async () => {
+    const { daemon, registry, release, writes } = await holdingPuts(/^\/api\/credentials\//u);
+    const value = Redacted.make("a-channel-key");
+
+    const held = run(registry, hold, { network: libera, path: ["password"], value });
+
+    await eventually(() => writes.length === 1);
+
+    const unset = run(registry, change, {
+      edit: { _tag: "Unset", path: ["password"] },
+      network: libera,
+    });
+
+    await eventually(() => registry.get(optionsState).onItsWay.length === 1);
+    release();
+    await Promise.all([held, unset]);
+
+    expect({
+      configuration: daemon.configurations.get("libera")?.configuration,
+      held: Object.fromEntries(daemon.credentials),
+    }).toStrictEqual({
+      configuration: liberaConfiguration,
+      held: { "libera.password": "a-channel-key" },
+    });
+  });
+
+  it("leaves a Channel by an edit when its join is on its way, so it is not joined again", async () => {
+    const { daemon, registry, release, writes } = await holdingPuts(/^\/api\/networks\/libera$/u);
+
+    daemon.joined.set("libera", ["#iirc"]);
+    daemon.configurations.set("libera", {
+      configuration: { ...liberaConfiguration, channels: [] },
+      sequence: 1,
+    });
+    registry.set(leavingState, {
+      _tag: "Offered",
+      channel: "#iirc",
+      failure: undefined,
+      network: libera,
+      sending: false,
+    });
+
+    const joined = run(registry, change, {
+      edit: { _tag: "Join", channels: ["#iirc"] },
+      network: libera,
+    });
+
+    await eventually(() => writes.length === 1);
+    const left = run(registry, confirmLeaving, undefined);
+
+    await eventually(() => {
+      const leaving = registry.get(leavingState);
+
+      return leaving._tag === "Offered" && leaving.sending;
+    });
+    release();
+    await Promise.all([joined, left]);
+
+    expect({
+      acts: daemon.acts.length,
+      channels: daemon.configurations.get("libera")?.configuration.channels,
+      puts: daemon.puts.length,
+    }).toStrictEqual({ acts: 0, channels: [], puts: 2 });
   });
 });

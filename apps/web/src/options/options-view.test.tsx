@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
+import { NetworkId } from "@iirc/api";
 import { deviceUiKey } from "@iirc/frontend/ui";
+import { Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,9 +19,11 @@ import {
   registryFor,
   run,
 } from "../testing/fake-daemon.ts";
-import { editing, optionsState, optionsSync } from "./atoms.ts";
+import { change, editing, optionsState, optionsSync } from "./atoms.ts";
 import { ownerSync } from "./owner.ts";
 import { uiSync } from "./ui.ts";
+
+const libera = Schema.decodeSync(NetworkId)("libera");
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -601,6 +605,38 @@ describe("an option's change, while it is on its way", () => {
     }
 
     expect(whileHeld).toStrictEqual([1, "Dean"]);
+  });
+
+  it("unsets a Network's option on the Daemon, showing at once, when unset while its set is held", async () => {
+    const { container, fake, registry, state, writes } = await held();
+    const realname = ["realname"];
+
+    registry.set(change, { edit: { _tag: "Set", path: realname, text: "Dean" }, network: libera });
+    await settled(
+      () => writes.length === 1 && rowOf(container, "network.libera.realname")?.[1] === "Dean"
+    );
+    registry.set(change, { edit: { _tag: "Unset", path: realname }, network: libera });
+    await settled(
+      () =>
+        registry.get(optionsState).onItsWay.length === 2 &&
+        rowOf(container, "network.libera.realname")?.[1] === "iirc"
+    );
+    const whileHeld = writes.length;
+
+    state.holding = false;
+
+    for (const release of writes.splice(0)) {
+      release();
+    }
+
+    await settled(() => registry.get(optionsState).onItsWay.length === 0);
+
+    // The unset takes realname back to what it starts as, after the set made it Dean.
+    expect({
+      configuration: fake.daemon.configurations.get("libera")?.configuration,
+      puts: fake.daemon.puts.length,
+      whileHeld,
+    }).toStrictEqual({ configuration: liberaConfiguration, puts: 2, whileHeld: 1 });
   });
 
   it("shows an option under store as asked, while the write is held", async () => {
