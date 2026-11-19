@@ -26,6 +26,7 @@ import {
   foldActivity,
   foldListed,
   joinWanted,
+  listedPart,
   remap,
   refused,
   see,
@@ -373,10 +374,14 @@ const foldModelOnly = (
   }
 
   if (meant._tag === "Listed") {
-    collectListed(run, arrival, meant.channel, meant.members);
-    foldListed(run, meant.channel, meant.members, (nick) =>
+    const part = listedPart(run, meant.members, (nick) =>
       completed.has(memberKey(meant.channel, nick))
     );
+
+    // A `NAMES` Lookup's answer is its own listing, which never reaches the Channel's.
+    if (!collectListed(run, arrival, meant, part)) {
+      foldListed(run, meant.channel, part);
+    }
   } else {
     described(run, meant);
   }

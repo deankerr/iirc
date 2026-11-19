@@ -169,7 +169,7 @@ describe("a NAMES Lookup", () => {
         "<< @label=l1 :irc.test BATCH +b1 labeled-response",
         "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer",
         "<< :irc.test BATCH -b1",
-        "?? looked-up i1 names=#iirc members count=2"
+        "?? looked-up i1 names=#iirc members=Ended count=2"
       ),
     ]);
 
@@ -197,7 +197,7 @@ describe("a NAMES Lookup", () => {
         "<< @label=l1 :irc.test BATCH +b1 labeled-response",
         "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer",
         "<< :irc.test BATCH -b1",
-        "?? looked-up i1 names=#iirc members count=2",
+        "?? looked-up i1 names=#iirc members=Ended count=2",
         "!! names #iirc",
         ">> @label=l2 NAMES #iirc",
         "<< @label=l2 :irc.test BATCH +b2 labeled-response",
@@ -209,6 +209,112 @@ describe("a NAMES Lookup", () => {
     ]);
 
     expect(membersOf(run)).toStrictEqual(["iirc", "pal"]);
+  });
+
+  it("reads its answer after its time runs out, so a late labelled batch leaves nothing pending", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! names #iirc",
+        ">> @label=l1 NAMES #iirc",
+        "+30s",
+        "?? looked-up i1 names=#iirc members=TimedOut count=0",
+        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+        "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer",
+        "<< :irc.test BATCH -b1",
+        "!! names #iirc",
+        ">> @label=l2 NAMES #iirc",
+        "<< @label=l2 :irc.test BATCH +b2 labeled-response",
+        "<< @batch=b2 :irc.test 353 iirc = #iirc :iirc pal",
+        "<< @batch=b2 :irc.test 366 iirc #iirc :End of /NAMES list.",
+        "<< :irc.test BATCH -b2",
+        "?? looked-up i2 names=#iirc members count=2"
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "pal"]);
+  });
+
+  it("corrects the members by its own late 366 on the floor", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! names #iirc",
+        ">> NAMES #iirc",
+        "<< :irc.test 353 iirc = #iirc :iirc",
+        "+30s",
+        "?? looked-up i1 names=#iirc members=TimedOut count=1",
+        "<< :irc.test 353 iirc = #iirc :peer",
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list."
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer"]);
+  });
+
+  it("keeps two labelled answers of one Channel apart", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! names #iirc",
+        ">> @label=l1 NAMES #iirc",
+        "!! names #iirc",
+        ">> @label=l2 NAMES #iirc",
+        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+        "<< @label=l2 :irc.test BATCH +b2 labeled-response",
+        "<< @batch=b1 :irc.test 353 iirc = #iirc :iirc peer",
+        "<< @batch=b2 :irc.test 353 iirc = #iirc :iirc",
+        "<< :irc.test BATCH -b1",
+        "?? looked-up i1 names=#iirc members=Ended count=2",
+        "<< @batch=b2 :irc.test 353 iirc = #iirc :pal",
+        "<< @batch=b2 :irc.test 366 iirc #iirc :End of /NAMES list.",
+        "<< :irc.test BATCH -b2",
+        "?? looked-up i2 names=#iirc members count=2"
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "pal"]);
+  });
+
+  it("collects a lone labelled 353, and leaves nothing of it pending", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! names #iirc",
+        ">> @label=l1 NAMES #iirc",
+        "<< @label=l1 :irc.test 353 iirc = #iirc :iirc peer",
+        "?? looked-up i1 names=#iirc members=Ended count=2",
+        "<< :irc.test 353 iirc = #iirc :iirc pal",
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list."
+      ),
+    ]);
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "pal"]);
+  });
+
+  it("finishes Self's JOIN listing when it takes that listing's own Lines", () => {
+    const configuration = configured({ whoOnJoin: true });
+
+    const run = played(
+      [
+        registered(configuration),
+        lines(
+          "!! configure +#iirc",
+          ">> JOIN #iirc",
+          "<< :iirc!~iirc@iirc.test JOIN #iirc",
+          ">> MODE #iirc",
+          "!! names #iirc",
+          ">> NAMES #iirc",
+          "<< :irc.test 353 iirc = #iirc :iirc peer",
+          "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+          "?? looked-up i1 names=#iirc members count=2",
+          ">> WHO #iirc"
+        ),
+      ],
+      configuration
+    );
+
+    expect(membersOf(run)).toStrictEqual(["iirc", "peer"]);
   });
 
   it("ends by an error naming its Channel, or a FAIL of NAMES", () => {
@@ -297,6 +403,22 @@ describe("a WHO Lookup", () => {
     ]);
 
     expect(resultOf(run)).toMatchObject({ users: [{ host: "peer.test", realname: "Peer" }] });
+  });
+
+  it("is cut short by a labelled batch that ends without its 315", () => {
+    played([
+      ...inChannel(echo),
+      lines(
+        "!! who peer",
+        ">> @label=l1 WHO peer",
+        "<< @label=l1 :irc.test BATCH +b1 labeled-response",
+        "<< @batch=b1 :irc.test 352 iirc * ~p peer.test irc.test peer H :0 Peer",
+        "<< :irc.test BATCH -b1",
+        "?? looked-up i1 who=peer users=Ended count=1"
+      ),
+    ]);
+
+    expect.assertions(0);
   });
 
   it("keeps 500 Users and says the rest were cut", () => {

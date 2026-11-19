@@ -383,6 +383,16 @@ export interface Looking {
   readonly masks: readonly MaskEntry[];
   /** The members a `NAMES` reply has listed so far, in order, up to {@link maxLookupEntries}. */
   readonly members: readonly NamesEntry[];
+  /**
+   * A `NAMES` reply's own listing, bounded as a Channel's is, apart from the Channel's own,
+   * which it replaces the members by only when its `366` comes.
+   */
+  readonly listing: Listing | undefined;
+  /**
+   * Whether its time ran out, and it reported what it had. A `NAMES` still reads its
+   * answer, to its `366` or its labelled answer's end, and reports nothing more.
+   */
+  readonly lapsed: boolean;
   /** The Users a `WHO` reply has described so far, in order, up to {@link maxLookupEntries}. */
   readonly users: readonly WhoEntry[];
   /** The mode a Channel's list was asked by, which a `472` names, or `undefined` for a User's. */

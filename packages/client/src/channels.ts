@@ -27,7 +27,7 @@ import { changesNothingHere } from "./news.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
-import type { Channel, Joined, Member, Seen, State } from "./state.ts";
+import type { Channel, Joined, Listing, Member, Seen, State } from "./state.ts";
 import { userIn, usersFrom, usersOf, withUser, withoutUsers } from "./users.ts";
 import { openOf, sessionOf } from "./views.ts";
 import { keptWatched } from "./watched.ts";
@@ -650,65 +650,70 @@ export const foldActivity = (
   }
 };
 
+/** One `353`'s part of a listing: its members, keyed by folded nick. */
+export type ListedPart = readonly (readonly [string, Member])[];
+
 /**
- * Folds part of a `NAMES` listing into a Channel Self is in. The listing replaces the
- * members when it ends.
+ * The part of a listing one `353` gives.
  * @param run - The step.
- * @param channel - The Channel, as the listing names it.
  * @param members - Its members, as listed.
  * @param complete - Whether a Feature made a member's prefixes complete.
+ * @returns The part.
  */
-export const foldListed = (
+export const listedPart = (
   run: Run,
-  channel: string,
   members: readonly Listed[],
   complete: (nick: string) => boolean
-): void => {
+): ListedPart => {
   const fold = folder(run.state);
 
-  const part = members.map(
+  return members.map(
     (member) =>
       [
         fold(member.nick),
         { complete: complete(member.nick), nick: member.nick, prefixes: member.prefixes },
       ] as const
   );
+};
 
+/**
+ * Folds part of a `NAMES` listing no Lookup took into a Channel Self is in. The listing
+ * replaces the members when it ends.
+ * @param run - The step.
+ * @param channel - The Channel, as the listing names it.
+ * @param part - What one `353` lists.
+ */
+export const foldListed = (run: Run, channel: string, part: ListedPart): void => {
   changeJoined(run, channel, (joined) => ({ ...joined, listing: listMore(joined.listing, part) }));
 };
 
 /**
  * A `NAMES` listing ended. Its members are now the Channel's, and the end of the replies
- * to our `JOIN` with no topic means the Channel has none.
+ * to our `JOIN` with no topic means the Channel has none. A Lookup's own listing ends by
+ * its own `366`, after any part the Channel's listing held before the Lookup took the
+ * rest, as when it was asked while the `JOIN`'s listing came.
  * @param run - The step.
  * @param channel - The Channel, as the end names it.
+ * @param own - A `NAMES` Lookup's own listing, which this `366` ends.
  */
-export const endOfNames = (run: Run, channel: string): void => {
-  changeJoined(run, channel, (joined) => ({
-    ...joined,
-    burst: false,
-    listing: undefined,
-    members: joined.listing === undefined ? joined.members : listedMembers(joined.listing),
-    synced: true,
-    topic:
-      joined.burst && joined.topic._tag === "Unknown"
-        ? { _tag: "Known", at: run.at, from: "ircd", value: null }
-        : joined.topic,
-  }));
-  pruneUsers(run);
-};
+export const endOfNames = (run: Run, channel: string, own?: Listing): void => {
+  changeJoined(run, channel, (joined) => {
+    const listing =
+      own === undefined ? joined.listing : listMore(joined.listing, [...listedMembers(own)]);
 
-/**
- * A `NAMES` answer ended without its `366`, so what it listed is no listing: it is
- * forgotten, and neither replaces the members nor waits to merge into the next listing.
- * A listing of Self's own `JOIN` is left to its own end.
- * @param run - The step.
- * @param channel - The Channel, as the Lookup named it.
- */
-export const dropListing = (run: Run, channel: string): void => {
-  changeJoined(run, channel, (joined) =>
-    joined.burst ? joined : { ...joined, listing: undefined }
-  );
+    return {
+      ...joined,
+      burst: false,
+      listing: undefined,
+      members: listing === undefined ? joined.members : listedMembers(listing),
+      synced: true,
+      topic:
+        joined.burst && joined.topic._tag === "Unknown"
+          ? { _tag: "Known", at: run.at, from: "ircd", value: null }
+          : joined.topic,
+    };
+  });
+  pruneUsers(run);
 };
 
 // Keys and values, where the first of any that share a key is kept.
