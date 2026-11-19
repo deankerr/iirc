@@ -533,6 +533,29 @@ export const anchorAfter = (
 };
 
 /**
+ * Where files added to a composer are anchored, from the caret as it was read in the text
+ * it showed then. While a command stands over a draft set aside, the files belong to the
+ * draft, where the command's caret means nothing, so they go at its end.
+ * @param composers - The composers, as they are now.
+ * @param place - The composer's place.
+ * @param caret - The caret, when the files were added.
+ * @param text - The plain text the composer showed then.
+ * @returns The anchor, within the text the files belong to.
+ */
+export const anchorAdded = (
+  composers: Composers,
+  place: Place,
+  caret: number,
+  text: string
+): number => {
+  const draft = draftOf(composers, place);
+
+  return draft.aside === undefined
+    ? anchorAfter(caret, text, plainOf(draft.text))
+    : plainOf(draft.aside.text).length;
+};
+
+/**
  * What is pending once the composers changed, as the Owner typed, recalled, or sent: each
  * anchor follows its draft's text. A draft that came to show its Timeline takes its files
  * with it.

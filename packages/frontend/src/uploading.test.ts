@@ -7,6 +7,7 @@ import type { CommandContext } from "./commands.ts";
 import { commandStarted, draftOf, initialComposers, reduceComposers, submit } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
 import {
+  anchorAdded,
   anchorAfter,
   caretAfter,
   checking,
@@ -873,5 +874,14 @@ describe("a draft set aside while its files upload", () => {
       sent: [{ _tag: "ShowSidebar", shown: undefined }],
     });
     expect(draftOf(state.composers, place).aside?.text).toBe("look  please");
+  });
+
+  it("puts a file added while the command shows at the end of the draft, never at the command's caret", () => {
+    const { composers } = over("/go ");
+
+    expect({
+      aside: anchorAdded(composers, place, 2, "/go "),
+      draft: anchorAdded(typed(initialComposers, "look  please"), place, 2, "look  please"),
+    }).toStrictEqual({ aside: "look  please".length, draft: 2 });
   });
 });
