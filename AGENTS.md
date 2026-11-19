@@ -9,6 +9,8 @@
 
 The brief says what to run. A run by hand covers the files a change reaches, as `bun --bun vitest related <files> --run`. The whole suite is the push's, since two at once starve each other.
 
+End-to-end tests run in neither the hooks nor CI. A change to the Transport, the Runtime, pacing, or the Daemon runs `bun run e2e`, and gives the run as evidence.
+
 A test earns its place by the regression it alone catches, one a Frontend, the Owner, or a Network would notice. Name it before writing the test. If another test already fails on it, write nothing.
 
 - **Test a decision where it is made.** A pure package covers the cases, a row for each branch. The layers above show it is wired in.
@@ -16,7 +18,7 @@ A test earns its place by the regression it alone catches, one a Frontend, the O
 - **Harden against a Network or a fetched page,** not the Owner's own input.
 - **A busy machine must not change a result.** Wait for a condition rather than a length of time, hold the clock where time matters, and compare two cases rather than bound one. Show that nothing happened by what happened next. A timeout is only for a hang.
 - **Print nothing,** and delete a test with what it tested.
-- **A flaky test is fixed,** or skipped with a comment linking its `bug` issue. It is not rerun until it passes.
+- **A flaky test is quarantined,** end-to-end ones too: fixed, or skipped with a comment linking its `bug` issue. It is never rerun until it passes.
 
 # Determinism
 

@@ -212,36 +212,20 @@ describe("formatted text", () => {
   });
 
   it("trims a link's hostile brackets and closes deep bidi formatting in linear time", () => {
-    // The quickest of a few runs, so a pause of the machine's own counts for nothing.
-    const took = (size: number) =>
-      Math.min(
-        ...Array.from({ length: 3 }, () => {
-          // oxlint-disable-next-line no-restricted-globals -- a test of how the work grows
-          const started = performance.now();
-          formatted(brackets(size));
-          contained(nested(size));
-
-          // oxlint-disable-next-line no-restricted-globals -- a test of how the work grows
-          return performance.now() - started;
-        })
-      );
-
-    // Four times the text takes about four times as long when linear, and sixteen when
-    // quadratic.
-    took(16_000);
-    const ratio = took(64_000) / took(16_000);
-    const linked = formatted(brackets(64_000));
+    // A million characters take a fraction of a second when the work is linear. Quadratic
+    // work on them is half a trillion steps, which no machine finishes inside the test's
+    // limit, so the limit guards the growth without timing anything.
+    const size = 1_000_000;
+    const linked = formatted(brackets(size));
 
     expect({
-      closed: contained(nested(60_000)).length,
-      linear: ratio < 10,
+      closed: contained(nested(size)).length,
       link: linked[0]?._tag === "Link" ? linked[0].href : undefined,
       rest: linked[1]?.text.length,
     }).toStrictEqual({
-      closed: 90_000,
-      linear: true,
+      closed: 1_500_000,
       link: "https://example.org/",
-      rest: 64_000,
+      rest: size,
     });
   });
 
