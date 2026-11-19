@@ -9,8 +9,8 @@
  * focused value in place as its raw text, or a whole number in a number field, turns a
  * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
  * unset it. Beside the filter, a button for each Network asks to remove it, or, removed
- * with its Timelines kept, to drop them. Escape anywhere else in it, or the close button on
- * its Pane's status bar, shows what the Pane showed before. An edit is a plain,
+ * with its Timelines kept, to drop them. Escape anywhere else in it shows what the Pane
+ * showed before. An edit is a plain,
  * uncontrolled input read once when Enter is pressed. A Credential's value is never edited
  * here.
  *
@@ -40,7 +40,7 @@ import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../keys/press.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { sidebarNetworks } from "../timelines/atoms.ts";
-import { Button, IconButton } from "../ui/button.tsx";
+import { Button } from "../ui/button.tsx";
 import {
   change,
   closeOptions,
@@ -616,19 +616,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
       onKeyDown={onViewKeyDown}
       onKeyDownCapture={onViewKeyDownCapture}
     >
-      <PaneBar
-        end={
-          <IconButton
-            icon="close"
-            keys="Esc"
-            label="Close the options"
-            onPress={closeNow}
-            size="small"
-          />
-        }
-        name="options"
-        pane={pane}
-      />
+      <PaneBar name="options" pane={pane} />
       <div className={styles.header}>
         <SearchField
           aria-label="Filter options"

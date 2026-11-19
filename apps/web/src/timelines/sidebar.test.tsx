@@ -2,7 +2,7 @@
 import { RegistryContext } from "@effect/atom-react";
 import { NetworkId, TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline, UiOptions } from "@iirc/api";
-import { openOf } from "@iirc/frontend/timelines";
+import { mainOf, openOf } from "@iirc/frontend/timelines";
 import { Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
@@ -1037,6 +1037,201 @@ describe("the Sidebar in the Owner's order", () => {
   });
 });
 
+/**
+ * What the sidebar's foot holds, in order: each view's row by its name, and each button by
+ * its label or its text.
+ * @param footer - Where the foot is.
+ * @returns Them.
+ */
+const footerControls = (footer: string) =>
+  [...document.querySelectorAll<HTMLElement>(`${footer} [role="option"], ${footer} button`)].map(
+    (one) => one.dataset.key ?? one.getAttribute("aria-label") ?? one.textContent
+  );
+
+/**
+ * A view's row at the sidebar's foot.
+ * @param name - The view.
+ * @returns It.
+ */
+const viewRow = (name: "Search" | "Uploads" | "Options") => {
+  const found = document.querySelector<HTMLElement>(`nav [role="option"][data-key="${name}"]`);
+
+  if (found === null) {
+    throw new Error(`no view row: ${name}`);
+  }
+
+  return found;
+};
+
+/**
+ * What the focused Pane shows.
+ * @param registry - The registry.
+ * @returns Its tag.
+ */
+const shownNow = (registry: AtomRegistry.AtomRegistry) => mainOf(registry.get(timelinesState))._tag;
+
+/**
+ * How the views' rows are marked: each one's label, whether it is chosen, and the number
+ * of the other Pane that shows it, if one does.
+ * @returns Each.
+ */
+const viewMarks = () =>
+  (["Search", "Uploads", "Options"] as const).map((name) => [
+    viewRow(name).getAttribute("aria-label"),
+    viewRow(name).getAttribute("aria-selected"),
+    [...viewRow(name).querySelectorAll('[aria-hidden="true"]')]
+      .map((mark) => mark.textContent)
+      .find((text) => /^\d+$/u.test(text)) ?? null,
+  ]);
+
+describe("the views of iirc's own, from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("opens each view in the focused Pane, as a Timeline's row does, marked as a Timeline's is", async () => {
+    const registry = await signedIn();
+
+    await doing(() => {
+      registry.set(open, iirc);
+      registry.set(paned, { _tag: "Split", axis: "Horizontal", timeline: other });
+    });
+    await settled(() => openNow(registry) === other);
+
+    await doing(() => {
+      viewRow("Uploads").click();
+    });
+    await settled(() => shownNow(registry) === "Uploads");
+
+    const focused = {
+      marks: viewMarks(),
+      pane: registry.get(timelinesState).layout.focused,
+    };
+
+    await doing(() => {
+      registry.set(paned, { _tag: "Focus", pane: "p0" });
+    });
+    await doing(() => {
+      viewRow("Search").click();
+    });
+    await settled(() => shownNow(registry) === "Search");
+
+    expect({ elsewhere: viewMarks(), focused }).toStrictEqual({
+      elsewhere: [
+        ["Search", "true", null],
+        ["Uploads, in Pane 2", "false", "2"],
+        ["Options", "false", null],
+      ],
+      focused: {
+        marks: [
+          ["Search", "false", null],
+          ["Uploads", "true", null],
+          ["Options", "false", null],
+        ],
+        pane: "p1",
+      },
+    });
+  });
+
+  it("gives no view a close button, and Escape in each shows what the Pane showed before", async () => {
+    const registry = await signedIn();
+
+    await doing(() => {
+      registry.set(open, iirc);
+    });
+
+    // Opens a view from its row, then presses Escape in it.
+    const escapedFrom = async (name: "Search" | "Uploads" | "Options") => {
+      await doing(() => {
+        viewRow(name).click();
+      });
+      await settled(() => shownNow(registry) === name);
+
+      const view = document.querySelector<HTMLElement>(`main section[aria-label="${name}"]`);
+
+      const closing = [...(view?.querySelectorAll("button") ?? [])].some((one) =>
+        (one.getAttribute("aria-label") ?? "").startsWith("Close")
+      );
+
+      await press(view?.querySelector("input") ?? view ?? document.body, { key: "Escape" });
+      await settled(() => shownNow(registry) === "Timeline");
+
+      return [name, closing, shownNow(registry)];
+    };
+
+    const seen = [
+      await escapedFrom("Search"),
+      await escapedFrom("Uploads"),
+      await escapedFrom("Options"),
+    ];
+
+    expect(seen).toStrictEqual([
+      ["Search", false, "Timeline"],
+      ["Uploads", false, "Timeline"],
+      ["Options", false, "Timeline"],
+    ]);
+  });
+
+  it("reaches the rows with the keys, which move between them and open one, each showing its keys", async () => {
+    const registry = await signedIn();
+
+    await doing(() => {
+      viewRow("Search").focus();
+    });
+    await press(viewRow("Search"), { key: "ArrowDown" });
+    const moved = document.activeElement === viewRow("Uploads");
+
+    await press(viewRow("Uploads"), { key: "ArrowDown" });
+    await press(viewRow("Options"), { key: "Enter" });
+    await settled(() => shownNow(registry) === "Options");
+
+    expect({
+      keys: (["Search", "Uploads", "Options"] as const).map(
+        (name) => viewRow(name).querySelector("kbd")?.textContent ?? null
+      ),
+      moved,
+      opened: shownNow(registry),
+    }).toStrictEqual({
+      keys: ["Ctrl+Shift+F", null, "Ctrl+,"],
+      moved: true,
+      opened: "Options",
+    });
+  });
+
+  it("marks the row of a view opened by its keys", async () => {
+    const registry = await signedIn();
+
+    await press(composer(), { code: "KeyF", ctrlKey: true, key: "F", shiftKey: true });
+    await settled(() => shownNow(registry) === "Search");
+
+    expect(viewMarks()[0]).toStrictEqual(["Search", "true", null]);
+  });
+
+  it("on a phone, lists the rows in the drawer, which choosing one closes", async () => {
+    const registry = await signedIn();
+
+    await doing(() => {
+      registry.set(pageState, { compact: true, focused: true, visible: true });
+      registry.set(drawerState, "Sidebar");
+    });
+    await settled(() => document.querySelector('[role="dialog"] nav [role="option"]') !== null);
+
+    await doing(() => {
+      viewRow("Uploads").click();
+    });
+    await settled(() => shownNow(registry) === "Uploads");
+
+    expect({
+      drawer: registry.get(drawerState),
+      shown: shownNow(registry),
+    }).toStrictEqual({ drawer: "None", shown: "Uploads" });
+  });
+});
+
 describe("the shell", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -1046,16 +1241,16 @@ describe("the shell", () => {
     localStorage.clear();
   });
 
-  it("has no bar on a wide screen, with the options and signing out at the sidebar's foot", async () => {
+  it("has no bar on a wide screen, with the views' rows, signing out, and hiding it at the sidebar's foot", async () => {
     await signedIn();
-    const footer = document.querySelector("nav footer");
 
     expect({
       bar: document.querySelector("body > div > div > header"),
-      footer: [...(footer?.querySelectorAll("button") ?? [])].map(
-        (one) => one.getAttribute("aria-label") ?? one.textContent
-      ),
-    }).toStrictEqual({ bar: null, footer: ["Options", "Sign out", "Hide the sidebar"] });
+      footer: footerControls("nav footer"),
+    }).toStrictEqual({
+      bar: null,
+      footer: ["Search", "Uploads", "Options", "Sign out", "Hide the sidebar"],
+    });
   });
 
   it("hides the sidebar by its button and shows it from beside the composer, keeping that on this device", async () => {
@@ -1223,15 +1418,13 @@ describe("the shell", () => {
       bars: document.querySelectorAll("body > div > div > header").length,
       compact,
       drawer: registry.get(drawerState),
-      footer: [...document.querySelectorAll('[role="dialog"] footer button')].map(
-        (one) => one.getAttribute("aria-label") ?? one.textContent
-      ),
+      footer: footerControls('[role="dialog"] footer'),
       kept: readChoice("iirc.sidebar"),
     }).toStrictEqual({
       bars: 1,
       compact: { edge: true, nav: true },
       drawer: "Sidebar",
-      footer: ["Options", "Sign out"],
+      footer: ["Search", "Uploads", "Options", "Sign out"],
       kept: undefined,
     });
   });

@@ -17,7 +17,6 @@ import { composerFocus } from "../composer/atoms.ts";
 import { timeShown } from "../options/ui.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { Nick } from "../timelines/line.tsx";
-import { IconButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { dateOf } from "../ui/dates.ts";
 import {
@@ -249,22 +248,7 @@ export const SearchView = ({ pane }: { readonly pane: string }) => {
 
   return (
     <section aria-label="Search" className={styles.view}>
-      <PaneBar
-        end={
-          <IconButton
-            icon="close"
-            keys="Esc"
-            label="Close the search"
-            onPress={() => {
-              close();
-              toComposer();
-            }}
-            size="small"
-          />
-        }
-        name="search"
-        pane={pane}
-      />
+      <PaneBar name="search" pane={pane} />
       <search>
         <form
           className={styles.header}

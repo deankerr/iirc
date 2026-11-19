@@ -3818,6 +3818,7 @@ describe("what stands in front of a Timeline", () => {
     const start = following();
     const options = reduceTimelines(start, { _tag: "OptionsShown", filter: "" });
     const search = searching(start, "m3 word");
+    const uploads = reduceTimelines(start, { _tag: "UploadsShown" });
 
     const draft = reduceTimelines(start, {
       _tag: "DraftShown",
@@ -3836,17 +3837,19 @@ describe("what stands in front of a Timeline", () => {
       options: chosenOf(options),
       search: chosenOf(search),
       start: chosenOf(start),
+      uploads: chosenOf(uploads),
     }).toStrictEqual({
       chosen: [{ _tag: "Timeline", timeline: three }, { _tag: "Timeline" }],
       draft: { _tag: "Nothing" },
       empty: { _tag: "Nothing" },
       options: { _tag: "Options" },
-      search: { _tag: "Nothing" },
+      search: { _tag: "Search" },
       start: { _tag: "Timeline", timeline: three },
+      uploads: { _tag: "Uploads" },
     });
   });
 
-  it("marks in the sidebar what the other Panes show, by their number, never what is behind something", () => {
+  it("marks in the sidebar what the other Panes show, by their number, a view of its own too, never what is behind something", () => {
     const start = following();
     const two_ = split(start, two);
     const three_ = split(two_, one, true);
@@ -3871,15 +3874,33 @@ describe("what stands in front of a Timeline", () => {
       ],
       refocused: [...elsewhereOf(refocused)],
       three: [...elsewhereOf(three_)],
+      views: [
+        ...elsewhereOf(
+          reduceTimelines(
+            reduceTimelines(searching(behind, "m3 word"), {
+              _tag: "Pane",
+              change: { _tag: "Focus", pane: "p2" },
+            }),
+            { _tag: "UploadsShown" }
+          )
+        ),
+      ],
     }).toStrictEqual({
       alone: [],
-      behind: [[one, 3]],
+      behind: [
+        ["Options", 1],
+        [one, 3],
+      ],
       refocused: [
         [two, 2],
         [one, 3],
       ],
       three: [
         [three, 1],
+        [two, 2],
+      ],
+      views: [
+        ["Search", 1],
         [two, 2],
       ],
     });
@@ -3994,7 +4015,7 @@ describe("the Uploads in a Pane", () => {
       shown: [mainOf(shown), openOf(shown)],
     }).toStrictEqual({
       again: true,
-      chosen: { _tag: "Nothing" },
+      chosen: { _tag: "Uploads" },
       closed: [{ _tag: "Timeline" }, three],
       moved: true,
       name: "uploads",

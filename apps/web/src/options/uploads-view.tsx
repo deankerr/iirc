@@ -14,9 +14,8 @@
  * so once rather than offering a link that would not work. A rename or a delete waiting on
  * the Daemon shows on its button, and one that failed says why in its row. Until the first
  * page is read, it says it is being read, never that nothing was uploaded, and until the
- * options are read, it says nothing of the public URL. Escape, or the close button on its
- * Pane's status bar, shows what the Pane showed before. Where the view is wide, a row lies
- * on one line.
+ * options are read, it says nothing of the public URL. Escape shows what the Pane showed
+ * before. Where the view is wide, a row lies on one line.
  *
  * @packageDocumentation
  */
@@ -37,7 +36,7 @@ import { useContext, useRef, useState } from "react";
 import { composerFocus } from "../composer/atoms.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { jumpTo } from "../search/atoms.ts";
-import { Button, IconButton, ToggleButton } from "../ui/button.tsx";
+import { Button, ToggleButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 import { Icon } from "../ui/icon.tsx";
@@ -298,19 +297,7 @@ export const UploadsView = ({ pane }: { readonly pane: string }) => {
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
     <section aria-label="Uploads" className={styles.view} onKeyDown={onKeyDown}>
-      <PaneBar
-        end={
-          <IconButton
-            icon="close"
-            keys="Esc"
-            label="Close the Uploads"
-            onPress={closeNow}
-            size="small"
-          />
-        }
-        name="uploads"
-        pane={pane}
-      />
+      <PaneBar name="uploads" pane={pane} />
       <div className={styles.head}>
         <ToggleButton
           isSelected={withDeleted}

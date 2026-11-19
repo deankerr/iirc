@@ -17,6 +17,7 @@ declare const styles: {
   readonly heading: string;
   readonly hide: string;
   readonly item: string;
+  readonly keys: string;
   readonly levelActivity: string;
   readonly levelDirect: string;
   readonly levelHighlight: string;
@@ -40,6 +41,7 @@ declare const styles: {
   readonly sidebar: string;
   readonly standing: string;
   readonly tree: string;
+  readonly views: string;
 };
 
 export default styles;
