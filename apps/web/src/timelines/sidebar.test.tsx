@@ -1294,7 +1294,12 @@ describe("signing out from the sidebar", () => {
     await signedIn(undefined, fake);
     await ask();
 
+    const describedBy = question()?.getAttribute("aria-describedby") ?? "";
+
     const asked = {
+      described: document
+        .querySelector(`[id="${describedBy}"]`)
+        ?.textContent?.includes("needs a key"),
       focused: question()?.contains(document.activeElement) ?? false,
       signedIn: fake.daemon.signedIn,
       text: question()?.querySelector("h2")?.textContent,
@@ -1304,7 +1309,12 @@ describe("signing out from the sidebar", () => {
     await settled(() => !fake.daemon.signedIn);
 
     expect({ asked, question: question() }).toStrictEqual({
-      asked: { focused: true, signedIn: true, text: "Sign out of this browser?" },
+      asked: {
+        described: true,
+        focused: true,
+        signedIn: true,
+        text: "Sign out of this browser?",
+      },
       question: null,
     });
   });

@@ -7,7 +7,7 @@
  */
 import { useAtomSet } from "@effect/atom-react";
 import type { Attempt } from "@iirc/frontend/sign-in";
-import { Dialog, DialogTrigger, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, DialogTrigger, Heading, Modal, ModalOverlay, Text } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
 import { signOut } from "./atoms.ts";
@@ -42,10 +42,10 @@ export const SignOutButton = ({
                 <Heading className={styles.heading} slot="title">
                   Sign out of this browser?
                 </Heading>
-                <p className={styles.body}>
+                <Text className={styles.body} elementType="p" slot="description">
                   This browser forgets its Sign-in, and needs a key to sign in again. The Daemon
                   stays on its Networks.
-                </p>
+                </Text>
                 <div className={styles.actions}>
                   <Button
                     onPress={() => {
