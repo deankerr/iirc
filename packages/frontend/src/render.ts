@@ -243,7 +243,6 @@ export type Line =
        * a view to show in monospace with every space kept and none wrapped.
        */
       readonly lines: readonly (readonly Inline[])[];
-      readonly cut: boolean;
     };
 
 /**
@@ -1053,7 +1052,6 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
       if (activity._tag === "Motd") {
         return {
           _tag: "Motd",
-          cut: activity.cut,
           lines: activity.lines.map(motdLine),
           marker: markerOf(activity),
           summary: motdSummary(activity),

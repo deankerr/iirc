@@ -395,6 +395,13 @@
     display: block;
   }
 
+  /* The folded line runs on after its time and marker, as an Activity's words do. */
+  .motdText,
+  .motdSummary {
+    display: inline;
+    width: auto;
+  }
+
   /*
    * As one run, a row's words wrap at the widest line from its start, the end's padding
    * taking up the rest, so a Highlight's tint still runs the width. A Gap or a Day is no
@@ -471,6 +478,11 @@
 :global([data-line])
   :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .motd, .gap, .day) {
   display: block;
+}
+
+:global([data-line]) :is(.motdText, .motdSummary) {
+  display: inline;
+  width: auto;
 }
 
 :global([data-line]) :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session) {

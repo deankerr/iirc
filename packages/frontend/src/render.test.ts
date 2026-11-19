@@ -564,11 +564,7 @@ describe("lines", () => {
     (lines, summary, cut, shown) => {
       const line = lineOf(activity({ _tag: "Motd", cut, lines }));
 
-      expect(line._tag === "Motd" && [line.marker, line.summary, line.cut]).toStrictEqual([
-        "--",
-        summary,
-        cut,
-      ]);
+      expect(line._tag === "Motd" && [line.marker, line.summary]).toStrictEqual(["--", summary]);
       expect(line._tag === "Motd" && line.lines.map(texts)).toStrictEqual(shown);
     }
   );
