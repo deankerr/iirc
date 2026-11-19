@@ -8,13 +8,17 @@
  *
  * @packageDocumentation
  */
+import { Aliases as AliasesSchema } from "@iirc/api";
 import type { Aliases, PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
+import { editAliases } from "@iirc/frontend/aliases";
+import type { AliasesEdit } from "@iirc/frontend/aliases";
 import { arranged, arrangementOf, arranging, unarranged } from "@iirc/frontend/arrangement";
 import type { ArrangeChange, ArrangeEdit } from "@iirc/frontend/arrangement";
+import type { Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions, uiShown } from "@iirc/frontend/options";
 import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
-import { Effect, Schedule, Stream } from "effect";
+import { Effect, Schedule, Schema, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -432,3 +436,88 @@ export const arrange = (registry: AtomRegistry.AtomRegistry, edit: ArrangeEdit) 
     ? work
     : onItsWay(registry, { _tag: "Ui", ...arrangeJson(shown) }, work);
 };
+
+/**
+ * One try at a change of one shared option made whole from the options read: what to write
+ * worked out from them, and sent made from the sequence read.
+ * @param registry - The registry.
+ * @param option - The option.
+ * @param make - Works out its new value from the options read, or why there is none.
+ * @returns What it came to, or a conflict to try again.
+ */
+const tryWhole = (
+  registry: AtomRegistry.AtomRegistry,
+  option: UiOptionName,
+  make: (read: UiInForce) => Parsed<Json>
+) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    const read = yield* readShared(registry);
+    const made = make(read);
+
+    if (made._tag === "Invalid") {
+      const refused: Outcome = { _tag: "NotDone", message: made.message };
+
+      return refused;
+    }
+
+    yield* client.ui.set({
+      params: { option },
+      payload: { value: made.value },
+      query: { ifSequence: read.sequence },
+    });
+
+    yield* readShared(registry);
+
+    const done: Outcome = { _tag: "Done" };
+
+    return done;
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(error._tag === "UiChanged" ? conflict : uiFailed(error._tag))
+    )
+  );
+
+/**
+ * Changes one shared option whole, for every device, from the options read, and once more
+ * from those read again after a conflict, since the edit is a pure function of the value,
+ * so another device's change in between is kept.
+ * @param registry - The registry.
+ * @param option - The option.
+ * @param make - Works out its new value from the options read, or why there is none.
+ * @returns What it came to.
+ */
+export const changeWhole = (
+  registry: AtomRegistry.AtomRegistry,
+  option: UiOptionName,
+  make: (read: UiInForce) => Parsed<Json>
+) =>
+  Effect.gen(function* () {
+    const first = yield* tryWhole(registry, option, make);
+
+    if (first._tag !== "Conflict") {
+      return first;
+    }
+
+    const second = yield* tryWhole(registry, option, make);
+
+    return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
+  });
+
+const aliasesJson = Schema.encodeSync(Schema.toCodecJson(AliasesSchema));
+
+/**
+ * Adds or removes an alias for every device, made from the options read, as `changeWhole`
+ * makes it.
+ * @param registry - The registry.
+ * @param edit - The edit.
+ * @returns What it came to.
+ */
+export const changeAliases = (registry: AtomRegistry.AtomRegistry, edit: AliasesEdit) =>
+  changeWhole(registry, "aliases", (read) => {
+    const aliases = editAliases(read.options.aliases, edit);
+
+    return aliases._tag === "Invalid"
+      ? aliases
+      : { _tag: "Parsed", value: aliasesJson(aliases.value) };
+  });

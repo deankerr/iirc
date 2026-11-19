@@ -1465,4 +1465,31 @@ describe("the options under headings", () => {
       expect.stringMatching(/^How .*default HH:mm$/u),
     ]);
   });
+
+  it("shows the aliases another device made as ui.aliases, by their names", async () => {
+    const fake = signedIn();
+
+    fake.daemon.ui = {
+      options: {
+        ...fake.daemon.ui.options,
+        aliases: [
+          { line: "/join #$1", name: "j" },
+          { line: "/whois $1", name: "w" },
+        ],
+      },
+      sequence: 4,
+    };
+
+    const shown = await page(fake);
+
+    shown.registry.mount(uiSync);
+    await shown.type("/set ui.aliases");
+    await settled(() => rowOf(shown.container, "ui.aliases")?.[1] === "j,w");
+
+    expect(rowOf(shown.container, "ui.aliases")?.slice(0, 3)).toStrictEqual([
+      "ui.aliases",
+      "j,w",
+      "default empty",
+    ]);
+  });
 });

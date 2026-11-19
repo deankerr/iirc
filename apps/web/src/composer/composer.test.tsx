@@ -1207,3 +1207,97 @@ describe("the Composer's formatting", () => {
     });
   });
 });
+
+/**
+ * What another device made before the page signed in: one alias, shared by every device.
+ * @param daemon - The fake Daemon.
+ */
+const withAlias = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
+  daemon.ui = {
+    options: { ...daemon.ui.options, aliases: [{ line: "/join #$1", name: "j" }] },
+    sequence: 4,
+  };
+};
+
+describe("the Composer's aliases of the Owner's own", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("makes an alias for every device from /alias add, then lists it with its line and completes it as a command", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "/alias add j /join #$1");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.uiChanges.length === 1);
+    await settled(() => daemon.ui.options.aliases.length === 1);
+
+    await typeIn(container, "/j");
+    await settled(() => listIn(container).names?.[0] === "/j");
+    const listed = listIn(container);
+
+    await pressIn(container, "Tab");
+    const completed = composerOf(container).value;
+
+    expect({
+      changes: daemon.uiChanges,
+      completed,
+      listed: [listed.names?.[0], listed.texts?.[0]],
+      shared: daemon.ui.options.aliases,
+    }).toStrictEqual({
+      changes: [{ ifSequence: "0", route: "PUT aliases" }],
+      completed: "/j ",
+      listed: ["/j", "/j<1>An alias of your own: /join #$1"],
+      shared: [{ line: "/join #$1", name: "j" }],
+    });
+  });
+
+  it("lists an alias another device made, and runs it as the command it expands to", async () => {
+    const { container, daemon } = await signedIn({}, withAlias);
+
+    await typeIn(container, "/j");
+    await settled(() => listIn(container).names?.[0] === "/j");
+    const listed = listIn(container).names?.[0];
+
+    const joined = () => daemon.configurations.get("libera")?.configuration.channels;
+
+    await typeIn(container, "/join #foo");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.puts.length === 1);
+    const direct = joined();
+
+    await typeIn(container, "/j bar");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.puts.length === 2);
+
+    expect({ aliased: joined(), direct, listed }).toStrictEqual({
+      aliased: [{ name: "#iirc" }, { name: "#foo" }, { name: "#bar" }],
+      direct: [{ name: "#iirc" }, { name: "#foo" }],
+      listed: "/j",
+    });
+  });
+
+  it("takes an alias away with /alias remove", async () => {
+    const { container, daemon } = await signedIn({}, withAlias);
+
+    await typeIn(container, "/alias remove j");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.uiChanges.length === 1);
+    await settled(() => daemon.ui.options.aliases.length === 0);
+
+    await typeIn(container, "/j");
+    await settled(() => listIn(container).names?.[0] !== "/j");
+
+    expect({
+      changes: daemon.uiChanges,
+      listed: listIn(container).names?.includes("/j"),
+      shared: daemon.ui.options.aliases,
+    }).toStrictEqual({
+      changes: [{ ifSequence: "4", route: "PUT aliases" }],
+      listed: false,
+      shared: [],
+    });
+  });
+});

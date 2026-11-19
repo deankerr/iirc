@@ -63,7 +63,7 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
-import { aliasesShown, arrange, arrangement, changeUi } from "../options/ui.ts";
+import { aliasesShown, arrange, arrangement, changeAliases, changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
@@ -650,7 +650,7 @@ const changeOne = (
     }
 
     case "EditAliases": {
-      return Effect.succeed({ _tag: "NotDone", message: "Aliases cannot be edited here yet." });
+      return changeAliases(registry, intent.edit);
     }
 
     case "ChoosePreviews": {
