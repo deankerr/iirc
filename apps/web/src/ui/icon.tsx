@@ -43,6 +43,8 @@ const glyphs = {
   menu: "≡",
   /** Opens a row's menu of what can be done with it. */
   more: "…",
+  /** Picks a row up, to move it with the keys: up and down. */
+  move: "↕",
   /** A Network offline: empty. */
   offline: "○",
   /** Plays an animated image, as a play button is drawn. */

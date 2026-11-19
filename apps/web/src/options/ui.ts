@@ -4,11 +4,13 @@
  * sent, and the ones in effect here, derived from both. A change for every device is made
  * from the options read, so the Daemon refuses it if another device changed them in
  * between, and is then read again and made once more, since a Change is the whole value
- * of one option.
+ * of one option. The Sidebar's order is among them, so the Sidebar as arranged is here too.
  *
  * @packageDocumentation
  */
 import type { PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
+import { arranged, arrangementOf, arranging, unarranged } from "@iirc/frontend/arrangement";
+import type { ArrangeChange, ArrangeEdit } from "@iirc/frontend/arrangement";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions, uiShown } from "@iirc/frontend/options";
 import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
@@ -20,7 +22,7 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { writeChoice } from "../page/device.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { retrying, Waits } from "../timelines/atoms.ts";
+import { retrying, sidebarNetworks, Waits } from "../timelines/atoms.ts";
 import { editing, onItsWay, optionsState, signedOut, told } from "./atoms.ts";
 import type { Outcome } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
@@ -325,3 +327,100 @@ export const changeUiOption = runtime
     { concurrent: true }
   )
   .pipe(Atom.keepAlive);
+
+/**
+ * The Owner's order of the Sidebar, as the shared options show it with the changes on their
+ * way, since every device shares it and none overrides it, or no order until they are read.
+ */
+export const arrangement = Atom.make((get) => {
+  const shown = uiShown(get(optionsState));
+
+  return shown === undefined ? unarranged : arrangementOf(shown.options);
+});
+
+/**
+ * The Sidebar as shown: the pinned Timelines, then the Networks, each in the Owner's order.
+ * It is here rather than beside `sidebarNetworks`, since the options' atoms read the
+ * Timelines' and not the other way around.
+ */
+export const arrangedSidebar = Atom.make((get) => arranged(get(sidebarNetworks), get(arrangement)));
+
+/**
+ * An arrangement's change as the Daemon takes it.
+ * @param change - The change.
+ * @returns The option, and its whole value as JSON.
+ */
+const arrangeJson = (change: ArrangeChange) => ({
+  option: change.option,
+  value: [...change.value],
+});
+
+/**
+ * One try at an edit of the Sidebar's order: the options read, what to write worked out
+ * from them and what the Sidebar shows, and the option sent whole, made from the sequence
+ * read. An edit that changes nothing sends nothing.
+ * @param registry - The registry.
+ * @param edit - What the Owner did.
+ * @returns What it came to, or a conflict to try again.
+ */
+const tryArrange = (registry: AtomRegistry.AtomRegistry, edit: ArrangeEdit) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    const read = yield* readShared(registry);
+    const done: Outcome = { _tag: "Done" };
+    const change = arranging(registry.get(sidebarNetworks), arrangementOf(read.options), edit);
+
+    if (change === undefined) {
+      return done;
+    }
+
+    const { option, value } = arrangeJson(change);
+
+    yield* client.ui.set({
+      params: { option },
+      payload: { value },
+      query: { ifSequence: read.sequence },
+    });
+
+    yield* readShared(registry);
+
+    return done;
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(error._tag === "UiChanged" ? conflict : uiFailed(error._tag))
+    )
+  );
+
+/**
+ * Carries out an edit of the Sidebar's order, for every device: worked out from the options
+ * read, and once more from those read again after a conflict, so another device's change
+ * made in between is kept. What it would write from the options held shows at once, so a
+ * row dropped stays where it was dropped while the Daemon answers.
+ * @param registry - The registry.
+ * @param edit - What the Owner did.
+ * @returns What it came to.
+ */
+export const arrange = (registry: AtomRegistry.AtomRegistry, edit: ArrangeEdit) => {
+  const work = Effect.gen(function* () {
+    const first = yield* tryArrange(registry, edit);
+
+    if (first._tag !== "Conflict") {
+      return first;
+    }
+
+    const second = yield* tryArrange(registry, edit);
+
+    return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
+  });
+
+  const held = uiShown(registry.get(optionsState));
+
+  const shown =
+    held === undefined
+      ? undefined
+      : arranging(registry.get(sidebarNetworks), arrangementOf(held.options), edit);
+
+  return shown === undefined
+    ? work
+    : onItsWay(registry, { _tag: "Ui", ...arrangeJson(shown) }, work);
+};

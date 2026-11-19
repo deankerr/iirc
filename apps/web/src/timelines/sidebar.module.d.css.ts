@@ -8,6 +8,8 @@ declare const styles: {
   readonly controls: string;
   readonly counts: string;
   readonly direct: string;
+  readonly drag: string;
+  readonly drop: string;
   readonly elsewhere: string;
   readonly failure: string;
   readonly footer: string;
@@ -28,10 +30,12 @@ declare const styles: {
   readonly muted: string;
   readonly name: string;
   readonly network: string;
+  readonly of: string;
   readonly offline: string;
   readonly pane: string;
-  readonly reading: string;
   readonly popover: string;
+  readonly preview: string;
+  readonly reading: string;
   readonly scroll: string;
   readonly section: string;
   readonly sidebar: string;
