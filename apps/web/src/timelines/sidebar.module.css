@@ -106,6 +106,22 @@
   white-space: nowrap;
 }
 
+/* A pinned Timeline's Network, dim, right after its name, which keeps the room it needs
+   first. */
+.name:has(+ .of) {
+  margin-right: 0;
+}
+
+.of {
+  flex-shrink: 4;
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* How a Network's connection stands, as a symbol whose shape says it too. */
 .standing {
   display: inline-flex;
@@ -332,4 +348,67 @@
   .action {
     min-height: var(--target-size);
   }
+}
+
+/* A row being dragged stays in its place, faded, while its preview follows the pointer. */
+.network[data-dragging],
+.item[data-dragging] {
+  opacity: 0.5;
+}
+
+/* What follows the pointer while a row is dragged: its name, on the page's own colours. */
+.preview {
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+/* Where a row dropped goes: a line in the accent between two rows, drawn only at the place
+   the drop would take, and taking no room, so nothing moves while a row is dragged. */
+.drop {
+  position: relative;
+  height: 0;
+  outline: none;
+}
+
+.drop[data-drop-target]::before {
+  position: absolute;
+  top: calc(-1 * var(--border-width));
+  right: var(--space-3);
+  left: var(--space-3);
+  height: calc(2 * var(--border-width));
+  border-radius: var(--border-width);
+  background: var(--color-accent);
+  content: "";
+}
+
+/* The button that picks a row up for the keys, which a pointer has no need of, as it drags
+   the row itself: out of sight until the keys reach it. */
+.drag {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  clip-path: inset(50%);
+}
+
+.drag[data-focus-visible] {
+  position: static;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2ch;
+  outline: var(--border-width) solid var(--color-focus);
+  clip-path: none;
+}
+
+.network[data-selected] .drag,
+.item[data-selected] .drag {
+  color: inherit;
 }

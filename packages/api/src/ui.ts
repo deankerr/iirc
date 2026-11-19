@@ -11,6 +11,8 @@
 import { TimelineId } from "@iirc/timelines";
 import { Schema, SchemaAST, Struct } from "effect";
 
+import { NetworkId } from "./network-id.ts";
+
 /**
  * A colour in sRGB, as `#` and six lower-case hex digits, such as `#1a1b26`: the one form a
  * palette holds, so two that look alike are alike.
@@ -445,7 +447,8 @@ export type ReadRule = typeof ReadRule.Type;
 
 /**
  * The annotation of an option under `ui` that no device may override for itself, as one
- * the Daemon acts on is: every device shares it, and a device's override of it is ignored.
+ * the Daemon acts on is, or one that is the Owner's single arrangement, as the Sidebar's
+ * order is: every device shares it, and a device's override of it is ignored.
  */
 export const sharedOnly = { sharedOnly: true } as const;
 
@@ -598,6 +601,65 @@ export const LineLayout = Schema.Literals(["columns", "inline", "stacked"]).anno
 /** The decoded form of {@link LineLayout}. */
 export type LineLayout = typeof LineLayout.Type;
 
+/**
+ * Refuses a list that names an id twice, so a place in the Sidebar is given once.
+ * @param ids - The ids.
+ * @returns Whether each is named once, or the reason it is refused.
+ */
+const namesEachOnce = (ids: readonly string[]) =>
+  new Set(ids).size === ids.length || "names an id twice";
+
+/**
+ * The Networks in the Owner's order in the Sidebar, by id. A Network it does not name keeps
+ * the place the fixed order gives it, and an id of a Network that has gone does nothing.
+ * Each is named once.
+ */
+export const SidebarNetworks = Schema.Array(NetworkId)
+  .check(Schema.makeFilter(namesEachOnce))
+  .annotate({
+    ...sharedOnly,
+    default: [],
+    description:
+      "The Networks in the Owner's order in the Sidebar, by id. A Network not named keeps the place the fixed order gives it, and an id of one that has gone does nothing. Moving a Network in the Sidebar sets it. Every device shares it.",
+  });
+
+/** The decoded form of {@link SidebarNetworks}. */
+export type SidebarNetworks = typeof SidebarNetworks.Type;
+
+/**
+ * The Timelines in the Owner's order in the Sidebar, by id, of which only the order among
+ * one Network's Timelines matters. A Timeline it does not name takes the place the fixed
+ * order gives it, and an id of one that has gone does nothing. Each is named once.
+ */
+export const SidebarOrder = Schema.Array(TimelineId)
+  .check(Schema.makeFilter(namesEachOnce))
+  .annotate({
+    ...sharedOnly,
+    default: [],
+    description:
+      "The Timelines in the Owner's order in the Sidebar, by id; only the order among one Network's Timelines matters. A Timeline not named takes the place the fixed order gives it, and an id of one that has gone does nothing. Moving a Timeline in the Sidebar sets it. Every device shares it.",
+  });
+
+/** The decoded form of {@link SidebarOrder}. */
+export type SidebarOrder = typeof SidebarOrder.Type;
+
+/**
+ * The Timelines pinned above the Networks in the Sidebar, by id, in order. An id of a
+ * Timeline that has gone, or that the Sidebar does not list, shows nothing. Each is named
+ * once.
+ */
+export const SidebarPinned = Schema.Array(TimelineId)
+  .check(Schema.makeFilter(namesEachOnce))
+  .annotate({
+    ...sharedOnly,
+    default: [],
+    description:
+      "The Timelines pinned above the Networks in the Sidebar, by id, in order. An id of a Timeline that has gone does nothing. /pin pins or unpins the focused Timeline. Every device shares it.",
+  });
+
+/** The decoded form of {@link SidebarPinned}. */
+export type SidebarPinned = typeof SidebarPinned.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -617,6 +679,9 @@ export const UiOptions = Schema.Struct({
   "previews.style": PreviewsStyle,
   "previews.timelines": PreviewsByTimeline,
   read: ReadRule,
+  "sidebar.networks": SidebarNetworks,
+  "sidebar.order": SidebarOrder,
+  "sidebar.pinned": SidebarPinned,
   size: TextSize,
   spellcheck: SpellcheckShown,
   suffix: NickSuffix,

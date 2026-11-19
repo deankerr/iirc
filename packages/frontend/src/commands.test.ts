@@ -405,6 +405,27 @@ describe("reading a line", () => {
     });
   });
 
+  it("moves the open Timeline up or down with /move, and pins or unpins it with /pin, which the Network's own Timeline never is", () => {
+    expect({
+      down: chosen("/move DOWN", inChannel),
+      network: chosen("/pin", inNetwork),
+      networkMoved: chosen("/move up", inNetwork),
+      nowhere: message("/move up", nowhere),
+      pin: chosen("/pin", inChannel),
+      trailing: message("/pin now", inChannel),
+      which: message("/move sideways", inChannel),
+    }).toStrictEqual({
+      down: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Down", timeline } }],
+      network:
+        "libera's own Timeline is the Network's row, so it is not pinned. /move moves the Network.",
+      networkMoved: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Up", timeline } }],
+      nowhere: "Open a Timeline first.",
+      pin: [{ _tag: "Arrange", edit: { _tag: "Pin", timeline } }],
+      trailing: "/pin takes nothing after it.",
+      which: "Move it which way? /move up|down",
+    });
+  });
+
   it("jumps to the open Timeline's latest with /latest, and takes nothing after it", () => {
     const run = (line: string) => interpret(line, inChannel);
 

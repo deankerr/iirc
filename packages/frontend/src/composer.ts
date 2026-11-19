@@ -21,6 +21,8 @@ import type {
 import { Option, Schema } from "effect";
 
 import { levelOf, markLatest } from "./activity.ts";
+import { arranged, shownOrder, unarranged } from "./arrangement.ts";
+import type { Arrangement } from "./arrangement.ts";
 import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
 import { commandNamed, credentialRefusal, interpret, namedIn } from "./commands.ts";
@@ -377,28 +379,35 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
 
 /**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
- * it, whether that Network has a Session, every Timeline in the sidebar's order, and by
- * name, those closed too, those open in any Pane, those with something unread, and the head
- * of the Channel in focus, as read.
+ * it, whether that Network has a Session, every Timeline in the order the sidebar shows, and
+ * by name, those closed too, those open in any Pane, those with something
+ * unread, and the head of the Channel in focus, as read.
  * @param timelines - The Timelines.
  * @param channels - The Channels the Panes show, as read.
+ * @param arrangement - The Owner's order of the sidebar.
  * @returns The context.
  */
 export const contextOf = (
   timelines: Timelines,
-  channels: Channels = initialChannels
+  channels: Channels = initialChannels,
+  arrangement: Arrangement = unarranged
 ): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
   const main = mainOf(timelines);
 
   const networks = sidebar(timelines);
-  const listed = networks.flatMap((one) => one.timelines);
+  const shownAs = arranged(networks, arrangement);
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
-  // for nothing.
+  // for nothing. Ties among what calls go by the order shown, the pinned first.
   const marked = networks.filter((one) => !one.removed);
-  const calling = marked.flatMap((one) => one.timelines);
+
+  const calling = [
+    ...shownAs.pinned.filter((pin) => !pin.network.removed).map((pin) => pin.timeline),
+    ...shownAs.networks.filter((one) => !one.removed).flatMap((one) => one.timelines),
+  ];
+
   const closed = marked.flatMap((one) => one.closed);
 
   // A Timeline behind the options, the search, or a draft is not the one shown, so
@@ -411,7 +420,7 @@ export const contextOf = (
     shown: panesOf(timelines.layout.root).flatMap((pane) =>
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
-    timelines: listed.map((timeline) => timeline.id),
+    timelines: shownOrder(shownAs),
     unread: unseenIn(calling),
     unreadClosed: unseenIn(closed),
   };

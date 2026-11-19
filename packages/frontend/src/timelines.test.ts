@@ -18,6 +18,8 @@ import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { unarranged } from "./arrangement.ts";
+import type { Arrangement } from "./arrangement.ts";
 import { interpret } from "./commands.ts";
 import { contextOf } from "./composer.ts";
 import { panesOf, single } from "./layout.ts";
@@ -1785,6 +1787,65 @@ describe("the Timelines' state", () => {
     });
   });
 
+  it("steps /next and /previous through the Timelines in the order shown: the Owner's, with the pinned first", () => {
+    const state = following();
+
+    const stepped = (arrangement: Arrangement) => {
+      const context = contextOf(state, undefined, arrangement);
+
+      return {
+        next: interpret("/next", context),
+        order: context.timelines,
+        previous: interpret("/previous", context),
+      };
+    };
+
+    // The open Timeline is #a, which the fixed order lists after the Network's own.
+    expect({
+      none: stepped(unarranged).order,
+      ordered: stepped({ ...unarranged, order: [two, three] }),
+      pinned: stepped({ ...unarranged, pinned: [two] }),
+    }).toStrictEqual({
+      none: [one, three, two],
+      ordered: {
+        next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+        order: [one, two, three],
+        previous: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+      },
+      pinned: {
+        next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+        order: [two, one, three],
+        previous: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+      },
+    });
+  });
+
+  it("breaks a tie in /next-unread by the order shown, so a pinned Timeline comes first", () => {
+    const unread = { activity: 0, direct: 0, highlights: 0, messages: 1 };
+
+    // alpha's own Timeline and #b each have a Message unread, and #a is open.
+    const state = reduceTimelines(
+      following(),
+      changed(6, {
+        timelines: [
+          { ...Schema.encodeSync(Timeline)(timelineOf(idOf(1), "Network", "alpha", 6)), unread },
+          { ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)), unread },
+        ],
+      })
+    );
+
+    const jump = (arrangement: Arrangement) =>
+      interpret("/next-unread", contextOf(state, undefined, arrangement));
+
+    expect({
+      fixed: jump(unarranged),
+      pinned: jump({ ...unarranged, pinned: [two] }),
+    }).toStrictEqual({
+      fixed: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
+      pinned: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
+    });
+  });
+
   it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
     const [network] = sidebar(following());
     const tree = network === undefined ? undefined : treeOf(network);
@@ -2583,6 +2644,42 @@ const began = (sequence: number) =>
 const statusWanted = (state: Timelines) => wanted(state).some((read) => read._tag === "Status");
 
 describe("whether a Session carries tags", () => {
+  it("says a Network's Timelines are complete only once their last page is read", () => {
+    const page = (more: boolean, ...timelines: readonly ReturnType<typeof timelineOf>[]) => ({
+      ...listOf(5, ...timelines),
+      more,
+    });
+
+    let state = folded(initialTimelines, [
+      { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
+      { _tag: "NetworksRead", entries: entries("alpha") },
+      { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
+      {
+        _tag: "ListRead",
+        after: undefined,
+        network: alpha,
+        page: page(true, timelineOf(idOf(1), "Network", "alpha", 1)),
+      },
+    ]);
+
+    const first = sidebar(state).map((network) => [network.listed, network.complete]);
+
+    state = folded(state, [
+      { _tag: "ReadStarted", read: { _tag: "List", after: one, attempt: 0, network: alpha } },
+      {
+        _tag: "ListRead",
+        after: one,
+        network: alpha,
+        page: page(false, timelineOf(idOf(2), "Channel", "#b", 2)),
+      },
+    ]);
+
+    expect({
+      first,
+      last: sidebar(state).map((network) => [network.listed, network.complete]),
+    }).toStrictEqual({ first: [[true, false]], last: [[true, true]] });
+  });
+
   it("is what known says, and unknown once a Session begins, until known is read again", () => {
     const read = folded(following(), [
       { _tag: "ReadStarted", read: statusOfAlpha },

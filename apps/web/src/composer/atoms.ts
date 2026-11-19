@@ -63,7 +63,7 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
-import { changeUi } from "../options/ui.ts";
+import { arrange, arrangement, changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
@@ -78,8 +78,10 @@ import { composerInput } from "./input.ts";
 import { followed } from "./sources.ts";
 import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
-/** The context commands are judged in, derived from the Timelines. */
-export const commandContext = Atom.make((get) => contextOf(get(timelinesState), get(channelState)));
+/** The context commands are judged in, derived from the Timelines and the Sidebar's order. */
+export const commandContext = Atom.make((get) =>
+  contextOf(get(timelinesState), get(channelState), get(arrangement))
+);
 
 /** One Timeline's composer, or the one under no Timeline. */
 export const draft = Atom.family((timeline: Place) =>
@@ -649,6 +651,10 @@ const changeOne = (
 
     case "ChoosePreviews": {
       return choosePreviews(registry, intent);
+    }
+
+    case "Arrange": {
+      return arrange(registry, intent.edit);
     }
 
     case "MarkRead": {

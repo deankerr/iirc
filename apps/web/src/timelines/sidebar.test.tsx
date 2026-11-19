@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { NetworkId, TimelineId, uiDefaults } from "@iirc/api";
-import type { Timeline } from "@iirc/api";
+import type { Timeline, UiOptions } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
 import { Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
@@ -173,7 +173,10 @@ const signedIn = async (
   await settled(
     () => rows().length === 3 + more.listed && rows()[0]?.getAttribute("aria-label") !== null
   );
-  await settled(() => (rows()[0]?.getAttribute("aria-label") ?? "").endsWith(", connected"));
+  // The Network's row, wherever a pin puts it.
+  await settled(() =>
+    rows().some((one) => (one.getAttribute("aria-label") ?? "").endsWith(", connected"))
+  );
 
   return registry;
 };
@@ -836,6 +839,177 @@ describe("a Timeline's own Previews, from the sidebar", () => {
     }).toStrictEqual({
       changes: ["4", "9"],
       now: { [iirc]: "links only", [other]: "off" },
+    });
+  });
+});
+
+/**
+ * The Frontend signed in, as `signedIn` does, with the shared options holding the order
+ * given, read.
+ * @param order - The options of the Sidebar's order to hold.
+ * @param more - More Timelines, and how many of them the sidebar lists.
+ * @returns The fake Daemon and the registry.
+ */
+const arrangedWith = async (order: Partial<UiOptions>, more = noMore) => {
+  const fake = fakeDaemon();
+
+  fake.daemon.ui = { options: { ...uiDefaults, ...order }, sequence: 4 };
+
+  const registry = await signedIn(more, fake);
+
+  registry.mount(uiSync);
+  await settled(() => registry.get(optionsState).ui !== undefined);
+
+  return { fake, registry };
+};
+
+/** A Direct Message with `peer`, listed after the Channels. */
+const withPeer: More = { listed: 1, timelines: [describeTimeline(peer, "peer", "Direct")] };
+
+/**
+ * The sidebar's headings, in order.
+ * @returns Their text.
+ */
+const headings = () => [...document.querySelectorAll("nav h2")].map((one) => one.textContent);
+
+/**
+ * Presses a key and lets it go, as a browser dispatches both, on an element.
+ * @param target - Where.
+ * @param key - The key.
+ */
+const tap = async (target: EventTarget, key: string) => {
+  await doing(() => {
+    for (const type of ["keydown", "keyup"]) {
+      target.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, key }));
+    }
+  });
+};
+
+describe("the Sidebar in the Owner's order", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  // Catches the Sidebar drawn in the fixed order, ignoring the order every device shares.
+  it("draws a Network's Timelines in the order given, one not named taking its place in the fixed order", async () => {
+    await arrangedWith({ "sidebar.order": [other, iirc] }, withPeer);
+    await settled(() => names()[1] === "#other");
+
+    expect(names()).toStrictEqual(["libera", "#other", "peer", "#iirc"]);
+  });
+
+  // Catches a pin drawn under its Network, or without saying which Network it is of.
+  it("draws a pinned Timeline in a part of its own above the Networks, saying its Network", async () => {
+    await arrangedWith({ "sidebar.pinned": [peer] }, withPeer);
+    await settled(() => headings().includes("Pinned"));
+
+    expect({
+      headings: headings(),
+      label: row("peer").getAttribute("aria-label"),
+      names: names(),
+      text: row("peer").textContent,
+    }).toStrictEqual({
+      headings: ["Pinned", "Networks"],
+      label: "peer of libera",
+      names: ["peer", "libera", "#iirc", "#other"],
+      text: "peer· libera…↕",
+    });
+  });
+
+  // Catches a menu's Pin that writes nothing, writes the wrong value, or is offered for a
+  // Network's own row, which can never be pinned.
+  it("pins a Timeline from its row's menu, from the sequence read, and offers no pin for a Network's own row", async () => {
+    const { fake } = await arrangedWith({ "sidebar.pinned": [other] });
+
+    await pressButton("More for libera");
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    const networkMenu = [...document.querySelectorAll('[role^="menuitem"]')].map(
+      (one) => one.textContent
+    );
+
+    await press(document.activeElement ?? document.body, { key: "Escape" });
+    await settled(() => document.querySelector('[role="menu"]') === null);
+    await pressButton("More for #iirc");
+    await chooseFromMenu("Pin");
+    await settled(() => fake.daemon.uiChanges.length === 1);
+    await settled(() => names()[1] === "#iirc");
+
+    expect({
+      changes: fake.daemon.uiChanges,
+      names: names(),
+      networkMenu: networkMenu.filter((text) => text === "Pin" || text === "Unpin"),
+      pinned: fake.daemon.ui.options["sidebar.pinned"],
+    }).toStrictEqual({
+      changes: [{ ifSequence: "4", route: "PUT sidebar.pinned" }],
+      names: ["#other", "#iirc", "libera"],
+      networkMenu: [],
+      pinned: [other, iirc],
+    });
+  });
+
+  // Catches the keys the keymap shows for moving a Timeline doing nothing in the page.
+  it("moves the open Timeline down with its keys, writing the order for every device", async () => {
+    const { fake, registry } = await arrangedWith({}, withPeer);
+
+    await doing(() => {
+      registry.set(open, iirc);
+    });
+    await press(document.body, { altKey: true, ctrlKey: true, key: "ArrowDown" });
+    await settled(() => fake.daemon.uiChanges.length === 1);
+    await settled(() => names()[1] === "#other");
+
+    expect({
+      changes: fake.daemon.uiChanges,
+      names: names(),
+      order: fake.daemon.ui.options["sidebar.order"],
+    }).toStrictEqual({
+      changes: [{ ifSequence: "4", route: "PUT sidebar.order" }],
+      names: ["libera", "#other", "#iirc", "peer"],
+      order: [other, iirc, peer],
+    });
+  });
+
+  // Catches the next Timeline's key stepping through the fixed order, not the one shown.
+  it("goes to the next Timeline in the order shown, the pinned first", async () => {
+    const { registry } = await arrangedWith({ "sidebar.pinned": [iirc] }, withPeer);
+
+    await settled(() => names()[0] === "#iirc");
+    await doing(() => {
+      registry.set(open, own);
+    });
+    await press(document.body, { altKey: true, key: "ArrowDown" });
+
+    expect(openNow(registry)).toBe(other);
+  });
+
+  // Catches a row dropped before or after another that moves nothing for every device.
+  it("moves a row dropped after another of its Network there, with the keys React Aria drags with", async () => {
+    const { fake } = await arrangedWith({}, withPeer);
+    const handle = row("#iirc").querySelector<HTMLElement>('button[aria-label="Drag #iirc"]');
+
+    if (handle === null) {
+      throw new Error("no drag button");
+    }
+
+    await doing(() => {
+      handle.focus();
+    });
+    await tap(handle, "Enter");
+    await tap(document.activeElement ?? document.body, "ArrowDown");
+    await tap(document.activeElement ?? document.body, "Enter");
+    await settled(() => fake.daemon.uiChanges.length === 1);
+
+    expect({
+      changes: fake.daemon.uiChanges,
+      order: fake.daemon.ui.options["sidebar.order"],
+    }).toStrictEqual({
+      changes: [{ ifSequence: "4", route: "PUT sidebar.order" }],
+      order: [other, iirc, peer],
     });
   });
 });

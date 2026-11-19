@@ -1291,6 +1291,9 @@ describe("the options under ui", () => {
       "previews.style": "thumbnail",
       "previews.timelines": {},
       read: "latest",
+      "sidebar.networks": [],
+      "sidebar.order": [],
+      "sidebar.pinned": [],
       size: 14,
       spellcheck: false,
       suffix: ", ",
@@ -1380,7 +1383,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-24),
+        .slice(-27),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1402,6 +1405,9 @@ describe("the options under ui", () => {
         "ui.previews.style",
         "ui.previews.timelines",
         "ui.read",
+        "ui.sidebar.networks",
+        "ui.sidebar.order",
+        "ui.sidebar.pinned",
         "ui.size",
         "ui.spellcheck",
         "ui.suffix",
@@ -1519,6 +1525,34 @@ describe("the options under ui", () => {
             value: ["player.vimeo.com", "w.soundcloud.com"],
           },
         ],
+      },
+    });
+  });
+
+  it("offer ui.sidebar.pinned as a list of Timeline ids, shared by every device, refused when one is named twice, and unset to none", () => {
+    const one = "00000000000002-00000000-00000000";
+    const two = "00000000000003-00000000-00000000";
+    const option = uiOptionsOf(shared, {}).find((found) => found.option === "sidebar.pinned");
+
+    expect({
+      device: read(`/set -device ui.sidebar.pinned ${one}`)._tag,
+      kind: option?.kind,
+      notAnId: read("/set ui.sidebar.pinned #iirc")._tag,
+      pinned: read(`/set ui.sidebar.pinned ${one}, ${two}`),
+      twice: read(`/set ui.sidebar.pinned ${one},${one}`)._tag,
+      unset: read("/unset ui.sidebar.pinned"),
+    }).toStrictEqual({
+      device: "Invalid",
+      kind: { _tag: "Texts", nonEmpty: false },
+      notAnId: "Invalid",
+      pinned: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "sidebar.pinned", value: [one, two] }],
+      },
+      twice: "Invalid",
+      unset: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "sidebar.pinned", value: undefined }],
       },
     });
   });

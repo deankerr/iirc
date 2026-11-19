@@ -11,7 +11,18 @@
  * always on a touch screen, or by the context menu, as a right-click, the menu key, or
  * Shift+F10 opens it. It chooses the Timeline's own Previews over `ui.previews`, for every
  * device, marking the choice in force, and closes a Channel's or Direct Message's Timeline,
- * which the Daemon keeps out of the sidebar until something arrives in it.
+ * which the Daemon keeps out of the sidebar until something arrives in it. It pins a
+ * Channel's or Direct Message's Timeline, or unpins it.
+ *
+ * The Networks and their Timelines are in the Owner's order, which every device shares,
+ * and the Timelines pinned are in a part of their own above the Networks, each saying which
+ * Network it is of. A row is dragged before or after another of its part: a pinned one among
+ * the pinned, a Network's own among the Networks as removed as it is, and any other among
+ * its Network's. Each part is a Tree of its own, as the removed Networks' is, so its keys
+ * stay within it. A drop is taken only where the core's arranging says something changes,
+ * which keeps it within one part and one Network, and anywhere else is cancelled, so it
+ * draws no line. The keys pick a
+ * row up by its drag button, which ArrowRight reaches past its menu's.
  *
  * @packageDocumentation
  */
@@ -25,6 +36,8 @@ import {
   networkActivity,
 } from "@iirc/frontend/activity";
 import type { Activity } from "@iirc/frontend/activity";
+import { arranging } from "@iirc/frontend/arrangement";
+import type { ArrangeEdit, Pin } from "@iirc/frontend/arrangement";
 import { closeOf } from "@iirc/frontend/closing";
 import { chosenIn } from "@iirc/frontend/previews";
 import { endReason } from "@iirc/frontend/render";
@@ -34,9 +47,10 @@ import { chosenOf, elsewhereOf, treeOf } from "@iirc/frontend/timelines";
 import type { Connection, SidebarNetwork } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import { useRef, useState } from "react";
-import type { MouseEvent, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 import {
   Button as AriaButton,
+  DropIndicator,
   Header,
   Menu,
   MenuItem,
@@ -45,11 +59,13 @@ import {
   Tree,
   TreeItem,
   TreeItemContent,
+  useDragAndDrop,
 } from "react-aria-components";
-import type { Key, Selection } from "react-aria-components";
+import type { DropTarget, Key, Selection } from "react-aria-components";
 
 import { perform } from "../composer/atoms.ts";
 import { openOptions } from "../options/atoms.ts";
+import { arrangedSidebar, arrangement } from "../options/ui.ts";
 import { compact, drawerState } from "../page/drawer.ts";
 import { previewsModes } from "../previews/atoms.ts";
 import { signOut } from "../sign-in/atoms.ts";
@@ -252,27 +268,41 @@ const MoreButton = ({
 );
 
 /**
- * A Timeline's row, under its Network, with the button that opens its menu.
- * @param props - The Timeline, the number of the other Pane that shows it, if one does,
- * whether its menu is open, and what opens it.
+ * The button that picks a row up, to move it with the keys, as React Aria's Tree wants of a
+ * row that drags. It shows only once the keys reach it, as a pointer drags the row itself.
+ * @returns The button.
+ */
+const DragButton = () => (
+  <AriaButton className={styles.drag} slot="drag">
+    <Icon name="move" />
+  </AriaButton>
+);
+
+/**
+ * A Timeline's row, under its Network or pinned, with the button that opens its menu.
+ * @param props - The Timeline, the Network it is of when it is pinned, the number of the
+ * other Pane that shows it, if one does, whether its menu is open, and what opens it.
  * @returns The row.
  */
 const TimelineItem = ({
   menu,
+  of,
   onMenu,
   pane,
   timeline,
 }: {
   readonly pane: number | undefined;
   readonly timeline: Timeline;
+  readonly of?: string | undefined;
   readonly menu: boolean;
   readonly onMenu: (row: HTMLElement) => void;
 }) => {
   const activity = activityOf(timeline);
+  const name = of === undefined ? timeline.name : `${timeline.name} of ${of}`;
 
   return (
     <TreeItem
-      aria-label={rowLabel(timeline.name, activity, pane)}
+      aria-label={rowLabel(name, activity, pane)}
       className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
       data-menu={menu || undefined}
       id={timeline.id}
@@ -290,8 +320,14 @@ const TimelineItem = ({
         >
           {timeline.name}
         </bdi>
+        {of === undefined ? null : (
+          <span aria-hidden className={styles.of}>
+            · <bdi>{of}</bdi>
+          </span>
+        )}
         <Counts activity={activity} calling={false} />
         <MoreButton name={timeline.name} onMenu={onMenu} />
+        <DragButton />
       </TreeItemContent>
     </TreeItem>
   );
@@ -310,16 +346,19 @@ const previewsChoices: readonly {
 
 /**
  * What can be done with a Timeline from its row: choosing its own Previews, the choice in
- * force marked, and closing it, when it can be closed.
- * @param props - The Timeline, its row, and what closes the menu.
+ * force marked, pinning it or unpinning it, unless it is a Network's own, and closing it,
+ * when it can be closed.
+ * @param props - The Timeline, whether it is pinned, its row, and what closes the menu.
  * @returns The menu, placed under its row.
  */
 const TimelineMenu = ({
   anchor,
   onClose,
+  pinned,
   timeline,
 }: {
   readonly timeline: Timeline;
+  readonly pinned: boolean;
   readonly anchor: RefObject<HTMLElement | null>;
   readonly onClose: () => void;
 }) => {
@@ -381,19 +420,38 @@ const TimelineMenu = ({
             </MenuItem>
           ))}
         </MenuSection>
-        {close === undefined ? null : (
+        {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
+        {timeline.kind === "Network" ? null : (
           <MenuSection className={styles.section}>
             <MenuItem
               className={styles.action}
-              id="close"
+              id="pin"
               onAction={() => {
                 onClose();
-                carryOut([close]);
+                carryOut([
+                  {
+                    _tag: "Arrange",
+                    edit: { _tag: "Pin", pinned: !pinned, timeline: timeline.id },
+                  },
+                ]);
               }}
-              textValue="Close"
+              textValue={pinned ? "Unpin" : "Pin"}
             >
-              Close
+              {pinned ? "Unpin" : "Pin"}
             </MenuItem>
+            {close === undefined ? null : (
+              <MenuItem
+                className={styles.action}
+                id="close"
+                onAction={() => {
+                  onClose();
+                  carryOut([close]);
+                }}
+                textValue="Close"
+              >
+                Close
+              </MenuItem>
+            )}
           </MenuSection>
         )}
       </Menu>
@@ -464,6 +522,7 @@ const NetworkRow = ({
         <Icon className={standing.className} name={standing.icon} />
       </span>
       {own === undefined ? null : <MoreButton name={own.name} onMenu={onMenu} />}
+      <DragButton />
     </>
   );
 };
@@ -533,38 +592,33 @@ const Footer = ({
   );
 };
 
+/** The type a dragged row carries its Timeline's name in, which only the sidebar takes. */
+const dragType = "application/x-iirc-timeline";
+
 /**
- * A tree of Networks and their Timelines, each Network its own Timeline's row.
- * @param props - The Networks, and what the tree is called.
- * @returns The tree.
+ * What every part of the sidebar does with its rows: choosing one opens its Timeline, a
+ * row's menu opens by its button or the context menu, and a row dragged before or after
+ * another of the part moves it there, for every device.
+ * @param timelines - The part's Timelines, which a row's key is read back as.
+ * @param pinned - The Timelines pinned, for the menu.
+ * @returns The Tree's handlers, its drag and drop, the Timeline whose menu is open, what
+ * opens a menu, and the menu itself.
  */
-const NetworkTrees = ({
-  label,
-  networks,
-}: {
-  readonly label: string;
-  readonly networks: readonly SidebarNetwork[];
-}) => {
-  const hidden = useAtomValue(collapsed);
-  const chosen = useAtomValue(selected);
-  const others = useAtomValue(elsewhere);
-  const setCollapsed = useAtomSet(collapsed);
+const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>) => {
   const choose = useAtomSet(open);
   const setDrawer = useAtomSet(drawerState);
+  const carryOut = useAtomSet(perform);
+  const networks = useAtomValue(sidebarNetworks);
+  const order = useAtomValue(arrangement);
   // The Timeline whose menu is open, placed by its row.
   const [menu, setMenu] = useState<TimelineId | undefined>(undefined);
   const anchor = useRef<HTMLElement | null>(null);
-
-  const trees = networks.map((network) => ({ network, tree: treeOf(network) }));
-
-  // A Network's row is its own Timeline's, keyed by its id, once it has one.
-  const rowKey = ({ network, tree }: (typeof trees)[number]) =>
-    tree.own?.id ?? networkKey(network.network);
+  // The keys of the rows dragged, which a place to drop them is judged by.
+  const dragged = useRef<ReadonlySet<Key>>(new Set());
 
   // A key is read back as the Timeline it names, never cast: a key that names none, such
   // as the row of a Network with no Timeline of its own, opens nothing.
-  const timelineOf = (key: Key) =>
-    networks.flatMap((network) => network.timelines).find((timeline) => timeline.id === key);
+  const timelineOf = (key: Key) => timelines.find((timeline) => timeline.id === key);
 
   // A menu is opened on a row, which it is placed by.
   const openMenu = (timeline: Timeline, row: HTMLElement) => {
@@ -601,6 +655,179 @@ const NetworkTrees = ({
     setDrawer("None");
   };
 
+  // One row dropped before or after another, as an edit of the order, or none.
+  const placing = (keys: ReadonlySet<Key>, target: DropTarget): ArrangeEdit | undefined => {
+    const [key] = keys;
+    const timeline = keys.size === 1 && key !== undefined ? timelineOf(key) : undefined;
+    const beside = target.type === "item" ? timelineOf(target.key) : undefined;
+
+    if (timeline === undefined || beside === undefined || target.type !== "item") {
+      return undefined;
+    }
+
+    return target.dropPosition === "on"
+      ? undefined
+      : {
+          _tag: "Place",
+          side: target.dropPosition === "before" ? "Before" : "After",
+          target: beside.id,
+          timeline: timeline.id,
+        };
+  };
+
+  const { dragAndDropHooks } = useDragAndDrop({
+    acceptedDragTypes: [dragType],
+    // A place takes a drop only where the order would change, as the core says from what
+    // is shown, so no line is drawn where a drop would do nothing. React Aria has kept it
+    // within this part and the dragged row's Network already.
+    getDropOperation: (target) => {
+      const edit = placing(dragged.current, target);
+
+      return edit !== undefined && arranging(networks, order, edit) !== undefined
+        ? "move"
+        : "cancel";
+    },
+    getItems: (keys) =>
+      [...keys].flatMap((key) => {
+        const timeline = timelineOf(key);
+
+        return timeline === undefined ? [] : [{ [dragType]: timeline.name }];
+      }),
+    onDragEnd: () => {
+      dragged.current = new Set();
+    },
+    onDragStart: ({ keys }) => {
+      dragged.current = keys;
+    },
+    onReorder: ({ keys, target }) => {
+      const edit = placing(keys, target);
+
+      if (edit !== undefined) {
+        carryOut([{ _tag: "Arrange", edit }]);
+      }
+    },
+    renderDragPreview: (items) => (
+      <div className={styles.preview}>{items.map((item) => item[dragType]).join(", ")}</div>
+    ),
+    renderDropIndicator: (target) => <DropIndicator className={styles.drop} target={target} />,
+  });
+
+  // The menu's Timeline, as it is now, while it is still listed.
+  const menuTimeline = menu === undefined ? undefined : timelineOf(menu);
+
+  return {
+    dragAndDropHooks,
+    handleContextMenu: onContextMenu,
+    handleSelectionChange: onSelectionChange,
+    menu,
+    menuElement:
+      menuTimeline === undefined ? null : (
+        <TimelineMenu
+          anchor={anchor}
+          onClose={() => {
+            setMenu(undefined);
+          }}
+          pinned={pinned.has(menuTimeline.id)}
+          timeline={menuTimeline}
+        />
+      ),
+    openMenu,
+  };
+};
+
+/**
+ * A part of the sidebar: its Tree, which listens for the context menu on its rows, and the
+ * menu open on one of them.
+ * @param props - The Tree, and the menu.
+ * @returns The part.
+ */
+const Part = ({
+  children,
+  menu,
+  onContextMenu,
+}: {
+  readonly children: ReactNode;
+  readonly menu: ReactNode;
+  readonly onContextMenu: (event: MouseEvent<HTMLElement>) => void;
+}) => (
+  // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the context menu is a row's, which the Tree's own keys reach, and this only listens for it.
+  <div onContextMenu={onContextMenu}>
+    {children}
+    {menu}
+  </div>
+);
+
+/**
+ * The Timelines pinned above the Networks, in the Owner's order, each saying which Network
+ * it is of.
+ * @param props - The pinned Timelines.
+ * @returns The tree.
+ */
+const PinnedTree = ({ pins }: { readonly pins: readonly Pin[] }) => {
+  const chosen = useAtomValue(selected);
+  const others = useAtomValue(elsewhere);
+  const timelines = pins.map((pin) => pin.timeline);
+  const part = usePart(timelines, new Set(timelines.map((timeline) => timeline.id)));
+
+  return (
+    <Part menu={part.menuElement} onContextMenu={part.handleContextMenu}>
+      <Tree
+        aria-label="Pinned Timelines"
+        className={styles.tree}
+        dragAndDropHooks={part.dragAndDropHooks}
+        onSelectionChange={part.handleSelectionChange}
+        selectedKeys={chosen._tag === "Timeline" ? [chosen.timeline] : []}
+        selectionMode="single"
+      >
+        {pins.map(({ network, timeline }) => (
+          <TimelineItem
+            key={timeline.id}
+            menu={part.menu === timeline.id}
+            of={network.network}
+            onMenu={(row) => {
+              part.openMenu(timeline, row);
+            }}
+            pane={others.get(timeline.id)}
+            timeline={timeline}
+          />
+        ))}
+      </Tree>
+    </Part>
+  );
+};
+
+/** None pinned, for a part that has none. */
+const nonePinned: ReadonlySet<TimelineId> = new Set();
+
+/**
+ * A tree of Networks and their Timelines, each Network its own Timeline's row.
+ * @param props - The Networks, and what the tree is called.
+ * @returns The tree.
+ */
+const NetworkTrees = ({
+  label,
+  networks,
+}: {
+  readonly label: string;
+  readonly networks: readonly SidebarNetwork[];
+}) => {
+  const hidden = useAtomValue(collapsed);
+  const chosen = useAtomValue(selected);
+  const others = useAtomValue(elsewhere);
+  const setCollapsed = useAtomSet(collapsed);
+
+  // A Timeline under a Network is not pinned, as a pinned one is in the part above.
+  const part = usePart(
+    networks.flatMap((network) => network.timelines),
+    nonePinned
+  );
+
+  const trees = networks.map((network) => ({ network, tree: treeOf(network) }));
+
+  // A Network's row is its own Timeline's, keyed by its id, once it has one.
+  const rowKey = ({ network, tree }: (typeof trees)[number]) =>
+    tree.own?.id ?? networkKey(network.network);
+
   // Only this tree's Networks are expanded or collapsed by it.
   const onExpandedChange = (keys: Set<Key>) => {
     const mine = new Set<string>(trees.map((one) => one.network.network));
@@ -611,12 +838,8 @@ const NetworkTrees = ({
     ]);
   };
 
-  // The menu's Timeline, as it is now, while it is still listed.
-  const menuTimeline = menu === undefined ? undefined : timelineOf(menu);
-
   return (
-    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the context menu is a row's, which the Tree's own keys reach, and this only listens for it.
-    <div onContextMenu={onContextMenu}>
+    <Part menu={part.menuElement} onContextMenu={part.handleContextMenu}>
       <Tree
         aria-label={label}
         className={styles.tree}
@@ -627,9 +850,10 @@ const NetworkTrees = ({
             .filter((one) => !one.network.listed)
             .map((one) => readingKey(one.network.network)),
         ]}
+        dragAndDropHooks={part.dragAndDropHooks}
         expandedKeys={trees.filter((one) => !hidden.includes(one.network.network)).map(rowKey)}
         onExpandedChange={onExpandedChange}
-        onSelectionChange={onSelectionChange}
+        onSelectionChange={part.handleSelectionChange}
         selectedKeys={chosen._tag === "Timeline" ? [chosen.timeline] : []}
         selectionMode="single"
       >
@@ -643,7 +867,7 @@ const NetworkTrees = ({
             <TreeItem
               aria-label={`${rowLabel(network.network, activity, pane)}, ${standingWords(standingOf(network))}`}
               className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
-              data-menu={(tree.own !== undefined && menu === tree.own.id) || undefined}
+              data-menu={(tree.own !== undefined && part.menu === tree.own.id) || undefined}
               id={rowKey(one)}
               // React Aria never changes an item's id, so a row that gains its own Timeline is drawn anew.
               key={rowKey(one)}
@@ -658,7 +882,7 @@ const NetworkTrees = ({
                     network={network}
                     onMenu={(row) => {
                       if (tree.own !== undefined) {
-                        openMenu(tree.own, row);
+                        part.openMenu(tree.own, row);
                       }
                     }}
                     own={tree.own}
@@ -682,9 +906,9 @@ const NetworkTrees = ({
               {tree.children.map((timeline) => (
                 <TimelineItem
                   key={timeline.id}
-                  menu={menu === timeline.id}
+                  menu={part.menu === timeline.id}
                   onMenu={(row) => {
-                    openMenu(timeline, row);
+                    part.openMenu(timeline, row);
                   }}
                   pane={others.get(timeline.id)}
                   timeline={timeline}
@@ -694,27 +918,19 @@ const NetworkTrees = ({
           );
         })}
       </Tree>
-      {menuTimeline === undefined ? null : (
-        <TimelineMenu
-          anchor={anchor}
-          onClose={() => {
-            setMenu(undefined);
-          }}
-          timeline={menuTimeline}
-        />
-      )}
-    </div>
+    </Part>
   );
 };
 
 /**
- * The tree of Networks and their Timelines, those removed with their Timelines kept apart
- * under their own heading, and the footer.
+ * The Timelines pinned, when any are, the tree of Networks and their Timelines, those
+ * removed with their Timelines kept apart under their own heading, each in the Owner's
+ * order, and the footer.
  * @param props - The attempt to sign out.
  * @returns The sidebar.
  */
 export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
-  const networks = useAtomValue(sidebarNetworks);
+  const { networks, pinned } = useAtomValue(arrangedSidebar);
   const listed = useAtomValue(listedNetworks);
   const chosen = useAtomValue(selected);
   const live = networks.filter((network) => !network.removed);
@@ -723,6 +939,12 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
   return (
     <nav aria-label="Networks" className={styles.sidebar}>
       <div className={styles.scroll}>
+        {pinned.length === 0 ? null : (
+          <>
+            <h2 className={styles.heading}>Pinned</h2>
+            <PinnedTree pins={pinned} />
+          </>
+        )}
         <h2 className={styles.heading}>Networks</h2>
         {live.length > 0 ? (
           <NetworkTrees label="Networks and their Timelines" networks={live} />

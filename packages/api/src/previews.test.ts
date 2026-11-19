@@ -249,7 +249,14 @@ describe("ui.previews", () => {
         Option.isSome(options({ ...uiDefaults, previews }))
       ),
     }).toStrictEqual({
-      sharedOnly: ["previews", "previews.players", "previews.timelines"],
+      sharedOnly: [
+        "previews",
+        "previews.players",
+        "previews.timelines",
+        "sidebar.networks",
+        "sidebar.order",
+        "sidebar.pinned",
+      ],
       taken: [true, true, true, false, false, false],
     });
   });
@@ -357,5 +364,33 @@ describe("ui.previews.timelines", () => {
         "previews.timelines"
       ]
     ).toStrictEqual({ [timeline]: "off" });
+  });
+});
+
+describe("ui.sidebar", () => {
+  it("start empty, name ids that may have gone, and refuse a list naming one twice", () => {
+    const options = Schema.decodeUnknownOption(UiOptions);
+    const a = "00000000000001-00000001-00000000";
+
+    const decodes = (extra: Readonly<Record<string, readonly string[]>>) =>
+      Option.isSome(options({ ...uiDefaults, ...extra }));
+
+    expect({
+      default: [
+        uiDefaults["sidebar.networks"],
+        uiDefaults["sidebar.order"],
+        uiDefaults["sidebar.pinned"],
+      ],
+      gone: decodes({ "sidebar.networks": ["libera", "gone"], "sidebar.pinned": [a] }),
+      twice: [
+        decodes({ "sidebar.networks": ["libera", "libera"] }),
+        decodes({ "sidebar.order": [a, a] }),
+        decodes({ "sidebar.pinned": [a, a] }),
+      ],
+    }).toStrictEqual({
+      default: [[], [], []],
+      gone: true,
+      twice: [false, false, false],
+    });
   });
 });

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./activity": "./src/activity.ts",
+    "./arrangement": "./src/arrangement.ts",
     "./channel": "./src/channel.ts",
     "./churn": "./src/churn.ts",
     "./closing": "./src/closing.ts",
