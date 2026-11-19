@@ -38,6 +38,7 @@ import type { IntentId } from "./ids.ts";
 import {
   collectFloor,
   collectLabelled,
+  collectListed,
   floorLookup,
   isNumeric,
   lookupByCommand,
@@ -364,14 +365,15 @@ const isModelOnly = (meant: Meant): meant is ModelOnly =>
 const foldModelOnly = (
   run: Run,
   meant: ModelOnly,
-  live: boolean,
+  arrival: Arrival,
   completed: ReadonlySet<string>
 ): void => {
-  if (!live) {
+  if (!arrival.live) {
     return;
   }
 
   if (meant._tag === "Listed") {
+    collectListed(run, arrival, meant.channel, meant.members);
     foldListed(run, meant.channel, meant.members, (nick) =>
       completed.has(memberKey(meant.channel, nick))
     );
@@ -400,7 +402,7 @@ const fold = (
   const { line, live } = arrival;
 
   if (isModelOnly(meant)) {
-    foldModelOnly(run, meant, live, completed);
+    foldModelOnly(run, meant, arrival, completed);
 
     return;
   }

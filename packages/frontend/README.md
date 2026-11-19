@@ -114,7 +114,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | --- | --- |
 | Saying | `/say`, `/me`, `/msg`, `/notice`, `/query` |
 | Acting | `/topic`, `/kick`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, `/unban`, `/invite`, `/ctcp`, `/ping`, `/away`, `/back`, `/nick`, `/quote` |
-| Lookups | `/whois`, `/whowas`, `/bans`, `/exceptions`, `/invexes` |
+| Lookups | `/whois`, `/whowas`, `/names`, `/who`, `/bans`, `/exceptions`, `/invexes` |
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/focus` |
@@ -323,10 +323,11 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 
 ## Lookups
 
-What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane showing what came back.
+What `/whois`, `/whowas`, `/names`, `/who`, and a Channel's lists ask, and a card for each Pane showing what came back.
 
 - **A Lookup's nick is read as the Client reads one,** so `/whois #iirc` and `/whois *!*@host` say why in words and send nothing. `fixtures/nicks` holds both readings to the same cases.
 - **A list's command is of the Channel named, or the one in focus.** `/bans`, `/exceptions`, and `/invexes` are not offered where the head of the Channel in focus says the Network keeps no such list. Where it is unread, the Client decides.
+- **`/names` is of the Channel named, or the one in focus,** and outside a Channel with none named it says so and sends nothing, never a bare `NAMES`. **`/who` needs a mask,** one word. Their cards list the members with their prefix symbols, by the `PREFIX` of the head of the Channel in focus or RFC 1459's, and the Users matched as `user@host`, away, and realname. A reply cut short says why, as a list's does.
 - **A mask can be removed while Self may,** by the head of the list's own Channel, which is followed as a Pane's Channel's is while the card lasts (`listedChannels`), wherever the card shows: an operator, or a rank above it in `PREFIX`, holds it. A half-operator is not offered it, since whether one may differs by Ircd and ISUPPORT does not say. Removing sends the unset under an intent of its own, and the card hides that mask while it is in flight. The Client refusing it, no answer within the runtime's bound, which never sends it again, or the Ircd refusing it later, an `ActionRefused` item of that intent in the changes stream, shows it again, and so does an overflow or a reset of the stream, which could have hidden that refusal.
 - **One card a Pane.** A new Lookup replaces it, and an answer for a card no Pane holds changes nothing.
 - **A card shows while its Pane has open the Timeline it was asked from,** and lives as long as its Pane.

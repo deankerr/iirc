@@ -698,6 +698,19 @@ export const endOfNames = (run: Run, channel: string): void => {
   pruneUsers(run);
 };
 
+/**
+ * A `NAMES` answer ended without its `366`, so what it listed is no listing: it is
+ * forgotten, and neither replaces the members nor waits to merge into the next listing.
+ * A listing of Self's own `JOIN` is left to its own end.
+ * @param run - The step.
+ * @param channel - The Channel, as the Lookup named it.
+ */
+export const dropListing = (run: Run, channel: string): void => {
+  changeJoined(run, channel, (joined) =>
+    joined.burst ? joined : { ...joined, listing: undefined }
+  );
+};
+
 // Keys and values, where the first of any that share a key is kept.
 const once = <V>(entries: readonly (readonly [string, V])[]): ReadonlyMap<string, V> => {
   const next = new Map<string, V>();

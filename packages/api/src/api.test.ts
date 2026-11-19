@@ -962,6 +962,53 @@ describe("the contract", () => {
     ]).toStrictEqual([asked, listed, whole, refused, false, false, []]);
   });
 
+  it("carries a Channel's members and the Users a mask matched, each with its cut, and an empty list whole", () => {
+    const names = { intent: "n1", lookup: { _tag: "Names", channel: "#iirc" } } as const;
+    const who = { intent: "w1", lookup: { _tag: "Who", mask: "peer*" } } as const;
+
+    const members = {
+      _tag: "Members",
+      cut: "Bounded",
+      members: [
+        { nick: "owner", prefixes: ["o", "v"] },
+        { nick: "peer", prefixes: [] },
+      ],
+      notes: [],
+    } as const;
+
+    const users = {
+      _tag: "Users",
+      cut: null,
+      notes: [],
+      users: [
+        { away: true, host: "h.example", nick: "peer", realname: "A Peer", user: "p" },
+        { away: null, host: "h2.example", nick: "other", realname: null, user: "o" },
+      ],
+    } as const;
+
+    const empty = { ...members, cut: null, members: [] };
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const nullable = `{"anyOf":[${untrusted},{"type":"null"}]}`;
+    const looked = JSON.stringify(document.paths["/api/networks/{network}/lookups/{intent}"]);
+
+    expect([
+      Schema.decodeSync(LookRequest)(names),
+      Schema.decodeSync(LookRequest)(who),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(members)),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(users)),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(empty)),
+      Schema.is(LookRequest)({ lookup: { _tag: "Names", channel: "" } }),
+      Schema.is(LookRequest)({ lookup: { _tag: "Who", mask: "" } }),
+      Schema.is(LookRequest)({ lookup: { _tag: "Who", mask: "a\r\nQUIT" } }),
+      [
+        `"properties":{"nick":${untrusted},"prefixes":{"type":"array","items":${untrusted}}}`,
+        `"realname":${nullable}`,
+        `"host":${untrusted}`,
+        `"user":${untrusted}`,
+      ].filter((field) => !looked.includes(field)),
+    ]).toStrictEqual([names, who, members, users, empty, false, false, false, []]);
+  });
+
   it("carries a standard reply and a Lookup's notes whole, each field its own, and only the three kinds", () => {
     const reply = {
       code: "SLOW",

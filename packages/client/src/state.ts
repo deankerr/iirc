@@ -13,7 +13,15 @@ import { Instant } from "./ids.ts";
 import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason, MaskEntry, Notes, Profile, RefusedAction } from "./news.ts";
+import type {
+  EndReason,
+  MaskEntry,
+  NamesEntry,
+  Notes,
+  Profile,
+  RefusedAction,
+  WhoEntry,
+} from "./news.ts";
 import type { Seam } from "./seam.ts";
 import type { Users } from "./users.ts";
 
@@ -373,6 +381,10 @@ export interface Looking {
   readonly profiles: readonly Profile[];
   /** The masks the reply has listed so far, in order, for a Channel's list. */
   readonly masks: readonly MaskEntry[];
+  /** The members a `NAMES` reply has listed so far, in order, up to {@link maxLookupEntries}. */
+  readonly members: readonly NamesEntry[];
+  /** The Users a `WHO` reply has described so far, in order, up to {@link maxLookupEntries}. */
+  readonly users: readonly WhoEntry[];
   /** The mode a Channel's list was asked by, which a `472` names, or `undefined` for a User's. */
   readonly mode: string | undefined;
   /** The error its reply held, which it reports at its end. */
@@ -381,7 +393,10 @@ export interface Looking {
   readonly notes: Notes;
   /** Whether its end numeric came, inside a labelled answer, which ends only with that answer. */
   readonly ended: boolean;
-  /** Whether its reply ran past {@link maxLookupLines}, so what came after was not kept. */
+  /**
+   * Whether its reply ran past {@link maxLookupLines}, or past {@link maxLookupEntries}
+   * members or Users, so what came after was not kept.
+   */
   readonly bounded: boolean;
   /**
    * For each fact of Knowledge its reply spoke of, the time of the Line that said it, and
@@ -404,6 +419,13 @@ export const maxLookups = 8;
 
 /** How many Lines of one Lookup's reply are kept. */
 export const maxLookupLines = 64;
+
+/**
+ * How many members of a `NAMES` reply, or Users of a `WHO` reply, one Lookup keeps. Each
+ * one's strings come from one Line, which the parser bounds, and its notes still count
+ * against {@link maxLookupLines}.
+ */
+export const maxLookupEntries = 500;
 
 /** How many Lines of actions a Connection keeps awaiting an answer. */
 export const maxActing = 64;

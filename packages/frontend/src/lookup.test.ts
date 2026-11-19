@@ -26,11 +26,13 @@ import {
   isLookupNick,
   listedChannels,
   listLookOf,
+  namesLookOf,
   nickRulesOf,
   parseLookupNick,
   reduceLookups,
   rfcRanks,
   shownCard,
+  whoLookOf,
 } from "./lookup.ts";
 import type { Card, Look, Lookups, LookupsEvent } from "./lookup.ts";
 import { nickColour } from "./render.ts";
@@ -676,7 +678,7 @@ describe("a card as a view draws it", () => {
     const words = (more: readonly LookupsEvent[], look = whois()) => {
       const { body } = cardShown(world(iirc), cardAfter(more, look), time);
 
-      return body._tag === "Profiles" || body._tag === "Masks" ? body.note : body.words;
+      return "note" in body ? body.note : body.words;
     };
 
     const whowas: Look = { ...whois(), lookup: { _tag: "Whowas", nick: "old" } };
@@ -1047,7 +1049,7 @@ describe("a card of a Channel's list", () => {
     const words = (more: LookupsEvent, look: Look = bans) => {
       const { body } = cardShown(world(iirc), cardAfter([more], look), time);
 
-      return body._tag === "Profiles" || body._tag === "Masks" ? body.note : body.words;
+      return "note" in body ? body.note : body.words;
     };
 
     expect({
@@ -1076,6 +1078,245 @@ describe("a card of a Channel's list", () => {
       noChannel: "The Network has no Channel #IIRC (403).",
       notOffered: "Not looked up: the Network keeps no such list, by its ISUPPORT.",
       unsendable: "Not looked up: the Network cannot be asked about that Channel.",
+    });
+  });
+});
+
+/**
+ * A command read as a Look of a Channel's members, from `#iirc`, by its head's ranks.
+ * @param channel - The Channel.
+ * @returns What it reads as.
+ */
+const namesOf = (channel: string) => ({
+  _tag: "Parsed",
+  value: [
+    {
+      _tag: "Look",
+      lookup: { _tag: "Names", channel },
+      network,
+      ranks: head.ranks,
+      timeline: timelineId(iirc),
+    },
+  ],
+});
+
+describe("/names", () => {
+  const context = inIirc();
+
+  it("is of the Channel in focus, or the one named, shown by the head's ranks", () => {
+    expect([interpret("/names", context), interpret("/NAMES #Other", context)]).toStrictEqual([
+      namesOf("#iirc"),
+      namesOf("#Other"),
+    ]);
+  });
+
+  it("is never a bare NAMES: outside a Channel it needs one named, and says why in words", () => {
+    const unread = { ...contextOf(world(own)), head: undefined };
+
+    expect({
+      direct: refusalOf("/names", contextOf(world(peer))),
+      named: interpret("/names #a", unread),
+      network: refusalOf("/names", unread),
+      nick: refusalOf("/names peer"),
+      two: refusalOf("/names #a #b"),
+    }).toStrictEqual({
+      direct: "Of which Channel? Open it, or name it: /names [channel]",
+      named: {
+        _tag: "Parsed",
+        value: [
+          {
+            _tag: "Look",
+            lookup: { _tag: "Names", channel: "#a" },
+            network,
+            ranks: rfcRanks,
+            timeline: timelineId(own),
+          },
+        ],
+      },
+      network: "Of which Channel? Open it, or name it: /names [channel]",
+      nick: "peer is no Channel's name. /names [channel]",
+      two: "Give one Channel. /names [channel]",
+    });
+  });
+
+  it("needs a Timeline open and its Network's Session", () => {
+    const when = commandNamed("names")?.when ?? [];
+    const offline = { ...contextOf(world(iirc)), session: false };
+
+    expect([unmet(when, contextOf(world(undefined))), unmet(when, offline)]).not.toContain(
+      undefined
+    );
+  });
+});
+
+describe("/who", () => {
+  const context = inIirc();
+
+  it("is of one mask, on the open Timeline's Network", () => {
+    expect(interpret("/who *!*@host.example", context)).toStrictEqual({
+      _tag: "Parsed",
+      value: [
+        {
+          _tag: "Look",
+          lookup: { _tag: "Who", mask: "*!*@host.example" },
+          network,
+          ranks: rfcRanks,
+          timeline: timelineId(iirc),
+        },
+      ],
+    });
+  });
+
+  it("needs a mask, and one word of it, and says why in words", () => {
+    expect({
+      none: refusalOf("/who"),
+      two: refusalOf("/who a b"),
+    }).toStrictEqual({
+      none: "Which mask? /who <mask>",
+      two: "Give one mask. /who <mask>",
+    });
+  });
+
+  it("needs a Timeline open and its Network's Session", () => {
+    const when = commandNamed("who")?.when ?? [];
+    const offline = { ...contextOf(world(iirc)), session: false };
+
+    expect([unmet(when, contextOf(world(undefined))), unmet(when, offline)]).not.toContain(
+      undefined
+    );
+  });
+});
+
+/**
+ * What a card says in words when its result held no one, or was cut short: its words, or its
+ * note, or its body when it said neither.
+ * @param look - The Lookup.
+ * @param encoded - The result.
+ * @returns The words.
+ */
+const peopleWords = (look: Look, encoded: typeof LookResult.Encoded) => {
+  const { body } = cardShown(world(iirc), cardAfter([result(encoded)], look), time);
+
+  if (body._tag === "Said") {
+    return body.words;
+  }
+
+  return "note" in body ? body.note : body;
+};
+
+describe("a card of a Channel's members", () => {
+  const names = namesLookOf("#iirc", network, timelineId(iirc), head);
+
+  it("shows each member in their colour with the symbols of their prefixes by the head's ranks", () => {
+    const card = cardAfter(
+      [
+        result({
+          _tag: "Members",
+          cut: null,
+          members: [
+            { nick: "‮op", prefixes: ["o", "v"] },
+            { nick: "plain", prefixes: [] },
+            { nick: "odd", prefixes: ["h"] },
+          ],
+          notes: [],
+        }),
+      ],
+      names
+    );
+
+    expect(cardShown(world(iirc), card, time)).toStrictEqual({
+      body: {
+        _tag: "Members",
+        members: [
+          { colour: nickColour("‮op"), label: "‮op‬, operator, voice", nick: "‮op‬", symbols: "@+" },
+          { colour: nickColour("plain"), label: "plain", nick: "plain", symbols: "" },
+          { colour: nickColour("odd"), label: "odd, mode h", nick: "odd", symbols: "" },
+        ],
+        note: undefined,
+      },
+      kind: "Names",
+      notes: [],
+      subject: { _tag: "Channel", name: "#iirc" },
+    });
+  });
+
+  it("says in words when the reply stopped short, empty or not, or no one is there", () => {
+    const cut = "Bounded";
+
+    expect({
+      bounded: peopleWords(names, {
+        _tag: "Members",
+        cut,
+        members: [{ nick: "a", prefixes: [] }],
+        notes: [],
+      }),
+      boundedEmpty: peopleWords(names, { _tag: "Members", cut, members: [], notes: [] }),
+      empty: peopleWords(names, { _tag: "Members", cut: null, members: [], notes: [] }),
+      noChannel: peopleWords(names, { _tag: "NotFound", notes: [], reply: "403" }),
+    }).toStrictEqual({
+      bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",
+      boundedEmpty: "The reply ran longer than a Lookup keeps, so this is how it began.",
+      empty: "#iirc has no members.",
+      noChannel: "The Network has no Channel #iirc (403).",
+    });
+  });
+});
+
+describe("a card of the Users a mask matched", () => {
+  const who = whoLookOf("*!*@Host", network, timelineId(iirc));
+
+  it("shows each User's nick, user@host, whether away, and realname where said", () => {
+    const card = cardAfter(
+      [
+        result({
+          _tag: "Users",
+          cut: "TimedOut",
+          notes: [],
+          users: [
+            { away: true, host: "h.example", nick: "peer", realname: "A Peer", user: "p" },
+            { away: null, host: "‮h", nick: "other", realname: "  ", user: "o" },
+          ],
+        }),
+      ],
+      who
+    );
+
+    expect(cardShown(world(iirc), card, time)).toStrictEqual({
+      body: {
+        _tag: "Users",
+        note: "The Network had not finished replying after 30 seconds, so this is what had come.",
+        users: [
+          {
+            away: true,
+            colour: nickColour("peer"),
+            mask: "p@h.example",
+            nick: "peer",
+            realname: "A Peer",
+          },
+          {
+            away: false,
+            colour: nickColour("other"),
+            mask: "o@‮h‬",
+            nick: "other",
+            realname: undefined,
+          },
+        ],
+      },
+      kind: "Who",
+      notes: [],
+      subject: { _tag: "Mask", mask: "*!*@Host" },
+    });
+  });
+
+  it("says in words when no one matched, or it could not be asked", () => {
+    expect({
+      empty: peopleWords(who, { _tag: "Users", cut: null, notes: [], users: [] }),
+      notFound: peopleWords(who, { _tag: "NotFound", notes: [], reply: "401" }),
+      unsendable: peopleWords(who, { _tag: "Refused", reason: "Unsendable" }),
+    }).toStrictEqual({
+      empty: "No one matches *!*@Host.",
+      notFound: "The Network has no one matching *!*@Host (401).",
+      unsendable: "Not looked up: the Network cannot be asked about that mask.",
     });
   });
 });

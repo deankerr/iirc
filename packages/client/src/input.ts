@@ -105,6 +105,10 @@ export const Lookup = Schema.TaggedUnion({
   Exceptions: { channel: Schema.String },
   /** A Channel's invitation masks, by the list mode `INVEX` names. */
   Invitations: { channel: Schema.String },
+  /** `NAMES` of one Channel: who the Network says is in it now. */
+  Names: { channel: Schema.String },
+  /** `WHO` of one mask, a Channel's name or a mask of Users. */
+  Who: { mask: Schema.String },
   /** `WHOIS` of one nick: what the Network says of that User now. */
   Whois: { nick: Schema.String },
   /** `WHOWAS` of one nick: who held it before. */

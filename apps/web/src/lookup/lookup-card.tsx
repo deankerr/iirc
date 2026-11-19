@@ -1,18 +1,26 @@
 /**
  * A Pane's Lookup card: a transient panel under its header, over its Timeline, showing what
- * `/whois`, `/whowas`, or a Channel's list found, compact as the header is. Each User's
+ * `/whois`, `/whowas`, `/names`, `/who`, or a Channel's list found, compact as the header is. Each User's
  * nick in their colour, which opens the menu on it, `user@host`, realname, server, idle and signed on, account, away,
  * the Channels with their prefixes, each opening its Timeline or starting `/join`, and the
  * numerics read for nothing, dimly. Each mask of a list with who set it and when, and,
  * while Self may, a button that removes it. Every text a Network sent is a text node in its
- * own isolate. Escape, in the card or in the composer with nothing else to let go of, or
+ * own isolate. Each member `/names` found as a wrapped nick with its prefix symbols, and each
+ * User `/who` matched as one row of nick, `user@host`, away, and realname, dimly. Escape, in the card or in the composer with nothing else to let go of, or
  * its close button, puts it away.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId } from "@iirc/api";
-import type { ChannelShown, MaskShown, ProfileShown, SubjectShown } from "@iirc/frontend/lookup";
+import type {
+  ChannelShown,
+  MaskShown,
+  MemberShown,
+  ProfileShown,
+  SubjectShown,
+  UserShown,
+} from "@iirc/frontend/lookup";
 import type { KeyboardEvent } from "react";
 import { useId } from "react";
 
@@ -79,6 +87,29 @@ const Field = ({ label, value }: { readonly label: string; readonly value: strin
   );
 
 /**
+ * A nick that opens the menu on it, in the Timeline the card shows over, or only the nick
+ * while that is unknown.
+ * @param props - The nick as drawn, its colour, and the Timeline.
+ * @returns The nick.
+ */
+const Who = ({
+  colour,
+  nick,
+  timeline,
+}: {
+  readonly colour: number;
+  readonly nick: string;
+  readonly timeline: TimelineId | undefined;
+}) =>
+  timeline === undefined ? (
+    <Nick colour={colour} nick={nick} />
+  ) : (
+    <NickButton nick={nick} timeline={timeline}>
+      <Nick colour={colour} nick={nick} />
+    </NickButton>
+  );
+
+/**
  * One User, as the reply described them, their nick opening the menu on it.
  * @param props - The User, and the Timeline the card shows over, if known.
  * @returns The profile.
@@ -100,13 +131,7 @@ const Profile = ({
   return (
     <div className={styles.profile}>
       <p className={styles.line}>
-        {timeline === undefined ? (
-          <Nick colour={profile.colour} nick={profile.nick} />
-        ) : (
-          <NickButton nick={profile.nick} timeline={timeline}>
-            <Nick colour={profile.colour} nick={profile.nick} />
-          </NickButton>
-        )}
+        <Who colour={profile.colour} nick={profile.nick} timeline={timeline} />
         {profile.mask === undefined ? null : <bdi className={styles.dim}>{profile.mask}</bdi>}
         {profile.realname === undefined ? null : <bdi>{profile.realname}</bdi>}
       </p>
@@ -185,7 +210,45 @@ const Mask = ({ mask, pane }: { readonly mask: MaskShown; readonly pane: string 
 };
 
 /**
- * What a card looked up: a nick in its colour, or a Channel's name.
+ * One member of a Channel: the symbols of their prefixes, dimly, and their nick.
+ * @param props - The member, and the Timeline the card shows over, if known.
+ * @returns The member.
+ */
+const Member = ({
+  member,
+  timeline,
+}: {
+  readonly member: MemberShown;
+  readonly timeline: TimelineId | undefined;
+}) => (
+  <li aria-label={member.label} className={styles.member}>
+    {member.symbols === "" ? null : <bdi className={styles.symbol}>{member.symbols}</bdi>}
+    <Who colour={member.colour} nick={member.nick} timeline={timeline} />
+  </li>
+);
+
+/**
+ * One User a `WHO` matched, in a row: nick, `user@host`, away, and realname, dimly.
+ * @param props - The User, and the Timeline the card shows over, if known.
+ * @returns The User.
+ */
+const Matched = ({
+  timeline,
+  user,
+}: {
+  readonly timeline: TimelineId | undefined;
+  readonly user: UserShown;
+}) => (
+  <li className={styles.user}>
+    <Who colour={user.colour} nick={user.nick} timeline={timeline} />
+    <bdi className={styles.dim}>{user.mask}</bdi>
+    {user.away ? <span className={styles.dim}>away</span> : null}
+    {user.realname === undefined ? null : <bdi className={styles.dim}>{user.realname}</bdi>}
+  </li>
+);
+
+/**
+ * What a card looked up: a nick in its colour, a Channel's name, or a mask.
  * @param props - What it looked up.
  * @returns It.
  */
@@ -193,7 +256,7 @@ const Subject = ({ subject }: { readonly subject: SubjectShown }) =>
   subject._tag === "Nick" ? (
     <Nick colour={subject.colour} nick={subject.nick} />
   ) : (
-    <bdi>{subject.name}</bdi>
+    <bdi>{subject._tag === "Mask" ? subject.mask : subject.name}</bdi>
   );
 
 /** What each Lookup is called in its card's heading. */
@@ -201,6 +264,8 @@ const kindWords = {
   Bans: "bans",
   Exceptions: "exceptions",
   Invitations: "invitation masks",
+  Names: "names",
+  Who: "who",
   Whois: "whois",
   Whowas: "whowas",
 } as const;
@@ -275,6 +340,30 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
                 // A mask holds no state of its own, so one a removal moves draws the same.
                 // oxlint-disable-next-line react/no-array-index-key
                 <Mask key={index} mask={mask} pane={pane} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {body._tag === "Members" ? (
+          <>
+            {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
+            <ul aria-label="Members" className={styles.members}>
+              {body.members.map((member, index) => (
+                // A member's place in the reply tells two apart, and it never moves.
+                // oxlint-disable-next-line react/no-array-index-key
+                <Member key={index} member={member} timeline={timeline} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {body._tag === "Users" ? (
+          <>
+            {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
+            <ul aria-label="Users" className={styles.users}>
+              {body.users.map((user, index) => (
+                // A User's place in the reply tells two apart, and it never moves.
+                // oxlint-disable-next-line react/no-array-index-key
+                <Matched key={index} timeline={timeline} user={user} />
               ))}
             </ul>
           </>
