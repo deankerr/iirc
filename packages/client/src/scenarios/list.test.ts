@@ -326,6 +326,28 @@ describe("a Channels Lookup", () => {
     expect.assertions(0);
   });
 
+  // Catches: an older WHOIS of a nick that reads as LIST taking the 263 that refuses the
+  // LIST, so the LIST never ends and every later /list is Busy.
+  it("takes a 263 naming LIST for itself, past an older WHOIS of List", () => {
+    played([
+      online(),
+      lines(
+        "!! whois List",
+        ">> WHOIS List",
+        "!! list",
+        ">> LIST",
+        "<< :irc.test 263 iirc LIST :Please wait a while and try again.",
+        "?? looked-up i2 list failed=263",
+        "<< :irc.test 318 iirc List :End of /WHOIS list.",
+        "?? looked-up i1 whois=List not-found=318",
+        "!! list",
+        ">> LIST"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
   // Catches: a try-again after the rows began ending the Lookup, so the rest of the rows
   // fall to the next one.
   it("holds to its 323 once its rows have begun, whatever refuses it after", () => {

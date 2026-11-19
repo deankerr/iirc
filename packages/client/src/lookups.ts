@@ -128,9 +128,10 @@ const only: Readonly<Record<UserLookup["_tag"], ReadonlySet<string>>> = {
 /**
  * Reply numerics the Client reads for something else, which name a nick second as a
  * Lookup's reply does, so none is taken for part of one: a `LIST`'s `321`, `322`, and
- * `323` among them, whatever their second parameter says.
+ * `323` among them, whatever their second parameter says, and a `263`, whose second
+ * parameter names a command, never a nick.
  */
-const readElsewhere: ReadonlySet<string> = new Set(["321", "322", "323", "341", "353"]);
+const readElsewhere: ReadonlySet<string> = new Set(["263", "321", "322", "323", "341", "353"]);
 
 /** Error numerics that answer a Lookup by naming its nick, or naming nothing, as `431` does. */
 const errors: ReadonlySet<string> = new Set(["401", "402", "406", "431"]);
