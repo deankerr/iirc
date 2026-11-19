@@ -4163,6 +4163,11 @@ export interface SidebarNetwork {
    * read again. While none are held and they are read, having none says nothing.
    */
   readonly listed: boolean;
+  /**
+   * Whether every page of its Timelines is read, so a Timeline it does not hold is not
+   * there, which `listed` alone does not say while later pages are still read.
+   */
+  readonly complete: boolean;
   /** It was removed with its Timelines kept, so they are only read. */
   readonly removed: boolean;
 }
@@ -4193,6 +4198,7 @@ export const sidebar = (
       return {
         away: network.away,
         closed: all.filter(hidden),
+        complete: network.list.fresh,
         connection: network.connection,
         listed: network.list.fresh || network.timelines.size > 0,
         network: network.network,

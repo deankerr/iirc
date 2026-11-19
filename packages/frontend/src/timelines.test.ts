@@ -2644,6 +2644,42 @@ const began = (sequence: number) =>
 const statusWanted = (state: Timelines) => wanted(state).some((read) => read._tag === "Status");
 
 describe("whether a Session carries tags", () => {
+  it("says a Network's Timelines are complete only once their last page is read", () => {
+    const page = (more: boolean, ...timelines: readonly ReturnType<typeof timelineOf>[]) => ({
+      ...listOf(5, ...timelines),
+      more,
+    });
+
+    let state = folded(initialTimelines, [
+      { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
+      { _tag: "NetworksRead", entries: entries("alpha") },
+      { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
+      {
+        _tag: "ListRead",
+        after: undefined,
+        network: alpha,
+        page: page(true, timelineOf(idOf(1), "Network", "alpha", 1)),
+      },
+    ]);
+
+    const first = sidebar(state).map((network) => [network.listed, network.complete]);
+
+    state = folded(state, [
+      { _tag: "ReadStarted", read: { _tag: "List", after: one, attempt: 0, network: alpha } },
+      {
+        _tag: "ListRead",
+        after: one,
+        network: alpha,
+        page: page(false, timelineOf(idOf(2), "Channel", "#b", 2)),
+      },
+    ]);
+
+    expect({
+      first,
+      last: sidebar(state).map((network) => [network.listed, network.complete]),
+    }).toStrictEqual({ first: [[true, false]], last: [[true, true]] });
+  });
+
   it("is what known says, and unknown once a Session begins, until known is read again", () => {
     const read = folded(following(), [
       { _tag: "ReadStarted", read: statusOfAlpha },

@@ -152,14 +152,14 @@ const once = <A>(names: readonly A[]): readonly A[] => [...new Set(names)];
 
 /**
  * The Owner's order without the ids of Timelines that have gone, so a write does not carry
- * them on for ever. Only once every Network's Timelines are known, since an id of one not
- * yet read may name a Timeline still there.
+ * them on for ever. Only once every page of every Network's Timelines is read, since an id
+ * of one not yet read may name a Timeline still there.
  * @param networks - The sidebar, in its fixed order.
  * @param arrangement - The Owner's order.
  * @returns The order, with what has gone dropped when that can be told.
  */
 const lasting = (networks: readonly SidebarNetwork[], arrangement: Arrangement): Arrangement => {
-  if (!networks.every((network) => network.listed)) {
+  if (!networks.every((network) => network.complete)) {
     return arrangement;
   }
 

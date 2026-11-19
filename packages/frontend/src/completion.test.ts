@@ -922,6 +922,7 @@ const networkOf = (
 ): SidebarNetwork => ({
   away: { _tag: "Unknown" },
   closed,
+  complete: true,
   connection: { _tag: "Unknown" },
   listed: true,
   network: on,

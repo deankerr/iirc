@@ -67,6 +67,7 @@ const net = (
   return {
     away: { _tag: "Unknown" },
     closed: closed.toSorted(sidebarOrder),
+    complete: true,
     connection: { _tag: "Unknown" },
     listed: true,
     network: network(name),
@@ -296,7 +297,8 @@ describe("arranging the Sidebar", () => {
   });
 
   it("drops what has gone from what it writes once every Network is read, and keeps it while one is read", () => {
-    const reading: SidebarNetwork = { ...oftc, closed: [], listed: false, timelines: [] };
+    // oftc's first page is held, and later pages are still read.
+    const reading: SidebarNetwork = { ...oftc, complete: false };
     const given = { order: [id(99), id(11), id(21)], pinned: [id(98), id(13)] };
 
     expect({
