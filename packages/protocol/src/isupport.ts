@@ -322,7 +322,7 @@ const extbanName = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 /**
  * Reads `EXTBAN` and `ACCOUNTEXTBAN` together: how a ban names an account. Hostile input,
  * so a token that does not follow its grammar to the letter means nothing is offered,
- * never a guessed mask. A name of one letter is the type's letter, so it is kept only where
+ * never a guessed mask. A name of one character is the type's letter, so it is kept only where
  * `EXTBAN` lists it, and a longer name, which `EXTBAN` cannot list, is kept as given.
  * @param extban - `EXTBAN`'s value, or `undefined` if it was not sent.
  * @param accountExtban - `ACCOUNTEXTBAN`'s value, or `undefined` if it was not sent.
