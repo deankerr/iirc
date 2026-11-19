@@ -68,7 +68,7 @@ import { openOptions } from "../options/atoms.ts";
 import { arrangedSidebar, arrangement } from "../options/ui.ts";
 import { compact, drawerState } from "../page/drawer.ts";
 import { previewsModes } from "../previews/atoms.ts";
-import { signOut } from "../sign-in/atoms.ts";
+import { SignOutButton } from "../sign-in/sign-out-button.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
@@ -544,7 +544,6 @@ const Footer = ({
 }) => {
   const showOptions = useAtomSet(openOptions);
   const setDrawer = useAtomSet(drawerState);
-  const signOutNow = useAtomSet(signOut);
   const carryOut = useAtomSet(perform);
   const drawer = useAtomValue(compact);
 
@@ -567,16 +566,7 @@ const Footer = ({
         >
           Options
         </Button>
-        <Button
-          isPending={attempt._tag === "Waiting"}
-          onPress={() => {
-            signOutNow();
-          }}
-          size="small"
-          variant="quiet"
-        >
-          Sign out
-        </Button>
+        <SignOutButton attempt={attempt} size="small" />
         {drawer ? null : (
           <IconButton
             className={styles.hide}

@@ -9,8 +9,9 @@ import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
 import { uiKnown } from "../options/ui.ts";
-import { check, signInState, signOut } from "../sign-in/atoms.ts";
+import { check, signInState } from "../sign-in/atoms.ts";
 import { SignInScreen } from "../sign-in/sign-in-screen.tsx";
+import { SignOutButton } from "../sign-in/sign-out-button.tsx";
 import { Button } from "../ui/button.tsx";
 import { Shell } from "./shell.tsx";
 
@@ -54,29 +55,17 @@ const Checking = ({ check: attempt }: { readonly check: Attempt }) => {
  * @param props - The attempt to sign out.
  * @returns The screen.
  */
-const Reading = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
-  const signOutNow = useAtomSet(signOut);
-
-  return (
-    <main className={styles.checking}>
-      <p className={styles.muted}>Reading…</p>
-      {attempt._tag === "Failed" ? (
-        <p className={styles.failure} role="alert">
-          {explain(attempt.failure)}
-        </p>
-      ) : null}
-      <Button
-        isPending={attempt._tag === "Waiting"}
-        onPress={() => {
-          signOutNow();
-        }}
-        variant="quiet"
-      >
-        Sign out
-      </Button>
-    </main>
-  );
-};
+const Reading = ({ signOut: attempt }: { readonly signOut: Attempt }) => (
+  <main className={styles.checking}>
+    <p className={styles.muted}>Reading…</p>
+    {attempt._tag === "Failed" ? (
+      <p className={styles.failure} role="alert">
+        {explain(attempt.failure)}
+      </p>
+    ) : null}
+    <SignOutButton attempt={attempt} />
+  </main>
+);
 
 /**
  * The screen for the sign-in state. Signed in, the shell waits for the shared options under
