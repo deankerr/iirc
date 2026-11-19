@@ -1113,6 +1113,16 @@ const entriesOf = (menu: HTMLElement | null) =>
     (entry) => `${entry.getAttribute("aria-checked") === "true" ? "* " : ""}${entry.textContent}`
   );
 
+/**
+ * Puts Enter down on an element, outside of React's `act`.
+ * @param element - The element.
+ */
+const enterOn = (element: HTMLElement) => {
+  element.dispatchEvent(
+    new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: "Enter", key: "Enter" })
+  );
+};
+
 describe("an option chosen from a menu", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -1235,6 +1245,49 @@ describe("an option chosen from a menu", () => {
       menu: false,
       starting: "system",
     });
+  });
+
+  it("lets Custom… go when another row is acted on before its editor opens", async () => {
+    const fake = signedIn();
+    const { container, registry } = await uiShown(fake);
+    const menu = await menuFor(container, "ui.font");
+
+    const custom = [...(menu?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].at(
+      -1
+    );
+
+    if (custom === undefined) {
+      throw new Error("no Custom…");
+    }
+
+    await doing(() => {
+      custom.focus();
+    });
+
+    const other = rowElement(container, "ui.time");
+
+    // Custom…, and then, within the same frame, Enter on another row.
+    await doing(() => {
+      enterOn(custom);
+      other.focus();
+      enterOn(other);
+      other.dispatchEvent(
+        new KeyboardEvent("keyup", { bubbles: true, code: "Enter", key: "Enter" })
+      );
+    });
+
+    // A frame asked for now runs after any Custom… asked for before it.
+    let framed = false;
+
+    requestAnimationFrame(() => {
+      framed = true;
+    });
+    await settled(() => framed);
+
+    expect({
+      editing: registry.get(optionsState).editing,
+      field: container.querySelector('input[aria-label="Value of ui.font"]') !== null,
+    }).toStrictEqual({ editing: "ui.time", field: false });
   });
 
   it("opens a value that is none of the choices as Custom…", async () => {

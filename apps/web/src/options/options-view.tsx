@@ -20,7 +20,7 @@ import { menuOf, parseOwnerText, parseUiText } from "@iirc/frontend/options";
 import type { Menu as Choices, Option, Value } from "@iirc/frontend/options";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
-import { useContext, useId, useRef, useState } from "react";
+import { useContext, useEffect, useId, useRef, useState } from "react";
 import {
   GridList,
   GridListItem,
@@ -467,6 +467,25 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const noticeId = useId();
   // The option whose menu gave way to its editor, by "Custom…", while it is edited.
   const [customised, setCustomised] = useState<string | undefined>(undefined);
+  // The frame that opens an editor by "Custom…", until it runs or something else is done.
+  const customising = useRef<number | undefined>(undefined);
+
+  const stopCustomising = () => {
+    if (customising.current !== undefined) {
+      cancelAnimationFrame(customising.current);
+      customising.current = undefined;
+    }
+  };
+
+  // Closing the view lets it go.
+  useEffect(
+    () => () => {
+      if (customising.current !== undefined) {
+        cancelAnimationFrame(customising.current);
+      }
+    },
+    []
+  );
 
   // Closing shows what the Pane showed before, and gives the composer the focus, as closing
   // the search does.
@@ -477,6 +496,15 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
 
   // Escape closes the view, unless something in it took it first: an edit, a question, or
   // the filter clearing its text.
+  // A key pressed in the view, not in a menu laid over it, is the Owner doing something else,
+  // which a pending "Custom…" gives way to. It is heard on its way in, as a row keeps its
+  // arrows and Enter to itself.
+  const onViewKeyDownCapture = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target instanceof Node && event.currentTarget.contains(event.target)) {
+      stopCustomising();
+    }
+  };
+
   const onViewKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (
       event.key !== "Escape" ||
@@ -511,6 +539,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
       return;
     }
 
+    stopCustomising();
+
     if (option.kind._tag === "Toggle") {
       const on = option.value._tag === "Shown" && option.value.text === "on";
 
@@ -530,8 +560,20 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   // holds the page loses the focus to its row.
   const customise = (name: string) => {
     edit(undefined);
-    focusRow(name)();
-    requestAnimationFrame(() => {
+    stopCustomising();
+    customising.current = requestAnimationFrame(() => {
+      customising.current = undefined;
+
+      const row = [...(list.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [])].find(
+        (one) => one.dataset.key === name
+      );
+
+      // A row filtered away since has nothing to edit.
+      if (row === undefined) {
+        return;
+      }
+
+      row.focus();
       setCustomised(name);
       edit(name);
     });
@@ -558,8 +600,13 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const asked = named(confirming);
 
   return (
-    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
-    <section aria-label="Options" className={styles.view} onKeyDown={onViewKeyDown}>
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys, and any key to let a pending Custom… go.
+    <section
+      aria-label="Options"
+      className={styles.view}
+      onKeyDown={onViewKeyDown}
+      onKeyDownCapture={onViewKeyDownCapture}
+    >
       <PaneBar
         end={
           <IconButton
