@@ -361,6 +361,10 @@ const About = ({ candidate }: { readonly candidate: Candidate }) => {
       return <span className={styles.detail}>{networkDescription(candidate)}</span>;
     }
 
+    case "Alias": {
+      return <span className={styles.description}>{candidate.line}</span>;
+    }
+
     case "Word":
     case "Emoji": {
       return null;
@@ -925,7 +929,10 @@ const Composer = ({
    * @param element - The textarea.
    */
   const sendFrom = (element: HTMLTextAreaElement | null) => {
-    if (element !== null && linesOf(element.value).some((line) => typesCredential(line))) {
+    if (
+      element !== null &&
+      linesOf(element.value).some((line) => typesCredential(line, context.aliases))
+    ) {
       element.value = "";
     }
 

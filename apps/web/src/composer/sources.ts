@@ -14,7 +14,7 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { keymapState } from "../keys/state.ts";
 import { optionsState } from "../options/atoms.ts";
-import { uiInEffect } from "../options/ui.ts";
+import { aliasesShown, uiInEffect } from "../options/ui.ts";
 import { themesListed } from "../theme/atoms.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
@@ -28,6 +28,7 @@ export const emojiState = Atom.make<readonly Emoji[] | undefined>(undefined).pip
 export const sourcesAt = Atom.family((place: Place) =>
   Atom.make((get): Sources =>
     sourcesOf(get(timelinesState), place, {
+      aliases: get(aliasesShown),
       chantypes: get(chantypesState),
       emoji: get(emojiState),
       keymap: get(keymapState),

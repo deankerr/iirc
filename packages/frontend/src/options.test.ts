@@ -86,6 +86,7 @@ const valueOf = (read: ReturnType<typeof set>) => {
 };
 
 const inChannel: CommandContext = {
+  aliases: [],
   behind: false,
   draft: undefined,
   focus: {
@@ -109,6 +110,7 @@ const inChannel: CommandContext = {
 };
 
 const nowhere: CommandContext = {
+  aliases: [],
   behind: false,
   draft: undefined,
   focus: undefined,
@@ -1371,6 +1373,7 @@ describe("the options under ui", () => {
   const shared = {
     options: {
       activity: "quiet",
+      aliases: [],
       colours: "theme",
       dark: "dark",
       day: "full",
@@ -1478,12 +1481,13 @@ describe("the options under ui", () => {
     expect({
       first: listed(state, "")
         .map((option) => option.name)
-        .slice(0, 27),
+        .slice(0, 28),
       kept: state.ui,
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       first: [
         "ui.activity",
+        "ui.aliases",
         "ui.colours",
         "ui.dark",
         "ui.day",
@@ -1981,7 +1985,7 @@ describe("the options under store, uploads, and previews", () => {
       device: read("/set -device uploads.maxSize 1024"),
       empty: read("/set uploads.maxSize "),
       filter: read("/set uploads.*"),
-      refused: typesCredential(secret),
+      refused: typesCredential(secret, []),
       unknown: read("/set store.s3.colour blue")._tag,
       unset: read("/unset uploads.maxSize"),
       unsetDevice: read("/unset -device uploads.maxSize"),

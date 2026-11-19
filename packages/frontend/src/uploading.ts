@@ -13,6 +13,7 @@
  * @packageDocumentation
  */
 import type { OwnerOptionName, Upload, UploadsStatus } from "@iirc/api";
+import type { Aliases } from "@iirc/api/ui";
 
 import { typesCredential } from "./commands.ts";
 import { draftOf, filesTextOf, linesOf, withFilesText } from "./composer.ts";
@@ -848,12 +849,14 @@ export const offNote = (missing: readonly OwnerOptionName[]): string => {
  * @param state - What is pending.
  * @param composers - The composers.
  * @param place - The composer's place.
+ * @param aliases - The aliases, one of which a line may expand to a Credential's value.
  * @returns Why, in words, or none.
  */
 export const heldBack = (
   state: Uploading,
   composers: Composers,
-  place: Place
+  place: Place,
+  aliases: Aliases
 ): string | undefined => {
   const waiting = pendingIn(state, place).filter(waits);
 
@@ -861,7 +864,7 @@ export const heldBack = (
   if (
     waiting.length === 0 ||
     draftOf(composers, place).aside !== undefined ||
-    linesOf(draftOf(composers, place).text).some((line) => typesCredential(line))
+    linesOf(draftOf(composers, place).text).some((line) => typesCredential(line, aliases))
   ) {
     return undefined;
   }
@@ -877,13 +880,16 @@ export const heldBack = (
  * @param state - What is pending.
  * @param composers - The composers.
  * @param place - The composer's place.
+ * @param aliases - The aliases, as `heldBack` takes them.
  * @returns Why, in words, or none.
  */
 export const heldNoteIn = (
   state: Uploading,
   composers: Composers,
-  place: Place
-): string | undefined => (state.held.has(place) ? heldBack(state, composers, place) : undefined);
+  place: Place,
+  aliases: Aliases
+): string | undefined =>
+  state.held.has(place) ? heldBack(state, composers, place, aliases) : undefined;
 
 /**
  * Why a file was not kept, or might not have been, in words.

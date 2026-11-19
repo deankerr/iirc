@@ -12,7 +12,6 @@
 import { Themes } from "@iirc/api";
 import type { Palette, UiInForce } from "@iirc/api";
 import type { Intent, Parsed } from "@iirc/frontend/commands";
-import type { Json } from "@iirc/frontend/options";
 import {
   cssVariables,
   drawn,
@@ -29,12 +28,11 @@ import { Effect, Option, Schema } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
-import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { composerPreview } from "../composer/composer-state.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
-import { changeUi, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
+import { changeUi, changeWhole, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { fontStack, monoStack } from "./fonts.ts";
 import { ThemeReader } from "./reader.ts";
@@ -241,48 +239,6 @@ export const chooseTheme = (
 
 const themesJson = Schema.encodeSync(Schema.toCodecJson(Themes));
 
-/** A conflict: the shared options were not the ones the edit was made from. */
-const conflict = { _tag: "Conflict" } as const;
-
-/**
- * One try at an edit of the themes imported: the options read, the edit applied to their
- * themes, and the themes sent whole, made from the sequence read.
- * @param registry - The registry.
- * @param edit - The edit.
- * @returns What it came to, or a conflict to try again.
- */
-const tryEdit = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
-  Effect.gen(function* () {
-    const client = yield* DaemonClient;
-    const read = yield* readShared(registry);
-
-    const themes = editThemes(read.options.themes, edit);
-
-    if (themes._tag === "Invalid") {
-      const refused: Outcome = { _tag: "NotDone", message: themes.message };
-
-      return refused;
-    }
-
-    const value: Json = themesJson(themes.value);
-
-    yield* client.ui.set({
-      params: { option: "themes" },
-      payload: { value },
-      query: { ifSequence: read.sequence },
-    });
-
-    yield* readShared(registry);
-
-    const done: Outcome = { _tag: "Done" };
-
-    return done;
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.succeed(error._tag === "UiChanged" ? conflict : uiFailed(error._tag))
-    )
-  );
-
 /**
  * Imports or removes a theme for every device: made from the options read, and made once
  * more from those read again after a conflict, since an edit is a pure function of the
@@ -292,16 +248,10 @@ const tryEdit = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
  * @returns What it came to.
  */
 export const changeThemes = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
-  Effect.gen(function* () {
-    const first = yield* tryEdit(registry, edit);
+  changeWhole(registry, "themes", (read) => {
+    const themes = editThemes(read.options.themes, edit);
 
-    if (first._tag !== "Conflict") {
-      return first;
-    }
-
-    const second = yield* tryEdit(registry, edit);
-
-    return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
+    return themes._tag === "Invalid" ? themes : { _tag: "Parsed", value: themesJson(themes.value) };
   });
 
 /**

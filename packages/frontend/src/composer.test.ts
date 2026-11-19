@@ -29,6 +29,7 @@ const channel = timelineId("00000000000002-00000000-00000000");
 const other = timelineId("00000000000003-00000000-00000000");
 
 const context: CommandContext = {
+  aliases: [],
   behind: false,
   draft: undefined,
   focus: {
@@ -135,9 +136,56 @@ describe("what a draft ran", () => {
 
     const asked = submit(fold([edited(lines.join("\n"))]), channel, context);
 
-    expect([asked.ran, confirm(asked.state, channel).ran]).toStrictEqual([
+    expect([asked.ran, confirm(asked.state, channel, []).ran]).toStrictEqual([
       [],
       ["command:timeline.next"],
+    ]);
+  });
+});
+
+describe("aliases in a draft", () => {
+  const aliases = [
+    { line: "/me $*", name: "m" },
+    { line: "/quote $*", name: "p" },
+  ];
+
+  const withAliases: CommandContext = { ...context, aliases };
+
+  it("run as the alias, which a command's list remembers by its own key, as the lines waiting are sent", () => {
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) =>
+      index === 0 ? "/m waves" : `line ${index}`
+    );
+
+    const sent = submit(fold([edited("/m waves\n/M too")]), channel, withAliases);
+    const asked = submit(fold([edited(lines.join("\n"))]), channel, withAliases);
+
+    expect({
+      confirmed: confirm(asked.state, channel, aliases).ran,
+      sent: [sent.ran, sent.intents.length],
+      unknown: submit(fold([edited("/m waves\n/m")]), channel, context).ran,
+    }).toStrictEqual({
+      confirmed: ["command:alias.m"],
+      sent: [["command:alias.m", "command:alias.m"], 2],
+      unknown: [],
+    });
+  });
+
+  it("are refused and cleared, keeping none of it, when they expand to a Credential's value", () => {
+    const before = sendAll(["hello"]);
+
+    const { intents, state } = submit(
+      reduceComposers(before, edited("/p PASS secret")),
+      channel,
+      withAliases
+    );
+
+    const draft = draftOf(state, channel);
+
+    expect([intents, draft.text, draft.history, draft.notice?._tag]).toStrictEqual([
+      [],
+      "",
+      ["hello"],
+      "AboutText",
     ]);
   });
 });
@@ -216,7 +264,7 @@ describe("submitting", () => {
     const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
     const atLimit = submit(fold([edited(lines.slice(1).join("\n"))]), channel, context);
     const asked = submit(fold([edited(lines.join("\n"))]), channel, context);
-    const confirmed = confirm(asked.state, channel);
+    const confirmed = confirm(asked.state, channel, []);
     const dismissed = fold([{ _tag: "Dismissed", timeline: channel }], asked.state);
     const changed = fold([edited("changed")], asked.state);
 
@@ -240,7 +288,7 @@ describe("submitting", () => {
     const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
     const asked = submit(fold([edited(lines.join("\n"))], sent), channel, context);
     const recalled = fold([up()], asked.state);
-    const enter = confirm(recalled, channel);
+    const enter = confirm(recalled, channel, []);
 
     expect({
       confirming: draftOf(recalled, channel).confirming,
@@ -274,7 +322,7 @@ describe("submitting", () => {
           if (one === "Submit") {
             ({ state } = submit(state, channel, context));
           } else if (one === "Confirm") {
-            ({ state } = confirm(state, channel));
+            ({ state } = confirm(state, channel, []));
           } else {
             state = reduceComposers(state, one);
           }
@@ -672,7 +720,7 @@ describe("how long a notice lasts", () => {
     const sent = submit(state, channel, context);
     const many = ["one", "two", "three", "four", "five", "six"].join("\n");
     const waiting = submit(reduceComposers(state, edited(many)), channel, context);
-    const confirmed = confirm(waiting.state, channel);
+    const confirmed = confirm(waiting.state, channel, []);
 
     expect({
       confirmed: [tagOf(confirmed.state), confirmed.intents.length],
@@ -858,7 +906,7 @@ describe("a reply", () => {
     const refused = submit(replying([edited("/frob")]), channel, context);
     const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
     const asked = submit(replying([edited(lines.join("\n"))]), channel, context);
-    const confirmed = confirm(asked.state, channel);
+    const confirmed = confirm(asked.state, channel, []);
 
     expect({
       asked: draftOf(asked.state, channel).answering,
@@ -1111,8 +1159,8 @@ describe("a command started over a draft", () => {
 
     expect([
       asideOf(asked.state)?.text,
-      draftOf(confirm(asked.state, channel).state, channel).text,
-      asideOf(confirm(asked.state, channel).state),
+      draftOf(confirm(asked.state, channel, []).state, channel).text,
+      asideOf(confirm(asked.state, channel, []).state),
     ]).toStrictEqual(["hello", "hello", undefined]);
   });
 

@@ -63,7 +63,7 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
-import { arrange, arrangement, changeUi } from "../options/ui.ts";
+import { aliasesShown, arrange, arrangement, changeAliases, changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
@@ -80,7 +80,7 @@ import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
 /** The context commands are judged in, derived from the Timelines and the Sidebar's order. */
 export const commandContext = Atom.make((get) =>
-  contextOf(get(timelinesState), get(channelState), get(arrangement))
+  contextOf(get(timelinesState), get(channelState), get(arrangement), get(aliasesShown))
 );
 
 /** One Timeline's composer, or the one under no Timeline. */
@@ -649,6 +649,10 @@ const changeOne = (
       return changeThemes(registry, intent.edit);
     }
 
+    case "EditAliases": {
+      return changeAliases(registry, intent.edit);
+    }
+
     case "ChoosePreviews": {
       return choosePreviews(registry, intent);
     }
@@ -1043,7 +1047,12 @@ const letGoOfTyped = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
  * @returns Whether it was held back.
  */
 const heldBackNow = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
-  const held = heldBack(registry.get(uploadingState), registry.get(composerState), timeline);
+  const held = heldBack(
+    registry.get(uploadingState),
+    registry.get(composerState),
+    timeline,
+    registry.get(aliasesShown)
+  );
 
   if (held !== undefined) {
     registry.set(
@@ -1135,7 +1144,7 @@ export const confirmSend = runtime
           return;
         }
 
-        const step = confirm(registry.get(composerState), timeline);
+        const step = confirm(registry.get(composerState), timeline, registry.get(aliasesShown));
 
         replaced(registry, step.state);
         letGoOfKept(registry, timeline, step.intents);

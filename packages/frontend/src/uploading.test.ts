@@ -343,7 +343,7 @@ describe("a file kept", () => {
     const sent = fold(other.uploading, { _tag: "Sent", place });
 
     expect({
-      held: heldBack(state.uploading, state.composers, place),
+      held: heldBack(state.uploading, state.composers, place, []),
       kept: pendingIn(state.uploading, place).map((one) => one.stage._tag),
       sent: pendingIn(sent, place),
       text: textOf(state),
@@ -647,7 +647,10 @@ describe("sending a draft while its files upload", () => {
       place,
     });
 
-    expect([heldBack(one, composers, place), heldBack(two, composers, place)]).toStrictEqual([
+    expect([
+      heldBack(one, composers, place, []),
+      heldBack(two, composers, place, []),
+    ]).toStrictEqual([
       "Wait for cat.png to finish uploading, or cancel it.",
       "Wait for a.png and b.png to finish uploading, or cancel them.",
     ]);
@@ -661,15 +664,15 @@ describe("sending a draft while its files upload", () => {
     });
 
     expect([
-      heldBack(failed, composers, place),
-      heldBack(addedAt(4, file("a")), composers, elsewhere),
+      heldBack(failed, composers, place, []),
+      heldBack(addedAt(4, file("a")), composers, elsewhere, []),
     ]).toStrictEqual([undefined, undefined]);
   });
 
   it("holds nothing back for a draft typing a Credential's value, so it is let go of", () => {
     const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
 
-    expect(heldBack(addedAt(0, file("a")), credential, place)).toBeUndefined();
+    expect(heldBack(addedAt(0, file("a")), credential, place, [])).toBeUndefined();
   });
 });
 
@@ -678,7 +681,7 @@ describe("what a composer says of a send held back", () => {
   const held: UploadingEvent = { _tag: "HeldBack", place };
 
   it("says nothing until a send was held back", () => {
-    expect(heldNoteIn(addedAt(4, file("a")), composers, place)).toBeUndefined();
+    expect(heldNoteIn(addedAt(4, file("a")), composers, place, [])).toBeUndefined();
   });
 
   it("names only the files still waiting, as each is kept, fails, or is cancelled", () => {
@@ -692,8 +695,8 @@ describe("what a composer says of a send held back", () => {
     });
 
     expect([
-      heldNoteIn(kept.state, kept.composers, place),
-      heldNoteIn(failed, kept.composers, place),
+      heldNoteIn(kept.state, kept.composers, place, []),
+      heldNoteIn(failed, kept.composers, place, []),
     ]).toStrictEqual([
       "Wait for b.png and c.png to finish uploading, or cancel them.",
       "Wait for c.png to finish uploading, or cancel it.",
@@ -716,7 +719,7 @@ describe("what a composer says of a send held back", () => {
     const done = end(fold(addedAt(4, file("a")), held));
     const later = fold(done, ...arrived(0, [file("b")], on));
 
-    expect(heldNoteIn(later, composers, place)).toBeUndefined();
+    expect(heldNoteIn(later, composers, place, [])).toBeUndefined();
   });
 
   it("stays with a draft carried to its Timeline while its file uploads", () => {
@@ -731,7 +734,7 @@ describe("what a composer says of a send held back", () => {
     const after = reduceComposers(before, { _tag: "Carried", from: draft, to: elsewhere });
     const carried = followed(atDraft, before, after);
 
-    expect([heldNoteIn(carried, after, elsewhere), carried.held.has(draft)]).toStrictEqual([
+    expect([heldNoteIn(carried, after, elsewhere, []), carried.held.has(draft)]).toStrictEqual([
       "Wait for a.png to finish uploading, or cancel it.",
       false,
     ]);
@@ -742,8 +745,8 @@ describe("what a composer says of a send held back", () => {
     const dismissed = fold(state, { _tag: "NoteDismissed", place });
 
     expect([
-      heldNoteIn(state, composers, elsewhere),
-      heldNoteIn(dismissed, composers, place),
+      heldNoteIn(state, composers, elsewhere, []),
+      heldNoteIn(dismissed, composers, place, []),
     ]).toStrictEqual([undefined, undefined]);
   });
 });
@@ -809,6 +812,7 @@ describe("why a file was not kept, in words", () => {
 });
 
 const context: CommandContext = {
+  aliases: [],
   behind: false,
   draft: undefined,
   focus: undefined,
@@ -845,8 +849,8 @@ describe("a draft set aside while its files upload", () => {
     const back = reduceComposers(composers, { _tag: "Restored", timeline: place });
 
     expect({
-      back: heldBack(uploading, back, place),
-      command: heldBack(uploading, composers, place),
+      back: heldBack(uploading, back, place, []),
+      command: heldBack(uploading, composers, place, []),
     }).toStrictEqual({
       back: "Wait for a.png to finish uploading, or cancel it.",
       command: undefined,

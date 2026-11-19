@@ -1,6 +1,6 @@
 /**
  * The entries the Composer's list ranks, as data: a command, a Timeline, a Network to
- * remove, a theme, and a font, each with the words a query matches it by and the key it is
+ * remove, a theme, a font, and an alias, each with the words a query matches it by and the key it is
  * remembered by once run. The entries add no action of their own: picking one only writes the
  * draft, and sending it gives the intents the composer's `/commands` do. Which commands were
  * run recently is remembered, at most `recentCap`.
@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
-import type { FontShown } from "@iirc/api/ui";
+import type { Alias, FontShown } from "@iirc/api/ui";
 import { FontFamily, fontNames, isFontName } from "@iirc/api/ui";
 import { Option as Maybe, Schema } from "effect";
 
@@ -71,6 +71,15 @@ export type Entry =
       readonly name: FontShown;
       /** Whether it is the one in effect on this device. */
       readonly current: boolean;
+    }
+  | {
+      /** An alias after `/alias`, by its name, with the line it stands for. */
+      readonly _tag: "Alias";
+      readonly key: string;
+      readonly name: string;
+      readonly line: string;
+      /** What choosing it writes: its name to remove it, or `add` and the alias to edit it. */
+      readonly text: string;
     };
 
 /**
@@ -173,6 +182,10 @@ export const matchedBy = (entry: Entry): Matched => {
         description: fontDescription(entry.name),
         names: isFontName(entry.name) ? [entry.name] : [`font ${entry.name}`, entry.name],
       };
+    }
+
+    case "Alias": {
+      return { description: entry.line, names: [entry.name] };
     }
 
     default: {
@@ -296,3 +309,18 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
  */
 export const fontEntries = (family: FontFamily | undefined, current: FontShown): readonly Entry[] =>
   [...fontNames, ...(family === undefined ? [] : [family])].map((font) => fontEntry(font, current));
+
+/**
+ * An alias's entry, after `/alias`.
+ * @param alias - The alias.
+ * @param edit - Whether choosing it writes `add` and the alias, to edit it, or only its
+ *   name, as `remove` takes it.
+ * @returns The entry.
+ */
+export const aliasEntry = (alias: Alias, edit: boolean): Entry => ({
+  _tag: "Alias",
+  key: `alias:${alias.name}`,
+  line: alias.line,
+  name: alias.name,
+  text: edit ? `add ${alias.name} ${alias.line}` : alias.name,
+});

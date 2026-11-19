@@ -250,6 +250,7 @@ describe("ui.previews", () => {
       ),
     }).toStrictEqual({
       sharedOnly: [
+        "aliases",
         "previews",
         "previews.players",
         "previews.timelines",

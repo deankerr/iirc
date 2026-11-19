@@ -18,6 +18,7 @@ import type {
   TimelineId,
   TimelineItem,
 } from "@iirc/api";
+import type { Aliases } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
 import { levelOf, markLatest } from "./activity.ts";
@@ -25,7 +26,7 @@ import { arranged, shownOrder, unarranged } from "./arrangement.ts";
 import type { Arrangement } from "./arrangement.ts";
 import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
-import { commandNamed, credentialRefusal, interpret, namedIn } from "./commands.ts";
+import { commandRunBy, credentialRefusal, interpret, namedIn } from "./commands.ts";
 import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
 import { commandKey } from "./entries.ts";
 import { merged, formattedIn, pendingAfter, plainOf } from "./formatting.ts";
@@ -385,12 +386,14 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
  * @param timelines - The Timelines.
  * @param channels - The Channels the Panes show, as read.
  * @param arrangement - The Owner's order of the sidebar.
+ * @param aliases - The aliases the Owner made.
  * @returns The context.
  */
 export const contextOf = (
   timelines: Timelines,
   channels: Channels = initialChannels,
-  arrangement: Arrangement = unarranged
+  arrangement: Arrangement = unarranged,
+  aliases: Aliases = []
 ): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
@@ -413,6 +416,7 @@ export const contextOf = (
   // A Timeline behind the options, the search, or a draft is not the one shown, so
   // `/next-unread` may go to it, which shows it.
   const around = {
+    aliases,
     behind: main._tag !== "Timeline",
     named: namedIn(networks),
     open: open === undefined ? undefined : resolve(timelines, open),
@@ -482,12 +486,13 @@ export const linesOf = (text: string): readonly string[] =>
  * The keys of the commands lines run, in order, as the Composer's list remembers them: a line that
  * starts with `/`, but not `//`, and names a command. Plain text runs none.
  * @param lines - The lines, each read already.
+ * @param aliases - The aliases, one of which a line may run.
  * @returns The keys.
  */
-const ranBy = (lines: readonly string[]): readonly string[] =>
+const ranBy = (lines: readonly string[], aliases: Aliases): readonly string[] =>
   lines.flatMap((line) => {
     const name = /^\/(?<name>[^\s/]\S*)/u.exec(line)?.groups?.name;
-    const found = name === undefined ? undefined : commandNamed(name);
+    const found = name === undefined ? undefined : commandRunBy(name, aliases);
 
     return found === undefined ? [] : [commandKey(found.id)];
   });
@@ -627,7 +632,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   // A Credential's value typed here is let go of at once: the draft, what was kept while
   // recalling, and what waits to be confirmed, and none of it enters the history.
   const credential = lines
-    .map((line) => credentialRefusal(line))
+    .map((line) => credentialRefusal(line, context.aliases))
     .find((message) => message !== undefined);
 
   if (credential !== undefined) {
@@ -677,16 +682,21 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
     };
   }
 
-  return { intents: replies, ran: ranBy(lines), state: withDraft(state, timeline, sent) };
+  return {
+    intents: replies,
+    ran: ranBy(lines, context.aliases),
+    state: withDraft(state, timeline, sent),
+  };
 };
 
 /**
  * Confirms the lines waiting in a Timeline's composer, which are then sent.
  * @param state - The composers.
  * @param timeline - The Timeline.
+ * @param aliases - The aliases, one of which a line may run.
  * @returns The state after, and the intents to carry out.
  */
-export const confirm = (state: Composers, timeline: Place): Submitted => {
+export const confirm = (state: Composers, timeline: Place, aliases: Aliases): Submitted => {
   const { confirming, text } = draftOf(state, timeline);
 
   // What waits was read from the text shown, which an edit lets go of it.
@@ -694,7 +704,7 @@ export const confirm = (state: Composers, timeline: Place): Submitted => {
     ? { intents: [], ran: [], state }
     : {
         intents: confirming.intents,
-        ran: ranBy(linesOf(text)),
+        ran: ranBy(linesOf(text), aliases),
         state: withDraft(state, timeline, sent),
       };
 };
