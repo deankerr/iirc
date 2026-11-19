@@ -93,7 +93,7 @@ export const timersOf = (state: State): ReadonlyMap<TimerId, Timer> => {
         });
       }
 
-      for (const looking of phase.lookups) {
+      for (const looking of phase.lookups.filter((each) => !each.lapsed)) {
         table.set(TimerId.make(`lookup ${looking.intent}`), {
           due: looking.deadline,
           purpose: { _tag: "Lookup", intent: looking.intent },

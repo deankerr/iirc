@@ -33,9 +33,12 @@ import {
   listMode,
   listWords,
   lookOf,
+  namesLookOf,
   nickRulesOf,
   parseListChannel,
   parseLookupNick,
+  parseWhoMask,
+  whoLookOf,
 } from "./lookup.ts";
 import type { ListKind, Look, UserKind } from "./lookup.ts";
 import {
@@ -1559,6 +1562,62 @@ const listCommand = (kind: ListKind, aliases: readonly string[], description: st
   };
 };
 
+/**
+ * `/names`: a Channel's members, of the Channel named, or the one in focus, on the open
+ * Timeline's Network, shown with the Network's prefix symbols.
+ * @returns The command.
+ */
+const namesCommand = (): Command => ({
+  aliases: [],
+  arguments: "Optional",
+  description: "List a Channel's members, the open one or another, with their prefixes.",
+  id: "lookup.names",
+  name: "names",
+  run: (args, context) => {
+    const { focus } = context;
+
+    if (focus === undefined) {
+      return invalid("Open a Timeline first.");
+    }
+
+    const head = focusHead(context);
+    const channel = parseListChannel("Names", args, focus, head?.chantypes ?? undefined);
+
+    return channel._tag === "Invalid"
+      ? channel
+      : parsed([namesLookOf(channel.value, focus.network, focus.timeline, head)]);
+  },
+  usage: "/names [channel]",
+  when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
+});
+
+/**
+ * `/who`: the Users a mask matches on the open Timeline's Network.
+ * @returns The command.
+ */
+const whoCommand = (): Command => ({
+  aliases: [],
+  arguments: "Required",
+  description: "List the Users on the open Timeline's Network that match a mask.",
+  id: "lookup.who",
+  name: "who",
+  run: (args, context) => {
+    const { focus } = context;
+
+    if (focus === undefined) {
+      return invalid("Open a Timeline first.");
+    }
+
+    const mask = parseWhoMask(args);
+
+    return mask._tag === "Invalid"
+      ? mask
+      : parsed([whoLookOf(mask.value, focus.network, focus.timeline)]);
+  },
+  usage: "/who <mask>",
+  when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
+});
+
 const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }];
 const anywhereActing = anywhere;
 const focused: readonly Condition[] = [{ _tag: "Focused" }];
@@ -2770,6 +2829,8 @@ export const commands: readonly Command[] = [
     "Look a nick up on the open Timeline's Network: who they are, where, and in which Channels."
   ),
   lookupCommand("Whowas", "Look up who used a nick on the open Timeline's Network before."),
+  namesCommand(),
+  whoCommand(),
   listCommand("Bans", [], "List a Channel's bans, the open one or another, and lift them."),
   listCommand(
     "Exceptions",

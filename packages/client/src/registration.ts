@@ -153,6 +153,7 @@ export const begin = (run: Run): void => {
     caps: { _tag: "Listing", offered: new Map() },
     confirmed: [],
     error: false,
+    forgotten: new Map(),
     isupport: new Map(),
     lastSaid: { NOTICE: undefined, PRIVMSG: undefined },
     loggedIn: false,

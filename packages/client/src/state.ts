@@ -13,7 +13,15 @@ import { Instant } from "./ids.ts";
 import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason, MaskEntry, Notes, Profile, RefusedAction } from "./news.ts";
+import type {
+  EndReason,
+  MaskEntry,
+  NamesEntry,
+  Notes,
+  Profile,
+  RefusedAction,
+  WhoEntry,
+} from "./news.ts";
 import type { Seam } from "./seam.ts";
 import type { Users } from "./users.ts";
 
@@ -150,6 +158,12 @@ type LinkPhase =
        * first, at most {@link maxLookups}.
        */
       readonly lookups: readonly Looking[];
+      /**
+       * For each Channel, by folded name, how many `NAMES` answers a forgotten Lookup began
+       * on the floor, each read to its `366` and kept by no one, so no part of one replaces
+       * the members. At most {@link maxForgotten} Channels.
+       */
+      readonly forgotten: ReadonlyMap<string, number>;
       /**
        * The one `MODE` query the Client sent of its own, to learn a Channel's modes on
        * joining it, whose answer has not come, or `undefined` for none.
@@ -373,6 +387,20 @@ export interface Looking {
   readonly profiles: readonly Profile[];
   /** The masks the reply has listed so far, in order, for a Channel's list. */
   readonly masks: readonly MaskEntry[];
+  /** The members a `NAMES` reply has listed so far, in order, up to {@link maxLookupEntries}. */
+  readonly members: readonly NamesEntry[];
+  /**
+   * A `NAMES` reply's own listing, bounded as a Channel's is, apart from the Channel's own,
+   * which it replaces the members by only when its `366` comes.
+   */
+  readonly listing: Listing | undefined;
+  /**
+   * Whether its time ran out, and it reported what it had. A `NAMES` still reads its
+   * answer, to its `366` or its labelled answer's end, and reports nothing more.
+   */
+  readonly lapsed: boolean;
+  /** The Users a `WHO` reply has described so far, in order, up to {@link maxLookupEntries}. */
+  readonly users: readonly WhoEntry[];
   /** The mode a Channel's list was asked by, which a `472` names, or `undefined` for a User's. */
   readonly mode: string | undefined;
   /** The error its reply held, which it reports at its end. */
@@ -381,7 +409,10 @@ export interface Looking {
   readonly notes: Notes;
   /** Whether its end numeric came, inside a labelled answer, which ends only with that answer. */
   readonly ended: boolean;
-  /** Whether its reply ran past {@link maxLookupLines}, so what came after was not kept. */
+  /**
+   * Whether its reply ran past {@link maxLookupLines}, or past {@link maxLookupEntries}
+   * members or Users, so what came after was not kept.
+   */
   readonly bounded: boolean;
   /**
    * For each fact of Knowledge its reply spoke of, the time of the Line that said it, and
@@ -402,8 +433,18 @@ interface Heard {
 /** How many Lookups may await their replies on a Connection at once. */
 export const maxLookups = 8;
 
+/** How many Channels a Connection counts forgotten `NAMES` answers of. */
+export const maxForgotten = 64;
+
 /** How many Lines of one Lookup's reply are kept. */
 export const maxLookupLines = 64;
+
+/**
+ * How many members of a `NAMES` reply, or Users of a `WHO` reply, one Lookup keeps. Each
+ * one's strings come from one Line, which the parser bounds, and its notes still count
+ * against {@link maxLookupLines}.
+ */
+export const maxLookupEntries = 500;
 
 /** How many Lines of actions a Connection keeps awaiting an answer. */
 export const maxActing = 64;

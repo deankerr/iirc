@@ -342,6 +342,104 @@ describe("the Lookup card", () => {
     });
   });
 
+  it("shows what /names found as nicks with their prefixes, text in isolates, of the open Channel", async () => {
+    const { container, daemon } = await signedIn({
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "Members",
+        cut: "Bounded",
+        members: [
+          { nick: "op", prefixes: ["o"] },
+          { nick: `${override}<b>evil</b>`, prefixes: [] },
+        ],
+        notes: [],
+      },
+    });
+
+    await inComposer(container, "/names", "Enter");
+    await settled(() => card()?.textContent.includes("evil") === true);
+
+    const shown = card();
+    const members = [...(shown?.querySelectorAll('ul[aria-label="Members"] > li') ?? [])];
+
+    expect({
+      bold: shown?.querySelectorAll("b").length,
+      heading: shown?.querySelector("h3")?.textContent,
+      looks: daemon.looks.map((one) => one.lookup),
+      members: members.map((one) => one.textContent),
+      note: shown?.textContent.includes("ran longer than a Lookup keeps"),
+    }).toStrictEqual({
+      bold: 0,
+      heading: "names #iirc",
+      looks: [{ _tag: "Names", channel: "#iirc" }],
+      members: ["@op", `${override}<b>evil</b>‬`],
+      note: true,
+    });
+  });
+
+  it("says a Channel nobody is in has no members", async () => {
+    const { container, daemon } = await signedIn({
+      answer: "LookedUp",
+      pending: 0,
+      result: { _tag: "Members", cut: null, members: [], notes: [] },
+    });
+
+    await inComposer(container, "/names #empty", "Enter");
+    await settled(() => card()?.textContent.includes("has no members") === true);
+
+    expect({
+      looks: daemon.looks.map((one) => one.lookup),
+      words: card()?.textContent,
+    }).toStrictEqual({
+      looks: [{ _tag: "Names", channel: "#empty" }],
+      words: "names #empty×#empty has no members.",
+    });
+  });
+
+  it("shows what /who matched as a row each, user@host, away, and realname, hostile text kept as text", async () => {
+    const { container, daemon } = await signedIn({
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "Users",
+        cut: null,
+        notes: [],
+        users: [
+          { away: true, host: "example.test", nick: "peer", realname: "A Peer", user: "~peer" },
+          {
+            away: null,
+            host: "x".repeat(200),
+            nick: "other",
+            realname: `${override}<img src=x onerror=alert(1)>${bell}`,
+            user: "o",
+          },
+        ],
+      },
+    });
+
+    await inComposer(container, "/who *!*@example.test", "Enter");
+    await settled(() => card()?.textContent.includes("A Peer") === true);
+
+    const shown = card();
+    const rows = [...(shown?.querySelectorAll('ul[aria-label="Users"] > li') ?? [])];
+
+    expect({
+      heading: shown?.querySelector("h3")?.textContent,
+      images: shown?.querySelectorAll("img").length,
+      looks: daemon.looks.map((one) => one.lookup),
+      rows: rows.map((one) => one.textContent),
+    }).toStrictEqual({
+      heading: "who *!*@example.test",
+      images: 0,
+      looks: [{ _tag: "Who", mask: "*!*@example.test" }],
+      rows: [
+        "peer~peer@example.testawayA Peer",
+        `othero@${"x".repeat(200)}${override}<img src=x onerror=alert(1)>␇‬`,
+      ],
+    });
+  });
+
   it("shows the WARN and NOTE the Network gave with its result, under it", async () => {
     const { container } = await signedIn({
       answer: "LookedUp",

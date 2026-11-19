@@ -1,6 +1,6 @@
 /**
- * Lookups: what `/whois`, `/whowas`, and the commands of a Channel's lists ask, a card for
- * each Pane showing what came back, and that card as text for a view to draw. The runtime
+ * Lookups: what `/whois`, `/whowas`, `/names`, `/who`, and the commands of a Channel's lists
+ * ask, a card for each Pane showing what came back, and that card as text for a view to draw. The runtime
  * asks the Daemon, under an intent it names, and folds each answer in. Every field a
  * Network wrote comes back contained, as text, and a time is formatted by a function the
  * caller gives, since the core reads no clock, locale, or time zone.
@@ -12,12 +12,14 @@ import type {
   LookResult,
   LookupRequest,
   MaskEntry,
+  NamesEntry,
   NetworkId,
   Profile,
   Rank,
   StandardReply,
   TimelineChange,
   TimelineId,
+  WhoEntry,
 } from "@iirc/api";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
@@ -29,8 +31,8 @@ import { opened, resolve } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
 /**
- * Which Lookup: `WHOIS`, what the Network says of a User now, `WHOWAS`, who held a nick, or
- * one of a Channel's lists.
+ * Which Lookup: `WHOIS`, what the Network says of a User now, `WHOWAS`, who held a nick,
+ * `NAMES`, a Channel's members, `WHO`, the Users a mask matches, or one of a Channel's lists.
  */
 export type LookupKind = LookupRequest["_tag"];
 
@@ -38,7 +40,10 @@ export type LookupKind = LookupRequest["_tag"];
 export type UserKind = Extract<LookupKind, "Whois" | "Whowas">;
 
 /** A Lookup of a Channel's list of masks: its bans, ban exceptions, or invitation masks. */
-export type ListKind = Exclude<LookupKind, UserKind>;
+export type ListKind = Extract<LookupKind, "Bans" | "Exceptions" | "Invitations">;
+
+/** A Lookup of a Channel: its members, or one of its lists. */
+export type ChannelKind = ListKind | "Names";
 
 /** Where a Channel's head says the mode of each list, by its kind. */
 const listKeys: Readonly<Record<ListKind, "bans" | "exceptions" | "invitations">> = {
@@ -204,26 +209,27 @@ export const parseLookupNick = (kind: UserKind, args: string, rules: NickRules):
   return { _tag: "Parsed", value: nick };
 };
 
-/** The command of each list, without its `/`. */
-export const listCommandNames: Readonly<Record<ListKind, string>> = {
+/** The command of each Lookup of a Channel, without its `/`. */
+export const listCommandNames: Readonly<Record<ChannelKind, string>> = {
   Bans: "bans",
   Exceptions: "exceptions",
   Invitations: "invexes",
+  Names: "names",
 };
 
 /**
- * The Channel a list's command is of: the one named, or the Channel in focus when none is,
+ * The Channel a command of a Channel is of: the one named, or the Channel in focus when none is,
  * as one name the Client could take for a Channel's, or why it is not one, in words.
  * Whether the Network has such a Channel, or keeps the list, the Client and the Network
  * decide.
- * @param kind - The list, to name its command.
+ * @param kind - The Lookup, to name its command.
  * @param args - The text after the command's name.
  * @param focus - The kind and name of the Timeline in focus.
  * @param chantypes - What starts a Channel's name on the Network, if the head says; unsaid, the Client decides.
  * @returns The Channel's name, or why there is none, in words.
  */
 export const parseListChannel = (
-  kind: ListKind,
+  kind: ChannelKind,
   args: string,
   focus: { readonly kind: "Network" | "Channel" | "Direct"; readonly name: string },
   chantypes: string | undefined
@@ -255,8 +261,8 @@ export const parseListChannel = (
 };
 
 /**
- * The intent a list's command comes to, once its Channel is read.
- * @param kind - The list.
+ * The intent a command of a Channel comes to, once its Channel is read.
+ * @param kind - The Lookup.
  * @param channel - The Channel's name.
  * @param network - The Network in focus.
  * @param timeline - The Timeline in focus.
@@ -274,6 +280,75 @@ export const listLookOf = (
   ranks: rfcRanks,
   timeline,
 });
+
+/**
+ * The ranks a card shows prefixes by: the Network's `PREFIX`, as the head of the Channel in
+ * focus read it, or RFC 1459's.
+ * @param head - The head of the Channel in focus, if read.
+ * @param network - The Network the Lookup is on.
+ * @returns The ranks.
+ */
+const ranksOf = (head: ChannelHeader | undefined, network: NetworkId): readonly Rank[] =>
+  head?.network === network && head.ranks.length > 0 ? head.ranks : rfcRanks;
+
+/**
+ * The intent `/names` comes to, once its Channel is read: its members shown with the
+ * Network's prefix symbols.
+ * @param channel - The Channel's name.
+ * @param network - The Network in focus.
+ * @param timeline - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read, whose ranks show prefixes.
+ * @returns The intent.
+ */
+export const namesLookOf = (
+  channel: string,
+  network: NetworkId,
+  timeline: TimelineId,
+  head: ChannelHeader | undefined
+): Look => ({
+  _tag: "Look",
+  lookup: { _tag: "Names", channel },
+  network,
+  ranks: ranksOf(head, network),
+  timeline,
+});
+
+/**
+ * The intent `/who` comes to, once its mask is read.
+ * @param mask - The mask.
+ * @param network - The Network in focus.
+ * @param timeline - The Timeline in focus.
+ * @returns The intent.
+ */
+export const whoLookOf = (mask: string, network: NetworkId, timeline: TimelineId): Look => ({
+  _tag: "Look",
+  lookup: { _tag: "Who", mask },
+  network,
+  ranks: rfcRanks,
+  timeline,
+});
+
+/**
+ * The mask `/who` is of, the text after the command trimmed: one word the Client can send,
+ * or why it is none, in words. Whether the Network accepts it, the Client and the Network
+ * decide.
+ * @param args - The text after the command's name.
+ * @returns The mask, or why there is none, in words.
+ */
+export const parseWhoMask = (args: string): Parsed<string> => {
+  const usage = "/who <mask>";
+  const mask = args.trim();
+
+  if (mask === "") {
+    return { _tag: "Invalid", message: `Which mask? ${usage}` };
+  }
+
+  if (/\s/u.test(mask) || unsendable.test(mask)) {
+    return { _tag: "Invalid", message: `Give one mask. ${usage}` };
+  }
+
+  return { _tag: "Parsed", value: mask };
+};
 
 /**
  * The intent `/whois` or `/whowas` comes to, once its nick is read.
@@ -294,7 +369,7 @@ export const lookOf = (
   _tag: "Look",
   lookup: { _tag: kind, nick },
   network,
-  ranks: head?.network === network && head.ranks.length > 0 ? head.ranks : rfcRanks,
+  ranks: ranksOf(head, network),
   timeline,
 });
 
@@ -663,10 +738,33 @@ export interface MaskShown {
   readonly remove: { readonly act: Act; readonly mask: string } | undefined;
 }
 
-/** What was looked up: a nick, in its colour, or a Channel, by its name. */
+/** One member of a Channel, as the card shows them. */
+export interface MemberShown {
+  /** The nick, contained. */
+  readonly nick: string;
+  readonly colour: number;
+  /** The symbols of the prefixes they hold, most privileged first, by the Network's `PREFIX`. */
+  readonly symbols: string;
+  /** What a screen reader hears, such as `peer, operator`. */
+  readonly label: string;
+}
+
+/** One User a `WHO` listed, as the card shows them: every text contained. */
+export interface UserShown {
+  readonly nick: string;
+  readonly colour: number;
+  /** `user@host`. */
+  readonly mask: string;
+  /** Whether the reply said they are away. Unsaid shows as not away. */
+  readonly away: boolean;
+  readonly realname: string | undefined;
+}
+
+/** What was looked up: a nick, in its colour, a Channel, by its name, or a mask. */
 export type SubjectShown =
   | { readonly _tag: "Nick"; readonly nick: string; readonly colour: number }
-  | { readonly _tag: "Channel"; readonly name: string };
+  | { readonly _tag: "Channel"; readonly name: string }
+  | { readonly _tag: "Mask"; readonly mask: string };
 
 /**
  * A card as a view draws it: what was looked up, and how it stands.
@@ -675,7 +773,11 @@ export type SubjectShown =
  * - `Profiles`: each User described, with a note when the reply was cut short.
  * - `Masks`: a Channel's list, but the masks removed from the card, with a note when the
  *   reply was cut short.
- * - `Said`: no User, or no mask, in words.
+ * - `Members`: a Channel's members, in the order the reply gave them, with a note when it was
+ *   cut short.
+ * - `Users`: the Users a mask matched, in the order the reply gave them, with a note when it
+ *   was cut short.
+ * - `Said`: no User, no mask, no member, or no match, in words.
  *
  * `notes` are the `WARN` and `NOTE` replies the Network gave with its result, each as its
  * kind, command, code, context, and description, contained.
@@ -694,6 +796,16 @@ export interface CardShown {
     | {
         readonly _tag: "Masks";
         readonly masks: readonly MaskShown[];
+        readonly note: string | undefined;
+      }
+    | {
+        readonly _tag: "Members";
+        readonly members: readonly MemberShown[];
+        readonly note: string | undefined;
+      }
+    | {
+        readonly _tag: "Users";
+        readonly users: readonly UserShown[];
         readonly note: string | undefined;
       }
     | { readonly _tag: "Said"; readonly words: string };
@@ -829,6 +941,66 @@ export const listedChannels = (
 };
 
 /**
+ * Text a Network wrote, contained, or none when it said nothing or nothing but whitespace.
+ * @param text - The text.
+ * @returns The text to show, or none.
+ */
+const said = (text: string | null): string | undefined =>
+  text === null || text.trim() === "" ? undefined : contained(text);
+
+/**
+ * The prefixes a User holds in a Channel, by the ranks: their symbols, and each in words for
+ * a screen reader. A mode the ranks do not name shows no symbol.
+ * @param ranks - The Network's `PREFIX`.
+ * @param prefixes - The membership modes held.
+ * @returns The symbols, contained, and the words.
+ */
+const prefixesShown = (ranks: readonly Rank[], prefixes: readonly string[]) => {
+  const held = ranks.filter((rank) => prefixes.includes(rank.mode));
+
+  return {
+    symbols: contained(held.map((rank) => rank.symbol).join("")),
+    words: [
+      ...held.map((rank) => rankNames.get(rank.mode) ?? `mode ${contained(rank.mode)}`),
+      ...prefixes.flatMap((mode) =>
+        ranks.some((rank) => rank.mode === mode) ? [] : [`mode ${contained(mode)}`]
+      ),
+    ],
+  };
+};
+
+/**
+ * One member a `NAMES` reply listed.
+ * @param card - The card.
+ * @param entry - The member, as the reply gave them.
+ * @returns The member, as the card shows them.
+ */
+const memberShown = (card: Card, entry: NamesEntry): MemberShown => {
+  const nick = contained(entry.nick);
+  const { symbols, words } = prefixesShown(card.look.ranks, entry.prefixes);
+
+  return {
+    colour: nickColour(entry.nick),
+    label: [nick, ...words].join(", "),
+    nick,
+    symbols,
+  };
+};
+
+/**
+ * One User a `WHO` reply listed.
+ * @param entry - The User, as the reply gave them.
+ * @returns The User, as the card shows them.
+ */
+const userShown = (entry: WhoEntry): UserShown => ({
+  away: entry.away === true,
+  colour: nickColour(entry.nick),
+  mask: `${contained(entry.user)}@${contained(entry.host)}`,
+  nick: contained(entry.nick),
+  realname: said(entry.realname),
+});
+
+/**
  * One Channel a profile lists, with the symbols of the prefixes held there, by the ranks.
  * A mode the ranks do not name shows no symbol, and is said for a screen reader.
  * @param timelines - The Timelines.
@@ -841,32 +1013,16 @@ const channelShown = (
   card: Card,
   channel: Profile["channels"][number]
 ): ChannelShown => {
-  const { ranks } = card.look;
-  const held = ranks.filter((rank) => channel.prefixes.includes(rank.mode));
   const name = contained(channel.name);
-
-  const words = [
-    ...held.map((rank) => rankNames.get(rank.mode) ?? `mode ${contained(rank.mode)}`),
-    ...channel.prefixes
-      .filter((mode) => !ranks.some((rank) => rank.mode === mode))
-      .map((mode) => `mode ${contained(mode)}`),
-  ];
+  const { symbols, words } = prefixesShown(card.look.ranks, channel.prefixes);
 
   return {
     choose: choosing(timelines, card, channel.name),
     label: [name, ...words].join(", "),
     name,
-    symbols: contained(held.map((rank) => rank.symbol).join("")),
+    symbols,
   };
 };
-
-/**
- * Text a Network wrote, contained, or none when it said nothing or nothing but whitespace.
- * @param text - The text.
- * @returns The text to show, or none.
- */
-const said = (text: string | null): string | undefined =>
-  text === null || text.trim() === "" ? undefined : contained(text);
 
 /**
  * When a User signed on, in words, or that it cannot be shown, as for an instant out of
@@ -956,7 +1112,10 @@ const lostWords: Readonly<Record<LookFailure, string>> = {
 const nothingFound = (
   kind: LookupKind,
   name: string,
-  result: Exclude<LookResult, { readonly _tag: "Found" | "Partial" | "Listed" }>
+  result: Exclude<
+    LookResult,
+    { readonly _tag: "Found" | "Partial" | "Listed" | "Members" | "Users" }
+  >
 ): string => {
   switch (result._tag) {
     case "NotFound": {
@@ -966,8 +1125,12 @@ const nothingFound = (
         return `No one uses the nick ${name} now (${reply}).`;
       }
 
-      return kind === "Whowas"
-        ? `The Network remembers no one who used the nick ${name} (${reply}).`
+      if (kind === "Whowas") {
+        return `The Network remembers no one who used the nick ${name} (${reply}).`;
+      }
+
+      return kind === "Who"
+        ? `The Network has no one matching ${name} (${reply}).`
         : `The Network has no Channel ${name} (${reply}).`;
     }
 
@@ -980,8 +1143,12 @@ const nothingFound = (
         return refusedWords[result.reason];
       }
 
-      return kind === "Whois" || kind === "Whowas"
-        ? "Not looked up: the Network cannot be asked about that nick."
+      if (kind === "Whois" || kind === "Whowas") {
+        return "Not looked up: the Network cannot be asked about that nick.";
+      }
+
+      return kind === "Who"
+        ? "Not looked up: the Network cannot be asked about that mask."
         : "Not looked up: the Network cannot be asked about that Channel.";
     }
 
@@ -1069,6 +1236,95 @@ const maskShown = (
 });
 
 /**
+ * The body of a card whose result listed people: a Channel's members, or the Users a mask
+ * matched, or in words when the list is empty.
+ * @param card - The card.
+ * @param name - What was looked up, contained.
+ * @param result - The result.
+ * @returns The body.
+ */
+const peopleBody = (
+  card: Card,
+  name: string,
+  result: Extract<LookResult, { readonly _tag: "Members" | "Users" }>
+): CardShown["body"] => {
+  const note = result.cut === null ? undefined : partialWords[result.cut];
+
+  if (result._tag === "Members") {
+    return result.members.length === 0
+      ? { _tag: "Said", words: note ?? `${name} has no members.` }
+      : {
+          _tag: "Members",
+          members: result.members.map((entry) => memberShown(card, entry)),
+          note,
+        };
+  }
+
+  return result.users.length === 0
+    ? { _tag: "Said", words: note ?? `No one matches ${name}.` }
+    : { _tag: "Users", note, users: result.users.map((entry) => userShown(entry)) };
+};
+
+/**
+ * What a Lookup is of, as the Owner gave it: a nick, a Channel's name, or a mask.
+ * @param lookup - The Lookup.
+ * @returns The text.
+ */
+const subjectName = (lookup: LookupRequest): string => {
+  switch (lookup._tag) {
+    case "Whois":
+    case "Whowas": {
+      return lookup.nick;
+    }
+
+    case "Who": {
+      return lookup.mask;
+    }
+
+    case "Bans":
+    case "Exceptions":
+    case "Invitations":
+    case "Names": {
+      return lookup.channel;
+    }
+
+    default: {
+      return lookup satisfies never;
+    }
+  }
+};
+
+/**
+ * What a card says it looked up.
+ * @param lookup - The Lookup.
+ * @param name - What it is of, contained.
+ * @returns The subject.
+ */
+const subjectOf = (lookup: LookupRequest, name: string): SubjectShown => {
+  switch (lookup._tag) {
+    case "Whois":
+    case "Whowas": {
+      return { _tag: "Nick", colour: nickColour(lookup.nick), nick: name };
+    }
+
+    case "Who": {
+      return { _tag: "Mask", mask: name };
+    }
+
+    case "Bans":
+    case "Exceptions":
+    case "Invitations":
+    case "Names": {
+      return { _tag: "Channel", name };
+    }
+
+    default: {
+      return lookup satisfies never;
+    }
+  }
+};
+
+/**
  * A card as a view draws it.
  * @param timelines - The Timelines, for which Channels have a Timeline to open.
  * @param card - The card.
@@ -1085,15 +1341,12 @@ export const cardShown = (
   head?: ChannelHeader
 ): CardShown => {
   const { lookup } = card.look;
-  const listed = isListLookup(lookup);
-  const name = contained(listed ? lookup.channel : lookup.nick);
+  const name = contained(subjectName(lookup));
   const { phase } = card;
   const result = phase._tag === "Done" ? phase.result : undefined;
   const notes = result !== undefined && "notes" in result ? result.notes.map(noteText) : [];
 
-  const subject: SubjectShown = listed
-    ? { _tag: "Channel", name }
-    : { _tag: "Nick", colour: nickColour(lookup.nick), nick: name };
+  const subject = subjectOf(lookup, name);
 
   const shown = { kind: lookup._tag, notes, subject };
 
@@ -1132,6 +1385,10 @@ export const cardShown = (
                 note,
               },
             };
+      }
+
+      if (result._tag === "Members" || result._tag === "Users") {
+        return { ...shown, body: peopleBody(card, name, result) };
       }
 
       if (result._tag !== "Found" && result._tag !== "Partial") {

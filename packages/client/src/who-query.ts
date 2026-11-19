@@ -142,6 +142,19 @@ const ended = (run: Run, key: string): void => {
 };
 
 /**
+ * Whether the answer to the Client's own `WHO` of a Channel is still read: asked in this
+ * Session, and its `315` not yet come.
+ * @param run - The step.
+ * @param channel - The Channel, as a Line names it.
+ * @returns Whether it is.
+ */
+export const whoAnswering = (run: Run, channel: string): boolean => {
+  const asked = openOf(run.state)?.whoAsked.get(folder(run.state)(channel));
+
+  return asked !== undefined && !asked.ended;
+};
+
+/**
  * `315 <client> <channel>`: the answer of a Channel asked ends.
  * @param run - The step.
  * @param line - The Line, live.
@@ -235,7 +248,7 @@ interface Described {
  * @param flags - The flags.
  * @returns Away, or `undefined` for flags that say neither.
  */
-const awayOf = (flags: string): boolean | undefined => {
+export const awayOf = (flags: string): boolean | undefined => {
   if (flags.startsWith("G")) {
     return true;
   }
@@ -294,13 +307,16 @@ const describe = (run: Run, described: Described): void => {
   });
 };
 
+/** What a `352` says of one User: the Channel it names, and each fact of the User. */
+export type WhoReply = Omit<Described, "account">;
+
 /**
  * `352 <client> <channel> <user> <host> <server> <nick> <flags> :<hopcount> <realname>`:
  * one User, from a plain `WHO`. The realname follows the hop count and its first space.
- * @param run - The step.
- * @param line - The Line, live.
+ * @param line - The Line.
+ * @returns What it says, or `undefined` when its parameters do not fit.
  */
-export const whoReply = (run: Run, line: Line): void => {
+export const readWho = (line: Line): WhoReply | undefined => {
   const [, channel, user, host, , nick, flags, last] = line.params;
 
   if (
@@ -310,20 +326,33 @@ export const whoReply = (run: Run, line: Line): void => {
     nick === undefined ||
     flags === undefined
   ) {
-    return;
+    return undefined;
   }
 
   const space = last?.indexOf(" ") ?? -1;
 
-  describe(run, {
-    account: undefined,
+  return {
     channel,
     flags,
     host,
     nick,
     realname: last === undefined || space === -1 ? undefined : last.slice(space + 1),
     user,
-  });
+  };
+};
+
+/**
+ * A `352`: one User, from a plain `WHO`, folded when it names a Channel whose answer has
+ * not ended.
+ * @param run - The step.
+ * @param line - The Line, live.
+ */
+export const whoReply = (run: Run, line: Line): void => {
+  const reply = readWho(line);
+
+  if (reply !== undefined) {
+    describe(run, { ...reply, account: undefined });
+  }
 };
 
 /**

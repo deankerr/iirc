@@ -391,9 +391,10 @@ const LookBody = Schema.fromJsonString(
     lookup: Schema.Union([
       Schema.Struct({ _tag: Schema.Literals(["Whois", "Whowas"]), nick: Schema.String }),
       Schema.Struct({
-        _tag: Schema.Literals(["Bans", "Exceptions", "Invitations"]),
+        _tag: Schema.Literals(["Bans", "Exceptions", "Invitations", "Names"]),
         channel: Schema.String,
       }),
+      Schema.TaggedStruct("Who", { mask: Schema.String }),
     ]),
   })
 );

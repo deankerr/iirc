@@ -38,6 +38,8 @@ import type {
   LookResult as WireLookResult,
   Lookup as WireLookup,
   MaskEntry as WireMaskEntry,
+  NamesEntry as WireNamesEntry,
+  WhoEntry as WireWhoEntry,
   Profile as WireProfile,
   Marked as WireMarked,
   Closable as WireClosable,
@@ -59,6 +61,7 @@ import type {
   Closable,
   MaskEntry,
   ModeChange,
+  NamesEntry,
   News,
   Profile,
   RefusedAction,
@@ -67,6 +70,7 @@ import type {
   StandardReply,
   TimerTable,
   Where,
+  WhoEntry,
 } from "@iirc/client";
 import type {
   ChannelKnowledge,
@@ -637,6 +641,19 @@ const maskEntry = (source: MaskEntry): Fields<MaskEntry, WireMaskEntry> => ({
   setBy: source.setBy ?? null,
 });
 
+const namesEntry = (source: NamesEntry): Fields<NamesEntry, WireNamesEntry> => ({
+  nick: source.nick,
+  prefixes: [...source.prefixes],
+});
+
+const whoEntry = (source: WhoEntry): Fields<WhoEntry, WireWhoEntry> => ({
+  away: source.away ?? null,
+  host: source.host,
+  nick: source.nick,
+  realname: source.realname ?? null,
+  user: source.user,
+});
+
 /**
  * What was looked up, as the contract says it.
  * @param source - The Lookup.
@@ -661,6 +678,21 @@ const lookupOf = (source: Lookup): WireLookup => {
         _tag: source._tag,
         channel: source.channel,
       };
+
+      return wire;
+    }
+
+    case "Names": {
+      const wire: Case<Lookup, WireLookup, "Names"> = {
+        _tag: "Names",
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
+    case "Who": {
+      const wire: Case<Lookup, WireLookup, "Who"> = { _tag: "Who", mask: source.mask };
 
       return wire;
     }
@@ -700,6 +732,28 @@ const lookResult = (source: LookResult): WireLookResult => {
         cut: source.cut ?? null,
         masks: source.masks.map(maskEntry),
         notes: source.notes.map(standardReply),
+      };
+
+      return wire;
+    }
+
+    case "Members": {
+      const wire: Case<LookResult, WireLookResult, "Members"> = {
+        _tag: "Members",
+        cut: source.cut ?? null,
+        members: source.members.map(namesEntry),
+        notes: source.notes.map(standardReply),
+      };
+
+      return wire;
+    }
+
+    case "Users": {
+      const wire: Case<LookResult, WireLookResult, "Users"> = {
+        _tag: "Users",
+        cut: source.cut ?? null,
+        notes: source.notes.map(standardReply),
+        users: source.users.map(whoEntry),
       };
 
       return wire;

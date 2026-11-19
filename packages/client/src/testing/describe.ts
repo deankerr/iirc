@@ -29,7 +29,7 @@ import type {
 } from "../news.ts";
 import { isNetworkOnly, isPresenceChange } from "../news.ts";
 import type { Output } from "../output.ts";
-import { printItem, writeInstant } from "./transcript.ts";
+import { lookedFor, printItem, writeInstant } from "./transcript.ts";
 
 /**
  * Writes a string from News as one token, bare when it holds nothing a description uses
@@ -520,6 +520,18 @@ const writeOutcome = (result: LookResult): string => {
         : `listed=${result.cut} masks=${result.masks.length}`;
     }
 
+    case "Members": {
+      return result.cut === undefined
+        ? `members count=${result.members.length}`
+        : `members=${result.cut} count=${result.members.length}`;
+    }
+
+    case "Users": {
+      return result.cut === undefined
+        ? `users count=${result.users.length}`
+        : `users=${result.cut} count=${result.users.length}`;
+    }
+
     case "NotFound": {
       return `not-found=${atom(result.reply)}`;
     }
@@ -698,7 +710,7 @@ export const describeNews = (news: News, now: Instant): string => {
       return words([
         "looked-up",
         atom(news.intent),
-        `${news.lookup._tag.toLowerCase()}=${atom("nick" in news.lookup ? news.lookup.nick : news.lookup.channel)}`,
+        `${news.lookup._tag.toLowerCase()}=${atom(lookedFor(news.lookup))}`,
         writeLookResult(news.result),
       ]);
     }

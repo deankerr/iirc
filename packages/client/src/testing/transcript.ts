@@ -72,8 +72,8 @@ export type Owner =
    */
   | { readonly _tag: "Act"; readonly action: Action }
   /**
-   * `!! whois peer`, `!! whowas peer`, `!! bans #iirc`, `!! exceptions #iirc`, or
-   * `!! invitations #iirc`: a Lookup. Its intent id is given in order with a `Say`'s.
+   * `!! whois peer`, `!! whowas peer`, `!! bans #iirc`, `!! exceptions #iirc`,
+   * `!! invitations #iirc`, `!! names #iirc`, or `!! who *.test`: a Lookup. Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Look"; readonly lookup: Lookup }
   /** `!! retry`. */
@@ -808,6 +808,35 @@ const writeAction = (action: Action): string => {
   }
 };
 
+/**
+ * What a Lookup looked for, as a transcript writes it: its nick, Channel, or mask.
+ * @param lookup - The Lookup.
+ * @returns What it looked for.
+ */
+export const lookedFor = (lookup: Lookup): string => {
+  switch (lookup._tag) {
+    case "Whois":
+    case "Whowas": {
+      return lookup.nick;
+    }
+
+    case "Who": {
+      return lookup.mask;
+    }
+
+    case "Bans":
+    case "Exceptions":
+    case "Invitations":
+    case "Names": {
+      return lookup.channel;
+    }
+
+    default: {
+      return lookup satisfies never;
+    }
+  }
+};
+
 /** The Lookups of a Channel's lists, by the word a transcript writes them with. */
 const maskLists: ReadonlyMap<string, "Bans" | "Exceptions" | "Invitations"> = new Map([
   ["bans", "Bans"],
@@ -815,8 +844,21 @@ const maskLists: ReadonlyMap<string, "Bans" | "Exceptions" | "Invitations"> = ne
   ["invitations", "Invitations"],
 ] as const);
 
+// `names <channel>` or `who <mask>`.
+const readMembers = (text: string): Owner | undefined => {
+  const named = /^names (?<channel>\S+)$/u.exec(text)?.groups?.channel;
+  const mask = /^who (?<mask>\S+)$/u.exec(text)?.groups?.mask;
+
+  if (named !== undefined) {
+    return { _tag: "Look", lookup: { _tag: "Names", channel: named } };
+  }
+
+  return mask === undefined ? undefined : { _tag: "Look", lookup: { _tag: "Who", mask } };
+};
+
 // `retry`, `remove [keep]`, `whois <nick>`, `whowas <nick>`, `bans <channel>`,
-// `exceptions <channel>`, and `invitations <channel>`, which take no more than a word.
+// `exceptions <channel>`, `invitations <channel>`, `names <channel>`, and `who <mask>`,
+// which take no more than a word.
 const readSimple = (text: string): Owner | undefined => {
   if (text === "retry") {
     return { _tag: "Retry" };
@@ -830,6 +872,12 @@ const readSimple = (text: string): Owner | undefined => {
 
   if (closing !== undefined) {
     return { _tag: "Close", target: closing };
+  }
+
+  const members = readMembers(text);
+
+  if (members !== undefined) {
+    return members;
   }
 
   const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
@@ -951,7 +999,7 @@ const writeOwner = (owner: Owner): string => {
     }
 
     case "Look": {
-      return `${owner.lookup._tag.toLowerCase()} ${"nick" in owner.lookup ? owner.lookup.nick : owner.lookup.channel}`;
+      return `${owner.lookup._tag.toLowerCase()} ${lookedFor(owner.lookup)}`;
     }
 
     case "Act": {

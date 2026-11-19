@@ -284,6 +284,85 @@ const masksOn = (ircd: Ircd) =>
     };
   });
 
+/**
+ * Reads a Channel's members and the Users a mask matches, as Lookups, with a Peer in the
+ * Channel first, so it holds a prefix and Self does not, and a Channel no one is in.
+ * @param ircd - The Ircd, by its plaintext port.
+ * @returns What each Lookup found.
+ */
+const peopleOn = (ircd: Ircd) =>
+  Effect.gen(function* () {
+    const ours = "#iirc-people";
+    const dataDir = yield* temporaryDirectory;
+    const key = yield* makeKey(dataDir);
+    const daemon = yield* startDaemon({ dataDir }, key);
+    const { api } = daemon;
+
+    const peer = yield* Effect.promise(
+      async () => await connectPeer({ host: ircd.host, nick: "seen", port: ircd.plainPort })
+    );
+
+    peer.send(`JOIN ${ours}`);
+    yield* Effect.promise(
+      async () => await peer.waitFor((line) => line.command === "JOIN", "the Peer's JOIN")
+    );
+
+    // A nick of its own: an Ircd may hold back what a client sends after a burst of Lookups.
+    yield* api.networks.configure({
+      params: { network },
+      payload: configured({
+        channels: [{ name: ours }],
+        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
+        nicks: ["asker"],
+      }),
+      query: {},
+    });
+
+    yield* eventually(api.networks.known({ params: { network } }), (known) =>
+      known.channels.some((one) => one.name === ours && one.standing === "Joined")
+    );
+
+    const look = (lookup: LookupRequest) =>
+      api.networks
+        .look({ params: { network }, payload: { lookup } })
+        .pipe(Effect.map((looked) => (looked._tag === "LookedUp" ? looked.result : looked)));
+
+    const names = yield* look({ _tag: "Names", channel: ours });
+    const who = yield* look({ _tag: "Who", mask: "seen" });
+    const nobody = yield* look({ _tag: "Names", channel: "#iirc-nobody" });
+
+    peer.close();
+    yield* daemon.stop;
+
+    // Which prefix a creator holds, and whether a User's name has a `~` for no ident, vary by
+    // Ircd, so only whether each is there is compared.
+    const members =
+      names._tag === "Members"
+        ? names.members
+            .map((one) => ({ nick: one.nick, prefixed: one.prefixes.length > 0 }))
+            .toSorted((a, b) => a.nick.localeCompare(b.nick))
+        : names;
+
+    const matched =
+      who._tag === "Users"
+        ? who.users
+            .filter((one) => one.nick === "seen")
+            .map((one) => ({
+              host: one.host !== "",
+              nick: one.nick,
+              realname: one.realname,
+              user: one.user !== "",
+            }))
+        : who;
+
+    return {
+      cut: names._tag === "Members" ? names.cut : undefined,
+      matched,
+      members,
+      nobody,
+    };
+  });
+
 describe("ngircd, on the floor", () => {
   let ngircd: Ircd;
 
@@ -600,6 +679,20 @@ describe("ngircd, on the floor", () => {
       stored: "Found",
       user: true,
       whowas: { _tag: "NotFound", notes: [], reply: "406" },
+    });
+  }, 60_000);
+
+  it("lists a Channel's members with their prefixes, and the Users a mask matches", async () => {
+    const result = await run(peopleOn(ngircd));
+
+    expect(result).toStrictEqual({
+      cut: null,
+      matched: [{ host: true, nick: "seen", realname: "seen", user: true }],
+      members: [
+        { nick: "asker", prefixed: false },
+        { nick: "seen", prefixed: true },
+      ],
+      nobody: { _tag: "Members", cut: null, members: [], notes: [] },
     });
   }, 60_000);
 
@@ -1159,6 +1252,20 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       shown: false,
     });
   }, 120_000);
+
+  it("lists a Channel's members with their prefixes, and the Users a mask matches", async () => {
+    const result = await run(peopleOn(ergo));
+
+    expect(result).toStrictEqual({
+      cut: null,
+      matched: [{ host: true, nick: "seen", realname: "seen", user: true }],
+      members: [
+        { nick: "asker", prefixed: false },
+        { nick: "seen", prefixed: true },
+      ],
+      nobody: { _tag: "Members", cut: null, members: [], notes: [] },
+    });
+  }, 90_000);
 
   it("sets a ban and reads it back, and a Channel's lists as one of its members only", async () => {
     const result = await run(masksOn(ergo));

@@ -12,10 +12,14 @@ declare const styles: {
   readonly line: string;
   readonly mask: string;
   readonly masks: string;
+  readonly member: string;
+  readonly members: string;
   readonly note: string;
   readonly profile: string;
   readonly remove: string;
   readonly symbol: string;
+  readonly user: string;
+  readonly users: string;
 };
 
 export default styles;

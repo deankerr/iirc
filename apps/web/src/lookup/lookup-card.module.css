@@ -89,3 +89,34 @@
 .remove {
   margin-left: auto;
 }
+
+/* Members run on as words do, a long nick breaking rather than widening the card. */
+.members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* A User a mask matched is a row, which wraps where the card is narrow. */
+.users {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.user {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  min-width: 0;
+}

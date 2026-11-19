@@ -56,6 +56,7 @@ export type {
   MaskEntry,
   ModeChange,
   Named,
+  NamesEntry,
   News,
   OtherReply,
   Ours,
@@ -68,6 +69,7 @@ export type {
   StandardReply,
   Unanswered,
   Where,
+  WhoEntry,
 } from "./news.ts";
 
 export { Output, timers } from "./output.ts";

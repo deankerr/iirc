@@ -209,10 +209,11 @@ export const ActRequest = Schema.Struct({
 export type ActRequest = typeof ActRequest.Type;
 
 /**
- * What the Owner looks up on a Network: a `WHOIS` or a `WHOWAS` of one nick, or one of a
- * Channel's lists of masks. The Client checks the nick or the Channel's name against the
- * Network's rules, and that it keeps the list, before it sends anything, so the wire checks
- * only that no line break or NUL is in it.
+ * What the Owner looks up on a Network: a `WHOIS` or a `WHOWAS` of one nick, one of a
+ * Channel's lists of masks, a Channel's members by `NAMES`, or the Users a mask matches by
+ * `WHO`. The Client checks the nick, the Channel's name, or the mask against the Network's
+ * rules, and that it keeps the list, before it sends anything, so the wire checks only that
+ * no line break or NUL is in it.
  */
 export const LookupRequest = Schema.TaggedUnion({
   /** A Channel's bans. */
@@ -221,6 +222,10 @@ export const LookupRequest = Schema.TaggedUnion({
   Exceptions: { channel: OwnerName },
   /** A Channel's invitation masks, where the Network keeps them, by `INVEX`. */
   Invitations: { channel: OwnerName },
+  /** A Channel's members, with their prefixes, by `NAMES`. */
+  Names: { channel: OwnerName },
+  /** The Users a mask matches, by `WHO`. */
+  Who: { mask: OwnerName },
   /** What the Network says of a User now. */
   Whois: { nick: OwnerName },
   /** Who held a nick before. */
@@ -685,11 +690,13 @@ const RefusedAction = Schema.Struct({
 /** A client-only tag on a Message, such as `+reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
-/** What was looked up: a `WHOIS` or a `WHOWAS` and the nick, or a Channel's list and its name, as the Owner gave it. */
+/** What was looked up: a `WHOIS` or a `WHOWAS` and the nick, a Channel's list or `NAMES` and its name, or a `WHO` and its mask, as the Owner gave it. */
 export const Lookup = Schema.TaggedUnion({
   Bans: { channel: Untrusted },
   Exceptions: { channel: Untrusted },
   Invitations: { channel: Untrusted },
+  Names: { channel: Untrusted },
+  Who: { mask: Untrusted },
   Whois: { nick: Untrusted },
   Whowas: { nick: Untrusted },
 });
@@ -752,6 +759,33 @@ export const MaskEntry = Schema.Struct({
 /** The decoded form of {@link MaskEntry}. */
 export type MaskEntry = typeof MaskEntry.Type;
 
+/**
+ * One member of a Channel as a `NAMES` reply lists them: the nick, and the membership modes
+ * its prefixes stand for, by `PREFIX`, in the order they came.
+ */
+export const NamesEntry = Schema.Struct({
+  nick: Untrusted,
+  prefixes: Schema.Array(Untrusted),
+});
+
+/** The decoded form of {@link NamesEntry}. */
+export type NamesEntry = typeof NamesEntry.Type;
+
+/**
+ * One User a `WHO` reply lists. `away` is `null` when the reply said nothing of it, and
+ * `realname` when it carried none.
+ */
+export const WhoEntry = Schema.Struct({
+  away: Schema.NullOr(Schema.Boolean),
+  host: Untrusted,
+  nick: Untrusted,
+  realname: Schema.NullOr(Untrusted),
+  user: Untrusted,
+});
+
+/** The decoded form of {@link WhoEntry}. */
+export type WhoEntry = typeof WhoEntry.Type;
+
 /** Why a Lookup ended with only part of its reply. */
 const PartialReason = Schema.Literals(["TimedOut", "Ended", "Bounded"]);
 
@@ -760,7 +794,8 @@ const PartialReason = Schema.Literals(["TimedOut", "Ended", "Bounded"]);
  * come when it stopped, because no end came in time (`TimedOut`), its Connection ended
  * (`Ended`), or the reply ran past the Lines one Lookup keeps (`Bounded`); `Listed`, a
  * Channel's masks, with `cut` saying why it stopped short, as `Partial` does, or `null`
- * when it did not; `NotFound`, no such User or Channel, by `401`, `403`, `406`, or an end
+ * when it did not; `Members`, a Channel's members, and `Users`, the Users a mask matched,
+ * each with `cut` as `Listed` has it, and an empty list a whole answer; `NotFound`, no such User or Channel, by `401`, `403`, `406`, or an end
  * with no User; `Failed`, another error, such as `482`, by its numeric or a `FAIL`'s code,
  * or a labelled answer that said nothing readable, by its command; `Refused`, not sent,
  * `Offline`, `Unsendable`, `Busy` with too many Lookups at once, or `NotOffered` for a list
@@ -776,6 +811,11 @@ export const LookResult = Schema.TaggedUnion({
     masks: Schema.Array(MaskEntry),
     notes: Notes,
   },
+  Members: {
+    cut: Schema.NullOr(PartialReason),
+    members: Schema.Array(NamesEntry),
+    notes: Notes,
+  },
   NotFound: { notes: Notes, reply: Untrusted },
   Partial: {
     notes: Notes,
@@ -784,6 +824,11 @@ export const LookResult = Schema.TaggedUnion({
   },
   Refused: { reason: Schema.Literals(["Offline", "Unsendable", "Busy", "NotOffered"]) },
   Unsent: {},
+  Users: {
+    cut: Schema.NullOr(PartialReason),
+    notes: Notes,
+    users: Schema.Array(WhoEntry),
+  },
 });
 
 /** The decoded form of {@link LookResult}. */
