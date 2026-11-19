@@ -126,10 +126,22 @@ describe("the page as it starts", () => {
 
     await act(async () => {
       button?.click();
+      await eventually(() => document.querySelector('[role="alertdialog"]') !== null);
+    });
+
+    const asked = fake.daemon.signedIn;
+
+    const confirm = [
+      ...(document.querySelector('[role="alertdialog"]')?.querySelectorAll("button") ?? []),
+    ].find((one) => one.textContent === "Sign out");
+
+    await act(async () => {
+      confirm?.click();
       await eventually(() => !fake.daemon.signedIn);
     });
 
-    expect({ offered: button !== undefined, signedIn: fake.daemon.signedIn }).toStrictEqual({
+    expect({ asked, offered: button !== undefined, signedIn: fake.daemon.signedIn }).toStrictEqual({
+      asked: true,
       offered: true,
       signedIn: false,
     });
