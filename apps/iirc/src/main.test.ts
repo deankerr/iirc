@@ -75,12 +75,17 @@ const raw = async (base: string, target: string) => {
 const navigate = { headers: { accept: "text/html" } };
 
 /**
- * Runs `iirc` to its end.
+ * Runs `iirc` to its end, with more in its environment.
+ * @param env - What to add to the environment.
  * @param args - Its arguments.
  * @returns Its exit code, stdout, and stderr.
  */
-const iirc = async (...args: readonly string[]) => {
-  const child = Bun.spawn(["bun", main, ...args], { stderr: "pipe", stdout: "pipe" });
+const iircWith = async (env: Readonly<Record<string, string>>, ...args: readonly string[]) => {
+  const child = Bun.spawn(["bun", main, ...args], {
+    env: { ...process.env, ...env },
+    stderr: "pipe",
+    stdout: "pipe",
+  });
 
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
@@ -90,6 +95,13 @@ const iirc = async (...args: readonly string[]) => {
 
   return { code, stderr, stdout };
 };
+
+/**
+ * Runs `iirc` to its end.
+ * @param args - Its arguments.
+ * @returns Its exit code, stdout, and stderr.
+ */
+const iirc = async (...args: readonly string[]) => await iircWith({}, ...args);
 
 /**
  * Runs `iirc daemon --web` on a fresh data directory, to its end.
@@ -506,6 +518,47 @@ describe("iirc", () => {
         code: 1,
         stderr: `The Daemon at 127.0.0.1:${unwell.port} is unwell: its projector has stopped until it restarts.\n`,
         stdout: "",
+      });
+    });
+
+    it("asks the Daemon itself, past a proxy in the environment and never following a redirect", async () => {
+      const daemon = await startDaemon(dataDir());
+
+      // Anything that answers, but is not the Daemon at the address asked.
+      const proxy = listening((socket) => {
+        socket.end("HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+      });
+
+      const redirecting = listening((socket) => {
+        socket.end(
+          `HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:${daemon.port}/api/health\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`
+        );
+      });
+
+      const proxied = await iircWith(
+        {
+          HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+          http_proxy: `http://127.0.0.1:${proxy.port}`,
+        },
+        "health",
+        "--listen",
+        `127.0.0.1:${daemon.port}`
+      );
+
+      const redirected = await iirc("health", "--listen", `127.0.0.1:${redirecting.port}`);
+
+      proxy.stop(true);
+      redirecting.stop(true);
+      daemon.child.kill("SIGTERM");
+      await daemon.child.exited;
+
+      expect({ proxied, redirected }).toStrictEqual({
+        proxied: { code: 0, stderr: "", stdout: "" },
+        redirected: {
+          code: 1,
+          stderr: `Something at 127.0.0.1:${redirecting.port} answered, but not as an iirc Daemon.\n`,
+          stdout: "",
+        },
       });
     });
 

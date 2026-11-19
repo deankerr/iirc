@@ -146,7 +146,7 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 
 - **A key is 256 random bits,** from Effect's `SecureRandom`, written `iirc_` and base64url. It is shown once, by `iirc key create`, and kept only as its SHA-256. A random key needs no password hash.
 - **A request's key is compared against every stored hash,** each with `timingSafeEqual`, so the time taken says nothing of which key matched, or how much of one.
-- **Keys are made only while the Daemon is stopped.** `iirc key create` holds the data directory, so the Daemon reads `keys.json` once at start, and nothing changes it under a running Daemon. A Daemon with no keys warns, and refuses every request but whether it is well.
+- **Keys are made only while the Daemon is stopped.** `iirc key create` holds the data directory, so the Daemon reads `keys.json` once at start, and nothing changes it under a running Daemon. A Daemon with no keys warns, and refuses every request that needs a key or a sign-in.
 - **Keys live in a file, not the Journal.** That is deliberate for now. A key is the Daemon's, not a Network's, and is checked rather than replayed. The Journal now holds Changes that belong to no Network, so keys may move there later.
 
 ## Sign-ins

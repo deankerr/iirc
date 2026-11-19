@@ -6,13 +6,22 @@
  */
 import { DaemonApi } from "@iirc/api";
 import type { Listen } from "@iirc/daemon";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Layer, Schema } from "effect";
 import { Command } from "effect/cli";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 
 import { failed, reportedOnStderr } from "./command-failed.ts";
 import { ListenAddress, listenFlag } from "./listen.ts";
+
+// The Daemon at the address asked, and nothing else: never through a proxy the
+// environment names, and never where a redirect points.
+const directly: BunFetchRequestInit = { proxy: false, redirect: "manual" };
+
+const direct = Layer.provideMerge(
+  FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.RequestInit, directly)
+);
 
 /** How long it waits for an answer, well under a health check's own limit. */
 const patience = Duration.seconds(5);
@@ -84,7 +93,7 @@ export const health = Command.make(
           }
         })
       );
-    }).pipe(Effect.provide(FetchHttpClient.layer), reportedOnStderr)
+    }).pipe(Effect.provide(direct), reportedOnStderr)
 ).pipe(
   Command.withDescription(
     "Ask the Daemon whether it is well: exit 0 if so, and 1 with one line on stderr if not"
