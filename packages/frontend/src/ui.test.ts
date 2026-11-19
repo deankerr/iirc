@@ -1,5 +1,5 @@
-import { ItemContent } from "@iirc/api";
-import type { Activity } from "@iirc/api";
+import { TimelineItem } from "@iirc/api";
+import type { Activity, ItemContent } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +10,7 @@ import {
   readRuleOf,
   noOverrides,
   overridden,
-  showsItem,
+  showsIn,
   writtenOnDevice,
 } from "./ui.ts";
 
@@ -206,12 +206,7 @@ describe("a device's overrides", () => {
   });
 });
 
-const content = Schema.decodeUnknownSync(ItemContent);
-
-const unknown = { _tag: "Unknown" };
-
-const activity = (happened: typeof Activity.Encoded) =>
-  content({ _tag: "Activity", activity: happened, at: unknown, id: unknown, live: true });
+const unknown = { _tag: "Unknown" } as const;
 
 describe("an option every device shares only", () => {
   it("is never a device's: not read back, not kept, not in effect, and never written there", () => {
@@ -231,13 +226,57 @@ describe("an option every device shares only", () => {
   });
 });
 
+const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
+
+const itemOf = (sequence: number, at: number, held: typeof ItemContent.Encoded) =>
+  Schema.decodeSync(TimelineItem)({
+    answered: null,
+    changed: sequence,
+    content: held,
+    level: "Activity",
+    network: "alpha",
+    position: `${hex(BigInt(at) + 2n ** 53n, 14)}-${hex(BigInt(sequence), 14)}-${hex(0n, 8)}`,
+    sequence,
+    timeline: `${hex(1n, 14)}-00000000-00000000`,
+  });
+
+const happened = (sequence: number, at: number, what: typeof Activity.Encoded) =>
+  itemOf(sequence, at, { _tag: "Activity", activity: what, at: unknown, id: unknown, live: true });
+
+const said = (
+  sequence: number,
+  at: number,
+  sender: string,
+  kind: "Privmsg" | "Notice" | "Action" = "Privmsg"
+) =>
+  itemOf(sequence, at, {
+    _tag: "Message",
+    answers: null,
+    at: unknown,
+    context: null,
+    id: unknown,
+    kind,
+    live: true,
+    ours: null,
+    sender,
+    tags: [],
+    target: "#iirc",
+    text: "hi",
+  });
+
+const joined = (sequence: number, at: number, nick: string) =>
+  happened(sequence, at, { _tag: "Joined", channel: "#iirc", nick });
+
+const quit = (sequence: number, at: number, nick: string) =>
+  happened(sequence, at, { _tag: "Quit", nick, reason: null });
+
+const minute = 60_000;
+
 describe("which items a Timeline shows", () => {
   it("in a Channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {
-    const joined = activity({ _tag: "Joined", channel: "#iirc", nick: "peer" });
-    const parted = activity({ _tag: "Parted", channel: "#iirc", nick: "peer", reason: null });
-    const quit = activity({ _tag: "Quit", nick: "peer", reason: null });
+    const parted = happened(2, 2, { _tag: "Parted", channel: "#iirc", nick: "peer", reason: null });
 
-    const kicked = activity({
+    const kicked = happened(4, 4, {
       _tag: "Kicked",
       by: "op",
       channel: "#iirc",
@@ -245,19 +284,77 @@ describe("which items a Timeline shows", () => {
       reason: null,
     });
 
-    const began = content({ _tag: "SessionBegan", at: 1, nick: "iirc" });
+    const began = itemOf(5, 5, { _tag: "SessionBegan", at: 1, nick: "iirc" });
+    const items = [joined(1, 1, "peer"), parted, quit(3, 3, "peer"), kicked, began];
 
     expect(
-      (["all", "quiet", "none"] as const).map((shown) => [
-        ...[joined, parted, quit, kicked, began].map((one) => showsItem(shown, "Channel", one)),
-        showsItem(shown, "Network", joined),
-        showsItem(shown, "Direct", quit),
+      (["all", "spoke", "quiet", "none"] as const).map((shown) => [
+        ...items.map(showsIn(shown, "Channel", items, "iirc")),
+        ...items.map(showsIn(shown, "Network", items, undefined)).slice(0, 1),
+        ...items.map(showsIn(shown, "Direct", items, undefined)).slice(2, 3),
       ])
     ).toStrictEqual([
       [true, true, true, true, true, true, true],
       [false, false, false, true, true, true, true],
+      [false, false, false, true, true, true, true],
       [false, false, false, false, true, true, true],
     ]);
+  });
+
+  it("under spoke, in a Channel's, shows a join, part, or quit only of Self's or of a User who spoke up to five minutes before it, and every one while Self's nick is unknown", () => {
+    const items = [
+      said(1, 0, "alice"),
+      said(2, 0, "Bob", "Action"),
+      said(3, 0, "carol", "Notice"),
+      said(4, 0, "dave"),
+      joined(5, 5 * minute, "ALICE"),
+      quit(6, 5 * minute, "bob"),
+      quit(7, 5 * minute, "carol"),
+      // Six minutes after dave spoke, and erin never did.
+      quit(8, 6 * minute, "dave"),
+      quit(9, 6 * minute, "erin"),
+      quit(10, 6 * minute, "Me"),
+    ];
+
+    expect({
+      known: items.map(showsIn("spoke", "Channel", items, "me")),
+      // Any of them could be Self's, so none is hidden.
+      unknown: items.map(showsIn("spoke", "Channel", items, undefined)),
+    }).toStrictEqual({
+      known: [true, true, true, true, true, true, true, false, false, true],
+      unknown: items.map(() => true),
+    });
+  });
+
+  it("under spoke, follows a User across a change of nick, and measures from their latest Message", () => {
+    const items = [
+      said(1, 0, "bob"),
+      happened(2, minute, { _tag: "NickChanged", from: "bob", to: "bobby" }),
+      quit(3, 4 * minute, "bobby"),
+      said(4, 5 * minute, "bobby"),
+      quit(5, 9 * minute, "bobby"),
+      // The old nick is no one's after it changed.
+      joined(6, 9 * minute, "bob"),
+    ];
+
+    expect(items.map(showsIn("spoke", "Channel", items, "me"))).toStrictEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("under spoke, leaves a Network's and a Direct Message's Timeline alone", () => {
+    const items = [quit(1, 0, "erin")];
+
+    expect(
+      (["Network", "Direct", undefined] as const).map((kind) =>
+        items.map(showsIn("spoke", kind, items, undefined))
+      )
+    ).toStrictEqual([[true], [true], [true]]);
   });
 });
 

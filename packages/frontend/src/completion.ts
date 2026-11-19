@@ -1586,8 +1586,7 @@ export const sourcesOf = (state: Timelines, place: Place, held: Held): Sources =
               : []
           );
 
-  const connection = network?.connection;
-  const self = connection?._tag === "Connected" ? connection.nick : undefined;
+  const self = network?.connection._tag === "Connected" ? network.self : undefined;
 
   let nicks: Nicks = { _tag: "Listed", nicks: [] };
 

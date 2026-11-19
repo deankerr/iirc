@@ -6,6 +6,7 @@
   "exports": {
     "./activity": "./src/activity.ts",
     "./channel": "./src/channel.ts",
+    "./churn": "./src/churn.ts",
     "./closing": "./src/closing.ts",
     "./commands": "./src/commands.ts",
     "./completion": "./src/completion.ts",

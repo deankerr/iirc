@@ -33,6 +33,7 @@ import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iir
 import type { Position } from "@iirc/timelines";
 import { Option, Schema, SchemaGetter } from "effect";
 
+import { churnOf, foldNick, selfChurn } from "./churn.ts";
 import type { Parsed } from "./commands.ts";
 import {
   deepestSplits,
@@ -96,9 +97,9 @@ interface StatusLoad extends Load {
  *
  * - `Unknown`: not yet read.
  * - `Connecting`: dialling or registering, as `known` said.
- * - `Connected`: in a Session, since it began, with Self's nick when a `SessionBegan` said it,
- *   and whether it carries tags, by `message-tags`, as `known` said: `undefined` from a
- *   `SessionBegan`, which does not say, until `known` is read again.
+ * - `Connected`: in a Session, since it began, and whether it carries tags, by
+ *   `message-tags`, as `known` said: `undefined` from a `SessionBegan`, which does not say,
+ *   until `known` is read again.
  * - `Offline`: no Session, since when and why, when an item said so.
  */
 export type Connection =
@@ -107,7 +108,6 @@ export type Connection =
   | {
       readonly _tag: "Connected";
       readonly since: number;
-      readonly nick: string | undefined;
       readonly tags: boolean | undefined;
     }
   | {
@@ -146,6 +146,14 @@ export interface NetworkView {
   readonly connection: Connection;
   /** The sequence of the last Session item that set `connection`, or `known`'s place. */
   readonly connectionAt: number;
+  /**
+   * Self's nick on the Network, as `known` last said, a `SessionBegan` said, or a change of
+   * nick in the Network's own Timeline moved it, and none until one has. It is kept when the
+   * Session ends, so a Timeline read while offline still says which items are Self's.
+   */
+  readonly self: string | undefined;
+  /** The sequence of the last Session item or change of nick that set `self`, or `known`'s place. */
+  readonly selfAt: number;
   /** Whether Self is away, as `known` last said, or a Session item since. */
   readonly away: SelfAway;
   /**
@@ -697,6 +705,8 @@ const newNetwork = (network: NetworkId, life: number): NetworkView => ({
   network,
   partners: new Map(),
   running: undefined,
+  self: undefined,
+  selfAt: 0,
   status: unreadStatus,
   statusAt: 0,
   timelines: new Map(),
@@ -711,6 +721,16 @@ const newNetwork = (network: NetworkId, life: number): NetworkView => ({
  */
 export const isRemoved = (network: NetworkView): boolean =>
   network.kept || [...network.timelines.values()].some((timeline) => timeline.removed);
+
+/**
+ * Self's nick on a Network, as `known` said, a Session said it began with, or a change of it
+ * in the Network's own Timeline moved it, and kept after the Session ends.
+ * @param state - The Timelines.
+ * @param id - The Network.
+ * @returns The nick, or none while it is not known.
+ */
+export const selfOf = (state: Timelines, id: NetworkId): string | undefined =>
+  state.networks.get(id)?.self;
 
 /**
  * Whether a Network's Session carries tags, by `message-tags`, so a Message can answer
@@ -1188,7 +1208,7 @@ const connectionOf = (session: SessionKnowledge): Connection => {
     }
 
     case "Registered": {
-      return { _tag: "Connected", nick: undefined, since: session.since, tags: session.tags };
+      return { _tag: "Connected", since: session.since, tags: session.tags };
     }
 
     case "Offline": {
@@ -1211,7 +1231,7 @@ const connectionFromItem = (item: TimelineItem): Connection | undefined => {
 
   switch (content._tag) {
     case "SessionBegan": {
-      return { _tag: "Connected", nick: content.nick, since: content.at, tags: undefined };
+      return { _tag: "Connected", since: content.at, tags: undefined };
     }
 
     case "SessionEnded":
@@ -1332,6 +1352,49 @@ const partnerLearnedAt = (network: NetworkView, change: TimelineChange): number 
   );
 
 /**
+ * Self's nick as an item says it, if it does: the one a Session begins with, or the one a
+ * change of nick gives, when it is of the nick held, in the Network's own Timeline, where the
+ * Client routes Self's changes of nick and no one else's.
+ * @param item - The item.
+ * @param kind - The kind of Timeline it is in.
+ * @param held - Self's nick as held.
+ * @returns The nick, or none.
+ */
+const selfFromItem = (
+  item: TimelineItem,
+  kind: Timeline["kind"] | undefined,
+  held: string | undefined
+): string | undefined => {
+  const { content } = item;
+
+  if (content._tag === "SessionBegan") {
+    return content.nick;
+  }
+
+  return kind === "Network" &&
+    held !== undefined &&
+    content._tag === "Activity" &&
+    content.activity._tag === "NickChanged" &&
+    foldNick(content.activity.from) === foldNick(held)
+    ? content.activity.to
+    : undefined;
+};
+
+/**
+ * Whether an item may have changed what `known` says besides the Session: Self's away, in the
+ * Network's own Timeline, which User it was and what the Ircd confirmed being `known`'s to say,
+ * or whether a partner is there, which a few Activities in their Direct Message Timeline may
+ * have changed.
+ * @param item - The item.
+ * @param kind - The kind of Timeline it is in.
+ * @returns Whether `known` is to be read again.
+ */
+const changesStatus = (item: TimelineItem, kind: Timeline["kind"] | undefined): boolean =>
+  item.content._tag === "Activity" &&
+  ((kind === "Network" && item.content.activity._tag === "AwayChanged") ||
+    (kind === "Direct" && changesPartner(item.content.activity)));
+
+/**
  * Brings a Network's connection up to date with the Session items of one step, when they
  * are later than what set it and of the life held: an item of a Timeline of an older life,
  * as the step names it or as one let go of when that life ended, says nothing of it.
@@ -1345,7 +1408,7 @@ const changeConnection = (
   change: TimelineChange,
   vanished: ReadonlySet<TimelineId>
 ): NetworkView => {
-  let { connection, connectionAt, statusAt } = network;
+  let { connection, connectionAt, self, selfAt, statusAt } = network;
 
   const older = (timeline: TimelineId) =>
     vanished.has(timeline) ||
@@ -1362,28 +1425,30 @@ const changeConnection = (
       statusAt = Math.max(statusAt, item.sequence);
     }
 
-    if (ours && item.content._tag === "Activity") {
-      const kind = network.timelines.get(item.timeline)?.kind;
+    const kind = ours ? network.timelines.get(item.timeline)?.kind : undefined;
 
-      // Self's away changes belong to the Network's own Timeline. Which User it was, and
-      // what the Ircd confirmed, `known` says. So does whether a partner is there, which
-      // these four, in their Direct Message Timeline, may have changed.
-      if (
-        (kind === "Network" && item.content.activity._tag === "AwayChanged") ||
-        (kind === "Direct" && changesPartner(item.content.activity))
-      ) {
-        statusAt = Math.max(statusAt, item.sequence);
-      }
+    const nick = ours && item.sequence > selfAt ? selfFromItem(item, kind, self) : undefined;
+
+    if (nick !== undefined) {
+      self = nick;
+      selfAt = item.sequence;
+    }
+
+    if (ours && changesStatus(item, kind)) {
+      statusAt = Math.max(statusAt, item.sequence);
     }
   }
 
   statusAt = Math.max(statusAt, partnerLearnedAt(network, change));
 
+  const heldSelf =
+    self === network.self && selfAt === network.selfAt ? network : { ...network, self, selfAt };
+
   const connected =
     connectionAt === network.connectionAt
-      ? network
+      ? heldSelf
       : {
-          ...network,
+          ...heldSelf,
           away: awayOfConnection(connection),
           connection,
           connectionAt,
@@ -2301,6 +2366,10 @@ const statusRead = (
       connection,
       connectionAt: Math.max(network.connectionAt, from),
       partners: newer ? network.partners : partnersOfKnown(session, partners),
+      // What known says, unless a Session item or a change of nick after its read began did.
+      // With no Session it says none, which leaves the nick Self had.
+      self: from >= network.selfAt && self !== null ? self.nick : network.self,
+      selfAt: from >= network.selfAt && self !== null ? from : network.selfAt,
       // A step after the read began may not be in it, nor whether a Session that
       // began after it carries tags, so it is read again.
       status: {
@@ -4209,6 +4278,12 @@ export type Row =
        */
       readonly repeated?: Repeated;
       /**
+       * Joins, parts, quits, and changes of nick in a row are one row: the latest, under the
+       * key of the first, which stays as the run grows, holding every item of the run, oldest
+       * first, for a view to open. Present only for more than one, and never for Self's.
+       */
+      readonly folded?: readonly TimelineItem[];
+      /**
        * A Message that continues a run: plain speech from the User who said the item drawn
        * just before it, within {@link runSpan} of it. Present only when it does, so a run's
        * head, and every other row, has none.
@@ -4266,6 +4341,46 @@ const collapsed = (rows: readonly Row[]): readonly Row[] => {
       out.push(row);
     }
   }
+
+  return out;
+};
+
+/**
+ * The rows with each run of joins, parts, quits, and changes of nick made one: the latest
+ * item, under the key of the first, with every item of the run. Only items next to one
+ * another join, so a Message, any other Activity, a Gap, a Day, or the "new" divider between
+ * ends a run, and Self's own are never in one, but split it. A run of one is a plain row.
+ * @param rows - The rows.
+ * @param ours - The items that are Self's.
+ * @returns The rows, folded.
+ */
+const folding = (rows: readonly Row[], ours: ReadonlySet<TimelineItem>): readonly Row[] => {
+  const out: Row[] = [];
+  let run: (Row & { readonly _tag: "Item" })[] = [];
+
+  const end = () => {
+    const [first] = run;
+    const last = run.at(-1);
+
+    if (first !== undefined && last !== undefined) {
+      out.push(
+        run.length === 1 ? last : { ...last, folded: run.map((row) => row.item), key: first.key }
+      );
+    }
+
+    run = [];
+  };
+
+  for (const row of rows) {
+    if (row._tag === "Item" && churnOf(row.item.content) !== undefined && !ours.has(row.item)) {
+      run.push(row);
+    } else {
+      end();
+      out.push(row);
+    }
+  }
+
+  end();
 
   return out;
 };
@@ -4361,7 +4476,9 @@ const dayOf = (zone: Zone, at: number): number | undefined => {
  * With no zone, there are no Day rows.
  *
  * Each Message that continues a run of plain speech from one User is marked, as `runs` says,
- * whatever layout a view draws.
+ * whatever layout a view draws. Each run of joins, parts, quits, and changes of nick is one
+ * row, as `folding` says, except where they are Self's, which is told by Self's nick as the
+ * Network holds it now, and a change of it in the window.
  *
  * A Gap that ended, with no item of the Timeline before it, in a window that holds the
  * Timeline's start, says nothing: nothing was there to miss. It is left out of the rows and
@@ -4372,13 +4489,15 @@ const dayOf = (zone: Zone, at: number): number | undefined => {
  * @param divider - The divider, if the Timeline opened with something unread.
  * @param shows - Which items are drawn, or every one.
  * @param zone - The zone a day is read in, if the rows should show where it changes.
+ * @param self - Self's nick now, if known, as `selfOf` gives it.
  * @returns The rows.
  */
 export const rowsOf = (
   window: Window,
   divider?: Divider,
   shows: (item: TimelineItem) => boolean = () => true,
-  zone?: Zone
+  zone?: Zone,
+  self?: string
 ): readonly Row[] => {
   const rows: Row[] = [];
   let next = 0;
@@ -4435,7 +4554,10 @@ export const rowsOf = (
     drawGap(gap);
   }
 
-  return runs(collapsed(rows));
+  // With Self's nick unknown, any of them could be Self's, so none is folded away.
+  const shown = collapsed(rows);
+
+  return runs(self === undefined ? shown : folding(shown, selfChurn(window.items, self)));
 };
 
 /**

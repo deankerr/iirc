@@ -5,8 +5,10 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import type { Churn } from "./churn.ts";
 import {
   attemptedText,
+  churnLine,
   contained,
   formatted,
   lineOf as lineIn,
@@ -879,6 +881,48 @@ describe("lines", () => {
       "Your PING of peer",
       "Your leaving of #iirc",
     ]);
+  });
+});
+
+const joined = (nick: string): Churn => ({ _tag: "Joined", channel: "#iirc", nick });
+const parted = (nick: string): Churn => ({ _tag: "Parted", channel: "#iirc", nick, reason: null });
+const quit = (nick: string): Churn => ({ _tag: "Quit", nick, reason: null });
+const renamed = (from: string, to: string): Churn => ({ _tag: "NickChanged", from, to });
+
+describe("a run of joins, parts, quits, and changes of nick as one line", () => {
+  it("counts each kind, in a fixed order and only those there were, and names up to five Users, the rest counted", () => {
+    const line = churnLine([
+      joined("alice"),
+      joined("bob"),
+      joined("carol"),
+      parted("dave"),
+      quit("erin"),
+      renamed("frank", "fay"),
+    ]);
+
+    expect({
+      marker: line._tag === "Description" ? line.marker : undefined,
+      text: read(line),
+    }).toStrictEqual({
+      marker: "--",
+      text: "3 joined, 1 left, 1 quit, 1 changed nick: <alice>, <bob>, <carol>, <dave>, <erin> and 1 more",
+    });
+  });
+
+  it("names each User once however they are written, by the nick a change of nick had, and a few Users with no more", () => {
+    expect(
+      read(churnLine([joined("Alice"), quit("alice"), renamed("bob", "bobby"), joined("BOB")]))
+    ).toBe("2 joined, 1 quit, 1 changed nick: <Alice>, <bob>");
+  });
+
+  it("gives each nick its colour slot as any other description does", () => {
+    const line = churnLine([joined("alice")]);
+
+    expect(
+      line._tag === "Description"
+        ? line.parts.flatMap((part) => (part._tag === "Nick" ? [part.colour] : []))
+        : []
+    ).toStrictEqual([nickColour("alice")]);
   });
 });
 

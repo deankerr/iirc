@@ -8,6 +8,7 @@ declare const styles: {
   readonly day: string;
   readonly dayText: string;
   readonly delivery: string;
+  readonly foldSummary: string;
   readonly gap: string;
   readonly gapText: string;
   readonly head: string;

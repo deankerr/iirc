@@ -229,13 +229,15 @@ export const DayShown = Schema.Literals(["full", "long", "medium", "short", "iso
 export type DayShown = typeof DayShown.Type;
 
 /**
- * Which Activity a Channel's Timeline shows: all of it, all but joins, parts, and quits
- * (`quiet`), or none. It changes what is drawn, never what is counted.
+ * Which Activity a Channel's Timeline shows, each value hiding more than the one before:
+ * all of it, all but the joins, parts, and quits of Users who did not speak there in the
+ * five minutes before (`spoke`), all but joins, parts, and quits (`quiet`), or none. Self's
+ * own are always shown under `spoke`. It changes what is drawn, never what is counted.
  */
-export const ActivityShown = Schema.Literals(["all", "quiet", "none"]).annotate({
+export const ActivityShown = Schema.Literals(["all", "spoke", "quiet", "none"]).annotate({
   default: "all",
   description:
-    "Which Activity a Channel shows: all, quiet to hide joins, parts, and quits, or none. Unread counts are unchanged.",
+    "Which Activity a Channel shows: all, spoke to hide the joins, parts, and quits of Users who did not speak there in the five minutes before, quiet to hide all joins, parts, and quits, or none. Unread counts are unchanged.",
 });
 
 /** The decoded form of {@link ActivityShown}. */
