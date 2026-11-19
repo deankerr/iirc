@@ -379,8 +379,8 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
 
 /**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
- * it, whether that Network has a Session, every Timeline in the order the sidebar shows, the
- * ones pinned, and by name, those closed too, those open in any Pane, those with something
+ * it, whether that Network has a Session, every Timeline in the order the sidebar shows, and
+ * by name, those closed too, those open in any Pane, those with something
  * unread, and the head of the Channel in focus, as read.
  * @param timelines - The Timelines.
  * @param channels - The Channels the Panes show, as read.
@@ -397,7 +397,6 @@ export const contextOf = (
   const main = mainOf(timelines);
 
   const networks = sidebar(timelines);
-  const shownAs = arranged(networks, arrangement);
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
   // for nothing.
@@ -412,11 +411,10 @@ export const contextOf = (
     named: namedIn(networks),
     open: open === undefined ? undefined : resolve(timelines, open),
     panes: panesOf(timelines.layout.root).length,
-    pinned: shownAs.pinned.map((pin) => pin.timeline.id),
     shown: panesOf(timelines.layout.root).flatMap((pane) =>
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
-    timelines: shownOrder(shownAs),
+    timelines: shownOrder(arranged(networks, arrangement)),
     unread: unseenIn(calling),
     unreadClosed: unseenIn(closed),
   };

@@ -54,7 +54,6 @@ const inChannel: CommandContext = {
   named: [],
   open: channel,
   panes: 1,
-  pinned: [],
   session: true,
   shown: [],
   timelines: [own, channel, direct],

@@ -1008,7 +1008,6 @@ describe("everything the Composer's list ranks", () => {
     named: namedIn(bar),
     open: iirc,
     panes: 1,
-    pinned: [],
     session: true,
     shown: [iirc],
     timelines: [],

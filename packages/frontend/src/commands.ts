@@ -126,8 +126,6 @@ export interface CommandContext {
   readonly session: boolean | undefined;
   /** Every Timeline, in the order the sidebar shows: the pinned, then each Network's. */
   readonly timelines: readonly TimelineId[];
-  /** The Timelines pinned above the Networks, in order, as the sidebar shows them. */
-  readonly pinned: readonly TimelineId[];
   /** Every Timeline by name, those closed too, as `namedIn` lists them, which `/go` finds one in. */
   readonly named: readonly NamedTimeline[];
   /**
@@ -994,14 +992,15 @@ const moveArguments = (args: string): Parsed<"Up" | "Down"> => {
 };
 
 /**
- * What `/pin` does with the open Timeline: unpins it when it is pinned, else pins it, unless
- * it is a Network's own, whose row is the Network.
+ * What `/pin` does with the open Timeline: unpins it when it is pinned, else pins it, as the
+ * options read when it is carried out say, unless it is a Network's own, whose row is the
+ * Network.
  * @param args - The text after `/pin`.
  * @param context - The context.
  * @returns The edit, or why there is none.
  */
 const pinArguments = (args: string, context: CommandContext): Parsed<ArrangeEdit> => {
-  const { focus, pinned } = context;
+  const { focus } = context;
 
   if (args.trim() !== "") {
     return invalid("/pin takes nothing after it.");
@@ -1017,11 +1016,7 @@ const pinArguments = (args: string, context: CommandContext): Parsed<ArrangeEdit
     );
   }
 
-  return parsed({
-    _tag: "Pin",
-    pinned: !pinned.includes(focus.timeline),
-    timeline: focus.timeline,
-  });
+  return parsed({ _tag: "Pin", timeline: focus.timeline });
 };
 
 const goUsage = "/go [network] <name>";

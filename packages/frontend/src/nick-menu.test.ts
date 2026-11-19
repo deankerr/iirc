@@ -62,7 +62,6 @@ const around = {
   named: [],
   open: timeline,
   panes: 1,
-  pinned: [],
   session: true,
   shown: [timeline],
   timelines: [timeline],

@@ -217,7 +217,8 @@ export const shownOrder = (shown: Arranged): readonly TimelineId[] => [
  * - `Move`: a Timeline one place up or down in the part it is in: the pinned part; among the
  *   Networks, for a Network's own Timeline; or among its Network's Timelines.
  * - `Place`: a Timeline before or after another in the same part, as dragging does.
- * - `Pin`: a Timeline pinned above the Networks, or no longer.
+ * - `Pin`: a Timeline pinned above the Networks, or no longer; with neither said, whichever
+ *   it is not now, as the options read when it is carried out say.
  */
 export type ArrangeEdit =
   | { readonly _tag: "Move"; readonly timeline: TimelineId; readonly direction: "Up" | "Down" }
@@ -227,7 +228,7 @@ export type ArrangeEdit =
       readonly target: TimelineId;
       readonly side: "Before" | "After";
     }
-  | { readonly _tag: "Pin"; readonly timeline: TimelineId; readonly pinned: boolean };
+  | { readonly _tag: "Pin"; readonly timeline: TimelineId; readonly pinned?: boolean };
 
 /** The new whole value of one `ui` option, by its name. */
 export type ArrangeChange =
@@ -458,7 +459,8 @@ const timelineMoved = (
  *   closed.
  * - `Place` onto a Timeline of another part or Network changes nothing, and neither does
  *   either at an edge.
- * - `Pin` appends to `sidebar.pinned`, or, unpinning, removes from it. A Network's own
+ * - `Pin` appends to `sidebar.pinned`, or, unpinning, removes from it, and with neither
+ *   said, does whichever the Timeline is not now. A Network's own
  *   Timeline cannot be pinned.
  * @param networks - The sidebar, in its fixed order.
  * @param arrangement - The Owner's order.
@@ -474,10 +476,12 @@ export const arranging = (
   const isPinned = shown.pinned.some((pin) => pin.timeline.id === edit.timeline);
 
   if (edit._tag === "Pin") {
-    if (edit.pinned !== isPinned) {
+    const wanted = edit.pinned ?? !isPinned;
+
+    if (wanted !== isPinned) {
       const rest = once(arrangement.pinned).filter((id) => id !== edit.timeline);
 
-      if (!edit.pinned) {
+      if (!wanted) {
         return { option: "sidebar.pinned", value: rest };
       }
 

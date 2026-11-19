@@ -388,11 +388,10 @@ describe("arranging the Sidebar", () => {
   });
 
   it("pins a Timeline by appending it, and unpins by removing it, changing nothing when it already is so", () => {
-    const pin = (timeline: number, pinned: boolean): ArrangeEdit => ({
-      _tag: "Pin",
-      pinned,
-      timeline: id(timeline),
-    });
+    const pin = (timeline: number, pinned?: boolean): ArrangeEdit =>
+      pinned === undefined
+        ? { _tag: "Pin", timeline: id(timeline) }
+        : { _tag: "Pin", pinned, timeline: id(timeline) };
 
     expect({
       already: edit({ pinned: [id(12)] }, pin(12, true)),
@@ -400,6 +399,8 @@ describe("arranging the Sidebar", () => {
       closed: arranging([net("libera", 10, ["#a"], { closed: ["#b"] })], unarranged, pin(12, true)),
       notPinned: edit({ pinned: [id(12)] }, pin(11, false)),
       own: edit({}, pin(10, true)),
+      toggleOff: edit({ pinned: [id(12), id(11)] }, pin(12)),
+      toggleOn: edit({ pinned: [id(12)] }, pin(11)),
       unknown: edit({}, pin(99, true)),
       unpin: edit({ pinned: [id(12), id(11)] }, pin(12, false)),
     }).toStrictEqual({
@@ -408,6 +409,8 @@ describe("arranging the Sidebar", () => {
       closed: undefined,
       notPinned: undefined,
       own: undefined,
+      toggleOff: { option: "sidebar.pinned", value: [id(11)] },
+      toggleOn: { option: "sidebar.pinned", value: [id(12), id(11)] },
       unknown: undefined,
       unpin: { option: "sidebar.pinned", value: [id(11)] },
     });
