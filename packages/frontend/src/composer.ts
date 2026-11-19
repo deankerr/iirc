@@ -230,7 +230,8 @@ export type SayFailure =
  *
  * - `Edited`: the Owner changed the plain text to `text`, which is merged into the draft's
  *   formatting, and lets go of lines waiting to be confirmed, and of a notice about the
- *   text. `caret`, where the caret is after it, places an edit the text alone could place
+ *   text. Over a command started over a draft, text edited to nothing puts the command away,
+ *   as `Restored` does. `caret`, where the caret is after it, places an edit the text alone could place
  *   in several ways. Text left as it was changes nothing. Once the text changes, a style
  *   pending is let go of, after it was typed if the edit put text in where it was.
  * - `Formatted`: the Owner put a format over the plain text from `start` to `end`. With
@@ -945,7 +946,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
 
         const text = merged(draft.text, event.text, hint);
 
-        return {
+        const edited: Draft = {
           ...draft,
           confirming: undefined,
           notice: unlessAboutText(draft.notice, plainOf(draft.text) !== event.text),
@@ -953,6 +954,10 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
           text,
           typing: text === draft.text ? draft.typing : undefined,
         };
+
+        // A command edited away to nothing is put away, as Escape does, so the draft set
+        // aside is never left behind a draft typed over the empty command.
+        return plainOf(text).trim() === "" ? restored(edited) : edited;
       });
     }
 
@@ -1086,3 +1091,35 @@ export const commandStarted = (state: Composers, timeline: Place, text: string):
     text,
     typing: undefined,
   }));
+
+/**
+ * The text the files added to a composer belong to: the draft set aside while a command
+ * stands over it, else the draft. Their anchors and links are in it.
+ * @param state - The composers.
+ * @param timeline - The composer's place.
+ * @returns Its text, with its formatting codes.
+ */
+export const filesTextOf = (state: Composers, timeline: Place): string => {
+  const draft = draftOf(state, timeline);
+
+  return draft.aside?.text ?? draft.text;
+};
+
+/**
+ * Changes the text the files added to a composer belong to, as `filesTextOf` says: the draft
+ * set aside, left as it is where a command stands over it, or else the draft, as an edit does.
+ * @param state - The composers.
+ * @param timeline - The composer's place.
+ * @param text - The plain text after.
+ * @returns The composers after.
+ */
+export const withFilesText = (state: Composers, timeline: Place, text: string): Composers => {
+  const { aside } = draftOf(state, timeline);
+
+  return aside === undefined
+    ? reduceComposers(state, { _tag: "Edited", text, timeline })
+    : withDraft(state, timeline, (draft) => ({
+        ...draft,
+        aside: { ...aside, text: merged(aside.text, text, { pending: undefined }) },
+      }));
+};

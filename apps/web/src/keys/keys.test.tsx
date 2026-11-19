@@ -12,11 +12,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { edit, perform, restoreDraft } from "../composer/atoms.ts";
 import { composerState } from "../composer/composer-state.ts";
 import { editing, openOptions, optionsSync, optionsState } from "../options/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -496,6 +497,21 @@ describe("the keys", () => {
         themes: true,
         value: "/theme ",
       });
+    });
+
+    it("leaves nothing of what was typed over a command in what the composer last took once it is put away", async () => {
+      const { registry } = await signedIn();
+      const secret = "hunter2-correct-horse";
+
+      registry.set(edit, { text: "keep this", timeline: "Nowhere" });
+      registry.set(perform, [{ _tag: "StartCommand", text: "/" }]);
+      registry.set(edit, { text: `/set network.libera.password ${secret}`, timeline: "Nowhere" });
+      registry.set(restoreDraft, "Nowhere");
+
+      expect({
+        held: holds(registry, secret),
+        text: draftOf(registry.get(composerState), "Nowhere").text,
+      }).toStrictEqual({ held: false, text: "keep this" });
     });
 
     it("reads the options again once a command is started, so what it lists of them is as configured now", async () => {

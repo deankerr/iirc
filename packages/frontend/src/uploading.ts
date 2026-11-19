@@ -15,7 +15,7 @@
 import type { OwnerOptionName, Upload, UploadsStatus } from "@iirc/api";
 
 import { typesCredential } from "./commands.ts";
-import { draftOf, linesOf, reduceComposers } from "./composer.ts";
+import { draftOf, filesTextOf, linesOf, withFilesText } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
 import { plainOf } from "./formatting.ts";
 import { sizeText } from "./uploads.ts";
@@ -561,8 +561,8 @@ export const followed = (
     pending: state.pending.map((one) => {
       const place = carriedTo(one.place);
       // An anchor is a place in the plain text, as a caret is.
-      const was = plainOf(draftOf(before, one.place).text);
-      const now = plainOf(draftOf(after, place).text);
+      const was = plainOf(filesTextOf(before, one.place));
+      const now = plainOf(filesTextOf(after, place));
       const typed = place === one.place && typing?.place === place ? typing : undefined;
 
       return was === now && place === one.place
@@ -614,7 +614,7 @@ export const caretAfter = (caret: number, insertion: Insertion): number =>
 export interface Kept {
   readonly state: Uploading;
   readonly composers: Composers;
-  /** Where the link went, and in which composer, or none. */
+  /** Where the link went, and in which composer, or none, as while the draft is set aside, which has no caret. */
   readonly inserted: (Insertion & { readonly place: Place }) | undefined;
 }
 
@@ -653,7 +653,7 @@ export const uploaded = (
   }
 
   const { place } = file;
-  const insertion = insertLink(plainOf(draftOf(composers, place).text), file.anchor, link);
+  const insertion = insertLink(plainOf(filesTextOf(composers, place)), file.anchor, link);
 
   const pending = state.pending.map((one, at): Pending => {
     if (one.key === key) {
@@ -672,12 +672,9 @@ export const uploaded = (
   });
 
   return {
-    composers: reduceComposers(composers, {
-      _tag: "Edited",
-      text: insertion.text,
-      timeline: place,
-    }),
-    inserted: { ...insertion, place },
+    composers: withFilesText(composers, place, insertion.text),
+    // No caret is in a draft set aside, so none moves.
+    inserted: draftOf(composers, place).aside === undefined ? { ...insertion, place } : undefined,
     state: settled({ ...state, pending }),
   };
 };
@@ -737,7 +734,7 @@ const placesOf = (text: string, link: string): readonly number[] => {
 export interface Renamed {
   readonly state: Uploading;
   readonly composers: Composers;
-  /** Where its old link stood in which composer, or none when nothing was replaced. */
+  /** Where its old link stood in which composer, or none when nothing was replaced, or the draft is set aside, which has no caret. */
   readonly relinked: (Relink & { readonly place: Place }) | undefined;
 }
 
@@ -768,7 +765,7 @@ export const renamed = (
   const { place, stage } = file;
   const was = stage.link;
   const now = upload.link ?? was;
-  const text = plainOf(draftOf(composers, place).text);
+  const text = plainOf(filesTextOf(composers, place));
   const starts = now === was ? [] : placesOf(text, was);
 
   const held = changed(state, key, (one) => ({
@@ -783,12 +780,8 @@ export const renamed = (
   const relink: Relink = { from: was.length, starts, to: now.length };
 
   return {
-    composers: reduceComposers(composers, {
-      _tag: "Edited",
-      text: text.split(was).join(now),
-      timeline: place,
-    }),
-    relinked: { ...relink, place },
+    composers: withFilesText(composers, place, text.split(was).join(now)),
+    relinked: draftOf(composers, place).aside === undefined ? { ...relink, place } : undefined,
     state: {
       ...held,
       pending: held.pending.map((one) =>
@@ -826,8 +819,9 @@ export const offNote = (missing: readonly OwnerOptionName[]): string => {
 
 /**
  * Why a composer's draft cannot be sent yet, or none: a file added to it is still being
- * checked or sent, so its link is not in yet. A failed or kept file holds nothing back, and
- * nor does a draft that types a Credential's value, which is let go of as it is submitted.
+ * checked or sent, so its link is not in yet. A failed or kept file holds nothing back, nor
+ * does a command started over the draft, whose files belong to the draft set aside, and nor
+ * does a draft that types a Credential's value, which is let go of as it is submitted.
  * @param state - What is pending.
  * @param composers - The composers.
  * @param place - The composer's place.
@@ -840,8 +834,10 @@ export const heldBack = (
 ): string | undefined => {
   const waiting = pendingIn(state, place).filter(waits);
 
+  // A command over the draft is not what they wait for: they belong to the draft set aside.
   if (
     waiting.length === 0 ||
+    draftOf(composers, place).aside !== undefined ||
     linesOf(draftOf(composers, place).text).some((line) => typesCredential(line))
   ) {
     return undefined;

@@ -1137,7 +1137,7 @@ describe("a command started over a draft", () => {
 
   it("keeps it where nothing was submitted: an empty command, a turn away", () => {
     const started_ = commandStarted(hello, channel, "/go ");
-    const blank = submit(reduceComposers(started_, edited("")), channel, context);
+    const blank = submit(commandStarted(hello, channel, "  "), channel, context);
     const away = reduceComposers(started_, { _tag: "Left", timeline: channel });
 
     expect([asideOf(blank.state)?.text, asideOf(away)?.text]).toStrictEqual(["hello", "hello"]);
@@ -1174,5 +1174,32 @@ describe("a command started over a draft", () => {
       asideOf(state, other)?.text,
       asideOf(state, place),
     ]).toStrictEqual(["/go ", "hi bob", undefined]);
+  });
+});
+
+const asideOfDraft = (state: Composers) => draftOf(state, channel).aside;
+
+describe("a command put away by editing", () => {
+  it("brings the draft set aside back once the text is edited to nothing, as Escape does, and leaves a draft typed after it alone", () => {
+    const started_ = commandStarted(fold([edited("A")]), channel, "/go ");
+    const backspaced = reduceComposers(started_, edited(""));
+    const blanked = reduceComposers(started_, edited("  "));
+    const typed_ = reduceComposers(backspaced, edited("AB"));
+    const escaped = reduceComposers(typed_, { _tag: "Restored", timeline: channel });
+
+    expect({
+      blanked: [draftOf(blanked, channel).text, asideOfDraft(blanked)],
+      escaped: draftOf(escaped, channel).text,
+      kept: [
+        draftOf(reduceComposers(started_, edited("/go x")), channel).text,
+        asideOfDraft(reduceComposers(started_, edited("/go x")))?.text,
+      ],
+      typed: [draftOf(backspaced, channel).text, asideOfDraft(backspaced)],
+    }).toStrictEqual({
+      blanked: ["A", undefined],
+      escaped: "AB",
+      kept: ["/go x", "A"],
+      typed: ["A", undefined],
+    });
   });
 });

@@ -1000,7 +1000,15 @@ export const dropReply = Atom.fnSync((timeline: Place, get) => {
  * the list of the command goes.
  */
 export const restoreDraft = Atom.fnSync((timeline: Place, get) => {
-  happened(get.registry, { _tag: "Restored", timeline });
+  const { registry } = get;
+
+  happened(registry, { _tag: "Restored", timeline });
+  // `edit` keeps the text it was last given as its argument, which was the command's, a
+  // Credential's value among it, so it is given the draft's own, which changes nothing.
+  registry.set(edit, {
+    text: plainOf(draftOf(registry.get(composerState), timeline).text),
+    timeline,
+  });
 }).pipe(Atom.keepAlive);
 
 /** Lets go of a Timeline's notice and confirmation. */
