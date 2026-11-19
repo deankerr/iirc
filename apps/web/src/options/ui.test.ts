@@ -11,7 +11,7 @@ import { readChoice, writeChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
 import { sync } from "../timelines/atoms.ts";
-import { optionRows, optionsState } from "./atoms.ts";
+import { optionGroups, optionsState } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
 import { readRule, uiInEffect, uiSync } from "./ui.ts";
 
@@ -109,7 +109,8 @@ describe("the options under ui", () => {
     const overriding = {
       kept: readChoice(deviceUiKey),
       row: registry
-        .get(optionRows)
+        .get(optionGroups)
+        .flatMap((group) => group.options)
         .filter((option) => option.name === "ui.theme")
         .map((option) =>
           option._tag === "Ui" ? [option.value, option.shared, option.device] : []

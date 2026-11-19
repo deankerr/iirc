@@ -17,6 +17,7 @@ import {
   derivedCredential,
   derivedOwnerCredential,
   fields,
+  grouped,
   initialOptions,
   listed,
   networksReading,
@@ -1455,7 +1456,7 @@ describe("the options under ui", () => {
     }).toStrictEqual({ after: shared, forgotten: undefined });
   });
 
-  it("lists them after every Network's, filtered, and keeps the newest read of them", () => {
+  it("lists them first, filtered, and keeps the newest read of them", () => {
     let state = initialOptions;
 
     for (const event of [
@@ -1471,14 +1472,13 @@ describe("the options under ui", () => {
     }
 
     expect({
-      kept: state.ui,
-      last: listed(state, "")
+      first: listed(state, "")
         .map((option) => option.name)
-        .slice(-27),
+        .slice(0, 27),
+      kept: state.ui,
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
-      kept: shared,
-      last: [
+      first: [
         "ui.activity",
         "ui.colours",
         "ui.dark",
@@ -1507,6 +1507,7 @@ describe("the options under ui", () => {
         "ui.time",
         "ui.width",
       ],
+      kept: shared,
       time: [{ _tag: "Shown", text: "HH:mm:ss" }],
     });
   });
@@ -1864,7 +1865,7 @@ describe("the options under store, uploads, and previews", () => {
     });
   });
 
-  it("are listed first, filtered, never overridden by a device, and keep the newest read", () => {
+  it("are listed, filtered, never overridden by a device, and keep the newest read", () => {
     let state = initialOptions;
 
     for (const event of [
@@ -1877,13 +1878,11 @@ describe("the options under store, uploads, and previews", () => {
     const forgotten = reduceOptions(state, { _tag: "OwnerForgotten" });
 
     expect({
-      first: listed(state, "")[0]?.name,
       forgotten: forgotten.owner,
       kept: state.owner,
       store: listed(state, "store.s3.b*").map((option) => [option._tag, option.name]),
       uploads: listed(state, "uploads").length,
     }).toStrictEqual({
-      first: "previews.maxTotal",
       forgotten: undefined,
       kept: owner,
       store: [["Owner", "store.s3.bucket"]],
@@ -2068,6 +2067,69 @@ const shownOf = (state: Options, name: string) =>
     .map((one) => one.value);
 
 const text = (value: string) => [{ _tag: "Shown", text: value }];
+
+describe("the options view's headings", () => {
+  const unread = Schema.decodeSync(NetworkId)("unread");
+
+  // Three Networks listed, two read, and everything else read.
+  const everything = [
+    { _tag: "Listed", networks: [dotted, libera, unread] },
+    { _tag: "Read", configuration: plain, network: libera, sequence: 1 },
+    { _tag: "Read", configuration: plain, network: dotted, sequence: 1 },
+    { _tag: "UiRead", ui: { options: uiDefaults, sequence: 1 } },
+    { _tag: "OwnerRead", owner },
+  ] satisfies readonly OptionsEvent[];
+
+  let state = initialOptions;
+
+  for (const event of everything) {
+    state = reduceOptions(state, event);
+  }
+
+  /**
+   * The headings the view shows under a filter, each with how many options it holds, and
+   * whether every one of them starts with it.
+   * @param filter - What the Owner typed.
+   * @returns The headings.
+   */
+  const headings = (filter: string) =>
+    grouped(state, filter).map((group) => [
+      group.heading,
+      group.options.length,
+      group.options.every((option) => option.name.startsWith(`${group.heading}.`)),
+    ]);
+
+  it.each([
+    {
+      filter: "",
+      shown: [
+        ["ui", Object.keys(uiDefaults).length, true],
+        ["network.my.net", optionsOf(dotted, plain, undefined).length, true],
+        ["network.libera", optionsOf(libera, plain, undefined).length, true],
+        ["store", 5, true],
+        ["uploads", 5, true],
+        ["previews", 1, true],
+      ],
+      why: "ui, then each Network read in the order listed, then store, uploads, and previews",
+    },
+    {
+      filter: "*maxTotal",
+      shown: [
+        ["uploads", 1, true],
+        ["previews", 1, true],
+      ],
+      why: "a group the filter leaves empty has no heading",
+    },
+    {
+      filter: "network.libera.nicks",
+      shown: [["network.libera", 1, true]],
+      why: "one Network's option heads only its own",
+    },
+    { filter: "nothing matches", shown: [], why: "nothing matched is no heading at all" },
+  ])("$why", ({ filter, shown }) => {
+    expect(headings(filter)).toStrictEqual(shown);
+  });
+});
 
 describe("a change on its way", () => {
   const inForce = { options: uiDefaults, sequence: 1 };

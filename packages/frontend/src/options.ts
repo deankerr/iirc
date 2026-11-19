@@ -2945,32 +2945,77 @@ export const configurationShown = (
   return shown;
 };
 
+/** Options under one heading of the options view, which every one of their names starts with. */
+export interface OptionGroup {
+  /** What their names start with: `ui`, a Network's, such as `network.libera`, `store`, `uploads`, or `previews`. */
+  readonly heading: string;
+  readonly options: readonly Option[];
+}
+
+/** The order the Owner's options are headed in, any other after them in the Schema's. */
+const ownerHeadings = ["store", "uploads", "previews"];
+
 /**
- * The options the view lists, that the filter matches: every option under `store` and
- * `uploads`, the Daemon's own, then every option of every Network read, then every option
- * under `ui`, as it takes effect on this device, each as it shows with the changes on its way.
+ * The heading an option under `store`, `uploads`, or `previews` is under: the first part of its name.
+ * @param option - The option.
+ * @returns The heading.
+ */
+const headingOf = (option: OwnerOption) => option.option.split(".")[0] ?? option.option;
+
+/**
+ * The options the view lists, that the filter matches, under a heading each: those under
+ * `ui`, as they take effect on this device, then every Network's read, in the order listed,
+ * then those under `store`, `uploads`, and `previews`, the Daemon's own, each as it shows
+ * with the changes on its way. A heading the filter leaves nothing under is left out.
  * @param state - The view.
  * @param filter - What the Owner typed to filter them.
  * @param device - This device's overrides of the options under `ui`.
  * @param missing - The fonts' families this device was found to lack.
- * @returns The options under `store`, `uploads`, and `previews`, then by Network in the order listed,
- *   then those under `ui`.
+ * @returns The headings, in the order shown.
+ */
+export const grouped = (
+  state: Options,
+  filter: string,
+  device: DeviceUi = noOverrides,
+  missing: ReadonlySet<FontFamily> = noneMissing
+): readonly OptionGroup[] => {
+  const owner = ownerOptionsOf(ownerShown(state), state.held);
+
+  return [
+    { heading: "ui", options: uiOptionsOf(uiShown(state), device, missing) },
+    ...[...(state.networks?.keys() ?? [])].map((network) => {
+      const configuration = configurationShown(state, network);
+
+      return {
+        heading: optionName(network, []),
+        options: configuration === undefined ? [] : optionsOf(network, configuration, state.held),
+      };
+    }),
+    ...[...new Set([...ownerHeadings, ...owner.map(headingOf)])].map((heading) => ({
+      heading,
+      options: owner.filter((option) => headingOf(option) === heading),
+    })),
+  ].flatMap(({ heading, options }) => {
+    const shown = options.filter((option) => matches(filter, option.name));
+
+    return shown.length === 0 ? [] : [{ heading, options: shown }];
+  });
+};
+
+/**
+ * The options the view lists, that the filter matches, in the order it heads them.
+ * @param state - The view.
+ * @param filter - What the Owner typed to filter them.
+ * @param device - This device's overrides of the options under `ui`.
+ * @param missing - The fonts' families this device was found to lack.
+ * @returns The options.
  */
 export const listed = (
   state: Options,
   filter: string,
   device: DeviceUi = noOverrides,
   missing: ReadonlySet<FontFamily> = noneMissing
-): readonly Option[] =>
-  [
-    ...ownerOptionsOf(ownerShown(state), state.held),
-    ...[...(state.networks?.keys() ?? [])].flatMap((network) => {
-      const configuration = configurationShown(state, network);
-
-      return configuration === undefined ? [] : optionsOf(network, configuration, state.held);
-    }),
-    ...uiOptionsOf(uiShown(state), device, missing),
-  ].filter((option) => matches(filter, option.name));
+): readonly Option[] => grouped(state, filter, device, missing).flatMap((group) => group.options);
 
 /**
  * The Networks whose options the view is still reading, by the names their options fall

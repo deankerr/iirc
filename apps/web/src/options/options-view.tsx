@@ -1,8 +1,9 @@
 /**
- * The options view: every option under `store`, `uploads`, and `previews`, every option of every
- * Network, and every option under `ui`, as the core derives them from the Schemas, filtered
- * as the Owner types. An option under `ui` this device overrides says so, beside the value
- * every device shares. No device overrides one under `store`, `uploads`, or `previews`. React Aria's
+ * The options view: every option under `ui`, every option of every Network, and every
+ * option under `store`, `uploads`, and `previews`, as the core derives and heads them from
+ * the Schemas, filtered as the Owner types. Each option takes two lines: its name and value,
+ * then its description and what it starts as. An option under `ui` this device overrides
+ * says so, beside the value every device shares. No device overrides one under `store`, `uploads`, or `previews`. React Aria's
  * GridList gives it its keyboard: arrows move, Enter opens a menu of an option's choices
  * where its kind lists them, which ends in "Custom…" where it also takes text, edits the
  * focused value in place as its raw text, or a whole number in a number field, turns a
@@ -17,13 +18,16 @@
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { menuOf, parseOwnerText, parseUiText } from "@iirc/frontend/options";
-import type { Menu as Choices, Option, Value } from "@iirc/frontend/options";
+import type { Menu as Choices, Option, OptionGroup, Value } from "@iirc/frontend/options";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
 import { useContext, useEffect, useId, useRef, useState } from "react";
 import {
+  Collection,
   GridList,
+  GridListHeader,
   GridListItem,
+  GridListSection,
   Input,
   Menu,
   MenuItem,
@@ -46,7 +50,7 @@ import {
   networksWaited,
   notice as noticeAtom,
   optionsFilter,
-  optionRows,
+  optionGroups,
   optionsState,
   promptCredential,
 } from "./atoms.ts";
@@ -122,7 +126,11 @@ const Starts = ({ starts }: { readonly starts: string | undefined }) => {
     return "must be given";
   }
 
-  return <bdi>{startsInWords(starts)}</bdi>;
+  return (
+    <>
+      default <bdi>{startsInWords(starts)}</bdi>
+    </>
+  );
 };
 
 /**
@@ -452,7 +460,7 @@ const NetworkRemovals = () => {
  * @returns The view.
  */
 export const OptionsView = ({ pane }: { readonly pane: string }) => {
-  const rows = useAtomValue(optionRows);
+  const groups = useAtomValue(optionGroups);
   const waits = useAtomValue(networksWaited);
   const { confirming, editing, notice } = useAtomValue(optionsState);
   const filter = useAtomValue(optionsFilter) ?? "";
@@ -519,7 +527,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
     closeNow();
   };
 
-  const named = (key: Key | null | undefined) => rows.find((option) => option.name === key);
+  const named = (key: Key | null | undefined) =>
+    groups.flatMap((group) => group.options).find((option) => option.name === key);
 
   // Focus goes back to an option's row once an edit or a question about it is done.
   const focusRow = (name: string) => () => {
@@ -653,7 +662,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
             {...(notice === undefined ? {} : { "aria-describedby": noticeId })}
             aria-label="Options"
             className={styles.list}
-            items={rows}
+            items={groups}
             // A row has no part of its own to move to but an open editor, whose caret takes
             // Left, Right, Home, and End, and whose number takes Up and Down, so the row
             // takes no arrow from it.
@@ -664,58 +673,80 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
               waits.length === 0 ? <p className={styles.muted}>No option matches.</p> : null
             }
           >
-            {(option) => {
-              const menu =
-                editing === option.name && customised !== option.name
-                  ? menuOf(option.kind, option.value)
-                  : undefined;
+            {(group: OptionGroup) => (
+              <GridListSection
+                // A heading can be an option's name, as a Network `libera.nicks` heads
+                // `network.libera.nicks`, which is libera's `nicks`, so its key is apart from
+                // theirs: an option's name never starts with a space.
+                id={` ${group.heading}`}
+              >
+                <GridListHeader className={styles.heading}>
+                  {/* A Network's id is ASCII, so it needs no isolating. */}
+                  {group.heading}
+                </GridListHeader>
+                <Collection items={group.options}>
+                  {(option: Option) => {
+                    const menu =
+                      editing === option.name && customised !== option.name
+                        ? menuOf(option.kind, option.value)
+                        : undefined;
 
-              const editor = editing === option.name && menu === undefined;
+                    const editor = editing === option.name && menu === undefined;
 
-              return (
-                <GridListItem className={styles.row} id={option.name} textValue={option.name}>
-                  <span className={styles.name}>
-                    <bdi>{option.name}</bdi>
-                  </span>
-                  <span className={styles.value}>
-                    {/* The value stays where it is while it is edited, hidden under its editor, so
-                      the row keeps its height however many lines the value takes. */}
-                    <span className={styles.field}>
-                      <span
-                        aria-hidden={editor || undefined}
-                        className={editor ? styles.hidden : undefined}
-                        data-value
-                      >
-                        <Shown value={option.value} />
-                      </span>
-                      {editor ? <Editor done={focusRow(option.name)} option={option} /> : null}
-                      {menu === undefined ? null : (
-                        <ChoiceMenu
-                          custom={() => {
-                            customise(option.name);
-                          }}
-                          done={focusRow(option.name)}
-                          menu={menu}
-                          option={option}
-                        />
-                      )}
-                    </span>
-                    {option._tag === "Ui" && option.device !== undefined ? (
-                      <span className={styles.device}>
-                        on this device, over <Shown value={option.shared} />
-                      </span>
-                    ) : null}
-                    {option._tag === "Ui" && option.note !== undefined ? (
-                      <span className={styles.note}>{option.note}</span>
-                    ) : null}
-                  </span>
-                  <span className={styles.starts}>
-                    <Starts starts={option.starts} />
-                  </span>
-                  <span className={styles.description}>{option.description}</span>
-                </GridListItem>
-              );
-            }}
+                    return (
+                      <GridListItem className={styles.row} id={option.name} textValue={option.name}>
+                        <span className={styles.line}>
+                          <span className={styles.name}>
+                            <bdi>{option.name}</bdi>
+                          </span>
+                          <span className={styles.value}>
+                            {/* The value stays where it is while it is edited, hidden under its
+                            editor, so the row keeps its height however many lines it takes. */}
+                            <span className={styles.field}>
+                              <span
+                                aria-hidden={editor || undefined}
+                                className={editor ? styles.hidden : undefined}
+                                data-value
+                              >
+                                <Shown value={option.value} />
+                              </span>
+                              {editor ? (
+                                <Editor done={focusRow(option.name)} option={option} />
+                              ) : null}
+                              {menu === undefined ? null : (
+                                <ChoiceMenu
+                                  custom={() => {
+                                    customise(option.name);
+                                  }}
+                                  done={focusRow(option.name)}
+                                  menu={menu}
+                                  option={option}
+                                />
+                              )}
+                            </span>
+                            {option._tag === "Ui" && option.device !== undefined ? (
+                              <span className={styles.device}>
+                                {" "}
+                                on this device, over <Shown value={option.shared} />
+                              </span>
+                            ) : null}
+                            {option._tag === "Ui" && option.note !== undefined ? (
+                              <span className={styles.note}>{option.note}</span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <span className={styles.about}>
+                          <span>{option.description}</span>{" "}
+                          <span className={styles.starts}>
+                            <Starts starts={option.starts} />
+                          </span>
+                        </span>
+                      </GridListItem>
+                    );
+                  }}
+                </Collection>
+              </GridListSection>
+            )}
           </GridList>
         </div>
       </div>
