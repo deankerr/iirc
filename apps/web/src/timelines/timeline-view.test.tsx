@@ -902,6 +902,27 @@ describe("what the view says it shows", () => {
     }).toStrictEqual({ closed: false, open: true, start: true });
   });
 
+  it("tells a screen reader a Timeline read to its start has nothing before its first line, and draws no words there", async () => {
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const said = [...logOf().querySelectorAll<HTMLElement>("p")].find(
+      (one) => one.textContent === "The start of this Timeline"
+    );
+
+    const style = said === undefined ? undefined : getComputedStyle(said);
+
+    // Read in the log, as the first of its rows, and taken out of what is drawn.
+    expect({
+      clip: style?.clipPath,
+      first: said?.closest<HTMLElement>("[data-index]")?.dataset.index,
+      position: style?.position,
+    }).toStrictEqual({ clip: "inset(50%)", first: "0", position: "absolute" });
+  });
+
   it("says nothing of a Message of ours the Ircd cannot confirm, and says one not sent", async () => {
     const { registry } = await signedIn(
       [],

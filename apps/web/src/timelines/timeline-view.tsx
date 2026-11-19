@@ -177,12 +177,13 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
 
   switch (row._tag) {
     case "Start": {
-      return <p className={styles.start}>The start of this Timeline</p>;
+      // Nothing is before it, so nothing is drawn: a screen reader alone is told.
+      return <p className={styles.unseen}>The start of this Timeline</p>;
     }
 
     case "Held": {
       return (
-        <p className={styles.start}>
+        <p className={styles.held}>
           {row.hidden
             ? "Older history here is hidden activity."
             : "Older history lies beyond what this view holds."}{" "}
@@ -262,9 +263,9 @@ const Lines = ({
   // purpose, at the top.
   const unasked = olderUnasked(window, cap);
 
-  // With nothing earlier, the first row says so, inside the list, so it is anchored and
-  // measured as every row is. The items `ui.activity` leaves out are not drawn, and are
-  // counted all the same.
+  // With nothing earlier, the first row says so to a screen reader alone, inside the list,
+  // so it is anchored and measured as every row is, and takes no room. The items
+  // `ui.activity` leaves out are not drawn, and are counted all the same.
   const rows: readonly Shown[] = useMemo(() => {
     const shows = showsIn(activity, kind, window.items, self);
     const drawn = rowsOf(window, divider, shows, zone, self);
