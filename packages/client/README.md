@@ -59,6 +59,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
 - **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its login's, and each Channel's key.
+- **`lines` are each parsed by the one rule `/quote` applies,** in `src/quoted.ts`. As a Session begins, after the welcome and any service login and before any Channel is joined, `userModes` go as one `MODE` on Self, then each Line in order, with no intent. One `/quote` would refuse in that moment, such as a `PART` of a Channel the Configuration wants, is `Ignored` as `Unsendable`.
 - **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` and `whoOnJoin` start on and decode as off, since nothing was answered or asked then.
 
 ### When the Client dials
