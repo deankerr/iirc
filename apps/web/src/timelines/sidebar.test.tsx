@@ -1236,3 +1236,110 @@ describe("the shell", () => {
     });
   });
 });
+
+/**
+ * The sidebar's own Sign out, at its foot.
+ * @returns It.
+ */
+const footerSignOut = () =>
+  [...document.querySelectorAll<HTMLElement>("nav footer button")].find(
+    (one) => one.textContent === "Sign out"
+  );
+
+/**
+ * The question asked before signing out.
+ * @returns It, while it is asked.
+ */
+const question = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+
+/**
+ * Presses one of the question's answers.
+ * @param answer - The answer's text.
+ */
+const answer = async (answer: string) => {
+  const found = [...(question()?.querySelectorAll<HTMLElement>("button") ?? [])].find(
+    (one) => one.textContent === answer
+  );
+
+  if (found === undefined) {
+    throw new Error(`no answer: ${answer}`);
+  }
+
+  await doing(() => {
+    found.click();
+  });
+};
+
+/** Presses the sidebar's Sign out, as the keys do, and waits for the question. */
+const ask = async () => {
+  await doing(() => {
+    footerSignOut()?.focus();
+    footerSignOut()?.click();
+  });
+  await settled(() => question() !== null);
+};
+
+describe("signing out from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("asks before signing out, and signs out once the Owner says to", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn(undefined, fake);
+    await ask();
+
+    const asked = {
+      focused: question()?.contains(document.activeElement) ?? false,
+      signedIn: fake.daemon.signedIn,
+      text: question()?.querySelector("h2")?.textContent,
+    };
+
+    await answer("Sign out");
+    await settled(() => !fake.daemon.signedIn);
+
+    expect({ asked, question: question() }).toStrictEqual({
+      asked: { focused: true, signedIn: true, text: "Sign out of this browser?" },
+      question: null,
+    });
+  });
+
+  it("leaves the Sign-in as it was on Cancel or Escape, giving the focus back", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn(undefined, fake);
+    await ask();
+    await answer("Cancel");
+    // React Aria gives the focus back a frame after the question goes.
+    await settled(() => question() === null && document.activeElement === footerSignOut());
+
+    await ask();
+    await press(document.activeElement ?? document.body, { key: "Escape" });
+    await settled(() => question() === null && document.activeElement === footerSignOut());
+
+    expect({ signedIn: fake.daemon.signedIn }).toStrictEqual({ signedIn: true });
+  });
+
+  it("says why a sign-out the Owner confirmed failed", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn(undefined, fake);
+    fake.daemon.signInsFail = true;
+    await ask();
+    await answer("Sign out");
+    await settled(() => document.querySelector('nav footer [role="alert"]') !== null);
+
+    expect({
+      failure: document.querySelector('nav footer [role="alert"]')?.textContent,
+      signedIn: fake.daemon.signedIn,
+    }).toStrictEqual({
+      failure: "The Daemon could not save its sign-ins, so nothing changed. Try again.",
+      signedIn: true,
+    });
+  });
+});
