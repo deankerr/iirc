@@ -73,8 +73,8 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **The Networks are those not removed, then those removed,** each group in the Owner's order. A Network's own Timeline stays first, as its row.
 - **A pinned Timeline leaves its Network for the pinned part above them,** in the order pinned, and a `Pin` says which Network it is of. Only a Timeline the sidebar lists can be pinned: one closed, gone, or not read shows nothing, and a Network's own Timeline is never pinned. What is closed is left as it was.
 - **`shownOrder` is what `/next` and `/previous` step through:** the pinned, then each Network's Timelines, as shown. The context carries it as `timelines`, given the arrangement.
-- **`arranging` says what to write for one edit, from what is shown now,** the option and its whole new value, or nothing when nothing would change. `Move` and `Place` of a pinned Timeline reorder the pinned part. Of a Network's own Timeline they move its Network among those as removed as it is. Of any other they move it among its Network's Timelines that are not pinned, and the value keeps the place of every other Network's Timelines and of those closed. None wraps at an edge, and a `Place` onto another part or Network changes nothing. `Pin` appends to `sidebar.pinned`, or removes from it, and refuses a Network's own Timeline.
-- **`/move up|down` and `/pin` give an `Arrange` intent** with the edit. `/pin` pins the focused Timeline, or unpins it when the context's `pinned` names it, and the runtime writes what `arranging` gave.
+- **`arranging` says what to write for one edit, from what is shown now,** the option and its whole new value, or nothing when nothing would change. `Move` and `Place` of a pinned Timeline reorder the pinned part. Of a Network's own Timeline they move its Network among those as removed as it is. Of any other they move it among its Network's Timelines that are not pinned, and the value keeps the place of every other Network's Timelines and of those closed. None wraps at an edge, and a `Place` onto another part or Network changes nothing. `Pin` appends to `sidebar.pinned`, or removes from it, or, saying neither, does whichever the Timeline is not now, and refuses a Network's own Timeline.
+- **`/move up|down` and `/pin` give an `Arrange` intent** with the edit. `/pin` gives a `Pin` that says neither, so whether it pins or unpins is decided from the options read when it is carried out, and the runtime writes what `arranging` gave.
 
 ## Panes
 
@@ -108,7 +108,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, every Timeline in the order the sidebar shows, those pinned, and what is unread.
+The one registry of commands, `commands`, as data, behind the composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, every Timeline in the order the sidebar shows, and what is unread.
 
 | For | Commands |
 | --- | --- |
