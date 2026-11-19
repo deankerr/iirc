@@ -568,7 +568,11 @@ const ViewItem = ({
         {pane}
       </span>
       <span className={styles.name}>{view}</span>
-      {keys === undefined ? null : <kbd className={styles.keys}>{keys}</kbd>}
+      {keys === undefined ? null : (
+        <kbd className={styles.keys} title={keys}>
+          {keys}
+        </kbd>
+      )}
     </ListBoxItem>
   );
 };
@@ -603,11 +607,13 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
     },
   };
 
-  // Choosing closes the drawer on a compact screen, and so does choosing the view already
-  // shown, which React Aria gives as an empty selection, as for a Timeline's row.
+  // Choosing a row opens its view and closes the drawer on a compact screen. Choosing the
+  // view already shown, which React Aria gives as an empty selection, opens it again, as
+  // the options then read again and clear their filter. Escape leaves the selection alone,
+  // so only a press or Enter or Space does either.
   const onSelectionChange = (selection: Selection) => {
     const [key] = selection === "all" ? [] : selection;
-    const view = ownViews.find((one) => one.view === key)?.view;
+    const view = ownViews.find((one) => one.view === key)?.view ?? shown;
 
     if (view !== undefined) {
       opening[view]();
@@ -621,6 +627,7 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
       <ListBox
         aria-label="Views"
         className={styles.views}
+        escapeKeyBehavior="none"
         onSelectionChange={onSelectionChange}
         selectedKeys={shown === undefined ? [] : [shown]}
         selectionMode="single"

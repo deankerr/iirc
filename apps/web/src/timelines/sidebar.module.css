@@ -160,11 +160,16 @@
   outline: none;
 }
 
-/* A view's keys, dim at its row's end, where there is a keyboard to press them. */
+/* A view's keys, dim at its row's end where there is a keyboard to press them, give way
+   to its name in a narrow sidebar, before the name itself is cut. */
 .keys {
-  flex-shrink: 0;
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-muted);
   font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .item[data-selected] .keys {
@@ -177,6 +182,7 @@
   --sign-out-inset: calc(var(--control-pad-inline) / 2 + var(--border-width));
 
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   padding: 0 var(--space-2) 0 calc(var(--space-3) + 2ch + var(--space-2) - var(--sign-out-inset));

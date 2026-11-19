@@ -1084,6 +1084,13 @@ const viewMarks = () =>
       .find((text) => /^\d+$/u.test(text)) ?? null,
   ]);
 
+/**
+ * The options view's filter.
+ * @returns It, while the options show.
+ */
+const filter = () =>
+  document.querySelector<HTMLInputElement>('main section[aria-label="Options"] input');
+
 describe("the views of iirc's own, from the sidebar", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -1199,6 +1206,46 @@ describe("the views of iirc's own, from the sidebar", () => {
       keys: ["Ctrl+Shift+F", null, "Ctrl+,"],
       moved: true,
       opened: "Options",
+    });
+  });
+
+  it("opens the options again from their row while they show, clearing their filter, but not on Escape", async () => {
+    const registry = await signedIn();
+
+    await doing(() => {
+      viewRow("Options").click();
+    });
+    await settled(() => shownNow(registry) === "Options");
+
+    await doing(() => {
+      const field = filter();
+
+      if (field !== null) {
+        Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+          field,
+          "nick"
+        );
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await settled(() => filter()?.value === "nick");
+
+    // Escape on the row is no choice, so what it shows stays as it is.
+    await doing(() => {
+      viewRow("Options").focus();
+    });
+    await press(viewRow("Options"), { key: "Escape" });
+    const escaped = filter()?.value;
+
+    await doing(() => {
+      viewRow("Options").click();
+    });
+    await settled(() => filter()?.value === "");
+
+    expect({ escaped, filter: filter()?.value, shown: shownNow(registry) }).toStrictEqual({
+      escaped: "nick",
+      filter: "",
+      shown: "Options",
     });
   });
 
