@@ -2328,9 +2328,11 @@ const banArguments = (
   }
 
   // The nick is split at U+0020 alone, as the nick menu writes it, so one holding another
-  // space is read whole, and never as another User whose nick is its first part.
-  const nicks = args
-    .slice(args.indexOf("-a") + 2)
+  // space is read whole, and never as another User whose nick is its first part. A typed
+  // separator of other whitespace, such as a tab, is the separator, never the nick's.
+  const after = args.slice(args.indexOf("-a") + 2);
+
+  const nicks = (after.startsWith(" ") ? after : after.trimStart())
     .split(" ")
     .filter((one) => one !== "");
 

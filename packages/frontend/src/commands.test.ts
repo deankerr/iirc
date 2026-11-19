@@ -1364,6 +1364,9 @@ describe("acting on a Network", () => {
       // A nick is read whole, never cut at a space other than U+0020, so a ban by account
       // never falls on another User whose nick is its first part.
       spacedNick: interpret("/ban -a bob\u00A0", byAccount),
+      spacedNickFirst: interpret("/ban -a \u00A0bob", byAccount),
+      tabbed: interpret("/ban -a\tbob", byAccount),
+      tabbedSpaced: interpret("/ban -a\t bob", byAccount),
       two: words("/ban -a bob eve", byAccount),
     }).toStrictEqual({
       ban: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
@@ -1381,6 +1384,9 @@ describe("acting on a Network", () => {
       }),
       prefixed: "Leave off the prefix @: a nick does not start with it. /ban -a <nick>",
       spacedNick: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob\u00A0" }),
+      spacedNickFirst: act({ _tag: "BanAccount", channel: "#iirc", nick: "\u00A0bob" }),
+      tabbed: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
+      tabbedSpaced: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
       two: "Ban one nick's account at a time. /ban -a <nick>",
     });
   });
