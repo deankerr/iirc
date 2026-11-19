@@ -87,6 +87,7 @@ import {
 } from "effect/http";
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 
+import { Following } from "./away-when-closed.ts";
 import { ApiKeys } from "./keys.ts";
 import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
@@ -548,6 +549,7 @@ const news = HttpApiBuilder.group(
   "news",
   Effect.fn(function* (handlers) {
     const runtime = yield* Runtime;
+    const following = yield* Following;
 
     return handlers.handle("follow", ({ headers, query }) =>
       Effect.suspend(() => {
@@ -564,7 +566,8 @@ const news = HttpApiBuilder.group(
           Stream.mapError(journalFailed)
         );
 
-        return followed(happenings, { data: {}, event: "heartbeat" });
+        // A Frontend following News is open, for as long as it follows.
+        return followed(following.follow(happenings), { data: {}, event: "heartbeat" });
       })
     );
   })
@@ -709,6 +712,7 @@ const timelines = HttpApiBuilder.group(
   "timelines",
   Effect.fn(function* (handlers) {
     const runtime = yield* Runtime;
+    const following = yield* Following;
     const store = yield* TimelineStore;
     const projector = yield* Projector;
     const page = yield* ChangesPage;
@@ -998,7 +1002,8 @@ const timelines = HttpApiBuilder.group(
             first
           ).pipe(Stream.mapError(timelinesFailed));
 
-          return followed(changes, { data: {}, event: "heartbeat" });
+          // The Timelines' changes are News folded, so a Frontend following them is open too.
+          return followed(following.follow(changes), { data: {}, event: "heartbeat" });
         })
       );
   })
@@ -1073,7 +1078,7 @@ const ui = HttpApiBuilder.group(
 const optionsChanged = (error: OptionsChangedSince) =>
   new OptionsChanged({ sequence: error.sequence });
 
-// The options under `store`, `uploads`, and `previews`, as the `ui` options are: a value is parsed by its
+// The options beyond `ui`, as the `ui` options are: a value is parsed by its
 // option's Schema before it is journaled, and journaled in its encoding.
 const options = HttpApiBuilder.group(
   DaemonApi,
@@ -1455,7 +1460,7 @@ const contentUnavailable = HttpRouter.middleware(
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
  * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the options
- * under `store`, `uploads`, and `previews`, the keys, and the sign-ins.
+ * beyond `ui`, the count of Frontends open, the keys, and the sign-ins.
  */
 export const ApiHandlers = Layer.mergeAll(
   signIn,

@@ -1,8 +1,8 @@
 /**
- * The Owner's options beyond `ui`, under the roots `store`, `uploads`, and `previews`: where
- * Uploads' bytes are kept, how Uploads are served, and how many bytes Previews' images may
- * take (ADR 0013, ADR 0016). They are the Owner's
- * rather than a device's, so no device overrides them. Each field is named in full, such as
+ * The Owner's options beyond `ui`, under the roots `away`, `store`, `uploads`, and
+ * `previews`: when Self is marked away by itself, where Uploads' bytes are kept, how Uploads
+ * are served, and how many bytes Previews' images may take (ADR 0013, ADR 0016). They are
+ * the Owner's rather than a device's, so no device overrides them. Each field is named in full, such as
  * `store.s3.bucket`, and says what it is and what it starts as in its annotations, which a
  * Frontend reads to offer every field as an option. A field with no `default` is unset until
  * set, and absent from the options in force. This module is the Schema alone, so a
@@ -201,6 +201,20 @@ export type ByteCount = typeof ByteCount.Type;
 /** The least and the most days an Upload may be kept: a day, and a hundred years. */
 export const expireAfterBounds = { maximum: 36_500, minimum: 1 } as const;
 
+/** The least and the most minutes `away.after` may be: a minute, and a week. */
+const awayAfterBounds = { maximum: 10_080, minimum: 1 } as const;
+
+/** An away message: some text, with no line break or NUL, which no `AWAY` Line can carry. */
+const AwayMessage = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter(
+    (text: string) => !/[\0\r\n]/u.test(text) || "must not hold a line break or NUL"
+  )
+).annotate({ identifier: "AwayMessage" });
+
+/** The away message Self is marked away with when `away.message` is unset. */
+export const defaultAwayMessage = "Away";
+
 /** 100 MiB, in bytes: what `uploads.maxSize` starts as. */
 export const defaultMaxSize = 104_857_600;
 
@@ -208,11 +222,21 @@ export const defaultMaxSize = 104_857_600;
 export const defaultPreviewsMaxTotal = 1_073_741_824;
 
 /**
- * The options under `store`, `uploads`, and `previews`, each named in full, with its
+ * The options beyond `ui`, each named in full, with its
  * description, and with what it starts as where it starts as anything. One with no `default` is optional,
  * and absent until set.
  */
 export const OwnerOptions = Schema.Struct({
+  "away.after": Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween(awayAfterBounds)).annotate({
+      description: `How many minutes no Frontend has been open before Self is marked away on every Network not already away, from ${awayAfterBounds.minimum} to ${awayAfterBounds.maximum}. Self is back once one has been open a short while. Unset, Self is never marked away by itself.`,
+    })
+  ),
+  "away.message": Schema.optionalKey(
+    AwayMessage.annotate({
+      description: `The away message Self is marked away with when no Frontend is open. Unset, it is ${defaultAwayMessage}.`,
+    })
+  ),
   "previews.maxTotal": ByteCount.annotate({
     default: defaultPreviewsMaxTotal,
     description:
@@ -274,18 +298,18 @@ export type OwnerOptions = typeof OwnerOptions.Type;
 
 /** An option's full name, such as `store.s3.bucket`: one of {@link OwnerOptions}' fields. */
 export const OwnerOptionName = Schema.Literals(Struct.keys(OwnerOptions.fields)).annotate({
-  description: "An option under store, uploads, or previews, such as uploads.maxSize.",
+  description: "An option beyond ui, such as uploads.maxSize.",
   identifier: "OwnerOptionName",
 });
 
 /** The decoded form of {@link OwnerOptionName}. */
 export type OwnerOptionName = typeof OwnerOptionName.Type;
 
-/** Every option's full name under `store`, `uploads`, and `previews`, in the Schema's order. */
+/** Every option's full name beyond `ui`, in the Schema's order. */
 export const ownerOptionNames: readonly OwnerOptionName[] = OwnerOptionName.literals;
 
 /**
- * What the options under `store`, `uploads`, and `previews` start as: each one with a
+ * What the options beyond `ui` start as: each one with a
  * `default` annotation at it, and none of the others.
  */
 export const ownerDefaults: OwnerOptions = Schema.decodeUnknownSync(OwnerOptions)(
@@ -307,14 +331,14 @@ export const ownerCredentialOptions: readonly OwnerOptionName[] = ownerOptionNam
 );
 
 /**
- * How far the options under `store`, `uploads`, and `previews` have been changed: the sequence of the
+ * How far the options beyond `ui` have been changed: the sequence of the
  * last Change of one, or `0` before any, to send back as `ifSequence` with a change made
  * from it.
  */
 export const OwnerSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * The options under `store`, `uploads`, and `previews` in force, each one set or with a
+ * The options beyond `ui` in force, each one set or with a
  * default, and the sequence of the last Change of one.
  */
 export const OwnerInForce = Schema.Struct({ options: OwnerOptions, sequence: OwnerSequence });
@@ -322,7 +346,7 @@ export const OwnerInForce = Schema.Struct({ options: OwnerOptions, sequence: Own
 /** The decoded form of {@link OwnerInForce}. */
 export type OwnerInForce = typeof OwnerInForce.Type;
 
-/** An option's value under `store`, `uploads`, or `previews`, decoded by its Schema. */
+/** An option's value beyond `ui`, decoded by its Schema. */
 export type OwnerOptionValue = Exclude<OwnerOptions[OwnerOptionName], undefined>;
 
 /**

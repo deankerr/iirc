@@ -37,6 +37,7 @@ import { Digest, SecureRandom } from "effect/crypto";
 import { HttpClientRequest } from "effect/http";
 import { HttpApiMiddleware } from "effect/http-api";
 
+import { layerAwayWhenClosed } from "../away-when-closed.ts";
 import { ApiKeys, createKey } from "../keys.ts";
 import { layerLinkListener } from "../link-listener.ts";
 import { OwnerConfiguration, layerOwnerConfiguration } from "../options.ts";
@@ -145,10 +146,10 @@ export const makeWorld = (
 
 /**
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
- * into the world's Timeline store, the `ui` options and those under `store`, `uploads`, and `previews`
+ * into the world's Timeline store, the `ui` options and those beyond `ui`
  * folded from the Journal's Changes, the Runtime sparing the Credentials those name, the
  * Previews and the Uploads on the world's byte store, staged in a data directory, and their link listener,
- * and the keys and browser sign-ins of that directory.
+ * Self marked away while no Frontend is open, and the keys and browser sign-ins of that directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @param pacing - How fast Lines leave each Connection, the Runtime's own unless given.
@@ -166,7 +167,8 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
         Layer.provideMerge(layerUiConfiguration),
         Layer.provide(Layer.merge(Layer.succeed(LinkFetch, world.links), bytes))
       ),
-      layerLinkListener
+      layerLinkListener,
+      layerAwayWhenClosed
     ).pipe(
       // The one Uploads instance is the Previews' and the link listener's.
       Layer.provideMerge(layerUploads(dataDir).pipe(Layer.provide(Layer.merge(bytes, platform)))),

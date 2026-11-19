@@ -1831,8 +1831,8 @@ describe("the options under store, uploads, and previews", () => {
 
   it("list each value in force, its default or unset, and a Credential's name and whether it is held", () => {
     expect({
-      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(1, 3),
-      notHeld: ownerRows(owner, new Set()).slice(1, 2),
+      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(3, 5),
+      notHeld: ownerRows(owner, new Set()).slice(3, 4),
       read: ownerRows(owner, undefined),
       unread: [...new Set(ownerOptionsOf(undefined, undefined).map((option) => option.value._tag))],
     }).toStrictEqual({
@@ -1852,6 +1852,8 @@ describe("the options under store, uploads, and previews", () => {
         ],
       ],
       read: [
+        ["away.after", { _tag: "Unset" }, "unset"],
+        ["away.message", { _tag: "Unset" }, "unset"],
         ["previews.maxTotal", { _tag: "Shown", text: "2048" }, "1073741824"],
         [
           "store.s3.accessKeyId",
@@ -2117,8 +2119,9 @@ describe("the options view's headings", () => {
         ["store", 5, true],
         ["uploads", 5, true],
         ["previews", 1, true],
+        ["away", 2, true],
       ],
-      why: "ui, then each Network read in the order listed, then store, uploads, and previews",
+      why: "ui, then each Network read in the order listed, then store, uploads, previews, and the rest",
     },
     {
       filter: "*maxTotal",

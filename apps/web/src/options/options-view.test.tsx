@@ -1390,7 +1390,7 @@ describe("the options under headings", () => {
     await settled(() => rowOf(shown.container, "ui.time") === undefined);
 
     expect({ all, filtered: headingsOf(shown.container) }).toStrictEqual({
-      all: ["ui", "network.libera", "store", "uploads", "previews"],
+      all: ["ui", "network.libera", "store", "uploads", "previews", "away"],
       filtered: ["uploads", "previews"],
     });
   });

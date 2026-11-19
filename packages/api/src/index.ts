@@ -230,6 +230,7 @@ export {
   RegionName,
   byteCountBounds,
   credentialsNamed,
+  defaultAwayMessage,
   defaultMaxSize,
   defaultPreviewsMaxTotal,
   expireAfterBounds,

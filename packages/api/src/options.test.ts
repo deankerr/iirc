@@ -29,6 +29,8 @@ describe("the options under store, uploads, and previews", () => {
     expect({ defaults: ownerDefaults, names: ownerOptionNames }).toStrictEqual({
       defaults: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 104_857_600 },
       names: [
+        "away.after",
+        "away.message",
         "previews.maxTotal",
         "store.s3.accessKeyId",
         "store.s3.bucket",
