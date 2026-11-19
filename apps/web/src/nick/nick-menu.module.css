@@ -26,8 +26,12 @@
 }
 
 /* The menu, under the nick, as dense as the Timeline. Its width is its own, never the
-   nick's, which on a phone would widen the page it is placed in. */
+   nick's, which on a phone would widen the page it is placed in. Taller than the room the
+   popover is given, as an operator's menu is with a phone's tall targets, it scrolls,
+   never drawing entries past its own edge. */
 .popover {
+  overflow-y: auto;
+  overscroll-behavior: contain;
   min-width: 16ch;
   max-width: calc(100vw - 2 * var(--space-4));
   border: var(--border-width) solid var(--color-border);
