@@ -1,0 +1,20 @@
+# Only what the build needs goes to Docker: never a data directory, a secret, a cache, or what
+# bun install and the builds make again inside the image.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/.cache
+**/coverage
+**/*.tsbuildinfo
+**/.vitest
+**/.DS_Store
+.git
+.claude
+.idea
+data
+**/*.sqlite
+**/*.sqlite-*
+Dockerfile
+compose.yaml
+.dockerignore
