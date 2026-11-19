@@ -4197,6 +4197,11 @@ export interface SidebarNetwork {
   readonly complete: boolean;
   /** It was removed with its Timelines kept, so they are only read. */
   readonly removed: boolean;
+  /**
+   * The Timelines the Owner muted, by id, as `ui.muted` says, passed through whole. An id of
+   * a Timeline this Network does not list, or that has gone, does nothing.
+   */
+  readonly muted: ReadonlySet<TimelineId>;
 }
 
 /**
@@ -4207,11 +4212,13 @@ export interface SidebarNetwork {
  * to close counts as closed from when it is asked.
  * @param state - The state.
  * @param closing - The Timelines asked to be closed that the Daemon has yet to say are.
+ * @param muted - The Timelines the Owner muted, which each Network passes through.
  * @returns The sidebar.
  */
 export const sidebar = (
   state: Timelines,
-  closing: ReadonlySet<TimelineId> = new Set()
+  closing: ReadonlySet<TimelineId> = new Set(),
+  muted: ReadonlySet<TimelineId> = new Set()
 ): readonly SidebarNetwork[] => {
   const open = new Set(openIn(state.layout).map((one) => resolve(state, one)));
 
@@ -4228,6 +4235,7 @@ export const sidebar = (
         complete: network.list.fresh,
         connection: network.connection,
         listed: network.list.fresh || network.timelines.size > 0,
+        muted,
         network: network.network,
         removed: isRemoved(network),
         running: network.running,

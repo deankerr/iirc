@@ -484,6 +484,7 @@ describe("the contract", () => {
         leading: 1.45,
         light: "light",
         line: "columns",
+        muted: [],
         previews: "off",
         "previews.animate": false,
         "previews.folded": "summary",
@@ -521,6 +522,7 @@ describe("the contract", () => {
         "leading",
         "light",
         "line",
+        "muted",
         "previews",
         "previews.animate",
         "previews.folded",
@@ -842,12 +844,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","muted":[],"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","line":"columns","muted":[],"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },

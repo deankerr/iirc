@@ -1655,6 +1655,59 @@ const listedAndClosed = (state: Timelines) =>
     network.closed.map((timeline) => timeline.name),
   ]);
 
+const unreadOf = (more: Partial<(typeof Timeline.Encoded)["unread"]>) => ({
+  activity: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+  ...more,
+});
+
+// The state with alpha's own Timeline and #b as given, and #a open.
+const withUnread = (
+  own: Partial<(typeof Timeline.Encoded)["unread"]>,
+  b: Partial<(typeof Timeline.Encoded)["unread"]>
+) =>
+  reduceTimelines(
+    following(),
+    changed(6, {
+      timelines: [
+        {
+          ...Schema.encodeSync(Timeline)(timelineOf(idOf(1), "Network", "alpha", 6)),
+          latest: cursor(6000, 6),
+          unread: unreadOf(own),
+        },
+        {
+          ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)),
+          latest: cursor(6000, 6),
+          unread: unreadOf(b),
+        },
+      ],
+    })
+  );
+
+/**
+ * What a line gives in a context where some Timelines are muted: the Timelines it opens or
+ * marks read.
+ * @param state - The state.
+ * @param muted - The Timelines the Owner muted.
+ * @param line - The line.
+ * @returns The Timelines, or what was refused.
+ */
+const from = (
+  state: Timelines,
+  muted: readonly TimelineId[],
+  line: "/next-unread" | "/read all"
+) => {
+  const result = interpret(line, contextOf(state, undefined, unarranged, [], new Set(muted)));
+
+  return result._tag === "Parsed"
+    ? result.value.map((one) =>
+        one._tag === "Open" || one._tag === "MarkRead" ? one.timeline : one
+      )
+    : result;
+};
+
 describe("the Timelines' state", () => {
   it("follows the stream after the smallest `through` it read", () => {
     let state = initialTimelines;
@@ -1846,6 +1899,40 @@ describe("the Timelines' state", () => {
       fixed: { _tag: "Parsed", value: [{ _tag: "Open", timeline: one }] },
       pinned: { _tag: "Parsed", value: [{ _tag: "Open", timeline: two }] },
     });
+  });
+
+  it("passes a muted Timeline over in /next-unread, a Highlight unread there too, and /read all still marks it", () => {
+    const messages = withUnread({ messages: 1 }, { messages: 3 });
+    const highlight = withUnread({ messages: 1 }, { highlights: 1, messages: 3 });
+
+    expect({
+      allMuted: from(messages, [one, two], "/next-unread"),
+      highlight: from(highlight, [two], "/next-unread"),
+      highlightMarked: from(highlight, [one, two], "/read all"),
+      highlightOnly: from(withUnread({}, { highlights: 1 }), [two], "/next-unread"),
+      marked: from(messages, [one, two], "/read all"),
+      messages: from(messages, [two], "/next-unread"),
+      unmuted: from(messages, [], "/next-unread"),
+    }).toStrictEqual({
+      allMuted: [],
+      highlight: [one],
+      highlightMarked: [one, two],
+      highlightOnly: [],
+      // Muted or not, the Daemon still counts them, so marking all read marks them.
+      marked: [one, two],
+      messages: [one],
+      unmuted: [one],
+    });
+  });
+
+  it("gives each Network the muted Timelines, whole, whether or not it lists them", () => {
+    const gone = timelineId(idOf(99));
+    const muted = new Set([two, gone]);
+
+    expect({
+      given: sidebar(following(), new Set(), muted).map((network) => network.muted),
+      none: sidebar(following()).map((network) => [...network.muted]),
+    }).toStrictEqual({ given: [muted], none: [[]] });
   });
 
   it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {

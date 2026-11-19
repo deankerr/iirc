@@ -70,6 +70,7 @@ const net = (
     complete: true,
     connection: { _tag: "Unknown" },
     listed: true,
+    muted: new Set(),
     network: network(name),
     removed: options.removed ?? false,
     running: undefined,

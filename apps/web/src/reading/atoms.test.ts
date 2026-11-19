@@ -499,6 +499,61 @@ describe("notifications", () => {
     });
   });
 
+  // Catches the muted Timelines never reaching the core's notifications, so a muted Timeline
+  // notifies of every Direct Message again.
+  it("notifies of a muted Timeline's Highlight and none of its Direct Messages", async () => {
+    const { notifier, opening, registry, send, type } = await reading();
+
+    await opening(iirc);
+    await type(timelineId(iirc), "/notify on");
+    uiRead(registry, { options: { ...uiDefaults, muted: [timelineId(peer)] }, sequence: 9 });
+
+    // The Direct Message comes first, so what shows after it shows it was passed over.
+    send(
+      changed(
+        3,
+        [message(peer, 3, "Direct")],
+        [listed(peer, { changed: 3, latest: 3000, unread: { direct: 1 } })]
+      )
+    );
+    send(highlight(4, peer));
+    await eventually(() => notifier.shown.length === 1);
+
+    expect(notifier.shown.map((one) => one.body)).toStrictEqual(["<⁨peer⁩> ⁨iirc: ping 4⁩"]);
+  });
+
+  // Catches a Timeline muted on another device notifying before this one reads the options.
+  it("notifies of a Highlight alone until the options are read, then of a Direct Message too", async () => {
+    const { notifier, opening, registry, send, type } = await reading(seeing, false);
+
+    await opening(iirc);
+    await type(timelineId(iirc), "/notify on");
+    send(
+      changed(
+        3,
+        [message(peer, 3, "Direct")],
+        [listed(peer, { changed: 3, latest: 3000, unread: { direct: 1 } })]
+      )
+    );
+    send(highlight(4, peer));
+    // The Highlight comes after the Direct Message, so once it shows the other was decided.
+    await eventually(() => notifier.shown.some((one) => one.body.includes("ping 4")));
+    uiRead(registry, { options: uiDefaults, sequence: 9 });
+    send(
+      changed(
+        5,
+        [message(peer, 5, "Direct")],
+        [listed(peer, { changed: 5, latest: 5000, unread: { direct: 1, highlights: 1 } })]
+      )
+    );
+    await eventually(() => notifier.shown.length === 2);
+
+    expect(notifier.shown.map((one) => one.body)).toStrictEqual([
+      "<⁨peer⁩> ⁨iirc: ping 4⁩",
+      expect.stringContaining("peer"),
+    ]);
+  });
+
   it("notifies of the open Timeline while the page is hidden, and stays off when the browser refuses", async () => {
     const { notifier, opening, registry, send, type } = await reading(away);
 

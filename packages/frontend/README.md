@@ -121,7 +121,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Aliases | `/alias`, `/alias add`, `/alias remove` |
 | Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/focus` |
-| Arranging | `/move`, `/pin` |
+| Arranging | `/move`, `/pin`, `/mute`, `/unmute` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 | Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
@@ -248,7 +248,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
-- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, and `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the sidebar: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
+- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, `ui.muted`, the Timelines the Owner silenced, and `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the sidebar: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and for `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.** `showsIn` works out once for a window which items a Channel's Timeline draws, and shows every item of another kind of Timeline. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`. `spoke` hides the joins, parts, and quits of Users who did not say a Message, of any kind, in that window no more than five minutes before it, measured between the two items' own times in the window's order, and a User is followed across a change of nick. Self's are always shown, as far as `rowsOf` says Self is known, and with Self's nick unknown, every one is. Only the window's Messages count, so one near its start may be hidden though its User spoke just before the window begins.
@@ -413,6 +413,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **Activity is a dimmer name, never a number.** Counts and labels say what was said. The page's title counts only Highlights and Direct Messages.
 - **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest, as the view said.
 - **A mark is never back, and never past what was shown.** It goes up to the last item the view named, even when the Daemon holds a later one.
+- **A muted Timeline counts nothing but a Highlight.** The Owner mutes it for every device with `/mute` and `/unmute`, which give a `Mute` intent, and the runtime writes `ui.muted`, the whole list, as `muting` gives it: nothing when it already is as wanted, and a refusal in words past `mutedCap`, which `/unmute` never meets. `sidebar` carries the list to each Network as `muted`, and `unreadShown` is the one place it is decided: only a Highlight is kept of the counts, so `activityOf`, `networkActivity`, `titleOf`, `saidLevel`, and `labelOf`, which then ends `muted`, show no number of Messages, Direct Messages, or Activity, and a Highlight there still gives its count and its level. The Daemon still counts it, so `/read all` still marks it, and `/next-unread` passes it over, a Highlight unread there too.
 - **A removed Network's Timelines are never marked, and call for nothing.** No Client moves their Read Markers, so what is unread there counts toward neither the title nor `/next-unread`.
 
 ## Removing a Network
@@ -437,7 +438,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 `notificationsOf` says which items a change added call for a notification, and what it says.
 
-- **Only what calls for the Owner, and only once:** a Highlight, a Direct Message, or an invitation said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once.
+- **Only what calls for the Owner, and only once:** a Highlight, a Direct Message, or an invitation said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once. In a muted Timeline only a Highlight, which an invitation is, notifies, and a Direct Message does not. Until the options are read, what is muted is `NotKnown`, and only a Highlight notifies anywhere, so a Timeline muted on another device never notifies first. The runtime gives the mutes the Daemon holds, never one on its way.
 - **Its words are plain text,** by `plainText`: the Timeline and Network, then the sender and text. A newer one for a Timeline replaces the last.
 
 ## Not yet

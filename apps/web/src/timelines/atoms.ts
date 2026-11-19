@@ -16,6 +16,8 @@ import type {
 import { closingShown, initialClosing } from "@iirc/frontend/closing";
 import type { Closing } from "@iirc/frontend/closing";
 import { notificationsOf } from "@iirc/frontend/notifications";
+import type { Muted } from "@iirc/frontend/notifications";
+import { uiShown } from "@iirc/frontend/options";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
@@ -51,6 +53,7 @@ import { forgetChantypes } from "../composer/chantypes-state.ts";
 import { cancelCompletion } from "../composer/completion-state.ts";
 import { lookupsHappened } from "../lookup/state.ts";
 import { notifyAll } from "../notifications/notifier.ts";
+import { optionsState } from "../options/state.ts";
 import { saidChanged } from "../options/uploads-state.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
@@ -66,14 +69,46 @@ export const timelinesState = Atom.make<Timelines>(initialTimelines).pipe(Atom.k
  */
 export const closingState = Atom.make<Closing>(initialClosing).pipe(Atom.keepAlive);
 
+/** None muted, for the options not read yet. */
+const noneMuted: ReadonlySet<TimelineId> = new Set();
+
+/** The Timelines muted, in order, as the shared options show them, or none until they are read. */
+const mutedList = Atom.make((get): readonly TimelineId[] => {
+  const shown = uiShown(get(optionsState));
+
+  return shown === undefined ? [] : shown.options.muted;
+});
+
+/**
+ * The Timelines the Owner muted, as the shared options show them with the changes on their
+ * way, since every device shares them and none overrides them, or none until they are read.
+ * It is here, derived from the options' state, since the sidebar reads it.
+ */
+export const mutedShown = Atom.make((get): ReadonlySet<TimelineId> => {
+  const list = get(mutedList);
+
+  return list.length === 0 ? noneMuted : new Set(list);
+});
+
+/**
+ * The Timelines the Owner muted as the Daemon holds them, not as a change on its way shows
+ * them, or `NotKnown` until the options are read, so a notification is never let through by
+ * a mute set elsewhere and not yet read, nor by an unmute that may yet fail.
+ */
+const mutedHeld = Atom.make((get): Muted => {
+  const { ui } = get(optionsState);
+
+  return ui === undefined ? "NotKnown" : new Set(ui.options.muted);
+});
+
 /**
  * The Networks and their Timelines, in sidebar order, a Timeline asked to be closed left
- * out from when it is asked.
+ * out from when it is asked, each passing on the Timelines the Owner muted.
  */
 export const sidebarNetworks = Atom.make((get) => {
   const state = get(timelinesState);
 
-  return sidebar(state, closingShown(get(closingState), state.networks));
+  return sidebar(state, closingShown(get(closingState), state.networks), get(mutedShown));
 });
 
 /** Whether the Network list was ever read, so having no Network says none is configured. */
@@ -418,7 +453,8 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
         before,
         registry.get(timelinesState),
         event.data,
-        registry.get(pageState)
+        registry.get(pageState),
+        registry.get(mutedHeld)
       );
 
       // Where an Upload was said is read again beside the stream, never holding it up.

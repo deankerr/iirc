@@ -1303,6 +1303,44 @@ describe("the Composer's aliases of the Owner's own", () => {
   });
 });
 
+describe("muting a Timeline from the Composer", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  // Catches /mute and /unmute missing from the commands, or run without writing `muted` for
+  // every device: the Timeline in focus, made from the options read, and Unmute taking it out.
+  it("lists /mute and /unmute, and runs them on the Timeline in focus", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "/mu");
+    const listed = listIn(container).names;
+
+    await typeIn(container, "/mute");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.uiChanges.length === 1);
+    const { muted } = daemon.ui.options;
+
+    await typeIn(container, "/unmute");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.uiChanges.length === 2);
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      listed: [listed?.includes("/mute"), listed?.includes("/unmute")],
+      muted,
+      unmuted: daemon.ui.options.muted,
+    }).toStrictEqual({
+      changes: ["PUT muted", "PUT muted"],
+      listed: [true, true],
+      muted: [iirc],
+      unmuted: [],
+    });
+  });
+});
+
 describe("exporting a Timeline from the Composer", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {

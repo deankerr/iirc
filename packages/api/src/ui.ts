@@ -665,6 +665,26 @@ export const SidebarPinned = Schema.Array(TimelineId)
 /** The decoded form of {@link SidebarPinned}. */
 export type SidebarPinned = typeof SidebarPinned.Type;
 
+/** How many Timelines the Owner may mute, so the options stay small enough to send whole. */
+export const mutedCap = 256;
+
+/**
+ * The Timelines the Owner muted, by id, each named once, at most {@link mutedCap}. A
+ * muted Timeline counts nothing and notifies of nothing but a Highlight. Every device
+ * shares it, since a Timeline the Owner silenced on one is silent on all.
+ */
+export const TimelinesMuted = Schema.Array(TimelineId)
+  .check(Schema.isMaxLength(mutedCap), Schema.makeFilter(namesEachOnce))
+  .annotate({
+    ...sharedOnly,
+    default: [],
+    description:
+      "The Timelines muted, by id, which show no unread count and notify of nothing but a Highlight. An id of a Timeline that has gone does nothing. /mute and /unmute set the focused Timeline's. Every device shares it.",
+  });
+
+/** The decoded form of {@link TimelinesMuted}. */
+export type TimelinesMuted = typeof TimelinesMuted.Type;
+
 /**
  * An alias's name: 1 to 32 lower-case letters and digits, in words joined by `-`, such as
  * `j` or `join-quiet`, so it is one word to type after `/`. It knows nothing of commands,
@@ -754,6 +774,7 @@ export const UiOptions = Schema.Struct({
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
   line: LineLayout,
+  muted: TimelinesMuted,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
   "previews.folded": PreviewsFolded,

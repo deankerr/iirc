@@ -7,10 +7,11 @@
  *
  * @packageDocumentation
  */
-import type { Level, ReadRequest, ReadRule, Timeline, Unread } from "@iirc/api";
+import { mutedCap } from "@iirc/api";
+import type { Level, ReadRequest, ReadRule, Timeline, TimelineId, Unread } from "@iirc/api";
 import { unreadCap } from "@iirc/timelines";
 
-import type { MarkRead } from "./commands.ts";
+import type { MarkRead, Parsed } from "./commands.ts";
 import { panesOf, shownPanes } from "./layout.ts";
 import { opened } from "./timelines.ts";
 import type { SidebarNetwork, Timelines } from "./timelines.ts";
@@ -77,14 +78,27 @@ export const levelOf = (unread: Unread): Level | undefined =>
   levels.find((level) => countOf(unread, level) > 0);
 
 /**
- * What is unread in a Timeline.
+ * The counts a view shows, which is where a muted Timeline is decided: a muted Timeline
+ * counts nothing but its Highlights, so what is said or done there is not shown, though
+ * the Daemon still counts it.
+ * @param unread - The counts the Daemon kept.
+ * @param muted - Whether the Timeline is muted.
+ * @returns The counts to show.
+ */
+export const unreadShown = (unread: Unread, muted: boolean): Unread =>
+  muted ? { ...none, highlights: unread.highlights } : unread;
+
+/**
+ * What is unread in a Timeline, as a view shows it.
  * @param timeline - The Timeline, as its Network lists it.
+ * @param muted - Whether it is muted.
  * @returns Its activity.
  */
-export const activityOf = (timeline: Timeline): Activity => ({
-  level: levelOf(timeline.unread),
-  unread: timeline.unread,
-});
+export const activityOf = (timeline: Timeline, muted = false): Activity => {
+  const unread = unreadShown(timeline.unread, muted);
+
+  return { level: levelOf(unread), unread };
+};
 
 /**
  * Two counts added, kept at most `unreadCap + 1`, which says more than `unreadCap`, as the
@@ -96,7 +110,8 @@ export const activityOf = (timeline: Timeline): Activity => ({
 const plus = (left: number, right: number): number => Math.min(left + right, unreadCap + 1);
 
 /**
- * What is unread in a Network: each count summed over its Timelines, and the highest level.
+ * What is unread in a Network: each count shown, summed over its Timelines, and the
+ * highest level. A muted Timeline adds only its Highlights.
  * @param network - The Network, as the sidebar shows it.
  * @returns Its activity.
  */
@@ -104,11 +119,13 @@ export const networkActivity = (network: SidebarNetwork): Activity => {
   let unread = none;
 
   for (const timeline of network.timelines) {
+    const shown = unreadShown(timeline.unread, network.muted.has(timeline.id));
+
     unread = {
-      activity: plus(unread.activity, timeline.unread.activity),
-      direct: plus(unread.direct, timeline.unread.direct),
-      highlights: plus(unread.highlights, timeline.unread.highlights),
-      messages: plus(unread.messages, timeline.unread.messages),
+      activity: plus(unread.activity, shown.activity),
+      direct: plus(unread.direct, shown.direct),
+      highlights: plus(unread.highlights, shown.highlights),
+      messages: plus(unread.messages, shown.messages),
     };
   }
 
@@ -142,12 +159,13 @@ export const countText = (count: number): string =>
 /**
  * A row's name with what is unread in it, for a screen reader, such as
  * `#iirc, 3 unread, 1 highlight`. Activity is left out, as a view shows it only as a
- * dimmer name.
+ * dimmer name. A muted Timeline's ends `muted`.
  * @param name - The Timeline's or Network's name.
- * @param activity - What is unread in it.
+ * @param activity - What is unread in it, as shown.
+ * @param muted - Whether it is muted.
  * @returns The label.
  */
-export const labelOf = (name: string, activity: Activity): string => {
+export const labelOf = (name: string, activity: Activity, muted = false): string => {
   const said = saidCount(activity.unread);
   const { highlights } = activity.unread;
 
@@ -157,7 +175,39 @@ export const labelOf = (name: string, activity: Activity): string => {
     ...(highlights > 0
       ? [`${countText(highlights)} ${highlights === 1 ? "highlight" : "highlights"}`]
       : []),
+    ...(muted ? ["muted"] : []),
   ].join(", ");
+};
+
+/**
+ * The Timelines the Owner muted, as the option `ui.muted` should be after muting or
+ * unmuting one.
+ * @param muted - The list in force.
+ * @param timeline - The Timeline.
+ * @param wanted - Whether it should be muted.
+ * @returns The whole new list, appending a Timeline newly muted, or none when it is
+ * already as wanted, or why muting one more is refused: the list holds at most
+ * `mutedCap`.
+ */
+export const muting = (
+  muted: readonly TimelineId[],
+  timeline: TimelineId,
+  wanted: boolean
+): Parsed<readonly TimelineId[] | undefined> => {
+  if (muted.includes(timeline) === wanted) {
+    return { _tag: "Parsed", value: undefined };
+  }
+
+  if (!wanted) {
+    return { _tag: "Parsed", value: muted.filter((id) => id !== timeline) };
+  }
+
+  return muted.length >= mutedCap
+    ? {
+        _tag: "Invalid",
+        message: `At most ${mutedCap} Timelines can be muted. /unmute one first.`,
+      }
+    : { _tag: "Parsed", value: [...muted, timeline] };
 };
 
 /** The page's own title, which a count goes before. */

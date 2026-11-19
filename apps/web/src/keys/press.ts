@@ -15,7 +15,7 @@ import { perform, placeOf } from "../composer/atoms.ts";
 import { completionShown } from "../composer/completion.ts";
 import { composerInput } from "../composer/input.ts";
 import { aliasesShown, arrangement } from "../options/ui.ts";
-import { timelinesState } from "../timelines/atoms.ts";
+import { mutedShown, timelinesState } from "../timelines/atoms.ts";
 import { keymapState, platform } from "./state.ts";
 
 /** Inputs whose type takes no text, so a key pressed there is not typing. */
@@ -99,7 +99,8 @@ const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent)
       registry.get(timelinesState),
       registry.get(channelState),
       registry.get(arrangement),
-      registry.get(aliasesShown)
+      registry.get(aliasesShown),
+      registry.get(mutedShown)
     ),
     composer: composerInput(document) !== undefined,
     covered: covered(target),

@@ -209,6 +209,7 @@ export {
   fontNames,
   isFontName,
   leadingBounds,
+  mutedCap,
   nickSuffixMaxLength,
   sharedOnly,
   textSizeBounds,

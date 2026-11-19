@@ -221,6 +221,22 @@
   font-weight: 600;
 }
 
+/* A muted Timeline's name, with no Highlight to colour it: italic, on top of the dim of a
+   name with nothing unread, so it stays as legible, and its marker beside it. */
+.silenced {
+  font-style: italic;
+}
+
+.silence {
+  flex-shrink: 0;
+  color: var(--color-muted);
+}
+
+.network[data-selected] .silence,
+.item[data-selected] .silence {
+  color: inherit;
+}
+
 .counts {
   display: flex;
   gap: var(--space-2);
