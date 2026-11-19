@@ -21,6 +21,7 @@ import {
   listed,
   networksReading,
   matches,
+  menuOf,
   optionsOf,
   ownerCredentialFor,
   ownerFields,
@@ -1140,6 +1141,96 @@ describe("the commands", () => {
       notice: true,
       text: ["", "", []],
     });
+  });
+});
+
+/**
+ * A value as the view shows it.
+ * @param text - Its text.
+ * @returns The value.
+ */
+const shown = (text: string) => ({ _tag: "Shown", text }) as const;
+
+describe("an option's menu", () => {
+  it.each([
+    [
+      "a choice",
+      { _tag: "Choice", choices: ["a", "b"] },
+      shown("b"),
+      { choices: ["a", "b"], chosen: 1, custom: false },
+    ],
+    [
+      "a choice, in another case",
+      { _tag: "Choice", choices: ["HH:mm"] },
+      shown("hh:MM"),
+      { choices: ["HH:mm"], chosen: 0, custom: false },
+    ],
+    [
+      "a choice or text, a choice",
+      { _tag: "ChoiceOrText", choices: ["system", "inter"] },
+      shown("inter"),
+      { choices: ["system", "inter"], chosen: 1, custom: true },
+    ],
+    [
+      "a choice or text, text",
+      { _tag: "ChoiceOrText", choices: ["system"] },
+      shown("Comic Sans"),
+      { choices: ["system"], chosen: "Custom", custom: true },
+    ],
+    [
+      "a number or a choice, a choice",
+      { _tag: "IntegerOrChoice", choices: ["none"], maximum: 9, minimum: 1 },
+      shown("none"),
+      { choices: ["none"], chosen: 0, custom: true },
+    ],
+    [
+      "a number or a choice, a number",
+      { _tag: "IntegerOrChoice", choices: ["none"], maximum: 9, minimum: 1 },
+      shown("8"),
+      { choices: ["none"], chosen: "Custom", custom: true },
+    ],
+    [
+      "a member, by its tag",
+      {
+        _tag: "Tagged",
+        members: [
+          { fields: [], tag: "None" },
+          { fields: [], tag: "Sasl" },
+        ],
+      },
+      shown("sasl"),
+      { choices: ["none", "sasl"], chosen: 1, custom: false },
+    ],
+    [
+      "a choice left unset",
+      { _tag: "Choice", choices: ["a"] },
+      { _tag: "Unset" },
+      { choices: ["a"], chosen: undefined, custom: false },
+    ],
+    [
+      "a choice or text left unset",
+      { _tag: "ChoiceOrText", choices: ["a"] },
+      { _tag: "Unset" },
+      { choices: ["a"], chosen: undefined, custom: true },
+    ],
+    [
+      "a choice being read",
+      { _tag: "Choice", choices: ["a"] },
+      { _tag: "Reading" },
+      { choices: ["a"], chosen: undefined, custom: false },
+    ],
+  ] as const)("lists %s's choices, with the one in force", (_, kind, value, menu) => {
+    expect(menuOf(kind, value)).toStrictEqual(menu);
+  });
+
+  it.each([
+    ["text", { _tag: "Text" }],
+    ["a toggle", { _tag: "Toggle" }],
+    ["a number", { _tag: "Integer", maximum: 9, minimum: 0 }],
+    // A choice for each key is a list no one menu holds.
+    ["a choice for each key", { _tag: "ChoiceByKey", choices: ["off", "on"] }],
+  ] as const)("gives %s no menu", (_, kind) => {
+    expect(menuOf(kind, shown("x"))).toBeUndefined();
   });
 });
 

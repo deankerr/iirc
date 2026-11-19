@@ -3,9 +3,10 @@
  * Network, and every option under `ui`, as the core derives them from the Schemas, filtered
  * as the Owner types. An option under `ui` this device overrides says so, beside the value
  * every device shares. No device overrides one under `store`, `uploads`, or `previews`. React Aria's
- * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
- * its raw text, or a whole number in a number field, turns a toggle over, or opens the
- * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
+ * GridList gives it its keyboard: arrows move, Enter opens a menu of an option's choices
+ * where its kind lists them, which ends in "Custom…" where it also takes text, edits the
+ * focused value in place as its raw text, or a whole number in a number field, turns a
+ * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
  * unset it. Beside the filter, a button for each Network asks to remove it, or, removed
  * with its Timelines kept, to drop them. Escape anywhere else in it, or the close button on
  * its Pane's status bar, shows what the Pane showed before. An edit is a plain,
@@ -15,12 +16,20 @@
  * @packageDocumentation
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
-import { parseOwnerText, parseUiText } from "@iirc/frontend/options";
-import type { Option, Value } from "@iirc/frontend/options";
+import { menuOf, parseOwnerText, parseUiText } from "@iirc/frontend/options";
+import type { Menu as Choices, Option, Value } from "@iirc/frontend/options";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
-import { useContext, useId, useRef } from "react";
-import { GridList, GridListItem, Input, SearchField } from "react-aria-components";
+import { useContext, useEffect, useId, useRef, useState } from "react";
+import {
+  GridList,
+  GridListItem,
+  Input,
+  Menu,
+  MenuItem,
+  Popover,
+  SearchField,
+} from "react-aria-components";
 import type { Key } from "react-aria-components";
 
 import { composerFocus } from "../composer/atoms.ts";
@@ -274,6 +283,95 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
   );
 };
 
+/** The key of the entry that ends a menu where its option also takes text. */
+const customKey = "custom";
+
+/**
+ * An option's choices, as a menu under its value, with the one in force marked and focused.
+ * Choosing one sets it, as `/set` with it does, and "Custom…" opens the editor instead.
+ * @param props - The option, its menu, how to open its editor, and how to give focus back
+ * to its row.
+ * @returns The menu.
+ */
+const ChoiceMenu = ({
+  custom,
+  done,
+  menu,
+  option,
+}: {
+  readonly option: Option;
+  readonly menu: Choices;
+  readonly custom: () => void;
+  readonly done: () => void;
+}) => {
+  const setTo = useSetTo();
+  const stopEditing = useAtomSet(editingAtom);
+  const anchor = useRef<HTMLSpanElement>(null);
+
+  const entries = [
+    ...menu.choices.map((text, index) => ({ id: String(index), text })),
+    ...(menu.custom ? [{ id: customKey, text: "Custom…" }] : []),
+  ];
+
+  const chosen =
+    menu.chosen === undefined ? [] : [menu.chosen === "Custom" ? customKey : String(menu.chosen)];
+
+  const close = () => {
+    stopEditing(undefined);
+    done();
+  };
+
+  return (
+    <>
+      <span className={styles.anchor} ref={anchor} />
+      <Popover
+        className={styles.popover}
+        isOpen
+        offset={0}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            close();
+          }
+        }}
+        placement="bottom start"
+        triggerRef={anchor}
+      >
+        <Menu
+          aria-label={`Value of ${option.name}`}
+          autoFocus={chosen.length === 0 ? "first" : true}
+          className={styles.menu}
+          disallowEmptySelection
+          items={entries}
+          onAction={(key) => {
+            if (key === customKey) {
+              custom();
+
+              return;
+            }
+
+            const choice = menu.choices[Number(key)];
+
+            close();
+
+            if (choice !== undefined) {
+              setTo(option, choice);
+            }
+          }}
+          selectedKeys={chosen}
+          selectionMode="single"
+        >
+          {(entry) => (
+            <MenuItem className={styles.entry} id={entry.id} textValue={entry.text}>
+              {/* A choice is the option's own text, such as a font's name, so it is isolated. */}
+              <bdi>{entry.text}</bdi>
+            </MenuItem>
+          )}
+        </Menu>
+      </Popover>
+    </>
+  );
+};
+
 /**
  * The bar that asks to confirm unsetting an option.
  * @param props - The option, and how to give focus back to its row.
@@ -367,6 +465,27 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const registry = useContext(RegistryContext);
   const list = useRef<HTMLDivElement>(null);
   const noticeId = useId();
+  // The option whose menu gave way to its editor, by "Custom…", while it is edited.
+  const [customised, setCustomised] = useState<string | undefined>(undefined);
+  // The frame that opens an editor by "Custom…", until it runs or something else is done.
+  const customising = useRef<number | undefined>(undefined);
+
+  const stopCustomising = () => {
+    if (customising.current !== undefined) {
+      cancelAnimationFrame(customising.current);
+      customising.current = undefined;
+    }
+  };
+
+  // Closing the view lets it go.
+  useEffect(
+    () => () => {
+      if (customising.current !== undefined) {
+        cancelAnimationFrame(customising.current);
+      }
+    },
+    []
+  );
 
   // Closing shows what the Pane showed before, and gives the composer the focus, as closing
   // the search does.
@@ -377,6 +496,15 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
 
   // Escape closes the view, unless something in it took it first: an edit, a question, or
   // the filter clearing its text.
+  // A key pressed in the view, not in a menu laid over it, is the Owner doing something else,
+  // which a pending "Custom…" gives way to. It is heard on its way in, as a row keeps its
+  // arrows and Enter to itself.
+  const onViewKeyDownCapture = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target instanceof Node && event.currentTarget.contains(event.target)) {
+      stopCustomising();
+    }
+  };
+
   const onViewKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (
       event.key !== "Escape" ||
@@ -411,6 +539,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
       return;
     }
 
+    stopCustomising();
+
     if (option.kind._tag === "Toggle") {
       const on = option.value._tag === "Shown" && option.value.text === "on";
 
@@ -420,8 +550,33 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
     } else if (option._tag === "Owner" && option.kind._tag === "Credential") {
       prompt({ option: option.option });
     } else {
+      setCustomised(undefined);
       edit(option.name);
     }
+  };
+
+  // "Custom…" lets the menu go, as Escape does, and once its row has the focus again opens
+  // the editor, as Enter on the row does. An editor opened while the menu's popover still
+  // holds the page loses the focus to its row.
+  const customise = (name: string) => {
+    edit(undefined);
+    stopCustomising();
+    customising.current = requestAnimationFrame(() => {
+      customising.current = undefined;
+
+      const row = [...(list.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [])].find(
+        (one) => one.dataset.key === name
+      );
+
+      // A row filtered away since has nothing to edit.
+      if (row === undefined) {
+        return;
+      }
+
+      row.focus();
+      setCustomised(name);
+      edit(name);
+    });
   };
 
   // Delete or Backspace on a row asks to unset its option.
@@ -445,8 +600,13 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const asked = named(confirming);
 
   return (
-    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
-    <section aria-label="Options" className={styles.view} onKeyDown={onViewKeyDown}>
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys, and any key to let a pending Custom… go.
+    <section
+      aria-label="Options"
+      className={styles.view}
+      onKeyDown={onViewKeyDown}
+      onKeyDownCapture={onViewKeyDownCapture}
+    >
       <PaneBar
         end={
           <IconButton
@@ -504,41 +664,58 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
               waits.length === 0 ? <p className={styles.muted}>No option matches.</p> : null
             }
           >
-            {(option) => (
-              <GridListItem className={styles.row} id={option.name} textValue={option.name}>
-                <span className={styles.name}>
-                  <bdi>{option.name}</bdi>
-                </span>
-                <span className={styles.value}>
-                  {/* The value stays where it is while it is edited, hidden under its editor, so
+            {(option) => {
+              const menu =
+                editing === option.name && customised !== option.name
+                  ? menuOf(option.kind, option.value)
+                  : undefined;
+
+              const editor = editing === option.name && menu === undefined;
+
+              return (
+                <GridListItem className={styles.row} id={option.name} textValue={option.name}>
+                  <span className={styles.name}>
+                    <bdi>{option.name}</bdi>
+                  </span>
+                  <span className={styles.value}>
+                    {/* The value stays where it is while it is edited, hidden under its editor, so
                       the row keeps its height however many lines the value takes. */}
-                  <span className={styles.field}>
-                    <span
-                      aria-hidden={editing === option.name || undefined}
-                      className={editing === option.name ? styles.hidden : undefined}
-                      data-value
-                    >
-                      <Shown value={option.value} />
+                    <span className={styles.field}>
+                      <span
+                        aria-hidden={editor || undefined}
+                        className={editor ? styles.hidden : undefined}
+                        data-value
+                      >
+                        <Shown value={option.value} />
+                      </span>
+                      {editor ? <Editor done={focusRow(option.name)} option={option} /> : null}
+                      {menu === undefined ? null : (
+                        <ChoiceMenu
+                          custom={() => {
+                            customise(option.name);
+                          }}
+                          done={focusRow(option.name)}
+                          menu={menu}
+                          option={option}
+                        />
+                      )}
                     </span>
-                    {editing === option.name ? (
-                      <Editor done={focusRow(option.name)} option={option} />
+                    {option._tag === "Ui" && option.device !== undefined ? (
+                      <span className={styles.device}>
+                        on this device, over <Shown value={option.shared} />
+                      </span>
+                    ) : null}
+                    {option._tag === "Ui" && option.note !== undefined ? (
+                      <span className={styles.note}>{option.note}</span>
                     ) : null}
                   </span>
-                  {option._tag === "Ui" && option.device !== undefined ? (
-                    <span className={styles.device}>
-                      on this device, over <Shown value={option.shared} />
-                    </span>
-                  ) : null}
-                  {option._tag === "Ui" && option.note !== undefined ? (
-                    <span className={styles.note}>{option.note}</span>
-                  ) : null}
-                </span>
-                <span className={styles.starts}>
-                  <Starts starts={option.starts} />
-                </span>
-                <span className={styles.description}>{option.description}</span>
-              </GridListItem>
-            )}
+                  <span className={styles.starts}>
+                    <Starts starts={option.starts} />
+                  </span>
+                  <span className={styles.description}>{option.description}</span>
+                </GridListItem>
+              );
+            }}
           </GridList>
         </div>
       </div>
