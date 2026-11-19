@@ -10,8 +10,8 @@
  */
 import type { EnterKey } from "@iirc/api/ui";
 
-import { commandWithId, runIn } from "./commands.ts";
-import type { CommandContext, Intent, Parsed } from "./commands.ts";
+import { commandWithId, runIn, unmet } from "./commands.ts";
+import type { Command, CommandContext, Intent, Parsed } from "./commands.ts";
 
 /** Which modifier `mod` is: Cmd on a Mac, Ctrl everywhere else. The runtime says which. */
 export type Platform = "Mac" | "Other";
@@ -94,7 +94,8 @@ export interface BindingText {
  * - `command`: the context the bound command is judged in.
  * - `editing`: focus is in a field that takes text, such as the composer.
  * - `inComposer`: focus is in the composer itself.
- * - `palette`: the command palette is open.
+ * - `palette`: the Composer's list is open. The name is the Owner's to write against, from
+ *   when the list was a palette of its own.
  * - `covered`: a modal dialog, a popover, or a menu is open or holds the focus, and keeps
  *   its keys.
  * - `composer`: there is a composer for typing to land in.
@@ -436,7 +437,9 @@ export const parseWhen = (text: string): Parsed<When> => {
     const key = (negated ? trimmed.slice(1) : trimmed).trim();
 
     if (!isContextKey(key)) {
-      return invalid(`"${key}" in "${text}" is not a context key: editing or palette.`);
+      return invalid(
+        `"${key}" in "${text}" is not a context key: editing, inComposer, or palette.`
+      );
     }
 
     clauses.push({ is: !negated, key });
@@ -488,48 +491,50 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
   });
 
 /**
- * The bindings the Frontend starts with. Opening the palette and moving between Timelines
- * work while typing in the composer, as an IRC client's do, and Alt+A jumps to what calls
- * for the Owner most, as WeeChat's does. Alt+M shows or hides the members and Alt+N the
- * sidebar of Networks beside them: Mod+Shift+M is the browser's own in Chrome and Firefox.
- * Formatting is Mod and a letter, as an IRC client's and a word processor's are: B, I,
- * and U, E for fixed pitch, as some editors mark code, R for reverse, and Mod+Shift+X to
- * strike through. mIRC's Ctrl+K for colour is the palette's here, so the colours are
- * Mod+Shift+K. They act only while typing in the composer, so anywhere else Mod+R
- * still reloads the page. No letter is bound to focusing the composer, since a character typed
- * outside a field goes to it. The Panes are Alt+Shift: with the arrows to move between
- * them, as Alt and the arrows move between Timelines, and with a letter to split, close,
- * zoom, equalize, grow, or shrink, a letter because Option on a Mac types another
- * character, which only a letter's or a digit's physical key names back.
+ * The bindings the Frontend starts with. Mod+Shift+P starts `/` in the Composer and Mod+K
+ * starts `/go `, which `timeline.go` requires arguments for, as a binding to such a command
+ * with none does. Starting a command and moving between Timelines work while typing in the
+ * composer, as an IRC client's do, and Alt+A jumps to what calls for the Owner most, as
+ * WeeChat's does. Alt+M shows or hides the members and Alt+N the sidebar of Networks beside
+ * them: Mod+Shift+M is the browser's own in Chrome and Firefox. Formatting is Mod and a
+ * letter, as an IRC client's and a word processor's are: B, I, and U, E for fixed pitch, as
+ * some editors mark code, R for reverse, and Mod+Shift+X to strike through. mIRC's Ctrl+K for
+ * colour is starting `/go ` here, so the colours are Mod+Shift+K. They act only while typing
+ * in the composer, so anywhere else Mod+R still reloads the page. No letter is bound to
+ * focusing the composer, since a character typed outside a field goes to it. The Panes are
+ * Alt+Shift: with the arrows to move between them, as Alt and the arrows move between
+ * Timelines, and with a letter to split, close, zoom, equalize, grow, or shrink, a letter
+ * because Option on a Mac types another character, which only a letter's or a digit's
+ * physical key names back.
  */
 export const defaultBindings: readonly BindingText[] = [
-  { command: "palette.open", keys: "mod+k", when: "!palette" },
-  { command: "palette.open", keys: "mod+shift+p", when: "!palette" },
-  { command: "timeline.next", keys: "alt+arrowdown", when: "!palette" },
-  { command: "timeline.previous", keys: "alt+arrowup", when: "!palette" },
-  { command: "timeline.unread", keys: "alt+a", when: "!palette" },
-  { command: "members.toggle", keys: "alt+m", when: "!palette" },
-  { command: "sidebar.toggle", keys: "alt+n", when: "!palette" },
-  { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
-  { command: "search.open", keys: "mod+shift+f", when: "!palette" },
-  { command: "format.bold", keys: "mod+b", when: "inComposer && !palette" },
-  { command: "format.italic", keys: "mod+i", when: "inComposer && !palette" },
-  { command: "format.underline", keys: "mod+u", when: "inComposer && !palette" },
-  { command: "format.monospace", keys: "mod+e", when: "inComposer && !palette" },
-  { command: "format.reverse", keys: "mod+r", when: "inComposer && !palette" },
-  { command: "format.strikethrough", keys: "mod+shift+x", when: "inComposer && !palette" },
-  { command: "format.colour", keys: "mod+shift+k", when: "inComposer && !palette" },
-  { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft", when: "!palette" },
-  { args: "right", command: "pane.focus", keys: "alt+shift+arrowright", when: "!palette" },
-  { args: "up", command: "pane.focus", keys: "alt+shift+arrowup", when: "!palette" },
-  { args: "down", command: "pane.focus", keys: "alt+shift+arrowdown", when: "!palette" },
-  { args: "h", command: "pane.split", keys: "alt+shift+s", when: "!palette" },
-  { args: "v", command: "pane.split", keys: "alt+shift+d", when: "!palette" },
-  { command: "pane.close", keys: "alt+shift+w", when: "!palette" },
-  { command: "pane.zoom", keys: "alt+shift+z", when: "!palette" },
-  { command: "pane.equalize", keys: "alt+shift+e", when: "!palette" },
-  { command: "pane.grow", keys: "alt+shift+g", when: "!palette" },
-  { command: "pane.shrink", keys: "alt+shift+r", when: "!palette" },
+  { command: "timeline.go", keys: "mod+k" },
+  { args: "/", command: "composer.focus", keys: "mod+shift+p" },
+  { command: "timeline.next", keys: "alt+arrowdown" },
+  { command: "timeline.previous", keys: "alt+arrowup" },
+  { command: "timeline.unread", keys: "alt+a" },
+  { command: "members.toggle", keys: "alt+m" },
+  { command: "sidebar.toggle", keys: "alt+n" },
+  { args: "", command: "options.set", keys: "mod+," },
+  { command: "search.open", keys: "mod+shift+f" },
+  { command: "format.bold", keys: "mod+b", when: "inComposer" },
+  { command: "format.italic", keys: "mod+i", when: "inComposer" },
+  { command: "format.underline", keys: "mod+u", when: "inComposer" },
+  { command: "format.monospace", keys: "mod+e", when: "inComposer" },
+  { command: "format.reverse", keys: "mod+r", when: "inComposer" },
+  { command: "format.strikethrough", keys: "mod+shift+x", when: "inComposer" },
+  { command: "format.colour", keys: "mod+shift+k", when: "inComposer" },
+  { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft" },
+  { args: "right", command: "pane.focus", keys: "alt+shift+arrowright" },
+  { args: "up", command: "pane.focus", keys: "alt+shift+arrowup" },
+  { args: "down", command: "pane.focus", keys: "alt+shift+arrowdown" },
+  { args: "h", command: "pane.split", keys: "alt+shift+s" },
+  { args: "v", command: "pane.split", keys: "alt+shift+d" },
+  { command: "pane.close", keys: "alt+shift+w" },
+  { command: "pane.zoom", keys: "alt+shift+z" },
+  { command: "pane.equalize", keys: "alt+shift+e" },
+  { command: "pane.grow", keys: "alt+shift+g" },
+  { command: "pane.shrink", keys: "alt+shift+r" },
 ];
 
 /** The keymap the Frontend starts with. */
@@ -543,6 +548,31 @@ export const defaultKeymap: Keymap = keymapOf(defaultBindings);
  */
 const holds = (when: When, context: KeyContext) =>
   when.every((clause) => context[clause.key] === clause.is);
+
+/**
+ * What a binding does: its command run with its arguments, or, where the command requires
+ * arguments and the binding gives none, starting it in the Composer as `/<name> `, which the
+ * Owner goes on to write. Either way only where the command can run.
+ * @param command - The bound command.
+ * @param args - The binding's arguments.
+ * @param context - The context the command is judged in.
+ * @returns Its intents, or why there are none.
+ */
+const carriedOut = (
+  command: Command,
+  args: string,
+  context: CommandContext
+): Parsed<readonly Intent[]> => {
+  if (command.arguments !== "Required" || args.trim() !== "") {
+    return runIn(command, args, context);
+  }
+
+  const reason = unmet(command.when, context);
+
+  return reason === undefined
+    ? parsed([{ _tag: "StartCommand", text: `/${command.name} ` }])
+    : invalid(reason);
+};
 
 /**
  * What a key pressed does: the intents of the last binding of its chord whose `when` holds,
@@ -573,7 +603,7 @@ export const resolve = (
       sameKeys(binding.keys, pressed, context.platform) &&
       holds(binding.when, context)
     ) {
-      const intents = runIn(command, binding.args, context.command);
+      const intents = carriedOut(command, binding.args, context.command);
 
       if (intents._tag === "Parsed") {
         return intents.value;
@@ -650,20 +680,21 @@ export const isTyping = (event: KeyEvent, platform: Platform): boolean => {
 export const typesInComposer = (keymap: Keymap, context: KeyContext, event: KeyEvent): boolean =>
   context.composer &&
   !context.editing &&
-  !context.palette &&
   !context.covered &&
   isTyping(event, context.platform) &&
   resolve(keymap, context, event) === undefined;
 
 /**
- * The chords bound to a command with no arguments, for a list to show beside it.
+ * The chords bound to a command with the arguments given, none unless said, for a list or a
+ * tip to show beside it.
  * @param keymap - The keymap.
  * @param command - The command's id.
+ * @param args - The text after its name the bindings give it.
  * @returns Its chords, in the keymap's order.
  */
-export const chordsFor = (keymap: Keymap, command: string): readonly Chord[] =>
+export const chordsFor = (keymap: Keymap, command: string, args = ""): readonly Chord[] =>
   keymap
-    .filter((binding) => binding.command === command && binding.args === "")
+    .filter((binding) => binding.command === command && binding.args === args)
     .map((binding) => binding.keys);
 
 /** Enter, by the name a chord writes. */

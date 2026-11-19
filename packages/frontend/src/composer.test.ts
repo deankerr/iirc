@@ -7,6 +7,7 @@ import { interpret } from "./commands.ts";
 import type { CommandContext, Intent } from "./commands.ts";
 import {
   confirm,
+  commandStarted,
   confirmAbove,
   draftOf,
   historyCap,
@@ -20,7 +21,6 @@ import {
   submit,
 } from "./composer.ts";
 import type { Answering, ComposerEvent, Composers, Notice, Place } from "./composer.ts";
-import { initialPalette, reducePalette } from "./palette.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timelineId = Schema.decodeSync(TimelineId);
@@ -108,7 +108,7 @@ const say = (text: string): Intent => ({
 });
 
 describe("what a draft ran", () => {
-  it("is the key of each command its lines run, in order, as the palette remembers it, and none for plain text", () => {
+  it("is the key of each command its lines run, in order, as the Composer's list remembers it, and none for plain text", () => {
     const sent = submit(
       fold([edited("/SET ui.theme dark\nhello\n//me too\n/me waves")]),
       channel,
@@ -138,20 +138,6 @@ describe("what a draft ran", () => {
     expect([asked.ran, confirm(asked.state, channel).ran]).toStrictEqual([
       [],
       ["command:timeline.next"],
-    ]);
-  });
-
-  it("is remembered as the palette remembers what was chosen, the last run the newest", () => {
-    const chosen = reducePalette(initialPalette, { _tag: "Chosen", key: "command:say.to" });
-
-    const ran = reducePalette(chosen, {
-      _tag: "Ran",
-      keys: ["command:options.set", "command:say.action", "command:options.set"],
-    });
-
-    expect([ran.recent, ran.open]).toStrictEqual([
-      ["command:options.set", "command:say.action", "command:say.to"],
-      false,
     ]);
   });
 });
@@ -745,37 +731,37 @@ const hex = (value: bigint, digits: number) => value.toString(16).padStart(digit
 
 const known = (value: string) => ({ _tag: "Known", at: 1, from: "ircd", value }) as const;
 
+const position = `${hex(1000n + 2n ** 53n, 14)}-${hex(5n, 14)}-${hex(0n, 8)}`;
+
+const item = (
+  content: Partial<Extract<typeof TimelineItem.Encoded.content, { _tag: "Message" }>> = {}
+) =>
+  Schema.decodeSync(TimelineItem)({
+    answered: null,
+    changed: 5,
+    content: {
+      _tag: "Message",
+      answers: null,
+      at: { _tag: "Unknown" },
+      context: null,
+      id: known("msg-1"),
+      kind: "Privmsg",
+      live: true,
+      ours: null,
+      sender: "alice",
+      tags: [],
+      target: "#iirc",
+      text: "is it on?",
+      ...content,
+    },
+    level: "Message",
+    network: "libera",
+    position,
+    sequence: 5,
+    timeline: "00000000000002-00000000-00000000",
+  });
+
 describe("a reply", () => {
-  const position = `${hex(1000n + 2n ** 53n, 14)}-${hex(5n, 14)}-${hex(0n, 8)}`;
-
-  const item = (
-    content: Partial<Extract<typeof TimelineItem.Encoded.content, { _tag: "Message" }>> = {}
-  ) =>
-    Schema.decodeSync(TimelineItem)({
-      answered: null,
-      changed: 5,
-      content: {
-        _tag: "Message",
-        answers: null,
-        at: { _tag: "Unknown" },
-        context: null,
-        id: known("msg-1"),
-        kind: "Privmsg",
-        live: true,
-        ours: null,
-        sender: "alice",
-        tags: [],
-        target: "#iirc",
-        text: "is it on?",
-        ...content,
-      },
-      level: "Message",
-      network: "libera",
-      position,
-      sequence: 5,
-      timeline: "00000000000002-00000000-00000000",
-    });
-
   const offered = replyOf(item(), true);
 
   if (offered === undefined) {
@@ -995,5 +981,198 @@ describe("formatting a draft", () => {
     const state = fold([edited("a b c"), formatted(2, 3), typed("a b c!", 6)]);
 
     expect(draftOf(state, channel).text).toBe("a \u0002b\u0002 c!");
+  });
+});
+
+/**
+ * What answering the Message of `item` answers, where tags are carried.
+ * @returns What it answers.
+ */
+const answerable = (): Answering => {
+  const offered = replyOf(item(), true);
+
+  if (offered === undefined) {
+    throw new Error("a Message with an id, where tags are carried, is answerable");
+  }
+
+  return offered;
+};
+
+describe("a command started over a draft", () => {
+  const reply = answerable();
+
+  const hello = fold([
+    edited("hello"),
+    { _tag: "ReplyChosen", answering: reply, timeline: channel },
+  ]);
+
+  const asideOf = (state: Composers, timeline: Place = channel) => draftOf(state, timeline).aside;
+
+  it("sets a draft with text aside, with what it answers, and starts the command clean", () => {
+    const state = commandStarted(hello, channel, "/go ");
+    const draft = draftOf(state, channel);
+
+    expect({
+      answering: draft.answering,
+      aside: draft.aside,
+      history: draft.history,
+      text: draft.text,
+    }).toStrictEqual({
+      answering: undefined,
+      aside: { answering: reply, text: "hello" },
+      history: [],
+      text: "/go ",
+    });
+  });
+
+  it("sets a blank draft aside too, so a second command keeps nothing but what was there, and Escape clears the command", () => {
+    const first = commandStarted(initialComposers, channel, "/go ");
+    const second = commandStarted(first, channel, "/theme ");
+    const escaped = reduceComposers(second, { _tag: "Restored", timeline: channel });
+
+    expect({
+      escaped: [draftOf(escaped, channel).text, asideOf(escaped)],
+      first: [draftOf(first, channel).text, asideOf(first)],
+      second: [draftOf(second, channel).text, asideOf(second)],
+    }).toStrictEqual({
+      escaped: ["", undefined],
+      first: ["/go ", { answering: undefined, text: "" }],
+      second: ["/theme ", { answering: undefined, text: "" }],
+    });
+  });
+
+  it("keeps the draft already set aside, and only replaces the command", () => {
+    const state = commandStarted(commandStarted(hello, channel, "/go "), channel, "/theme ");
+
+    expect([asideOf(state)?.text, draftOf(state, channel).text]).toStrictEqual([
+      "hello",
+      "/theme ",
+    ]);
+  });
+
+  it("lets go of what the command replaced: a recall, lines to confirm, a notice about the text", () => {
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
+    const waiting = submit(fold([edited(lines.join("\n"))]), channel, context).state;
+    const state = commandStarted(reduceComposers(waiting, up()), channel, "/go ");
+    const complained_ = commandStarted(complained(), channel, "/go ");
+
+    expect([
+      draftOf(state, channel).confirming,
+      draftOf(state, channel).recalled,
+      draftOf(complained_, channel).notice,
+    ]).toStrictEqual([undefined, undefined, undefined]);
+  });
+
+  it("brings the draft back once a command is run, sends only the command, and recalls only the command", () => {
+    const started_ = commandStarted(hello, channel, "/next");
+    const { ran, state } = submit(started_, channel, context);
+    const draft = draftOf(state, channel);
+
+    const recalled = draftOf(reduceComposers(state, up()), channel);
+
+    expect({
+      answering: draft.answering,
+      aside: draft.aside,
+      history: draft.history,
+      ran,
+      recalled: recalled.text,
+      text: draft.text,
+    }).toStrictEqual({
+      answering: reply,
+      aside: undefined,
+      history: ["/next"],
+      ran: ["command:timeline.next"],
+      recalled: "/next",
+      text: "hello",
+    });
+  });
+
+  it("brings the draft back once a Message is sent, and sends only what was typed", () => {
+    const typed = reduceComposers(commandStarted(hello, channel, "/go "), edited("hi there"));
+    const { intents, state } = submit(typed, channel, context);
+
+    expect({
+      aside: asideOf(state),
+      history: draftOf(state, channel).history,
+      intents,
+      text: draftOf(state, channel).text,
+    }).toStrictEqual({
+      aside: undefined,
+      history: ["hi there"],
+      intents: [say("hi there")],
+      text: "hello",
+    });
+  });
+
+  it("brings the draft back once lines waiting to be confirmed are sent", () => {
+    const lines = Array.from({ length: confirmAbove + 1 }, (_, index) => `line ${index}`);
+    const typed = reduceComposers(commandStarted(hello, channel, "/go "), edited(lines.join("\n")));
+    const asked = submit(typed, channel, context);
+
+    expect([
+      asideOf(asked.state)?.text,
+      draftOf(confirm(asked.state, channel).state, channel).text,
+      asideOf(confirm(asked.state, channel).state),
+    ]).toStrictEqual(["hello", "hello", undefined]);
+  });
+
+  it("keeps both when what was typed cannot be read, and when a Credential is refused", () => {
+    const refused = submit(commandStarted(hello, channel, "/frob"), channel, context);
+
+    const credential = submit(
+      commandStarted(hello, channel, "/quote PASS secret"),
+      channel,
+      context
+    );
+
+    expect([
+      refused.intents,
+      draftOf(refused.state, channel).text,
+      asideOf(refused.state)?.text,
+      draftOf(refused.state, channel).notice?._tag,
+      credential.intents,
+      asideOf(credential.state)?.text,
+    ]).toStrictEqual([[], "/frob", "hello", "AboutText", [], "hello"]);
+  });
+
+  it("keeps it where nothing was submitted: an empty command, a turn away", () => {
+    const started_ = commandStarted(hello, channel, "/go ");
+    const blank = submit(reduceComposers(started_, edited("")), channel, context);
+    const away = reduceComposers(started_, { _tag: "Left", timeline: channel });
+
+    expect([asideOf(blank.state)?.text, asideOf(away)?.text]).toStrictEqual(["hello", "hello"]);
+  });
+
+  it("is brought back by Escape, which drops the command and sends and remembers nothing", () => {
+    const restored = reduceComposers(commandStarted(hello, channel, "/go "), {
+      _tag: "Restored",
+      timeline: channel,
+    });
+
+    const draft = draftOf(restored, channel);
+
+    expect({
+      answering: draft.answering,
+      aside: draft.aside,
+      history: draft.history,
+      text: draft.text,
+    }).toStrictEqual({ answering: reply, aside: undefined, history: [], text: "hello" });
+    expect(reduceComposers(hello, { _tag: "Restored", timeline: channel })).toStrictEqual(hello);
+  });
+
+  it("goes with the text when a draft comes to show its Timeline", () => {
+    const place = placeOfDraft(network, "bob");
+
+    const state = reduceComposers(commandStarted(fold([edited("hi bob", place)]), place, "/go "), {
+      _tag: "Carried",
+      from: place,
+      to: other,
+    });
+
+    expect([
+      draftOf(state, other).text,
+      asideOf(state, other)?.text,
+      asideOf(state, place),
+    ]).toStrictEqual(["/go ", "hi bob", undefined]);
   });
 });

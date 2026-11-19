@@ -359,7 +359,8 @@ const scrollTo = async (top: number, content: number) => {
 };
 
 /**
- * Opens a Timeline through the palette, as the Owner would: Mod+K, its name, and Enter.
+ * Opens a Timeline from the keys, as the Owner would: Mod+K starts `/go ` in the Composer,
+ * then its name and Enter.
  * @param name - Its name, `#iirc` unless given.
  */
 const openFromPalette = async (name = "#iirc") => {
@@ -370,33 +371,39 @@ const openFromPalette = async (name = "#iirc") => {
     await Promise.resolve();
   });
 
-  await settled(() => document.querySelector('[role="dialog"] input') !== null);
-  const search = document.querySelector<HTMLInputElement>('[role="dialog"] input');
+  const composer = document.querySelector<HTMLTextAreaElement>("textarea[data-composer]");
 
-  if (search === null) {
-    throw new Error("no search field");
+  if (composer === null) {
+    throw new Error("no composer");
   }
 
+  await settled(() => composer.value === "/go ");
+
+  const text = `/go ${name}`;
+
   await act(async () => {
-    search.focus();
-    search.dispatchEvent(
+    composer.dispatchEvent(
       new InputEvent("beforeinput", { bubbles: true, data: name, inputType: "insertText" })
     );
-    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, name);
-    search.dispatchEvent(
+    Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      composer,
+      text
+    );
+    composer.setSelectionRange(text.length, text.length);
+    composer.dispatchEvent(
       new InputEvent("input", { bubbles: true, data: name, inputType: "insertText" })
     );
     await Promise.resolve();
   });
 
   await act(async () => {
-    search.dispatchEvent(
+    composer.dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })
     );
     await Promise.resolve();
   });
 
-  await settled(() => document.querySelector('[role="dialog"]') === null);
+  await settled(() => composer.value === "");
 };
 
 /**

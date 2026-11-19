@@ -257,25 +257,71 @@ describe("the keymap", () => {
     });
   });
 
-  it("resolves Mod+K and Mod+Shift+P to opening the palette, while typing too, but not while it is open", () => {
+  it("resolves Mod+Shift+P to starting / and Mod+K to starting /go in the Composer, from anywhere, typing, with its list open or not, and with no Timeline", () => {
     const k = press("k", "KeyK", { ctrl: true });
     const p = press("P", "KeyP", { ctrl: true, shift: true });
-    const opened = [{ _tag: "OpenPalette" }];
+
+    const nowhere: CommandContext = {
+      ...inChannel,
+      focus: undefined,
+      open: undefined,
+      session: false,
+      timelines: [],
+    };
+
+    const slash = [{ _tag: "StartCommand", text: "/" }];
+    const go = [{ _tag: "StartCommand", text: "/go " }];
 
     expect({
       k: resolve(defaultKeymap, at(), k),
+      kNowhere: resolve(defaultKeymap, at({}, nowhere), k),
+      kOpen: resolve(defaultKeymap, at({ palette: true }), k),
       mac: resolve(defaultKeymap, at({ platform: "Mac" }), press("k", "KeyK", { meta: true })),
       macCtrl: resolve(defaultKeymap, at({ platform: "Mac" }), k),
-      open: resolve(defaultKeymap, at({ palette: true }), k),
       p: resolve(defaultKeymap, at(), p),
+      pNowhere: resolve(defaultKeymap, at({}, nowhere), p),
+      pOpen: resolve(defaultKeymap, at({ palette: true }), p),
+      pTyping: resolve(defaultKeymap, at({ editing: true, inComposer: true }), p),
       typing: resolve(defaultKeymap, at({ editing: true }), k),
     }).toStrictEqual({
-      k: opened,
-      mac: opened,
+      k: go,
+      kNowhere: go,
+      kOpen: go,
+      mac: go,
       macCtrl: undefined,
-      open: undefined,
-      p: opened,
-      typing: opened,
+      p: slash,
+      pNowhere: slash,
+      pOpen: slash,
+      pTyping: slash,
+      typing: go,
+    });
+  });
+
+  it("starts a bound command that requires arguments, with none given, in the Composer, where it can run, and runs it with them", () => {
+    const keymap = keymapOf([
+      { command: "say.privmsg", keys: "alt+s" },
+      { args: "hello", command: "say.privmsg", keys: "alt+h" },
+      { command: "options.set", keys: "alt+o" },
+      { command: "timeline.go", keys: "alt+g" },
+    ]);
+
+    const offline: CommandContext = { ...inChannel, session: false };
+    const s_ = press("s", "KeyS", { alt: true });
+
+    expect({
+      go: resolve(keymap, at(), press("g", "KeyG", { alt: true })),
+      hello: resolve(keymap, at(), press("h", "KeyH", { alt: true }))?.map((one) => one._tag),
+      // Where the command cannot run, no key is taken to start it.
+      offline: resolve(keymap, at({}, offline), s_),
+      // `/set` takes arguments but needs none, so the key runs it.
+      optional: resolve(keymap, at(), press("o", "KeyO", { alt: true })),
+      say: resolve(keymap, at(), s_),
+    }).toStrictEqual({
+      go: [{ _tag: "StartCommand", text: "/go " }],
+      hello: ["Say"],
+      offline: undefined,
+      optional: [{ _tag: "OpenOptions", filter: "" }],
+      say: [{ _tag: "StartCommand", text: "/say " }],
     });
   });
 
@@ -308,7 +354,7 @@ describe("the keymap", () => {
     });
   });
 
-  it("shows or hides the members with Alt+M, Option+M on a Mac, while typing too", () => {
+  it("shows or hides the members with Alt+M, Option+M on a Mac, while typing too, and with the Composer's list open", () => {
     const turned = [{ _tag: "ShowMembers", shown: undefined }];
 
     expect({
@@ -319,10 +365,10 @@ describe("the keymap", () => {
       ),
       open: resolve(defaultKeymap, at({ palette: true }), press("m", "KeyM", { alt: true })),
       other: resolve(defaultKeymap, at({ editing: true }), press("m", "KeyM", { alt: true })),
-    }).toStrictEqual({ mac: turned, open: undefined, other: turned });
+    }).toStrictEqual({ mac: turned, open: turned, other: turned });
   });
 
-  it("shows or hides the sidebar with Alt+N, Option+N on a Mac, a dead key there, while typing too", () => {
+  it("shows or hides the sidebar with Alt+N, Option+N on a Mac, a dead key there, while typing too, and with the Composer's list open", () => {
     const turned = [{ _tag: "ShowSidebar", shown: undefined }];
 
     expect({
@@ -333,7 +379,7 @@ describe("the keymap", () => {
       ),
       open: resolve(defaultKeymap, at({ palette: true }), press("n", "KeyN", { alt: true })),
       other: resolve(defaultKeymap, at({ editing: true }), press("n", "KeyN", { alt: true })),
-    }).toStrictEqual({ mac: turned, open: undefined, other: turned });
+    }).toStrictEqual({ mac: turned, open: turned, other: turned });
   });
 
   it("moves to the next and previous Timeline in the sidebar's order, wrapping, while typing too", () => {
@@ -409,7 +455,7 @@ describe("the keymap", () => {
         at({ editing: true }),
         press("F", "KeyF", { ctrl: true, shift: true })
       ),
-    }).toStrictEqual({ find: undefined, mac: shown, open: undefined, typing: shown });
+    }).toStrictEqual({ find: undefined, mac: shown, open: shown, typing: shown });
   });
 
   it("respects the bound command's own conditions, and lets a later binding win", () => {
@@ -442,11 +488,12 @@ describe("the keymap", () => {
     });
   });
 
-  it("lists the chords bound to a command with no arguments", () => {
-    expect(chordsFor(defaultKeymap, "palette.open").map(formatChord)).toStrictEqual([
-      "mod+k",
-      "mod+shift+p",
-    ]);
+  it("lists the chords bound to a command with the arguments given, none unless said", () => {
+    expect({
+      focus: chordsFor(defaultKeymap, "composer.focus"),
+      go: chordsFor(defaultKeymap, "timeline.go").map(formatChord),
+      slash: chordsFor(defaultKeymap, "composer.focus", "/").map(formatChord),
+    }).toStrictEqual({ focus: [], go: ["mod+k"], slash: ["mod+shift+p"] });
     expect(chordsFor(defaultKeymap, "say.privmsg")).toStrictEqual([]);
     expect(key("Up")).toBe("arrowup");
   });
@@ -506,7 +553,7 @@ const clashes = (texts: readonly BindingText[]) => {
 };
 
 describe("the formatting keys", () => {
-  it("resolve to formatting the composer while typing in it, but not in another field, outside one, or while the palette is open", () => {
+  it("resolve to formatting the composer while typing in it, with its list open too, but not in another field or outside one", () => {
     const chord = (key: string, shift = false) =>
       resolve(
         defaultKeymap,
@@ -540,7 +587,7 @@ describe("the formatting keys", () => {
       italic: [{ _tag: "Format", format: "italic" }],
       mac: [{ _tag: "Format", format: "bold" }],
       monospace: [{ _tag: "Format", format: "monospace" }],
-      open: undefined,
+      open: [{ _tag: "Format", format: "bold" }],
       otherField: undefined,
       outside: undefined,
       reverse: [{ _tag: "Format", format: "reverse" }],
@@ -761,8 +808,8 @@ describe("the Panes' keys", () => {
       covered: typesInComposer(defaultKeymap, at({ covered: true }), a),
       editing: typesInComposer(defaultKeymap, at({ editing: true }), a),
       free: typesInComposer(defaultKeymap, at(), a),
+      listOpen: typesInComposer(defaultKeymap, at({ palette: true }), a),
       noComposer: typesInComposer(defaultKeymap, at({ composer: false }), a),
-      palette: typesInComposer(defaultKeymap, at({ palette: true }), a),
       // A binding that cannot run here, as `timeline.next` with no Timelines, takes nothing.
       unrunnable: typesInComposer(
         bound,
@@ -774,8 +821,8 @@ describe("the Panes' keys", () => {
       covered: false,
       editing: false,
       free: true,
+      listOpen: true,
       noComposer: false,
-      palette: false,
       unrunnable: true,
     });
   });

@@ -17,8 +17,9 @@ import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake
 import { drawnTheme, watchTheme } from "../theme/atoms.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { placeOf } from "./atoms.ts";
-import { completer, emojiLoader, emojiState } from "./completion.ts";
+import { completer, emojiLoader } from "./completion.ts";
 import { composerState } from "./composer-state.ts";
+import { emojiState } from "./sources.ts";
 
 import inlineStyles from "../timelines/inlines.module.css";
 
@@ -578,7 +579,7 @@ describe("the Composer's list", () => {
         active: true,
         controls: true,
         highlighted: -1,
-        // `/invexes` is found as the palette finds it: its description says "join".
+        // `/invexes` is found by its description, which says "join".
         names: ["/join", "/invexes"],
         texts: undefined,
       },
@@ -764,7 +765,7 @@ const font = () => document.documentElement.style.getPropertyValue("--font-text"
 
 const alertdialog = () => document.querySelector('[role="alertdialog"]');
 
-describe("the Composer's list of everything the palette lists", () => {
+describe("the Composer's list of everything it can complete", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);

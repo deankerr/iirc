@@ -14,7 +14,7 @@ export const completionState = Atom.make(initialCompletion).pipe(Atom.keepAlive)
 
 /**
  * Lets go of what was being completed: the draft was changed or replaced other than by
- * completion, by typing, recalling, sending, the palette, or another Timeline opening, so
+ * completion, by typing, recalling, sending, a command started over it, or another Timeline opening, so
  * an answer still on its way puts nothing in.
  * @param registry - The registry.
  */

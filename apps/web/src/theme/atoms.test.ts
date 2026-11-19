@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { draftOf } from "@iirc/frontend/composer";
-import { allScope } from "@iirc/frontend/palette";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -10,8 +9,6 @@ import { composerState } from "../composer/composer-state.ts";
 import { signedOut } from "../options/atoms.ts";
 import { uiInEffect, uiSync } from "../options/ui.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
-import { closePalette, highlightEntry, paletteSections, pickEntry } from "../palette/atoms.ts";
-import { paletteHappened, paletteState } from "../palette/state.ts";
 import { check } from "../sign-in/atoms.ts";
 import {
   eventually,
@@ -209,40 +206,6 @@ describe("themes", () => {
     });
   });
 
-  it("lists the themes in the palette, drawing one while highlighted, and the one in effect again on Escape", async () => {
-    const fake = signedIn();
-    const { background, registry, type } = await page(fake);
-
-    await type("/theme");
-    const listed = registry.get(paletteState);
-
-    registry.set(highlightEntry, { highlighted: true, key: "theme:dracula" });
-    const dracula = background();
-
-    registry.set(highlightEntry, { highlighted: true, key: "theme:solarized-light" });
-    const solarized = background();
-
-    registry.set(highlightEntry, { highlighted: true, key: "command:theme.set" });
-    const command = background();
-
-    registry.set(highlightEntry, { highlighted: true, key: "theme:nord" });
-    registry.set(closePalette, undefined);
-
-    expect({
-      closed: background(),
-      command,
-      dracula,
-      listed: [listed.open, listed.scope],
-      solarized,
-    }).toStrictEqual({
-      closed: "#111314",
-      command: "#111314",
-      dracula: "#282a36",
-      listed: [true, { _tag: "Themes", option: "theme" }],
-      solarized: "#fdf6e3",
-    });
-  });
-
   it("sets, overrides, refuses, and removes themes by /theme", async () => {
     const fake = signedIn();
     const { background, notice, registry, type } = await page(fake);
@@ -340,7 +303,7 @@ describe("themes", () => {
     });
   });
 
-  it("draws the text's size and font on the root at once, with IRC's monospace in a monospace font beside a sans one, previews a font highlighted in the palette, and sets one chosen there", async () => {
+  it("draws the text's size and font on the root at once, with IRC's monospace in a monospace font beside a sans one, and writes a font chosen on this device while it overrides ui.font", async () => {
     const fake = signedIn();
     const { notice, registry, type } = await page(fake);
     const stop = watchTheme(registry);
@@ -364,72 +327,33 @@ describe("themes", () => {
     await type("/set -device ui.font jetbrains-mono");
     const device = read();
 
-    paletteHappened(registry, { _tag: "Opened", scope: allScope });
-    registry.set(highlightEntry, { highlighted: true, key: "font:ibm-plex-mono" });
-    const previewed = read();
-
-    registry.set(highlightEntry, { highlighted: true, key: "font:inter" });
+    await type("/set -device ui.font inter");
     const sans = read();
 
-    registry.set(highlightEntry, { highlighted: true, key: "theme:nord" });
-    const otherRow = read();
-
-    registry.set(highlightEntry, { highlighted: true, key: "font:commit-mono" });
-    registry.set(closePalette, undefined);
-    const closed = read();
-
-    paletteHappened(registry, { _tag: "Opened", scope: allScope });
-
-    const commit = registry
-      .get(paletteSections)
-      .flatMap((section) => section.entries)
-      .find((entry) => entry.key === "font:commit-mono");
-
-    if (commit !== undefined) {
-      registry.set(pickEntry, commit);
-    }
+    await type("/set -device ui.font jetbrains-mono");
 
     // This device overrides the font, so the choice is its own: a shared one would not win.
+    await type("/set ui.font commit-mono");
     await until(registry, uiInEffect, (ui) => ui.font === "commit-mono");
 
     stop();
 
     expect({
       before,
-      closed,
       device,
       kept: readChoice(deviceUiKey),
-      otherRow,
-      picked: commit?.key,
-      previewed,
       refused,
       sans,
       shared: fake.daemon.ui.options.font,
       sized,
     }).toStrictEqual({
       before: ["14px", "var(--font-device)", "var(--font-device)"],
-      closed: [
-        "18px",
-        '"JetBrains Mono Variable", var(--font-device)',
-        '"JetBrains Mono Variable", var(--font-device)',
-      ],
       device: [
         "18px",
         '"JetBrains Mono Variable", var(--font-device)',
         '"JetBrains Mono Variable", var(--font-device)',
       ],
       kept: '{"font":"commit-mono"}',
-      otherRow: [
-        "18px",
-        '"JetBrains Mono Variable", var(--font-device)',
-        '"JetBrains Mono Variable", var(--font-device)',
-      ],
-      picked: "font:commit-mono",
-      previewed: [
-        "18px",
-        '"IBM Plex Mono", var(--font-device)',
-        '"IBM Plex Mono", var(--font-device)',
-      ],
       refused: 'ui.size: Give a whole number from 10 to 24, not "30".',
       sans: ["18px", '"Inter Variable", var(--font-device-sans)', "var(--font-device)"],
       shared: "system",
@@ -437,7 +361,7 @@ describe("themes", () => {
     });
   });
 
-  it("draws a family the device has by its name, on this device alone, set by /set or typed in the palette, and previews one typed there", async () => {
+  it("draws a family the device has by its name, on this device alone, set by /set with or without -device", async () => {
     const fake = signedIn();
     const { registry, type } = await page(fake);
     const stop = watchTheme(registry);
@@ -451,21 +375,7 @@ describe("themes", () => {
     await type("/set -device ui.font Fira Code");
     const set = read();
 
-    paletteHappened(registry, { _tag: "Opened", scope: allScope });
-    paletteHappened(registry, { _tag: "Queried", query: "font Iosevka Term" });
-
-    const typed = registry
-      .get(paletteSections)
-      .flatMap((section) => section.entries)
-      .find((entry) => entry.key === "font:Iosevka Term");
-
-    registry.set(highlightEntry, { highlighted: true, key: "font:Iosevka Term" });
-    const previewed = read();
-
-    if (typed !== undefined) {
-      registry.set(pickEntry, typed);
-    }
-
+    await type("/set ui.font Iosevka Term");
     await until(registry, uiInEffect, (ui) => ui.font === "Iosevka Term");
     const chosen = read();
 
@@ -474,13 +384,11 @@ describe("themes", () => {
     expect({
       chosen,
       kept: readChoice(deviceUiKey),
-      previewed,
       set,
       shared: fake.daemon.ui.options.font,
     }).toStrictEqual({
       chosen: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
       kept: '{"font":"Iosevka Term"}',
-      previewed: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
       set: ['"Fira Code", var(--font-device)', "var(--font-device)"],
       shared: "system",
     });

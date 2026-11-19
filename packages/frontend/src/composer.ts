@@ -25,10 +25,10 @@ import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
 import { commandNamed, credentialRefusal, interpret, namedIn } from "./commands.ts";
 import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
+import { commandKey } from "./entries.ts";
 import { merged, formattedIn, pendingAfter, plainOf } from "./formatting.ts";
 import type { Format, Hint, Pending } from "./formatting.ts";
 import { panesOf } from "./layout.ts";
-import { commandKey } from "./palette.ts";
 import { attemptedText, contained, requested } from "./render.ts";
 import { isRemoved, mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
@@ -147,6 +147,16 @@ export interface Answering {
   readonly message: Answered;
 }
 
+/**
+ * A draft set aside while a command is written over it: its text, with its formatting codes,
+ * and the Message it answered. Nothing else of it is kept, since the rest is derived again
+ * from the text.
+ */
+export interface Aside {
+  readonly text: string;
+  readonly answering: Answering | undefined;
+}
+
 /** One Timeline's composer. */
 export interface Draft {
   /**
@@ -166,6 +176,12 @@ export interface Draft {
   readonly kept: string;
   readonly confirming: Confirming | undefined;
   readonly notice: Notice | undefined;
+  /**
+   * The draft set aside by a command started over it, blank or not, which comes back when
+   * what was written runs or is sent, and on Escape. It is never sent, and never enters
+   * `history`, so Up never recalls it.
+   */
+  readonly aside: Aside | undefined;
 }
 
 /** Every Timeline's composer, and the one under no Timeline. */
@@ -223,6 +239,8 @@ export type SayFailure =
  * - `Left`: the composer turned to another Timeline, which lets go of a notice about the
  *   text it holds, since the text stays and the complaint about it does not come back.
  * - `Dismissed`: Escape, which lets go of a notice and a confirmation.
+ * - `Restored`: Escape over a command started over a draft: the command goes, and the draft
+ *   set aside comes back, with what it answered. With none set aside, nothing changes.
  * - `Failed`: a Say or an Act failed; `intents` are it and those after it, none carried out after it.
  * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
@@ -233,7 +251,7 @@ export type SayFailure =
  * - `Carried`: a draft came to show its Timeline, so what was typed under it, unsent, goes
  *   to the Timeline's composer, unless that holds text of its own, with its notice unless
  *   that holds one, and what is said later of a Say sent from the draft is said there. A
- *   notice about the text stays behind.
+ *   notice about the text stays behind. A draft set aside goes with the text.
  */
 export type ComposerEvent =
   | {
@@ -256,6 +274,7 @@ export type ComposerEvent =
     }
   | { readonly _tag: "Left"; readonly timeline: Place }
   | { readonly _tag: "Dismissed"; readonly timeline: Place }
+  | { readonly _tag: "Restored"; readonly timeline: Place }
   | {
       readonly _tag: "Failed";
       readonly timeline: Place;
@@ -270,7 +289,7 @@ export type ComposerEvent =
 
 /**
  * A composer's next state, the intents it asks the runtime to carry out, and the keys of the
- * commands those run, in order, as the palette remembers them, none for plain text.
+ * commands those run, in order, as the Composer's list remembers them, none for plain text.
  */
 export interface Submitted {
   readonly state: Composers;
@@ -284,6 +303,7 @@ export const initialComposers: Composers = { carried: new Map(), drafts: new Map
 /** A composer never touched. */
 export const emptyDraft: Draft = {
   answering: undefined,
+  aside: undefined,
   confirming: undefined,
   history: [],
   kept: "",
@@ -449,7 +469,7 @@ export const linesOf = (text: string): readonly string[] =>
   text.split(/\r\n|\r|\n/u).filter((line) => plainOf(line).trim() !== "");
 
 /**
- * The keys of the commands lines run, in order, as the palette remembers them: a line that
+ * The keys of the commands lines run, in order, as the Composer's list remembers them: a line that
  * starts with `/`, but not `//`, and names a command. Plain text runs none.
  * @param lines - The lines, each read already.
  * @returns The keys.
@@ -545,18 +565,21 @@ const answered = (
 };
 
 /**
- * The composer once its text was sent: cleared, and its text the newest in its history,
- * unless it is already. An offer made of an earlier Say or Act stays.
+ * The composer once its text was sent: cleared, or showing the draft that was set aside, with
+ * what it answered, and its text the newest in its history, unless it is already, which the
+ * draft set aside never is. An offer made of an earlier Say or Act stays.
  * @param draft - The composer.
  * @returns The composer after.
  */
 const sent = (draft: Draft): Draft => ({
   ...emptyDraft,
+  answering: draft.aside?.answering,
   history:
     draft.history[0] === draft.text
       ? draft.history
       : [draft.text, ...draft.history].slice(0, historyCap),
   notice: afterSubmit(draft.notice),
+  text: draft.aside?.text ?? "",
 });
 
 /**
@@ -603,6 +626,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
       ran: [],
       state: withDraft(state, timeline, (one) => ({
         ...emptyDraft,
+        aside: one.aside,
         history: one.history,
         notice: aboutText(credential),
       })),
@@ -836,6 +860,40 @@ const unlessAboutText = (notice: Notice | undefined, edited: boolean): Notice | 
   edited && notice?._tag === "AboutText" ? undefined : notice;
 
 /**
+ * A draft once a command started over it is put away: the draft set aside comes back, with
+ * what it answered, and what the command left, a recall or lines to confirm among it, goes.
+ * With none set aside, it is as it was.
+ * @param draft - The draft.
+ * @returns The draft after.
+ */
+const restored = (draft: Draft): Draft =>
+  draft.aside === undefined
+    ? draft
+    : {
+        ...draft,
+        answering: draft.aside.answering,
+        aside: undefined,
+        confirming: undefined,
+        kept: "",
+        notice: unlessAboutText(draft.notice, true),
+        recalled: undefined,
+        text: draft.aside.text,
+        typing: undefined,
+      };
+
+/**
+ * Whether a draft that came to show its Timeline brings what it holds to the Timeline's
+ * composer: it holds text, or a draft set aside, and the composer holds neither.
+ * @param from - The draft's composer.
+ * @param to - The Timeline's composer.
+ * @returns Whether it does.
+ */
+const brings = (from: Draft, to: Draft): boolean =>
+  (plainOf(from.text).trim() !== "" || from.aside !== undefined) &&
+  plainOf(to.text).trim() === "" &&
+  to.aside === undefined;
+
+/**
  * The composers after an event.
  * @param state - The state before.
  * @param event - What happened.
@@ -850,7 +908,9 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
       const from = draftOf(state, event.from);
       const to = draftOf(state, event.to);
       const kept = from.notice?._tag === "AboutText" ? undefined : from.notice;
-      const moving = plainOf(from.text).trim() !== "" && plainOf(to.text).trim() === "";
+
+      const moving = brings(from, to);
+
       const drafts = new Map(state.drafts);
 
       drafts.delete(event.from);
@@ -862,6 +922,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
           moving
             ? {
                 ...to,
+                aside: from.aside,
                 confirming: from.confirming,
                 notice: to.notice ?? kept,
                 recalled: undefined,
@@ -936,6 +997,10 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
       }));
     }
 
+    case "Restored": {
+      return withDraft(state, event.timeline, restored);
+    }
+
     case "Failed": {
       return noticed(state, event.timeline, failed(event.failure, event.intent, event.intents));
     }
@@ -968,7 +1033,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
 };
 
 /**
- * Starts a composer with text, as the palette does for a command that needs arguments. A
+ * Starts a composer with text, as `/topic` does with the Channel's topic. A
  * draft with more than whitespace in it is never replaced: it is kept as it is, and the
  * composer says what was not put in, so the Owner can clear it and choose again.
  * @param state - The composers.
@@ -995,3 +1060,29 @@ export const started = (state: Composers, timeline: Place, text: string | undefi
     )
   );
 };
+
+/**
+ * Starts a command in a composer: `text`, which the Owner goes on to write. The draft is set
+ * aside, with what it answers, and comes back when the command runs, or the text is sent, or
+ * on Escape; one already set aside stays the one set aside, and only the command is
+ * replaced. A blank draft is set aside as it is, so that a second key over the command it
+ * started puts nothing of it aside, and Escape clears it. What the draft answered, a recall,
+ * lines waiting to be confirmed, a style pending, and a notice about the text are let go of,
+ * as they are for any other text.
+ * @param state - The composers.
+ * @param timeline - The composer's place.
+ * @param text - What to start it with.
+ * @returns The composers after.
+ */
+export const commandStarted = (state: Composers, timeline: Place, text: string): Composers =>
+  withDraft(state, timeline, (draft) => ({
+    ...draft,
+    answering: undefined,
+    aside: draft.aside ?? { answering: draft.answering, text: draft.text },
+    confirming: undefined,
+    kept: "",
+    notice: unlessAboutText(draft.notice, true),
+    recalled: undefined,
+    text,
+    typing: undefined,
+  }));

@@ -17,6 +17,9 @@ import { completionState } from "./completion-state.ts";
 /** Every Timeline's composer, as the core folds it. */
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
 
+/** The keys of the commands run from a composer, newest first, which its list puts first. */
+export const ranState = Atom.make<readonly string[]>([]).pipe(Atom.keepAlive);
+
 /**
  * The theme or font the composer under the main view's list highlights, which is drawn in
  * place of the one in effect while it does, and none once it moves on, the list closes, or

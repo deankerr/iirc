@@ -16,13 +16,11 @@ import {
   nicksWanted,
   owns,
   reduceCompletion,
-  sourcesOf,
 } from "@iirc/frontend/completion";
-import type { Completed, CompletionEvent, Emoji, List, Sources } from "@iirc/frontend/completion";
+import type { Completed, CompletionEvent, List } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { plainOf } from "@iirc/frontend/formatting";
-import { listed } from "@iirc/frontend/options";
 import type { Typing } from "@iirc/frontend/uploading";
 import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
 import { Atom } from "effect/reactivity";
@@ -30,38 +28,14 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
-import { optionsState, signedOut } from "../options/atoms.ts";
-import { uiInEffect } from "../options/ui.ts";
-import { keymapState, paletteState } from "../palette/state.ts";
+import { signedOut } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { themesListed } from "../theme/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
 import { draft, edited, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 import { composerState } from "./composer-state.ts";
-
-/** What was run or chosen recently, apart from the palette's query, so typing there recomputes no composer's sources. */
-const ranRecently = Atom.make((get) => get(paletteState).recent);
-
-/** Every emoji by its names, once loaded, and none until completion first wants them. */
-export const emojiState = Atom.make<readonly Emoji[] | undefined>(undefined).pipe(Atom.keepAlive);
-
-/** What a word typed at a place can be completed from, as things are now. */
-const sourcesAt = Atom.family((place: Place) =>
-  Atom.make((get): Sources =>
-    sourcesOf(get(timelinesState), place, {
-      chantypes: get(chantypesState),
-      emoji: get(emojiState),
-      keymap: get(keymapState),
-      options: listed(get(optionsState), ""),
-      ran: get(ranRecently),
-      suffix: get(uiInEffect).suffix,
-      ...get(themesListed),
-      font: get(uiInEffect).font,
-    })
-  )
-);
+import { emojiState, sourcesAt } from "./sources.ts";
 
 /** What a composer shows of completion: the list, whether completion owns the keys, and what a screen reader is told. */
 export interface CompletionShown {

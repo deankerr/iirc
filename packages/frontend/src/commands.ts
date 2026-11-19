@@ -1,6 +1,6 @@
 /**
- * The commands, as data: one registry behind the composer's `/commands`, the palette, the
- * keymap, and later agents, since each is a way of naming the same action. A
+ * The commands, as data: one registry behind the composer's `/commands`, the keymap, and
+ * later agents, since each is a way of naming the same action. A
  * command parses its arguments into typed values or says in words why it cannot, and
  * gives intents, plain data the runtime carries out. It never does anything itself.
  *
@@ -236,8 +236,6 @@ export interface Act {
  *   it, or `light` or `dark` to have `system` draw it while the device is light or dark.
  * - `EditThemes`: read the themes imported, apply the edit, and send them whole, made from
  *   the options read, applying it once more after a conflict, as `Configure` does.
- * - `ListThemes`: open the palette on the themes alone, each drawn while it is
- *   highlighted, where choosing one sets `option` to it.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `ChoosePreviews`: set a Timeline's own choice in `ui.previews.timelines` to `mode`, or
  *   remove it with none, so it follows `ui.previews`: the option read, the choice made,
@@ -248,10 +246,12 @@ export interface Act {
  *   composer, nor through an intent.
  * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
  * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
- * - `OpenPalette`: open the command palette.
+ * - `StartCommand`: focus the composer under the main view and start `text` in it, with
+ *   its list open, as a key that starts a command does. A draft with text in it is set
+ *   aside, and comes back when the command runs or on Escape.
  * - `FocusComposer`: focus the composer under the main view, starting it with `text` when
- *   there is one, as the palette starts a command that needs arguments. A draft with text
- *   in it is never replaced: the composer says what was not put in.
+ *   there is one, as `/topic` starts the Channel's topic. A draft with text in it is never
+ *   replaced: the composer says what was not put in.
  * - `MarkRead`: mark a Timeline read, above.
  * - `CloseTimeline`: close a Timeline, above.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
@@ -303,7 +303,6 @@ export type Intent =
       readonly device: boolean;
     }
   | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
-  | { readonly _tag: "ListThemes"; readonly option: ThemeOption }
   | { readonly _tag: "ImportTheme" }
   | {
       readonly _tag: "ChoosePreviews";
@@ -313,7 +312,7 @@ export type Intent =
   | ({ readonly _tag: "PromptCredential" } & Asked)
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
-  | { readonly _tag: "OpenPalette" }
+  | { readonly _tag: "StartCommand"; readonly text: string }
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
   | CloseTimeline
@@ -372,8 +371,8 @@ export interface Command {
   /** How it is typed, such as `/me <text>`. */
   readonly usage: string;
   /**
-   * Whether it takes arguments: `None`, `Optional`, or `Required`. The palette runs one that
-   * needs none, and starts one that does in the composer.
+   * Whether it takes arguments: `None`, `Optional`, or `Required`. A key bound to one that
+   * requires them, with none given, starts it in the composer.
    */
   readonly arguments: "None" | "Optional" | "Required";
   /** What it does, in one line. */
@@ -1084,8 +1083,9 @@ export const themeFlags = (
 };
 
 /**
- * What `/theme` was given: nothing, to list the themes; `-light` or `-dark` alone, to list
- * them to choose the one `system` draws while the device is light or dark; `import`, to read
+ * What `/theme` was given: nothing, to start `/theme ` with the themes listed; `-light` or
+ * `-dark` alone, to start it so to choose the one `system` draws while the device is light
+ * or dark; `import`, to read
  * one from a file; `remove` and a name, to remove one imported; or a name, perhaps after
  * `-device`, `-light`, or `-dark`, to draw in it, or to have `system` draw it. `system` is
  * never the theme `system` draws.
@@ -1102,7 +1102,7 @@ const themeArguments = (args: string): Parsed<Intent> => {
   const lowered = first?.toLowerCase();
 
   if (first === undefined) {
-    return parsed({ _tag: "ListThemes", option: "theme" });
+    return parsed({ _tag: "StartCommand", text: "/theme " });
   }
 
   if (lowered === "import") {
@@ -1134,7 +1134,7 @@ const themeArguments = (args: string): Parsed<Intent> => {
   if (one === undefined) {
     return flags.option === "theme" || flags.device
       ? invalid(`Usage: ${themeUsage}`)
-      : parsed({ _tag: "ListThemes", option: flags.option });
+      : parsed({ _tag: "StartCommand", text: `/theme -${flags.option} ` });
   }
 
   const name = parseThemeName(one);
@@ -2774,17 +2774,6 @@ export const commands: readonly Command[] = [
     usage: "/uploads",
     when: [],
   }),
-  unfocused({
-    aliases: [],
-    arguments: "None",
-    description: "Open the command palette, to run a command, open a Timeline, or set an option.",
-    id: "palette.open",
-    intents: () => [{ _tag: "OpenPalette" }],
-    name: "palette",
-    parse: nothingAfter("palette"),
-    usage: "/palette",
-    when: [],
-  }),
   paneCommand({
     aliases: [],
     arguments: "Optional",
@@ -2868,13 +2857,18 @@ export const commands: readonly Command[] = [
   }),
   unfocused({
     aliases: [],
-    arguments: "None",
-    description: "Put the caret in the composer, to type into it.",
+    arguments: "Optional",
+    description:
+      "Put the caret in the composer, to type into it, or with text, start it there with its list open, setting a draft aside until it runs or Escape.",
     id: "composer.focus",
-    intents: () => [{ _tag: "FocusComposer", text: undefined }],
+    intents: (text: string | undefined) => [
+      text === undefined ? { _tag: "FocusComposer", text } : { _tag: "StartCommand", text },
+    ],
     name: "focus",
-    parse: nothingAfter("focus"),
-    usage: "/focus",
+    // The text keeps its trailing space, which `/focus /go ` is typed to leave.
+    parse: (args): Parsed<string | undefined> =>
+      parsed(args.trim() === "" ? undefined : args.trimStart()),
+    usage: "/focus [text]",
     when: [],
   }),
 ];

@@ -1,6 +1,6 @@
 /**
  * The dialog that asks before a Network is removed, opened by `/network remove`, the
- * options, the palette, or a removed Network's Pane. Removing one, it asks whether its
+ * options, or a removed Network's Pane. Removing one, it asks whether its
  * Timelines stay readable, as a pair of radios, keeping them unless the Owner chooses
  * otherwise. A Network removed with its Timelines kept is asked about only to drop them.
  * Nothing is sent until the Owner confirms, and Cancel, Escape, or a press outside sends

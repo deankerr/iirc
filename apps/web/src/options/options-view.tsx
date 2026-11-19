@@ -24,7 +24,7 @@ import { GridList, GridListItem, Input, SearchField } from "react-aria-component
 import type { Key } from "react-aria-components";
 
 import { composerFocus } from "../composer/atoms.ts";
-import { pressed } from "../palette/press.ts";
+import { pressed } from "../keys/press.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { sidebarNetworks } from "../timelines/atoms.ts";
 import { Button, IconButton } from "../ui/button.tsx";

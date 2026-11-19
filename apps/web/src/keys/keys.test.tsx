@@ -1,19 +1,23 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
+import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
+import { draftOf } from "@iirc/frontend/composer";
+import { configurationShown } from "@iirc/frontend/options";
 import { deviceUiKey } from "@iirc/frontend/ui";
+import { Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { editing, openOptions, optionsSync } from "../options/atoms.ts";
+import { composerState } from "../composer/composer-state.ts";
+import { editing, openOptions, optionsSync, optionsState } from "../options/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
-import { openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
-import { paletteState } from "./state.ts";
+import { open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -22,6 +26,7 @@ const mounted: (() => void)[] = [];
 
 const idOf = (sequence: number) => `${sequence.toString(16).padStart(14, "0")}-00000000-00000000`;
 
+const libera = Schema.decodeSync(NetworkId)("libera");
 const own = idOf(1);
 const channel = idOf(2);
 
@@ -126,48 +131,6 @@ const press = async (target: EventTarget, init: KeyboardEventInit) => {
   return prevented;
 };
 
-/**
- * Types into a field as typing forward does: `beforeinput` saying it inserts text, the
- * value set beneath React's own tracking, then `input`.
- * @param field - The field.
- * @param value - Its value after.
- */
-const typeInto = async (field: HTMLInputElement, value: string) => {
-  await act(async () => {
-    field.dispatchEvent(
-      new InputEvent("beforeinput", { bubbles: true, data: value, inputType: "insertText" })
-    );
-    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, value);
-    field.dispatchEvent(
-      new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" })
-    );
-    await Promise.resolve();
-  });
-};
-
-/**
- * The palette's search field, once it shows, with focus in it. In a browser it takes focus
- * as it opens, which the end-to-end run shows. happy-dom's documents fail React Aria's
- * `instanceof Document` check, so its Dialog takes focus back from the field, and the test
- * puts it there again.
- * @returns The field.
- */
-const searchField = async () => {
-  await settled(() => document.querySelector('[role="dialog"] input') !== null);
-  const search = document.querySelector<HTMLInputElement>('[role="dialog"] input');
-
-  if (search === null) {
-    throw new Error("no search field");
-  }
-
-  await act(async () => {
-    search.focus();
-    await Promise.resolve();
-  });
-
-  return search;
-};
-
 const composerOf = (container: HTMLElement) => {
   const found = container.querySelector("textarea");
 
@@ -184,61 +147,44 @@ const openedName = (registry: AtomRegistry.AtomRegistry) => {
   return shown._tag === "Shown" ? shown.description?.name : shown._tag;
 };
 
-/**
- * The palette's status: an `output`, whose role is `status`.
- * @returns It, or none.
- */
-const statusRegion = () => document.querySelector('[role="dialog"] output');
+const slash = { ctrlKey: true, key: "P", shiftKey: true };
+const go = { ctrlKey: true, key: "k" };
 
 /**
- * The rows the palette lists, by their names, as the Owner reads them.
- * @returns Their names, in order.
+ * Types text into the composer, as the browser does, the caret at its end.
+ * @param container - The page.
+ * @param text - The text.
  */
-const rows = () =>
-  [...document.querySelectorAll('[role="menuitem"]')].map(
-    (row) => row.querySelector('[slot="label"]')?.textContent ?? ""
-  );
+const typeIn = async (container: HTMLElement, text: string) => {
+  const composer = composerOf(container);
 
-describe("the palette and the keys", () => {
+  await act(async () => {
+    Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      composer,
+      text
+    );
+    composer.setSelectionRange(text.length, text.length);
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * What the Composer's list holds, by each candidate's name, none while it is closed.
+ * @returns The names.
+ */
+const listed = () =>
+  [
+    ...document.querySelectorAll('[role="listbox"][aria-label="Completions"] [role="option"] bdi'),
+  ].map((one) => one.textContent);
+
+const closed = () => document.querySelector('[role="listbox"][aria-label="Completions"]') === null;
+
+describe("the keys", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
-  });
-
-  it("opens on Mod+K from the composer, filters as typed, opens a Timeline on Enter, and gives focus back", async () => {
-    const { container, registry } = await signedIn();
-    const composer = composerOf(container);
-
-    await act(async () => {
-      composer.focus();
-      await Promise.resolve();
-    });
-
-    const opened = await press(composer, { ctrlKey: true, key: "k" });
-    const search = await searchField();
-    const everything = rows();
-
-    await typeInto(search, "iirc");
-    const filtered = rows();
-
-    await press(search, { key: "Enter" });
-    await settled(() => openedName(registry) === "#iirc");
-    await settled(() => document.activeElement === composer);
-
-    expect({
-      closed: document.querySelector('[role="dialog"]'),
-      everything: everything.includes("#iirc") && everything.includes("/next"),
-      filtered: filtered[0],
-      focused: document.activeElement === composer,
-      opened,
-    }).toStrictEqual({
-      closed: null,
-      everything: true,
-      filtered: "#iirc",
-      focused: true,
-      opened: true,
-    });
   });
 
   it("moves to the next and previous Timeline in the sidebar's order with Alt+arrows", async () => {
@@ -257,7 +203,7 @@ describe("the palette and the keys", () => {
   });
 
   it("gives a key that types to the composer, with the caret at the end of its draft, and swallows nothing", async () => {
-    const { container, registry } = await signedIn();
+    const { container } = await signedIn();
     const composer = composerOf(container);
 
     await act(async () => {
@@ -274,18 +220,11 @@ describe("the palette and the keys", () => {
     const caret = [composer.selectionStart, composer.selectionEnd];
     const inside = await press(composer, { code: "KeyI", key: "i" });
 
-    expect({
-      caret,
-      focused,
-      inside,
-      outside,
-      palette: registry.get(paletteState).open,
-    }).toStrictEqual({
+    expect({ caret, focused, inside, outside }).toStrictEqual({
       caret: [14, 14],
       focused: true,
       inside: false,
       outside: false,
-      palette: false,
     });
   });
 
@@ -399,48 +338,7 @@ describe("the palette and the keys", () => {
     });
   });
 
-  it("starts a command that needs arguments in the composer, focused", async () => {
-    const { container } = await signedIn();
-    const composer = composerOf(container);
-
-    await press(document.body, { ctrlKey: true, key: "k" });
-    const search = await searchField();
-
-    await typeInto(search, "network");
-    await press(search, { key: "Enter" });
-    await settled(() => document.activeElement === composer);
-
-    expect(composer.value).toBe("/network ");
-  });
-
-  it("announces how many results there are, from the moment it opens", async () => {
-    await signedIn();
-
-    await press(document.body, { ctrlKey: true, key: "k" });
-    const search = await searchField();
-
-    const opened = {
-      live: statusRegion()?.getAttribute("aria-live"),
-      text: statusRegion()?.textContent,
-    };
-
-    const listed = rows().length;
-
-    await typeInto(search, "zzzz");
-    const none = statusRegion()?.textContent;
-
-    await typeInto(search, "iirc");
-    const some = { listed: rows().length, text: statusRegion()?.textContent };
-
-    expect({ none, opened, some }).toStrictEqual({
-      none: "No results",
-      opened: { live: "polite", text: `${listed} results` },
-      some: { listed: some.listed, text: `${some.listed} results` },
-    });
-    expect(some.listed).toBeGreaterThan(1);
-  });
-
-  it("opens the palette with Mod+K from an option's editor, committing nothing", async () => {
+  it("starts /go in the Composer on Mod+K from an option's editor, committing nothing", async () => {
     const { container, daemon, registry } = await signedIn();
     const name = "network.libera.nicks";
 
@@ -468,10 +366,8 @@ describe("the palette and the keys", () => {
     });
 
     const taken = await press(editor, { ctrlKey: true, key: "k" });
-    const search = await searchField();
 
-    await press(search, { key: "Escape" });
-    await settled(() => document.querySelector('[role="dialog"]') === null);
+    await settled(() => composerOf(container).value === "/go ");
 
     expect({
       editing: container.querySelector(`input[aria-label="Value of ${name}"]`) === editor,
@@ -479,6 +375,139 @@ describe("the palette and the keys", () => {
       taken,
       value: editor.value,
     }).toStrictEqual({ editing: true, puts: 0, taken: true, value: "changed,not,sent" });
+  });
+
+  describe("starting a command", () => {
+    const enter = { code: "Enter", key: "Enter" };
+
+    it("starts / on Mod+Shift+P and /go on Mod+K from the page body with no Timeline open, the list open and the Composer focused", async () => {
+      const { container } = await signedIn();
+      const composer = composerOf(container);
+
+      const first = await press(document.body, slash);
+      await settled(() => composer.value === "/");
+
+      const withSlash = {
+        focused: document.activeElement === composer,
+        listsSet: listed().includes("/set"),
+        value: composer.value,
+      };
+
+      const second = await press(document.body, go);
+      await settled(() => composer.value === "/go ");
+
+      expect({
+        first,
+        go: { focused: document.activeElement === composer, list: listed(), value: composer.value },
+        second,
+        slash: withSlash,
+      }).toStrictEqual({
+        first: true,
+        go: { focused: true, list: ["libera", "#iirc"], value: "/go " },
+        second: true,
+        slash: { focused: true, listsSet: true, value: "/" },
+      });
+    });
+
+    it("sets a draft aside, which comes back when the command runs, sending nothing and recalling nothing of it", async () => {
+      const { container, daemon, registry } = await signedIn();
+
+      await typeIn(container, "hello");
+      await press(document.body, go);
+      await settled(() => composerOf(container).value === "/go ");
+      await typeIn(container, "/go #iirc");
+      await press(composerOf(container), enter);
+      await settled(() => openedName(registry) === "#iirc");
+
+      const nowhere = draftOf(registry.get(composerState), "Nowhere");
+
+      expect({
+        aside: nowhere.aside,
+        history: nowhere.history,
+        said: daemon.says,
+        text: nowhere.text,
+      }).toStrictEqual({ aside: undefined, history: ["/go #iirc"], said: [], text: "hello" });
+    });
+
+    it("brings the draft back in the Composer it was set aside from, and Escape does it in one press, closing the list", async () => {
+      const { container, daemon, registry } = await signedIn();
+      const composer = composerOf(container);
+
+      await act(async () => {
+        registry.set(open, Schema.decodeSync(TimelineId)(channel));
+        await Promise.resolve();
+      });
+
+      await typeIn(container, "hello");
+      await press(composer, go);
+      await settled(() => composer.value === "/go ");
+      const during = { list: listed(), value: composer.value };
+
+      await press(composer, { code: "Escape", key: "Escape" });
+      await settled(() => composer.value === "hello");
+
+      await press(composer, go);
+      await settled(() => composer.value === "/go ");
+      await typeIn(container, "/go libera");
+      await press(composer, enter);
+      await settled(() => openedName(registry) === "libera");
+      await press(document.body, { altKey: true, key: "ArrowDown" });
+      await settled(() => openedName(registry) === "#iirc");
+
+      expect({
+        back: composer.value,
+        closed: closed(),
+        during,
+        said: daemon.says,
+      }).toStrictEqual({
+        back: "hello",
+        closed: true,
+        during: { list: ["libera", "#iirc"], value: "/go " },
+        said: [],
+      });
+    });
+
+    it("starts a command over one already started, taking the key as it does with the list open, and Escape then clears it", async () => {
+      const { container } = await signedIn();
+      const composer = composerOf(container);
+
+      await press(document.body, slash);
+      await settled(() => composer.value === "/");
+      await press(composer, go);
+      await settled(() => composer.value === "/go ");
+      await press(composer, { code: "Escape", key: "Escape" });
+      await settled(() => composer.value === "");
+
+      expect({ closed: closed(), value: composer.value }).toStrictEqual({
+        closed: true,
+        value: "",
+      });
+    });
+
+    it("leaves /theme in the Composer with the themes listed when it is sent alone", async () => {
+      const { container } = await signedIn();
+      const composer = composerOf(container);
+
+      await typeIn(container, "/theme");
+      await press(composer, enter);
+      await settled(() => composer.value === "/theme ");
+
+      expect({ themes: listed().includes("nord"), value: composer.value }).toStrictEqual({
+        themes: true,
+        value: "/theme ",
+      });
+    });
+
+    it("reads the options again once a command is started, so what it lists of them is as configured now", async () => {
+      const { registry } = await signedIn();
+      const configured = () => configurationShown(registry.get(optionsState), libera) !== undefined;
+      const before = configured();
+
+      await press(document.body, slash);
+      await settled(configured);
+
+      expect({ after: configured(), before }).toStrictEqual({ after: true, before: false });
+    });
   });
 
   it("edits the text's size in a number field within its bounds, set for every device on Enter", async () => {

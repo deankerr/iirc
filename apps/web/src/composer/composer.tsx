@@ -11,7 +11,8 @@
  * with a button that drops it. Escape lets go of an error or a confirmation, or, with
  * neither, of what the draft answers, or, with none, closes what stands in front of the focused Pane's Timeline, the options, the
  * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
- * away. Files pasted, dropped on it, picked, or photographed are uploaded, each link going
+ * away. Over a command started from a key, which set a draft aside, Escape puts the command
+ * away and brings the draft back, whatever else is shown. Files pasted, dropped on it, picked, or photographed are uploaded, each link going
  * where the caret was. What it says goes through the command registry in the core, and the
  * runtime carries it out.
  *
@@ -24,6 +25,7 @@ import { completes } from "@iirc/frontend/completion";
 import type { Candidate, List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
+import { fontDescription, networkDescription, themeDescription } from "@iirc/frontend/entries";
 import {
   colourChoices,
   colouredStyle,
@@ -33,23 +35,17 @@ import {
   pendingWords,
   plainOf,
 } from "@iirc/frontend/formatting";
-import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
-import {
-  allScope,
-  fontDescription,
-  networkDescription,
-  themeDescription,
-} from "@iirc/frontend/palette";
+import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { formatted, quotedOf } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
+import { keyOf } from "../keys/press.ts";
+import { keymapState, platform } from "../keys/state.ts";
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, closeUploads, mainView } from "../options/atoms.ts";
 import { enterShown, spellcheckShown } from "../options/ui.ts";
-import { keyOf } from "../palette/press.ts";
-import { openPalette, platform } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { drawnTheme } from "../theme/atoms.ts";
@@ -68,7 +64,9 @@ import {
   dismiss,
   draft as draftAtom,
   dropReply,
+  perform,
   recall,
+  restoreDraft,
   send,
   takeUp,
 } from "./atoms.ts";
@@ -118,21 +116,24 @@ const AwayMark = ({ network }: { readonly network: string | undefined }) => {
 };
 
 /**
- * The way to the command palette from a touch screen, which has no keys to open it with,
- * beside the composer. Elsewhere Mod+K opens it, and the button is not drawn.
+ * The way to start a command from a touch screen, which has no keys to start one with,
+ * beside the composer: it does what Mod+Shift+P does, starting `/` with the list open.
+ * Elsewhere the keys do, and the button is not drawn.
  * @returns The button.
  */
-const PaletteButton = () => {
-  const openNow = useAtomSet(openPalette);
+const CommandButton = () => {
+  const start = useAtomSet(perform);
+  const keymap = useAtomValue(keymapState);
+  const keys = chordsFor(keymap, "composer.focus", "/").map((chord) => showChord(chord, platform));
 
   return (
     <IconButton
-      className={styles.palette}
-      command="palette.open"
-      icon="palette"
-      label="Command palette"
+      className={styles.command}
+      icon="command"
+      keys={keys.length === 0 ? undefined : keys.join(" ")}
+      label="Start a command"
       onPress={() => {
-        openNow(allScope);
+        start([{ _tag: "StartCommand", text: "/" }]);
       }}
       size="small"
     />
@@ -184,7 +185,7 @@ const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Fi
 
 /**
  * The ways to add files to the composer beside the drop and the paste: a picker of several
- * files, and, where the palette's button shows, as on a phone, the camera.
+ * files, and, where the button that starts a command shows, as on a phone, the camera.
  * @param props - What adding files does.
  * @returns The buttons, and the inputs they open.
  */
@@ -301,11 +302,11 @@ const sayable = (context: CommandContext): Sayable => {
  */
 const optionId = (list: string, index: number) => `${list}-${index}`;
 
-/** What a Timeline is, in a few words, as the palette says it. */
+/** What a Timeline is, in a few words. */
 const kinds = { Channel: "Channel", Direct: "Direct Message", Network: "Network" } as const;
 
 /**
- * What a candidate says beyond its name, dim, as the palette's row does: a command's usage,
+ * What a candidate says beyond its name, dim: a command's usage,
  * what it does, and the keys bound to it; a Timeline's kind and Network; whether a theme
  * is built in or imported and in effect; whether a font is in effect; and what choosing a
  * Network removes or drops. A word or an emoji says nothing more.
@@ -647,6 +648,7 @@ const Composer = ({
   const { list, owned, said } = useAtomValue(completionShown(timeline));
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
+  const restoreNow = useAtomSet(restoreDraft);
   const dropNow = useAtomSet(dropReply);
   const sendNow = useAtomSet(send);
   const confirmNow = useAtomSet(confirmSend);
@@ -974,7 +976,20 @@ const Composer = ({
       return;
     }
 
-    if (colourKey(event) || completionKey(event)) {
+    if (colourKey(event)) {
+      return;
+    }
+
+    // A command started over a draft is put away in one press, its list with it, before
+    // anything else Escape would do.
+    if (event.key === "Escape" && draft.aside !== undefined) {
+      event.preventDefault();
+      restoreNow(timeline);
+
+      return;
+    }
+
+    if (completionKey(event)) {
       return;
     }
 
@@ -1176,7 +1191,7 @@ const Composer = ({
           />
         ) : null}
         <FileButtons add={add} />
-        <PaletteButton />
+        <CommandButton />
       </div>
     </div>
   );

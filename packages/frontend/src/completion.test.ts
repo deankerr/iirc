@@ -32,8 +32,6 @@ import {
 } from "./completion.ts";
 import type { Completion, CompletionEvent, Emoji, Held, Shown, Sources } from "./completion.ts";
 import { defaultKeymap } from "./keymap.ts";
-import { choose, networkEntry, sections } from "./palette.ts";
-import type { Listing } from "./palette.ts";
 import { listedThemes } from "./theme.ts";
 import { initialTimelines, reduceTimelines } from "./timelines.ts";
 import type { SidebarNetwork, TimelinesEvent } from "./timelines.ts";
@@ -212,7 +210,7 @@ describe("the word at the caret", () => {
 });
 
 describe("completing", () => {
-  it("completes a command at the start of a line, ranked as the palette ranks it, cycling with Tab, backwards with Shift+Tab", () => {
+  it("completes a command at the start of a line, ranked by name, cycling with Tab, backwards with Shift+Tab", () => {
     expect({
       back: shown(play("/m", [back])),
       first: shown(play("/m", [tab])),
@@ -225,7 +223,7 @@ describe("completing", () => {
       first: ["/me ", 4],
       // A word starting with `/` mid-line is no command: none of the nicks start with it.
       notAtStart: "Asking",
-      // The shorter name it begins ranks first, as in the palette.
+      // The shorter name it begins ranks first.
       second: ["/msg ", 5],
       wraps: ["/me ", 4],
       wrapsBack: ["/members ", 9],
@@ -932,7 +930,7 @@ const networkOf = (
   timelines,
 });
 
-describe("everything the palette lists", () => {
+describe("everything the Composer's list ranks", () => {
   const oftc = Schema.decodeSync(NetworkId)("oftc");
   const decodeTimeline = Schema.decodeSync(Timeline);
 
@@ -1019,16 +1017,6 @@ describe("everything the palette lists", () => {
 
   const away: CommandContext = { ...context, focus: undefined, open: undefined, session: false };
 
-  const listing: Listing = {
-    chosen: sources.chosen,
-    context,
-    font: sources.font,
-    keymap: defaultKeymap,
-    options: [],
-    sidebar: bar,
-    themes: sources.themes,
-  };
-
   /**
    * The list a draft opens as it is typed.
    * @param text - The draft.
@@ -1047,15 +1035,6 @@ describe("everything the palette lists", () => {
    */
   const pickedIn = (text: string, index: number, given: Sources = everywhere) =>
     play("", [type(text), { _tag: "Pick", index }], given).text;
-
-  /**
-   * A section of what the palette lists for a query.
-   * @param query - The query.
-   * @param title - The section's title.
-   * @returns Its entries.
-   */
-  const sectionOf = (query: string, title: string) =>
-    sections(listing, query, []).find((one) => one.title === title)?.entries ?? [];
 
   /**
    * Opens `/network remove `, highlights its first candidate, and picks one.
@@ -1089,20 +1068,11 @@ describe("everything the palette lists", () => {
   };
 
   /**
-   * What sending a Network picked from `/network remove`'s list asks for, beside what the
-   * palette's entry for it asks for.
+   * What sending a Network picked from `/network remove`'s list asks for.
    * @param index - The Network's index in the list.
-   * @returns Both asks.
+   * @returns What it asks for.
    */
-  const sent = (index: number) => {
-    const picked = picking(index);
-    const network_ = everywhere.networks[index];
-
-    return {
-      palette: network_ === undefined ? undefined : choose(networkEntry(network_), context, false),
-      sent: interpret(picked.edit?.text ?? "", context),
-    };
-  };
+  const sent = (index: number) => interpret(picking(index).edit?.text ?? "", context);
 
   it("lists every Timeline on every Network after /go, open then closed, each with its Network and kind", () => {
     expect(
@@ -1196,54 +1166,6 @@ describe("everything the palette lists", () => {
     });
   });
 
-  it("ranks as the palette ranks, so nothing the palette finds is harder to find here", () => {
-    const commandIds = new Map(commands.map((one) => [`/${one.name}`, one.id]));
-
-    fc.assert(
-      fc.property(
-        fc.string({
-          minLength: 1,
-          unit: fc.constantFrom("a", "e", "i", "m", "o", "s", "#", "-", "l", "r"),
-        }),
-        (query) => {
-          const palette = {
-            commands: sectionOf(query, "Commands").map((one) => one.key),
-            networks: sectionOf(query, "Networks").flatMap((one) =>
-              one._tag === "Network" ? [one.network] : []
-            ),
-            themes: sectionOf(query, "Themes").map((one) => one.name),
-            timelines: sectionOf(query, "Timelines").flatMap((one) =>
-              one._tag === "Timeline" ? [one.timeline] : []
-            ),
-          };
-
-          const listedHere = new Set(palette.commands);
-          const ids = namedIn(bar);
-
-          const here = {
-            commands: opened(`/${query}`)
-              .map((one) => `command:${commandIds.get(one.name) ?? ""}`)
-              .filter((key) => listedHere.has(key)),
-            networks: opened(`/network remove ${query}`).map((one) => one.name),
-            themes: opened(`/theme ${query}`).map((one) => one.name),
-            timelines: opened(`/go ${query}`).map(
-              (one) =>
-                ids.find(
-                  (named) =>
-                    one._tag === "Timeline" &&
-                    named.network === one.network &&
-                    named.name === one.name &&
-                    named.kind === one.kind
-                )?.timeline
-            ),
-          };
-
-          expect(here).toStrictEqual(palette);
-        }
-      )
-    );
-  });
-
   it("lists after a bare / what was run recently first, newest first, then the rest by name", () => {
     const ran: Sources = {
       ...sources,
@@ -1259,7 +1181,7 @@ describe("everything the palette lists", () => {
     });
   });
 
-  it("lists the themes after /theme, as the palette's themes, each built in or imported and whether it is in effect", () => {
+  it("lists the themes after /theme, each built in or imported and whether it is in effect", () => {
     const themed: Sources = {
       ...everywhere,
       chosen: { dark: "nord", light: "solarized-light", theme: "dark" },
@@ -1376,28 +1298,17 @@ describe("everything the palette lists", () => {
     });
   });
 
-  it("asks first, as the palette's entry does, only once /network remove <id> is sent, for a live Network and a removed one", () => {
-    const live = sent(0);
-    const removed = sent(1);
-
-    expect({
-      live: live.sent,
-      removed: removed.sent,
-      samePalette: [live.palette, removed.palette],
-    }).toStrictEqual({
-      live: {
+  it("asks first only once /network remove <id> is sent, for a live Network and a removed one", () => {
+    expect([sent(0), sent(1)]).toStrictEqual([
+      {
         _tag: "Parsed",
         value: [{ _tag: "AskRemoval", keep: undefined, network: "libera" }],
       },
-      removed: {
+      {
         _tag: "Parsed",
         value: [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
       },
-      samePalette: [
-        [{ _tag: "AskRemoval", keep: undefined, network: "libera" }],
-        [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
-      ],
-    });
+    ]);
   });
 });
 

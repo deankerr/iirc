@@ -13,6 +13,7 @@
 import type { Sequence } from "@iirc/api";
 import type { Act, Intent, Say } from "@iirc/frontend/commands";
 import {
+  commandStarted,
   confirm,
   contextOf,
   draftOf,
@@ -31,11 +32,12 @@ import type {
   Place,
   SayFailure,
 } from "@iirc/frontend/composer";
+import { remember } from "@iirc/frontend/entries";
 import type { Format } from "@iirc/frontend/formatting";
 import { colourChoices, plainOf } from "@iirc/frontend/formatting";
-import { allScope } from "@iirc/frontend/palette";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
+import { writtenOnDevice } from "@iirc/frontend/ui";
 import { heldBack, reduceUploading } from "@iirc/frontend/uploading";
 import type { Typing } from "@iirc/frontend/uploading";
 import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
@@ -54,14 +56,15 @@ import {
   openOptions,
   openUploads,
   promptCredential,
+  readOptions,
   signedOut,
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
+import { deviceUi } from "../options/device.ts";
 import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
 import { changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
-import { openPalette, paletteHappened } from "../palette/state.ts";
 import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
@@ -70,8 +73,9 @@ import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
-import { composerState } from "./composer-state.ts";
+import { composerState, ranState } from "./composer-state.ts";
 import { composerInput } from "./input.ts";
+import { followed } from "./sources.ts";
 import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
 /** The context commands are judged in, derived from the Timelines. */
@@ -120,7 +124,7 @@ export const setComposers = (
  * @param typing - Where the Owner's selection was, if they typed the edit.
  */
 const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent, typing?: Typing) => {
-  if (event._tag === "Edited" || event._tag === "Recalled") {
+  if (event._tag === "Edited" || event._tag === "Recalled" || event._tag === "Restored") {
     cancelCompletion(registry);
   }
 
@@ -134,8 +138,8 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent, typ
 };
 
 /**
- * Replaces the composers' state, as sending, confirming, taking an offer, or the palette
- * starting a draft does, which lets go of what was being completed.
+ * Replaces the composers' state, as sending, confirming, taking an offer, or a command
+ * starting over a draft does, which lets go of what was being completed.
  * @param registry - The registry.
  * @param state - The state.
  */
@@ -325,7 +329,7 @@ interface Range {
 
 /**
  * Where the selection is in a composer's plain text: the textarea's, which keeps it while
- * the focus is elsewhere, as in the palette, or the end of the draft with none drawn.
+ * the focus is elsewhere, or the end of the draft with none drawn.
  * @param registry - The registry.
  * @param place - The composer's place.
  * @returns The selection.
@@ -423,12 +427,11 @@ type Local = Extract<
       | "PromptCredential"
       | "Open"
       | "Latest"
-      | "OpenPalette"
+      | "StartCommand"
       | "FocusComposer"
       | "ShowMembers"
       | "ShowSidebar"
       | "Pane"
-      | "ListThemes"
       | "ImportTheme"
       | "AskRemoval"
       | "Search"
@@ -447,17 +450,16 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "Format",
   "ImportTheme",
   "Latest",
-  "ListThemes",
   "Look",
   "Open",
   "OpenOptions",
-  "OpenPalette",
   "OpenUploads",
   "Pane",
   "PromptCredential",
   "Search",
   "ShowMembers",
   "ShowSidebar",
+  "StartCommand",
 ]);
 
 /**
@@ -469,9 +471,10 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
  * Carries out an intent in the page: shows the options, the Uploads, the search, or a Timeline, jumps
- * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
- * starting an empty draft with text, shows or hides the members or the sidebar, changes
- * the Panes, or starts a Lookup, which goes on beside the composer's turn.
+ * to a Timeline's latest, opens the password prompt, focuses the composer, starting an
+ * empty draft with text, or starting a command over any draft, with its list open, shows or
+ * hides the members or the sidebar, changes the Panes, or starts a Lookup, which goes on
+ * beside the composer's turn.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -500,13 +503,13 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
       break;
     }
 
-    case "OpenPalette": {
-      registry.set(openPalette, allScope);
-      break;
-    }
-
-    case "ListThemes": {
-      registry.set(openPalette, { _tag: "Themes", option: intent.option });
+    // The draft is set aside, and the command's list opens over the options as configured
+    // now, which `/set` lists.
+    case "StartCommand": {
+      replaced(registry, commandStarted(registry.get(composerState), place, intent.text));
+      followed(registry, place, intent.text);
+      registry.set(readOptions, undefined);
+      registry.set(composerFocus, registry.get(composerFocus) + 1);
       break;
     }
 
@@ -617,8 +620,19 @@ const changeOne = (
       return addNetwork(registry, intent.network, intent.configuration);
     }
 
+    // A value is written where it takes effect, as the options view writes it: this device's
+    // own for a family, and for any option this device overrides already, whose override
+    // would win over a shared one. Unsetting is the Owner's to say with `-device`.
     case "ChangeUi": {
-      return changeUi(registry, intent);
+      const own =
+        intent.value !== undefined &&
+        writtenOnDevice(
+          intent.option,
+          intent.value,
+          registry.get(deviceUi)[intent.option] !== undefined
+        );
+
+      return changeUi(registry, { ...intent, device: intent.device || own });
     }
 
     case "ChangeOwner": {
@@ -981,6 +995,14 @@ export const dropReply = Atom.fnSync((timeline: Place, get) => {
   happened(get.registry, { _tag: "ReplyDropped", timeline });
 }).pipe(Atom.keepAlive);
 
+/**
+ * Puts away a command started over a draft, which comes back with what it answered, and
+ * the list of the command goes.
+ */
+export const restoreDraft = Atom.fnSync((timeline: Place, get) => {
+  happened(get.registry, { _tag: "Restored", timeline });
+}).pipe(Atom.keepAlive);
+
 /** Lets go of a Timeline's notice and confirmation. */
 export const dismiss = Atom.fnSync((timeline: Place, get) => {
   happened(get.registry, { _tag: "Dismissed", timeline });
@@ -1040,13 +1062,19 @@ const letGoOfKept = (
 };
 
 /**
- * Has the palette remember the commands a draft ran, as it remembers those it chose.
+ * Remembers the commands a draft ran, so the Composer's list puts them first.
  * @param registry - The registry.
- * @param keys - The keys of the commands, in order.
+ * @param keys - The keys of the commands, in order, the last the newest.
  */
 const ran = (registry: AtomRegistry.AtomRegistry, keys: readonly string[]) => {
   if (keys.length > 0) {
-    paletteHappened(registry, { _tag: "Ran", keys });
+    let recent = registry.get(ranState);
+
+    for (const key of keys) {
+      recent = remember(recent, key);
+    }
+
+    registry.set(ranState, recent);
   }
 };
 
@@ -1067,10 +1095,13 @@ export const send = runtime
         const step = submit(registry.get(composerState), timeline, registry.get(commandContext));
 
         replaced(registry, step.state);
-        letGoOfTyped(registry, timeline);
         letGoOfKept(registry, timeline, step.intents);
         ran(registry, step.ran);
         yield* sendAll(registry, timeline, step.intents, undefined);
+
+        // After the intents, which may start a command over the draft, so what is let go of
+        // is the draft as it is by then, and never a command's text over it.
+        letGoOfTyped(registry, timeline);
       }),
     { concurrent: true }
   )
@@ -1142,7 +1173,7 @@ export const takeUp = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** Carries out intents from the palette or a key, as the composer under the main view's. */
+/** Carries out intents from a key, as the composer under the main view's. */
 const performQueued = runtime
   .fn(
     (intents: readonly Intent[], get) =>
@@ -1156,7 +1187,7 @@ const performQueued = runtime
   .pipe(Atom.keepAlive);
 
 /**
- * Carries out intents that came from the palette or a key, not the composer. When every one
+ * Carries out intents that came from a key, not the composer. When every one
  * is carried out in the page, as opening a Timeline is, it is done at once, so a key that
  * moves between Timelines never waits behind a Say in flight. Otherwise they wait their
  * turn with every other submission, and a failure is said under the composer.

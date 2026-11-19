@@ -4086,7 +4086,7 @@ export interface SidebarNetwork {
   readonly timelines: readonly Timeline[];
   /**
    * Its Timelines closed, with nothing arrived in them since, that no Pane has open, which
-   * the sidebar leaves out and the palette still lists.
+   * the sidebar leaves out and the Composer's `/go` still lists.
    */
   readonly closed: readonly Timeline[];
   /**
@@ -4102,7 +4102,7 @@ export interface SidebarNetwork {
  * The Networks, each with its Timelines in sidebar order: those not removed by id, then
  * those removed with their Timelines kept, by id. A Timeline closed, with nothing arrived
  * in it since, is left out while no Pane has it open, and listed while one does, so opening
- * it from the palette or the search shows it for as long as it is open. One the Owner asked
+ * it from `/go` or the search shows it for as long as it is open. One the Owner asked
  * to close counts as closed from when it is asked.
  * @param state - The state.
  * @param closing - The Timelines asked to be closed that the Daemon has yet to say are.

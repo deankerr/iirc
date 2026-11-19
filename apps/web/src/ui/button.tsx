@@ -24,7 +24,7 @@ import type {
   ToggleButtonProps as AriaToggleButtonProps,
 } from "react-aria-components";
 
-import { keymapState, platform } from "../palette/state.ts";
+import { keymapState, platform } from "../keys/state.ts";
 import { Icon } from "./icon.tsx";
 import type { IconName } from "./icon.tsx";
 

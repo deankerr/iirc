@@ -23,6 +23,8 @@ const glyphs = {
   close: "×",
   /** A Network's Timelines are hidden under it. */
   collapsed: "▸",
+  /** Starts a command in the composer, as a `/` begins one. */
+  command: "/",
   /** A Network connected: filled. */
   connected: "●",
   /** A Network connecting: half filled. */
@@ -43,8 +45,6 @@ const glyphs = {
   more: "…",
   /** A Network offline: empty. */
   offline: "○",
-  /** The command palette, where a command starts as it does in the composer. */
-  palette: "/",
   /** Plays an animated image, as a play button is drawn. */
   play: "▶",
   /** A Network removed, whose Timelines are kept to read: a circle struck through. */
