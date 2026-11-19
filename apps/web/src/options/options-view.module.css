@@ -95,15 +95,38 @@
   outline: none;
 }
 
-/* Name, value, what a new Network starts with, and what it is. */
+/* What the options under it are named for, held at the top while they scroll under it. */
+.heading {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-muted);
+}
+
+/* Two lines: the name and the value, then what it is and what it starts as. */
 .row {
-  display: grid;
-  grid-template-columns: minmax(16ch, 2fr) minmax(12ch, 2fr) minmax(8ch, 1fr) minmax(0, 3fr);
-  gap: var(--space-3);
-  align-items: baseline;
+  display: flex;
+  flex-direction: column;
   padding: var(--space-1) var(--space-3);
   outline: none;
   cursor: default;
+}
+
+/* The value goes under the name only when the two do not fit side by side, and the name
+   breaks only where it is wider than the whole line. */
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  min-width: 0;
+}
+
+.about {
+  display: block;
 }
 
 .row[data-hovered] {
@@ -117,16 +140,24 @@
 
 .name,
 .value,
-.starts {
+.about {
   overflow-wrap: anywhere;
 }
 
 .name {
+  flex: none;
+  max-width: 100%;
   color: var(--color-accent);
 }
 
+/* The value, and its editor and menu, which are placed in its box. */
+.value {
+  position: relative;
+  flex: 1 1 16ch;
+  min-width: 0;
+}
+
 .starts,
-.description,
 .muted {
   color: var(--color-muted);
 }
@@ -135,10 +166,8 @@
   color: var(--color-ok);
 }
 
-/* An option this device overrides for itself, and the value every device shares under it,
-   on a line of its own under the value's box. */
+/* An option this device overrides for itself, and the value every device shares, beside it. */
 .device {
-  display: block;
   color: var(--color-muted);
 }
 
@@ -152,13 +181,12 @@
   color: var(--color-danger);
 }
 
-/* A value, and its editor laid over its first line while it is edited, with the value
-   left in place but hidden, so opening an edit moves no text, however many lines the value
-   takes. The editor's border and padding lie outside the value's line, so its text stands
-   where the value's did. */
+/* A value, and its editor laid over the first line of the value's box while it is edited,
+   with the value left in place but hidden, so opening an edit moves no text, however many
+   lines the value takes. The editor's border and padding lie outside the value's line, so
+   its text stands where the value's did. */
 .field {
-  display: block;
-  position: relative;
+  display: inline;
 }
 
 .hidden {
@@ -186,8 +214,7 @@
   line-height: calc(var(--font-size) * var(--line-height));
 }
 
-/* Too narrow for four columns of the text as it is drawn: each option's parts one under
-   another, and the filter as wide as the view. */
+/* Too narrow for the filter beside the Networks: the filter as wide as the view. */
 @container (max-width: 72ch) {
   .filter {
     flex: 1 1 100%;
@@ -197,13 +224,6 @@
     flex: 1;
     width: auto;
     min-width: 0;
-  }
-
-  .row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-    padding: var(--space-2) var(--space-3);
-    border-bottom: var(--border-width) solid var(--color-border);
   }
 }
 

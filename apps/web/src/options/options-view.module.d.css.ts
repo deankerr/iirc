@@ -1,9 +1,9 @@
 // The class names in options-view.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly about: string;
   readonly anchor: string;
   readonly body: string;
   readonly confirm: string;
-  readonly description: string;
   readonly device: string;
   readonly editor: string;
   readonly entry: string;
@@ -11,8 +11,10 @@ declare const styles: {
   readonly filter: string;
   readonly filterInput: string;
   readonly header: string;
+  readonly heading: string;
   readonly hidden: string;
   readonly held: string;
+  readonly line: string;
   readonly list: string;
   readonly menu: string;
   readonly missing: string;

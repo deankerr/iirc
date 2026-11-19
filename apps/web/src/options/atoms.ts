@@ -24,7 +24,7 @@ import {
   apply,
   credentialFor,
   initialOptions,
-  listed,
+  grouped,
   networksReading,
   optionName,
   reduceOptions,
@@ -61,16 +61,16 @@ export const optionsFilter = Atom.make((get) => {
 });
 
 /**
- * The options the view lists, filtered as the Pane they show in says, each as it shows with
- * the changes on its way, those under `ui` as they take effect on this device, with a font's
- * family this device lacks said to be.
+ * The options the view lists under their headings, filtered as the Pane they show in says,
+ * each as it shows with the changes on its way, those under `ui` as they take effect on this
+ * device, with a font's family this device lacks said to be.
  */
-export const optionRows = Atom.make((get) => {
+export const optionGroups = Atom.make((get) => {
   const state = get(optionsState);
   const device = get(deviceUi);
   const missing = familiesMissing([uiShown(state)?.options.font, device.font], canvasMeasure());
 
-  return listed(state, get(optionsFilter) ?? "", device, missing);
+  return grouped(state, get(optionsFilter) ?? "", device, missing);
 });
 
 /** The Networks whose options the view is still reading, which it draws as a wait. */

@@ -145,8 +145,36 @@ const signedIn = () => {
  */
 const rows = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLElement>('section[aria-label="Options"] [data-key]')].map(
-    // A row's one grid cell holds its name, value, starting value, and description.
-    (row) => [...(row.firstElementChild?.children ?? [])].map((cell) => cell.textContent)
+    (row) => {
+      // A row's one grid cell holds two lines: its name and value, then its description
+      // and what it starts as.
+      const [first, second] = [...(row.firstElementChild?.children ?? [])];
+      const [name, value] = [...(first?.children ?? [])];
+      const [description, starts] = [...(second?.children ?? [])];
+
+      return [name, value, starts, description].map((part) => part?.textContent);
+    }
+  );
+
+/**
+ * One option's row, as the text of each of its lines.
+ * @param container - The page.
+ * @param name - The option.
+ * @returns The lines.
+ */
+const linesOf = (container: HTMLElement, name: string) =>
+  [...(container.querySelector(`[data-key="${name}"]`)?.firstElementChild?.children ?? [])].map(
+    (line) => line.textContent
+  );
+
+/**
+ * The headings the options are under, in order.
+ * @param container - The page.
+ * @returns The headings.
+ */
+const headingsOf = (container: HTMLElement) =>
+  [...container.querySelectorAll('section[aria-label="Options"] [role="rowheader"]')].map(
+    (heading) => heading.textContent
   );
 
 /**
@@ -185,31 +213,31 @@ describe("the options view, under store, uploads, and previews", () => {
       [
         "uploads.expireAfter",
         "unset",
-        "unset",
+        "default unset",
         "How many days an Upload is kept before it is deleted, from 1 to 36500. Unset, Uploads are kept until deleted.",
       ],
       [
         "uploads.listen",
         "unset",
-        "unset",
+        "default unset",
         "Where the listener that serves Uploads' links listens, as host:port, such as 127.0.0.1:7668.",
       ],
       [
         "uploads.maxSize",
         "104857600",
-        "104857600",
+        "default 104857600",
         "The largest an Upload may be, in bytes. 104857600, 100 MiB, unless set.",
       ],
       [
         "uploads.maxTotal",
         "unset",
-        "unset",
+        "default unset",
         "The most bytes the store may hold for live Uploads, each distinct file counted once; an upload that would pass it is refused, and nothing is evicted. Unset, there is no limit.",
       ],
       [
         "uploads.publicUrl",
         "unset",
-        "unset",
+        "default unset",
         "The base of every Upload's link, an http or https URL, such as https://files.example.com, kept without a trailing /.",
       ],
     ]);
@@ -382,7 +410,7 @@ describe("the options view, under store, uploads, and previews", () => {
     expect(rowOf(first.container, "store.s3.region")).toStrictEqual([
       "store.s3.region",
       "us-east-1",
-      "unset",
+      "default unset",
       "The bucket's region, such as us-east-1, or auto.",
     ]);
   });
@@ -477,7 +505,7 @@ describe("the options view, under store, uploads, and previews", () => {
       before: [
         "store.s3.secretAccessKey",
         "unset",
-        "unset",
+        "default unset",
         "The Credential holding the secret access key of the bucket that keeps Uploads.",
       ],
       changes: [{ ifSequence: "0", route: "PUT store.s3.secretAccessKey" }],
@@ -488,7 +516,7 @@ describe("the options view, under store, uploads, and previews", () => {
       row: [
         "store.s3.secretAccessKey",
         "Owner.store.s3.secretAccessKey held",
-        "unset",
+        "default unset",
         "The Credential holding the secret access key of the bucket that keeps Uploads.",
       ],
     });
@@ -1024,7 +1052,7 @@ describe("an option edited in place", () => {
     expect(rowOf(shown.container, "network.libera.highlights")?.slice(0, 3)).toStrictEqual([
       "network.libera.highlights",
       "empty",
-      "empty",
+      "default empty",
     ]);
   });
 });
@@ -1298,5 +1326,91 @@ describe("an option chosen from a menu", () => {
     await settled(() => rowOf(container, "ui.width")?.[1] === "120");
 
     expect(entriesOf(await menuFor(container, "ui.width"))).toStrictEqual(["none", "* Custom…"]);
+  });
+});
+
+/**
+ * The option whose row has the focus.
+ * @returns Its name, or none.
+ */
+const focused = () =>
+  document.activeElement instanceof HTMLElement ? document.activeElement.dataset.key : undefined;
+
+describe("the options under headings", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("heads ui, each Network, store, uploads, and previews, and drops a heading the filter empties", async () => {
+    const shown = await uiShown(signedIn());
+
+    await shown.type("/set");
+    await settled(() => rowOf(shown.container, "network.libera.nicks") !== undefined);
+    const all = headingsOf(shown.container);
+
+    await shown.type("/set *maxTotal");
+    await settled(() => rowOf(shown.container, "ui.time") === undefined);
+
+    expect({ all, filtered: headingsOf(shown.container) }).toStrictEqual({
+      all: ["ui", "network.libera", "store", "uploads", "previews"],
+      filtered: ["uploads", "previews"],
+    });
+  });
+
+  it("moves by arrows from option to option across a heading, edits on Enter, and asks on Delete", async () => {
+    const shown = await uiShown(signedIn());
+
+    await shown.type("/set");
+    await settled(() => rowOf(shown.container, "network.libera.nicks") !== undefined);
+    await readAt(shown.registry, 0);
+
+    await doing(() => {
+      rowElement(shown.container, "ui.width").focus();
+    });
+    await press(rowElement(shown.container, "ui.width"), "ArrowDown");
+    const down = focused();
+
+    await press(document.activeElement ?? document.body, "ArrowUp");
+    const up = focused();
+
+    await doing(() => {
+      rowElement(shown.container, "uploads.publicUrl").focus();
+    });
+    await press(rowElement(shown.container, "uploads.publicUrl"), "ArrowDown");
+    const intoPreviews = focused();
+
+    await enter(document.activeElement ?? document.body);
+    await settled(
+      () => shown.container.querySelector('input[aria-label="Value of previews.maxTotal"]') !== null
+    );
+    await press(document.activeElement ?? document.body, "Escape");
+    await settled(() => focused() === "previews.maxTotal");
+    await press(rowElement(shown.container, "previews.maxTotal"), "Delete");
+
+    expect({
+      asked: shown.container.querySelector('[role="alertdialog"] p')?.textContent,
+      down,
+      intoPreviews,
+      up,
+    }).toStrictEqual({
+      asked: "Unset previews.maxTotal, back to 1073741824?",
+      down: "network.libera.answerCtcp",
+      intoPreviews: "previews.maxTotal",
+      up: "ui.width",
+    });
+  });
+
+  it("gives an option two lines, and says beside a value this device overrides the one every device shares", async () => {
+    const shown = await uiShown(signedIn());
+
+    await shown.type("/set -device ui.time HH:mm:ss");
+    await settled(() => rowOf(shown.container, "ui.time")?.[1]?.startsWith("HH:mm:ss") === true);
+
+    expect(linesOf(shown.container, "ui.time")).toStrictEqual([
+      "ui.timeHH:mm:ss on this device, over HH:mm",
+      expect.stringMatching(/^How .*default HH:mm$/u),
+    ]);
   });
 });
