@@ -3,9 +3,11 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { draftOf, initialComposers, reduceComposers } from "./composer.ts";
+import type { CommandContext } from "./commands.ts";
+import { commandStarted, draftOf, initialComposers, reduceComposers, submit } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
 import {
+  anchorAdded,
   anchorAfter,
   caretAfter,
   checking,
@@ -803,5 +805,83 @@ describe("why a file was not kept, in words", () => {
 
   it("says nothing of a file still being sent", () => {
     expect(failureText({ ...named, failure: undefined })).toBeUndefined();
+  });
+});
+
+const context: CommandContext = {
+  behind: false,
+  draft: undefined,
+  focus: undefined,
+  head: undefined,
+  named: [],
+  open: undefined,
+  panes: 1,
+  session: false,
+  shown: [],
+  timelines: [],
+  unread: [],
+  unreadClosed: [],
+};
+
+/**
+ * A draft with a file uploading at its second space, and a command started over it.
+ * @param command - The command.
+ * @returns The composers and what is pending.
+ */
+const over = (command = "/go ") => {
+  const before = {
+    composers: typed(initialComposers, "look  please"),
+    uploading: addedAt(5, file("a")),
+  };
+
+  const composers = commandStarted(before.composers, place, command);
+
+  return { composers, uploading: followed(before.uploading, before.composers, composers) };
+};
+
+describe("a draft set aside while its files upload", () => {
+  it("holds a command back for none of its files, and the draft again once it is back", () => {
+    const { composers, uploading } = over();
+    const back = reduceComposers(composers, { _tag: "Restored", timeline: place });
+
+    expect({
+      back: heldBack(uploading, back, place),
+      command: heldBack(uploading, composers, place),
+    }).toStrictEqual({
+      back: "Wait for a.png to finish uploading, or cancel it.",
+      command: undefined,
+    });
+  });
+
+  it("puts a link that finishes while the command shows in the draft, never in the command, and keeps the anchors against the draft", () => {
+    const state = over();
+    const edited_ = edited(state, "/go #x");
+    const kept = keep(edited_, "a");
+    const back = reduceComposers(kept.composers, { _tag: "Restored", timeline: place });
+    const ran = submit(commandStarted(kept.composers, place, "/sidebar"), place, context);
+
+    expect({
+      anchor: pendingIn(kept.uploading, place)[0]?.anchor,
+      back: draftOf(back, place).text,
+      command: draftOf(kept.composers, place).text,
+      ran: draftOf(ran.state, place).text,
+      sent: ran.intents,
+    }).toStrictEqual({
+      anchor: 5,
+      back: "look https://f.test/a please",
+      command: "/go #x",
+      ran: "look https://f.test/a please",
+      sent: [{ _tag: "ShowSidebar", shown: undefined }],
+    });
+    expect(draftOf(state.composers, place).aside?.text).toBe("look  please");
+  });
+
+  it("puts a file added while the command shows at the end of the draft, never at the command's caret", () => {
+    const { composers } = over("/go ");
+
+    expect({
+      aside: anchorAdded(composers, place, 2, "/go "),
+      draft: anchorAdded(typed(initialComposers, "look  please"), place, 2, "look  please"),
+    }).toStrictEqual({ aside: "look  please".length, draft: 2 });
   });
 });

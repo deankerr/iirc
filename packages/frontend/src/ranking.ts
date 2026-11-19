@@ -1,6 +1,6 @@
 /**
- * How a query ranks what is listed, in one place, so the palette and the composer's list
- * find the same things in the same order. A query matches an item's names and its
+ * How a query ranks what is listed, in one place, so every list in the composer finds the
+ * same things in the same order. A query matches an item's names and its
  * description in four tiers, and is ASCII case-insensitive, reading no locale.
  *
  * @packageDocumentation
@@ -30,15 +30,14 @@ export interface Matched {
  * @param right - The other.
  * @returns Their order.
  */
-export const byScore = (left: Score, right: Score) =>
-  right.tier - left.tier || left.cost - right.cost;
+const byScore = (left: Score, right: Score) => right.tier - left.tier || left.cost - right.cost;
 
 /**
  * Text in ASCII lower case, which is how a query and what it matches are compared.
  * @param text - The text.
  * @returns It, folded.
  */
-export const lower = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+const lower = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
 
 /**
  * What was typed, as a query: trimmed, each run of whitespace one space, and folded.

@@ -1,9 +1,9 @@
 /**
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
- * palette, or one previewed, while the palette highlights a theme or the import dialog
- * reads one, in a Worker through the `ThemeReader` port, one text at a time and for at most
- * a second; the text's size, line height, font, and widest line, or a font the palette
- * highlights; drawing them as CSS custom properties on the document's root; choosing a
+ * palette, or one previewed, while the Composer's list highlights a theme or the import
+ * dialog reads one, in a Worker through the `ThemeReader` port, one text at a time and for
+ * at most a second; the text's size, line height, font, and widest line, or a font the
+ * Composer's list highlights; drawing them as CSS custom properties on the document's root; choosing a
  * theme, and importing and removing themes for every device, each made from the options
  * read.
  *
@@ -13,7 +13,6 @@ import { Themes } from "@iirc/api";
 import type { Palette, UiInForce } from "@iirc/api";
 import type { Intent, Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
-import { fontOfKey } from "@iirc/frontend/palette";
 import {
   cssVariables,
   drawn,
@@ -36,7 +35,6 @@ import { composerPreview } from "../composer/composer-state.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { changeUi, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
-import { paletteHighlight, paletteState } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { fontStack, monoStack } from "./fonts.ts";
 import { ThemeReader } from "./reader.ts";
@@ -137,8 +135,8 @@ export const offeredName = (draft: ImportDraft, read: Imported | undefined): str
   "";
 
 /**
- * The theme previewed, while there is one: the one the import dialog reads, the one the
- * open palette highlights, or the one the Composer's list highlights.
+ * The theme previewed, while there is one: the one the import dialog reads, or the one the
+ * Composer's list highlights.
  */
 const previewed = Atom.make((get): Palette | undefined => {
   const draft = get(importDraft);
@@ -148,17 +146,11 @@ const previewed = Atom.make((get): Palette | undefined => {
     return read?._tag === "Parsed" ? read.value.palette : undefined;
   }
 
-  const highlighted = get(paletteHighlight);
   const listed = get(composerPreview);
-  let name: string | undefined = undefined;
 
-  if (get(paletteState).open && highlighted?.startsWith("theme:") === true) {
-    name = highlighted.slice("theme:".length);
-  } else if (listed?._tag === "Theme") {
-    ({ name } = listed);
-  }
-
-  return name === undefined ? undefined : paletteNamed(name, get(uiInEffect), get(prefersDark));
+  return listed?._tag === "Theme"
+    ? paletteNamed(listed.name, get(uiInEffect), get(prefersDark))
+    : undefined;
 });
 
 /** The theme in effect on this device, or the one previewed, drawn by the core. */
@@ -172,20 +164,14 @@ export const drawnTheme = Atom.make((get) => {
 /**
  * The text's size, line height, font, and widest line in effect on this device, as the
  * root's custom properties, with the monospace font IRC's formatting asks for beside it:
- * the font the open palette or the Composer's list highlights, while one is highlighted, else
- * the one in effect.
+ * the font the Composer's list highlights, while one is highlighted, else the one in effect.
  * The widest line is in `ch`, the font's own `0` at the text's size, so it follows both,
  * and no bound is no property at all, which leaves a line as wide as its Pane.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string | undefined])[] => {
   const ui = get(uiInEffect);
-  const highlighted = get(paletteState).open ? get(paletteHighlight) : undefined;
   const listed = get(composerPreview);
-
-  const font =
-    (highlighted === undefined ? undefined : fontOfKey(highlighted)) ??
-    (listed?._tag === "Font" ? listed.font : undefined) ??
-    ui.font;
+  const font = (listed?._tag === "Font" ? listed.font : undefined) ?? ui.font;
 
   return [
     ["--font-size", `${ui.size}px`],
@@ -198,7 +184,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
 
 /**
  * Every theme there is, and the one each option that names a theme names here, for the
- * palette to list.
+ * Composer's list.
  */
 export const themesListed = Atom.make((get) => {
   const ui = get(uiInEffect);

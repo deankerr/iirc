@@ -183,7 +183,7 @@
 }
 
 /*
- * What it can complete, just above its line, as the palette lists: a candidate's name, and
+ * What it can complete, just above its line: a candidate's name, and
  * what it is, dim, in columns down the list: what a command takes and does and its keys,
  * or what a Timeline, theme, font, or Network is. The Panes give it room, so
  * nothing in a Timeline is hidden behind it. It is bounded so the composer stays in view,
@@ -285,9 +285,9 @@
   color: var(--color-muted);
 }
 
-/* The palette's and the camera's buttons, drawn only where there may be no keys to open
-   the palette with, as on a phone, which is where a camera is. */
-.line .palette,
+/* The command's and the camera's buttons, drawn only where there may be no keys to start
+   a command with, as on a phone, which is where a camera is. */
+.line .command,
 .line .camera {
   display: none;
 }
@@ -402,7 +402,7 @@
     align-items: center;
   }
 
-  .line .palette,
+  .line .command,
   .line .camera {
     display: inline-flex;
   }

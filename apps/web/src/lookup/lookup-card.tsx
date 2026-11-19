@@ -222,7 +222,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
     return null;
   }
 
-  // Put away from inside it, the composer takes the focus, as after the palette.
+  // Put away from inside it, the composer takes the focus.
   const close = () => {
     dismiss(pane);
     run([{ _tag: "FocusComposer", text: undefined }]);

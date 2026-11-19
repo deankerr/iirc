@@ -3,7 +3,7 @@
  * can be, a command after `/` at the start of a line, an option after `/set `, a Channel's
  * name, or a nick, or the whole argument of `/go`, `/theme`, `/set ui.font`, and
  * `/network remove`, a Timeline, a theme, a font, or a Network, listed above the composer
- * and ranked as the palette ranks them. A draft that starts with a command opens the
+ * and ranked by `ranking`. A draft that starts with a command opens the
  * list as it is typed, and anything else opens it on Tab. Tab, Shift+Tab, and the arrows
  * move through it, writing the one highlighted into the draft, and Escape gives back what
  * was typed. A nick in a Channel comes from the Daemon's members route, which the runtime
@@ -20,9 +20,6 @@ import { commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
 import type { Command, NamedTimeline } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
-import type { Chord, Keymap } from "./keymap.ts";
-import { fields, optionName } from "./options.ts";
-import type { Option } from "./options.ts";
 import {
   commandEntry,
   familyNamed,
@@ -31,8 +28,11 @@ import {
   networkEntry,
   themeEntries,
   timelineEntry,
-} from "./palette.ts";
-import type { Entry } from "./palette.ts";
+} from "./entries.ts";
+import type { Entry } from "./entries.ts";
+import type { Chord, Keymap } from "./keymap.ts";
+import { fields, optionName } from "./options.ts";
+import type { Option } from "./options.ts";
 import { queryOf, ranked, tiers, wordStart } from "./ranking.ts";
 import type { ListedTheme, ThemeOption } from "./theme.ts";
 import { resolve, sidebar } from "./timelines.ts";
@@ -70,7 +70,7 @@ export interface Sources {
   readonly commands: readonly Command[];
   /** The keymap, for the chords bound to a command. */
   readonly keymap: Keymap;
-  /** The keys of what the palette remembers as chosen or run recently, newest first. */
+  /** The keys of the commands run recently, newest first. */
   readonly ran: readonly string[];
   /** Every option. */
   readonly options: readonly OptionListed[];
@@ -185,7 +185,7 @@ export interface Completion {
  * - `NicksFailed`: it did not.
  * - `Escaped`: Escape, which gives back what was typed.
  * - `LetGo`: the draft was replaced other than by completion or typing, as by recalling,
- *   sending, or the palette, so what was being completed is let go of.
+ *   sending, or a command started over it, so what was being completed is let go of.
  */
 export type CompletionEvent =
   | {
@@ -501,8 +501,7 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
 };
 
 /**
- * Entries in their own order with no query, or those a query matches, ranked as the
- * palette ranks them.
+ * Entries in their own order with no query, or those a query matches, ranked.
  * @param query - The query, as `queryOf` reads it.
  * @param entries - The entries, in their own order.
  * @returns The entries listed.
@@ -598,10 +597,6 @@ const candidateOfEntry = (entry: Entry, go?: GoText): Candidate | undefined => {
       return { _tag: "Font", current: entry.current, name: entry.name, text: entry.name };
     }
 
-    case "Option": {
-      return undefined;
-    }
-
     default: {
       return entry satisfies never;
     }
@@ -651,7 +646,7 @@ const wholeCandidates = (whole: Whole, typed: string, sources: Sources): readonl
 /**
  * The commands, once each by name: with nothing typed, those run recently first, newest
  * first, then the rest by name, and with a query, those it matches, ranked, those that
- * match as well in the registry's order, as in the palette.
+ * match as well in the registry's order.
  * @param typed - What was typed after `/`.
  * @param sources - The sources.
  * @returns The candidates.
@@ -682,7 +677,7 @@ const commandCandidates = (typed: string, sources: Sources): readonly Candidate[
 const asWord = (name: string): Candidate => ({ _tag: "Word", name, text: name });
 
 /**
- * The options a query matches, ranked as the palette ranks them, or all, by name.
+ * The options a query matches, ranked, or all, by name.
  * @param typed - What was typed.
  * @param sources - The sources.
  * @returns The candidates.
@@ -1512,10 +1507,9 @@ const chantypesNow = (
 
 /**
  * What completion lists from beyond the Timelines, as a Frontend holds it: the options
- * read, each Network's `CHANTYPES`, `ui.suffix` in effect, the keymap, the keys the palette
- * remembers as chosen or run recently, every theme, the one each theme option names on this
- * device, and the font in effect on it, as the palette's `Listing` has them, and every emoji
- * once loaded.
+ * read, each Network's `CHANTYPES`, `ui.suffix` in effect, the keymap, the keys of the
+ * commands run recently, every theme, the one each theme option names on this device, and
+ * the font in effect on it, and every emoji once loaded.
  */
 export interface Held {
   readonly options: readonly Option[];

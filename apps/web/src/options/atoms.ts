@@ -591,7 +591,7 @@ export const ownerWanted = Atom.make((get) => get(optionsShown) || get(uploadsSh
 
 /**
  * Reads every Network's Configuration, and the Credentials held, each time the options come
- * to show in a Pane, however they came to: `/set`, the sidebar, the palette, a Pane focused
+ * to show in a Pane, however they came to: `/set`, the sidebar, a Pane focused
  * or closed, or a layout restored with them showing. So what they show follows from their
  * showing, and nothing that shows them need remember to read. Mounted once for the page.
  */
@@ -603,6 +603,14 @@ export const optionsSync = runtime
       }
     })
   )
+  .pipe(Atom.keepAlive);
+
+/**
+ * Reads every Network's Configuration, and the Credentials held, again, so what the
+ * Composer's list says of the options is as configured now, as `/set` is about to list them.
+ */
+export const readOptions = runtime
+  .fn((_: undefined, get) => refresh(get.registry))
   .pipe(Atom.keepAlive);
 
 /**

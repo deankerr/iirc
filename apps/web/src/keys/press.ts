@@ -11,10 +11,11 @@ import type { KeyContext, KeyEvent } from "@iirc/frontend/keymap";
 import type { AtomRegistry } from "effect/reactivity";
 
 import { channelState } from "../channel/state.ts";
-import { perform } from "../composer/atoms.ts";
+import { perform, placeOf } from "../composer/atoms.ts";
+import { completionShown } from "../composer/completion.ts";
 import { composerInput } from "../composer/input.ts";
 import { timelinesState } from "../timelines/atoms.ts";
-import { keymapState, paletteState, platform } from "./state.ts";
+import { keymapState, platform } from "./state.ts";
 
 /** Inputs whose type takes no text, so a key pressed there is not typing. */
 const notText: ReadonlySet<string> = new Set([
@@ -98,7 +99,7 @@ const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent)
     covered: covered(target),
     editing: editing(target),
     inComposer: target !== null && target === composerInput(document),
-    palette: registry.get(paletteState).open,
+    palette: registry.get(completionShown(placeOf(registry))).list !== undefined,
     platform,
   };
 };

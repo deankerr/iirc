@@ -8,6 +8,7 @@ declare const styles: {
   readonly camera: string;
   readonly candidate: string;
   readonly colours: string;
+  readonly command: string;
   readonly composer: string;
   readonly description: string;
   readonly detail: string;
@@ -28,7 +29,6 @@ declare const styles: {
   readonly note: string;
   readonly notice: string;
   readonly option: string;
-  readonly palette: string;
   readonly pane: string;
   readonly pending: string;
   readonly progress: string;

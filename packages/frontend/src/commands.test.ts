@@ -382,7 +382,7 @@ describe("reading a line", () => {
     ]);
   });
 
-  it("moves to the next and previous Timeline, opens the palette, and focuses the composer, from anywhere", () => {
+  it("moves to the next and previous Timeline, and focuses the composer or starts a command in it, from anywhere", () => {
     const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
     const listed: CommandContext = { ...nowhere, open: timeline, timelines: [timeline, other] };
 
@@ -390,15 +390,17 @@ describe("reading a line", () => {
       focus: interpret("/focus", nowhere),
       next: interpret("/next", listed),
       none: message("/next", nowhere),
-      palette: interpret("/palette", nowhere),
+      palette: message("/palette", nowhere),
       prev: interpret("/PREV", listed),
+      started: interpret("/focus /go ", nowhere),
       trailing: message("/next 2", listed),
     }).toStrictEqual({
       focus: { _tag: "Parsed", value: [{ _tag: "FocusComposer", text: undefined }] },
       next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
       none: "There are no Timelines yet. Add a Network with /network add.",
-      palette: { _tag: "Parsed", value: [{ _tag: "OpenPalette" }] },
+      palette: "There is no command /palette. Start with // to say text that begins with /.",
       prev: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
+      started: { _tag: "Parsed", value: [{ _tag: "StartCommand", text: "/go " }] },
       trailing: "/next takes nothing after it.",
     });
   });
@@ -547,7 +549,7 @@ describe("themes", () => {
         message: "/theme import takes nothing after it: paste the theme into the dialog it opens.",
       },
       imported: { _tag: "Parsed", value: [{ _tag: "ImportTheme" }] },
-      listed: { _tag: "Parsed", value: [{ _tag: "ListThemes", option: "theme" }] },
+      listed: { _tag: "Parsed", value: [{ _tag: "StartCommand", text: "/theme " }] },
       named: {
         _tag: "Parsed",
         value: [{ _tag: "UseTheme", device: false, name: "nord", option: "theme" }],
@@ -572,6 +574,7 @@ describe("themes", () => {
       deviceAlone: outcome("/theme -device -light", nowhere),
       light: outcome("/theme -light nord", nowhere),
       listed: outcome("/theme -dark", nowhere),
+      listedLight: outcome("/theme -LIGHT", nowhere),
       set: outcome("/set -device ui.light nord", nowhere),
       setSystem: outcome("/set ui.dark system", nowhere),
       system: outcome("/theme -light system", nowhere),
@@ -582,7 +585,8 @@ describe("themes", () => {
       darkFirst: [{ _tag: "UseTheme", device: true, name: "mine", option: "dark" }],
       deviceAlone: usage,
       light: [{ _tag: "UseTheme", device: false, name: "nord", option: "light" }],
-      listed: [{ _tag: "ListThemes", option: "dark" }],
+      listed: [{ _tag: "StartCommand", text: "/theme -dark " }],
+      listedLight: [{ _tag: "StartCommand", text: "/theme -light " }],
       set: [{ _tag: "ChangeUi", device: true, option: "light", value: "nord" }],
       setSystem:
         "ui.dark must not be system, which follows the device and draws no theme of its own.",

@@ -2,7 +2,7 @@
  * What a signed-in browser sees: the sidebar of Networks and their Timelines, with the
  * options and signing out at its foot, the Panes, each showing a Timeline or the options,
  * with its Channel's members beside it when shown, the composer under them, writing to the
- * focused Pane's Timeline, and the command palette and the keys. The sidebar's edge drags
+ * focused Pane's Timeline, and the keys. The sidebar's edge drags
  * or takes arrows to resize it, and it can be hidden, leaving a button before the composer's
  * prompt that marks what is unread, and the focus goes to the composer if it was in the
  * sidebar. On a compact screen the sidebar is a drawer instead, opened from a button in one
@@ -21,6 +21,7 @@ import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 
 import { composerFocus } from "../composer/atoms.ts";
 import { MainComposer } from "../composer/composer.tsx";
+import { Keys } from "../keys/keys.tsx";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
 import { RemoveDialog } from "../options/remove-dialog.tsx";
 import { compact, drawerShown } from "../page/drawer.ts";
@@ -33,8 +34,6 @@ import {
   sidebarWidth,
   widest,
 } from "../page/sidebar.ts";
-import { Keys } from "../palette/keys.tsx";
-import { Palette } from "../palette/palette.tsx";
 import { PaneSwitcher } from "../panes/pane-switcher.tsx";
 import { PaneTree } from "../panes/pane-tree.tsx";
 import { Pane } from "../panes/pane.tsx";
@@ -335,7 +334,6 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
         </main>
       </div>
       {drawn ? <SidebarDrawer signOut={attempt} /> : null}
-      <Palette />
       <ImportDialog />
       <RemoveDialog />
       <LeaveDialog />

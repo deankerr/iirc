@@ -38,7 +38,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 - **`UnknownNetwork` names no life, so it lets nothing go.** The Network list is read again, and a Network it does not name, whose life began before it was asked, is over.
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
 - **A Network's connection, Self's away, and which partners are on it are derived, never polled.** They come from `known`, and then from the Session items the changes carry. `known` is read again when Self's away changes, when a partner comes, goes, quits, or changes nick in their Direct Message Timeline, and when one is opened. A partner shows as there or gone only while connected and as `known` says, and as neither otherwise. Whether a Session carries tags is `known`'s alone to say, so a `SessionBegan` leaves it unknown and has `known` read again, and `carriesTags` is true only once it says so.
-- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for the palette, and gives it with the rest while a Pane has it open, so one opened from the palette or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, the one that calls most, and the page's title count only what the sidebar lists.
+- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for `/go`, and gives it with the rest while a Pane has it open, so one opened by `/go` or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, the one that calls most, and the page's title count only what the sidebar lists.
 - **A removed Network is derived too.** One removed with its Timelines kept is named `Kept` by the Network list, which names every Network, live or kept, in one read, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
 - **A dropped Timeline is let go of at once.** The changes name it, or name its Network as removed without keeping its Timelines, which reaches a Network that never had one too. Its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. A Network the changes name as removed with its Timelines kept is only read from then on. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, for the life it ended.
 
@@ -95,7 +95,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, and what is unread.
+The one registry of commands, `commands`, as data, behind the composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, and what is unread.
 
 | For | Commands |
 | --- | --- |
@@ -104,12 +104,12 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Lookups | `/whois`, `/whowas`, `/bans`, `/exceptions`, `/invexes` |
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
-| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/palette`, `/focus` |
+| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/uploads`, `/focus` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 | Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
 
-Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
+Each entry in `src/commands.ts` carries its usage, aliases, and description, which the Composer's list shows.
 
 - **A line is read one way.** Plain text is `/say` to the open Timeline, `//text` says `/text`, and `/name args` runs the command named. An unknown command sends nothing.
 - **Arguments are parsed into typed values,** or the command says why not, naming its usage. The text after a Target is kept exactly.
@@ -123,7 +123,8 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
 - **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the composer's, is refused, naming the Networks. Of two that share a name on one Network, it takes the first, so the list leaves out the other.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
-- **A new command is one entry.** The palette and the keymap add no actions of their own.
+- **A new command is one entry.** The Composer's list and the keymap add no actions of their own.
+- **`/focus [text]` focuses the Composer, and with text starts a command in it.** Its intent is `StartCommand`, which focuses the focused Pane's Composer, sets its draft aside, and starts the text with the list open. `/theme` alone, and `-light` or `-dark` alone, give it too, as `/theme ` and `/theme -light `, so the themes are listed where they are chosen.
 
 ## Keymap
 
@@ -131,7 +132,8 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 | Keys                              | Does                                          |
 | --------------------------------- | --------------------------------------------- |
-| `mod+k`, `mod+shift+p`            | Open the palette                              |
+| `mod+shift+p`                     | Start `/` in the Composer                     |
+| `mod+k`                           | Start `/go ` in the Composer                  |
 | `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline                    |
 | `alt+a`                           | The Timeline that calls most                  |
 | `alt+m`                           | Show or hide the members                      |
@@ -151,18 +153,19 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
 - **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses, but the formatting keys, as a web editor's do, and those fire only in the composer, so Mod+R reloads anywhere else. No two defaults share a chord where both can fire.
-- **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, the palette, an overlay holding the focus, or no composer to write to, leaves the key alone.
+- **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, an overlay holding the focus, or no composer to write to, leaves the key alone.
 - **Enter in the Composer is not a binding, but `ui.enter`.** `enterPressed` says whether a press sends or begins a new line: under `send`, Enter sends and Shift+Enter begins a line, and under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
+- **A key bound to a command that requires arguments, with none given, starts it.** `mod+k` is bound to `/go` with none, so it resolves to `StartCommand` with `/go `, and `chordsFor` lists `mod+k` beside `/go`. `mod+shift+p` is bound to `/focus` with `/`. Neither has a `when`, so both work from anywhere, with the Composer's list open or not and a Pane with no Timeline included.
+- **The `palette` context key means that the Composer's list is open.** No default binding consults it, but a binding an Owner wrote against it, such as `!palette`, still parses.
 - **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
 
-## Palette
+## Entries
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, those closed after the rest, every Network, to remove it or drop what it kept, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
+What the Composer's list ranks (`@iirc/frontend/entries`): a command, a Timeline, a Network to remove or, removed with its Timelines kept, to drop them, a theme, and a font, each as an `Entry` with a key it is remembered by and the words a query matches it by. The entries add no action of their own: picking one only writes the draft, and sending it gives the intents the composer's `/commands` do. Completion makes them from what the Frontend holds.
 
-- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`. The composer's list ranks with the same scorer and the same entries, so each finds what the other does.
-- **With no query, recent choices come first,** at most 20. A command run from the composer is remembered among them, by the `Ran` event, with the keys `submit` gives.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Network asks to remove it, as `/network remove` does. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, or, listed by `/theme -light` or `-dark`, set as `ui.light` or `ui.dark`, and a bundled font is drawn in on every device too, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
-- **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
+- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
+- **With no query, the commands run recently come first,** at most 20, newest first. A command run from the composer is remembered by `remember`, with the keys `submit` gives as `ran`.
+- **A family typed after `font`, such as `font Fira Code`, is listed among the fonts,** when it names a family and no bundled font. `familyNamed` says whether it does.
 
 ## Composer
 
@@ -171,7 +174,8 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 - **Each Timeline has its own draft and its own history,** at most 100 lines, which Up and Down go through.
 - **A draft's text is what is sent,** IRC's formatting codes and all, and is what history keeps and recalls. The Owner sees and edits its plain text: `Edited` carries the plain text, which is merged into the formatting, and `Formatted` puts a format over a range, or with nothing selected, keeps it pending at the caret for what is typed there next, until the text changes.
 - **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
-- **What was sent says which commands it ran,** as `ran`, the palette's keys, so the palette remembers them. Plain text runs none.
+- **What was sent says which commands it ran,** as `ran`, the keys of their entries, so the Composer's list puts them first. Plain text runs none.
+- **A command started over a draft sets it aside.** `commandStarted` keeps the draft, its codes and what it answers, as its `aside`, whether it is blank or not, and starts the command's text clean. The draft comes back when a submit carries something out, a command run or a Message sent, and on `Restored`, which is Escape and drops the command. A submit that is refused keeps both. It is never sent, never lost, and never enters the history, so Up recalls only what was sent. Over a command already started, the draft set aside stays the one, and `Carried` and `Left` keep it with the text.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
 - **A draft can answer one Message,** which `replyOf` offers only for a Message with an id a `+reply` tag can carry, on a Network whose Session carries tags. The draft holds it, with the Message as it was, through edits and turning away, until it is dropped or sent, and only the first Say to its Timeline answers it, so a reply of several lines is tagged on its first.
 - **A refusal is said in words under the composer it came from,** and nothing after it is sent.
@@ -222,7 +226,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
 - **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
-- **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and the palette alike.
+- **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and for `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.**
 - **A font's family the device lacks is said to be not found,** when it is the one in effect. Only the device can find that out, so it hands the families it lacks to `uiOptionsOf`.
@@ -255,6 +259,7 @@ The files added to a composer, as a reducer (`reduceUploading`) over what the ru
 - **A link is a word of its own.** `insertLink` adds a space on whichever side touches anything but whitespace, and `caretAfter` moves a caret at or after it past it. Files added at one caret land in the order added, whatever order they finish in.
 - **Whether Uploads are on is the Daemon's answer when the files were added, never kept.** Files are checking until it answers. While they are off, those files are let go of, and `offNote` names the options to set. A file over `maxSize` is refused before it is sent. A link of `null`, with no public URL, puts nothing in and notes it the same way.
 - **A draft waits for its links.** While a file added to it is checking or being sent, `heldBack` says to wait for it or cancel it, and nothing is sent. A failed file holds nothing back. What is kept of a send held back is only that it was, per composer (`HeldBack`), and `heldNoteIn` derives the words from the files still pending, so they name only those and go with the last of them, kept, failed, or cancelled, and never come back.
+- **A draft set aside by a command owns its files.** While a command stands over a draft, the anchors and links are in the draft set aside (`filesTextOf`), `heldBack` holds the command back for none of them, and a link that finishes goes into the draft, never the command. An edit that leaves the command empty puts it away, as Escape does.
 - **A file kept stays listed until its draft is sent** (`Sent`), or it is dismissed, holding nothing back. Renamed, its new link goes into the draft in place of the old (`renamed`), wherever the old now stands, however the Owner edited around it, and every anchor and caret after it moves by the change in length (`relinkedAt`). Where the Owner edited it away, nothing is replaced.
 - **Every failure is said in words** by `failureText`, from the API's typed errors, and a request with no answer says only that whether the file was kept is unknown.
 
@@ -329,13 +334,13 @@ What `/whois`, `/whowas`, and a Channel's lists ask, and a card for each Pane sh
 
 What the composer can complete, as a reducer, and the list it shows above the composer, `listOf`. It completes the word that ends at the caret, moves through the candidates, and gives back what was typed on Escape.
 
-- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, a Channel after `/join` or `/part`, or what the palette lists after `/go`, `/theme`, `/set ui.font`, and `/network remove`. Only the first line opens it, and `//` never does. So does a `:name` word on any line, and a command's own completion wins over it. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
+- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, a Channel after `/join` or `/part`, or a Timeline, a theme, a font, or a Network after `/go`, `/theme`, `/set ui.font`, and `/network remove`. Only the first line opens it, and `//` never does. So does a `:name` word on any line, and a command's own completion wins over it. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the composer is no keyboard trap.
 - **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after `/join `, `/part `, or a `CHANTYPES` character, an emoji for a word that is `:` and two or more characters of a name, and otherwise a nick.
-- **An emoji is completed from names the Frontend gives,** `emoji` in the sources, none until it has them. A name matches when it starts with what follows the `:`, or a word of it, split at `_`, `+`, or `-`, does, ranked as the palette ranks, with no match by letters in order. Each emoji is listed once, by the name that matched, as `:smile:`, and picking one writes the emoji and a space. A `:` inside a word, as in `12:30` or an address, starts nothing. `emojiWanted` says when the names are needed and not held, which is when a Frontend loads them; until then the list is empty and Tab waits.
-- **What the palette lists is ranked as the palette ranks it:** commands, options, and the whole argument of `/go`, a Timeline on any Network, `/theme`, after any flags, a theme, `/set ui.font`, a font or a family typed by name, and `/network remove`, a Network, a removed one whose Timelines were kept too. That argument is the rest of the line, its spaces collapsed, and a candidate replaces all of it. Channels and nicks are matched by their start.
+- **An emoji is completed from names the Frontend gives,** `emoji` in the sources, none until it has them. A name matches when it starts with what follows the `:`, or a word of it, split at `_`, `+`, or `-`, does, ranked as every list is, with no match by letters in order. Each emoji is listed once, by the name that matched, as `:smile:`, and picking one writes the emoji and a space. A `:` inside a word, as in `12:30` or an address, starts nothing. `emojiWanted` says when the names are needed and not held, which is when a Frontend loads them; until then the list is empty and Tab waits.
+- **Entries are ranked as `Entries` says:** commands, options, and the whole argument of `/go`, a Timeline on any Network, `/theme`, after any flags, a theme, `/set ui.font`, a font or a family typed by name, and `/network remove`, a Network, a removed one whose Timelines were kept too. That argument is the rest of the line, its spaces collapsed, and a candidate replaces all of it. Channels and nicks are matched by their start.
 - **A bare `/` lists every command once, by name,** those run recently first, newest first. An alias still finds its command.
 - **`/go` writes a name alone where it finds that Timeline from the composer's Network,** and the Network's id before it where it would not.
-- **Picking from the list only writes the draft.** Only sending it asks for anything, so `/network remove` asks first, as the palette does.
+- **Picking from the list only writes the draft.** Only sending it asks for anything, so `/network remove` asks first.
 - **A theme or font highlighted is drawn while it is,** as `previewOf` says, and the one in effect comes back as the highlight moves on, the list closes, or the draft changes or is sent.
 - **Nothing is highlighted while the list only follows what is typed,** and that list is derived from the draft and the sources as they are now. Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent, and the list then holds its order while it is moved through.
 - **A command is listed with what its usage says it takes, what it does, and the chords bound to it.** A Timeline is listed with its Network and its kind, a theme with whether it is built in and in effect, a font with whether it is in effect, and a Network with whether it was removed.
@@ -414,6 +419,6 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **One Timeline in two Panes,** at two places, as WeeChat and tmux allow. A Pane opens what no other Pane shows.
 - **A layout kept under `ui`,** shared by every device. It is kept per device, and a phone's screen shows one Pane at a time whatever it holds.
 - **More options under `ui`,** such as overrides of the keymap. `keymapOf` is ready to read them, dropping what does not parse.
-- **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
+- **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone starts `/go `, so a sequence beginning with it would make that wait.
 - **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens. One left open in a hidden page gathers unread items, which the counts show, but no divider until it is opened again.
 - **Marking a detached Direct Message read.** No Target names it, so its counts stay until the API can mark a Timeline by its id.
