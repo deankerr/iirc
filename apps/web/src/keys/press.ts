@@ -14,7 +14,7 @@ import { channelState } from "../channel/state.ts";
 import { perform, placeOf } from "../composer/atoms.ts";
 import { completionShown } from "../composer/completion.ts";
 import { composerInput } from "../composer/input.ts";
-import { arrangement } from "../options/ui.ts";
+import { aliasesShown, arrangement } from "../options/ui.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { keymapState, platform } from "./state.ts";
 
@@ -98,7 +98,8 @@ const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent)
     command: contextOf(
       registry.get(timelinesState),
       registry.get(channelState),
-      registry.get(arrangement)
+      registry.get(arrangement),
+      registry.get(aliasesShown)
     ),
     composer: composerInput(document) !== undefined,
     covered: covered(target),

@@ -8,7 +8,7 @@
  *
  * @packageDocumentation
  */
-import type { PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
+import type { Aliases, PreviewsMediaHeight, UiInForce, UiOptionName } from "@iirc/api";
 import { arranged, arrangementOf, arranging, unarranged } from "@iirc/frontend/arrangement";
 import type { ArrangeChange, ArrangeEdit } from "@iirc/frontend/arrangement";
 import type { Json } from "@iirc/frontend/options";
@@ -337,6 +337,14 @@ export const arrangement = Atom.make((get) => {
 
   return shown === undefined ? unarranged : arrangementOf(shown.options);
 });
+
+/**
+ * The aliases the Owner made, as the shared options show them with the changes on their
+ * way, since every device shares them and none overrides them, or none until they are read.
+ */
+export const aliasesShown = Atom.make(
+  (get): Aliases => uiShown(get(optionsState))?.options.aliases ?? []
+);
 
 /**
  * The Sidebar as shown: the pinned Timelines, then the Networks, each in the Owner's order.

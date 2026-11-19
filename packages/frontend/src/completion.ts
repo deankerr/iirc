@@ -1,8 +1,8 @@
 /**
  * Completion in the composer, as a reducer: the word at the caret, completed from what it
- * can be, a command after `/` at the start of a line, an option after `/set `, a Channel's
- * name, or a nick, or the whole argument of `/go`, `/theme`, `/set ui.font`, and
- * `/network remove`, a Timeline, a theme, a font, or a Network, listed above the composer
+ * can be, a command after `/` at the start of a line, an alias too, an option after `/set `, a Channel's
+ * name, or a nick, or the whole argument of `/go`, `/theme`, `/set ui.font`,
+ * `/network remove`, and `/alias`, a Timeline, a theme, a font, a Network, or an alias, listed above the composer
  * and ranked by `ranking`. A draft that starts with a command opens the
  * list as it is typed, and anything else opens it on Tab. Tab, Shift+Tab, and the arrows
  * move through it, writing the one highlighted into the draft, and Escape gives back what
@@ -12,15 +12,16 @@
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
-import type { FontShown } from "@iirc/api/ui";
+import type { Aliases, FontShown } from "@iirc/api/ui";
 import { themeCommandWords } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
-import { commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
+import { aliasCommands, commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
 import type { Command, NamedTimeline } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
 import {
+  aliasEntry,
   commandEntry,
   familyNamed,
   fontEntries,
@@ -66,8 +67,10 @@ export interface Emoji {
 
 /** What a word can be completed from, for the composer at one place. */
 export interface Sources {
-  /** Every command, each listed once, by its name. */
+  /** Every command, each listed once, by its name: those of the Frontend's own, then each alias that runs. */
   readonly commands: readonly Command[];
+  /** Every alias the Owner made, which `/alias` lists. */
+  readonly aliases: Aliases;
   /** The keymap, for the chords bound to a command. */
   readonly keymap: Keymap;
   /** The keys of the commands run recently, newest first. */
@@ -428,11 +431,13 @@ const arguments_: ReadonlyMap<string, "Options" | "Channels"> = new Map([
 
 /**
  * What a command's whole argument is completed from: a Timeline after `/go`, a theme after
- * `/theme` and any flags, to set the option they say, a font after `/set ui.font`, or a
- * Network after `/network remove`.
+ * `/theme` and any flags, to set the option they say, a font after `/set ui.font`, a
+ * Network after `/network remove`, or an alias after `/alias`, to edit it, or after
+ * `/alias remove`, to remove it.
  */
 type Whole =
   | { readonly _tag: "Timelines" }
+  | { readonly _tag: "Aliases"; readonly remove: boolean }
   | { readonly _tag: "Themes"; readonly option: ThemeOption }
   | { readonly _tag: "Fonts" }
   | { readonly _tag: "Networks" };
@@ -470,6 +475,20 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
 
     case "network.manage": {
       return past(/^remove\s+/u.exec(after), { _tag: "Networks" });
+    }
+
+    case "aliases.edit": {
+      // `add` is typed in full, so what follows it is the Owner's own to write.
+      if (/^add\s/iu.test(after)) {
+        return undefined;
+      }
+
+      return (
+        past(/^remove\s+/iu.exec(after), { _tag: "Aliases", remove: true }) ?? {
+          start: head[0].length,
+          whole: { _tag: "Aliases", remove: false },
+        }
+      );
     }
 
     case "options.set": {
@@ -597,6 +616,10 @@ const candidateOfEntry = (entry: Entry, go?: GoText): Candidate | undefined => {
       return { _tag: "Font", current: entry.current, name: entry.name, text: entry.name };
     }
 
+    case "Alias": {
+      return { _tag: "Alias", line: entry.line, name: entry.name, text: entry.text };
+    }
+
     default: {
       return entry satisfies never;
     }
@@ -621,6 +644,10 @@ const wholeCandidates = (whole: Whole, typed: string, sources: Sources): readonl
 
       case "Networks": {
         return sources.networks.map(networkEntry);
+      }
+
+      case "Aliases": {
+        return sources.aliases.map((alias) => aliasEntry(alias, !whole.remove));
       }
 
       case "Themes": {
@@ -1231,6 +1258,8 @@ export const emojiWanted = (state: Completion, sources: Sources): boolean =>
  *   in effect on this device.
  * - `Network`: a Network after `/network remove`, by its id, and whether it was removed with
  *   its Timelines kept.
+ * - `Alias`: an alias after `/alias`, by its name, with the line it stands for, and what
+ *   choosing it writes.
  * - `Word`: an option's name, a Channel's name, or a nick.
  * - `Emoji`: an emoji after `:`, by the `:name:` its query matched, with the emoji itself,
  *   which is what it writes.
@@ -1269,6 +1298,12 @@ export type Candidate =
       readonly name: NetworkId;
       readonly text: string;
       readonly removed: boolean;
+    }
+  | {
+      readonly _tag: "Alias";
+      readonly name: string;
+      readonly line: string;
+      readonly text: string;
     }
   | { readonly _tag: "Word"; readonly name: string; readonly text: string }
   | {
@@ -1344,6 +1379,7 @@ export const previewOf = (state: Completion, place: Place, text: string): Previe
     case "Command":
     case "Timeline":
     case "Network":
+    case "Alias":
     case "Word":
     case "Emoji":
     case undefined: {
@@ -1509,9 +1545,10 @@ const chantypesNow = (
  * What completion lists from beyond the Timelines, as a Frontend holds it: the options
  * read, each Network's `CHANTYPES`, `ui.suffix` in effect, the keymap, the keys of the
  * commands run recently, every theme, the one each theme option names on this device, and
- * the font in effect on it, and every emoji once loaded.
+ * the font in effect on it, the aliases the Owner made, and every emoji once loaded.
  */
 export interface Held {
+  readonly aliases: Aliases;
   readonly options: readonly Option[];
   readonly chantypes: ReadonlyMap<NetworkId, Chantypes>;
   readonly suffix: string;
@@ -1540,8 +1577,9 @@ export const sourcesOf = (state: Timelines, place: Place, held: Held): Sources =
   const networks = sidebar(state);
 
   const at = {
+    aliases: held.aliases,
     chosen: held.chosen,
-    commands,
+    commands: [...commands, ...aliasCommands(held.aliases)],
     emoji: held.emoji,
     font: held.font,
     keymap: held.keymap,

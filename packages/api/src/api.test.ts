@@ -31,6 +31,9 @@ import {
   WindowQuery,
 } from "./schemas.ts";
 import {
+  AliasLine,
+  AliasName,
+  Aliases,
   FontShown,
   UiInForce,
   UiOptionName,
@@ -50,6 +53,14 @@ import {
 import { UploadId, UploadName } from "./uploads.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
+
+/**
+ * Aliases of one line, each named for its place.
+ * @param count - How many.
+ * @returns The aliases.
+ */
+const numbered = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({ line: "/join $1", name: `a${index}` }));
 
 /**
  * A font decoded from JSON, or null when refused.
@@ -451,6 +462,7 @@ describe("the contract", () => {
     }).toStrictEqual({
       defaults: {
         activity: "all",
+        aliases: [],
         colours: "theme",
         dark: "dark",
         day: "full",
@@ -487,6 +499,7 @@ describe("the contract", () => {
       },
       names: [
         "activity",
+        "aliases",
         "colours",
         "dark",
         "day",
@@ -548,6 +561,86 @@ describe("the contract", () => {
       ],
       statuses: ["200", "400", "401", "403", "409", "500"],
       value: [true, true, false, false],
+    });
+  });
+
+  it("takes aliases as names of lower-case words that each stand for one command line, each named once, at most 64, and keeps the good of a value refused whole", () => {
+    const aliases = Schema.decodeUnknownOption(Aliases);
+    const line = Schema.decodeUnknownOption(AliasLine);
+    const name = Schema.decodeUnknownOption(AliasName);
+    const mine = { line: "/join $1", name: "j" };
+
+    const many = uiValueKept("aliases", numbered(70));
+
+    expect({
+      cap: [64, 65].map((count) => Option.isSome(aliases(numbered(count)))),
+      default: uiDefaults.aliases,
+      kept: [
+        uiValueKept("aliases", [
+          mine,
+          { line: "/me $*", name: "Bad Name" },
+          { ...mine, line: "/x" },
+        ]),
+        Array.isArray(many) ? many.length : undefined,
+        uiValueKept("aliases", "j"),
+        uiValueKept("aliases", [mine]),
+      ],
+      lines: [
+        "/join $1",
+        "/me $*",
+        "/x",
+        "",
+        "join #a",
+        "//join",
+        "/",
+        "/ join",
+        " /join",
+        "/join ",
+        "/join\n/part",
+        "/join\u0000",
+        `/${"x".repeat(511)}`,
+        `/${"x".repeat(512)}`,
+        "/join \uD800",
+      ].map((each) => Option.isSome(line(each))),
+      names: [
+        "j",
+        "join-quiet",
+        "a1",
+        "x".repeat(32),
+        "J",
+        "-j",
+        "j-",
+        "j--k",
+        "",
+        "x".repeat(33),
+        "j k",
+      ].map((each) => Option.isSome(name(each))),
+      option: Option.isSome(Schema.decodeOption(UiOptions)({ ...uiDefaults, aliases: [mine] })),
+      twice: Option.isSome(aliases([mine, mine])),
+    }).toStrictEqual({
+      cap: [true, false],
+      default: [],
+      kept: [[mine], 64, undefined, [mine]],
+      lines: [
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+      ],
+      names: [true, true, true, true, false, false, false, false, false, false, false],
+      option: true,
+      twice: false,
     });
   });
 
@@ -730,12 +823,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","line":"columns","previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },

@@ -57,6 +57,7 @@ const known = (value: readonly string[]): Held => ({
 });
 
 const around = {
+  aliases: [],
   behind: false,
   draft: undefined,
   named: [],

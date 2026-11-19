@@ -153,34 +153,39 @@ export const Themes = Schema.Array(Theme)
       "The themes imported, by name, for every device: /theme import adds one, and /theme remove takes one away.",
   });
 
-const decodeTheme = Schema.decodeUnknownOption(Theme);
-
 /**
- * The themes kept from a value journaled for `themes` that `Themes` refuses whole, as one
- * from before a name was reserved: each entry that is a theme, the first of each name, up
- * to {@link themesCap}, so one bad entry drops only itself. A value that is no list is none.
- * @param value - The value, as JSON.
- * @returns The themes kept, or none.
+ * What a journaled value is kept as when its option's Schema refuses it whole, as one from
+ * before a rule was added: each entry that `entry` decodes, the first of each name, up to
+ * `cap`, so one bad entry drops only itself. A value that is no list is none.
+ * @param entry - The Schema of one entry.
+ * @param cap - The most entries the option holds.
+ * @returns What it keeps of a value, as JSON.
  */
-const themesKept = (value: Schema.Json): readonly Theme[] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
+const keptByName = <A extends { readonly name: string }>(entry: Schema.Decoder<A>, cap: number) => {
+  const decode = Schema.decodeUnknownOption(entry);
 
-  const kept: Theme[] = [];
-  const names = new Set<string>();
-
-  for (const entry of value) {
-    const theme = decodeTheme(entry);
-
-    if (theme._tag === "Some" && !names.has(theme.value.name) && kept.length < themesCap) {
-      names.add(theme.value.name);
-      kept.push(theme.value);
+  return (value: Schema.Json): readonly A[] | undefined => {
+    if (!Array.isArray(value)) {
+      return undefined;
     }
-  }
 
-  return kept;
+    const kept: A[] = [];
+    const names = new Set<string>();
+
+    for (const each of value) {
+      const one = decode(each);
+
+      if (one._tag === "Some" && !names.has(one.value.name) && kept.length < cap) {
+        names.add(one.value.name);
+        kept.push(one.value);
+      }
+    }
+
+    return kept;
+  };
 };
+
+const themesKept = keptByName(Theme, themesCap);
 
 /**
  * How the colours a Message asks for are drawn: `theme` maps mIRC's sixteen onto the
@@ -660,9 +665,84 @@ export const SidebarPinned = Schema.Array(TimelineId)
 /** The decoded form of {@link SidebarPinned}. */
 export type SidebarPinned = typeof SidebarPinned.Type;
 
+/**
+ * An alias's name: 1 to 32 lower-case letters and digits, in words joined by `-`, such as
+ * `j` or `join-quiet`, so it is one word to type after `/`. It knows nothing of commands,
+ * which a Frontend's own names are for it to keep.
+ */
+export const AliasName = Schema.String.check(
+  Schema.isPattern(/^(?=.{1,32}$)[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
+    message: "must be 1 to 32 lower-case letters and digits, in words joined by -",
+  })
+).annotate({ identifier: "AliasName" });
+
+/** The decoded form of {@link AliasName}. */
+export type AliasName = typeof AliasName.Type;
+
+/** The most UTF-16 code units the line an alias stands for may take. */
+export const aliasLineMaxLength = 512;
+
+/**
+ * The command line an alias stands for: one line, trimmed, at most {@link aliasLineMaxLength}
+ * long, that starts with `/` and a command's name, so it is never `//`, which says text, and
+ * holds no control character or lone surrogate. It may name `$1` to `$9` for the words typed
+ * after the alias, and `$*` for all of them.
+ */
+export const AliasLine = Schema.String.check(
+  Schema.isTrimmed({ message: "must not start or end with a space" }),
+  Schema.isMaxLength(aliasLineMaxLength, {
+    message: `must be at most ${aliasLineMaxLength} characters`,
+  }),
+  Schema.isPattern(/^\/[^/\s]/u, {
+    message: "must be a command line: / and a command's name, and not //",
+  }),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]*$/u, {
+    message: "must be one line with no control character",
+  })
+).annotate({ identifier: "AliasLine" });
+
+/** The decoded form of {@link AliasLine}. */
+export type AliasLine = typeof AliasLine.Type;
+
+/** An alias the Owner made: its name, and the command line it stands for. */
+export const Alias = Schema.Struct({ line: AliasLine, name: AliasName }).annotate({
+  identifier: "Alias",
+});
+
+/** The decoded form of {@link Alias}. */
+export type Alias = typeof Alias.Type;
+
+/** How many aliases the Owner may make, so the options stay small enough to send whole. */
+export const aliasesCap = 64;
+
+/**
+ * The aliases the Owner made, each named once, at most {@link aliasesCap}. Every device
+ * shares them, since a command the Owner made on one is the Owner's on all.
+ */
+export const Aliases = Schema.Array(Alias)
+  .check(
+    Schema.isMaxLength(aliasesCap),
+    Schema.makeFilter(
+      (aliases: readonly Alias[]) =>
+        new Set(aliases.map((one) => one.name)).size === aliases.length || "names an alias twice"
+    )
+  )
+  .annotate({
+    ...sharedOnly,
+    default: [],
+    description:
+      "The aliases made, by name, for every device: each a command line run as /name, which may name $1 to $9 for the words typed after it, and $* for all of them. /alias lists them, /alias add adds or replaces one, and /alias remove takes one away.",
+  });
+
+/** The decoded form of {@link Aliases}. */
+export type Aliases = typeof Aliases.Type;
+
+const aliasesKept = keptByName(Alias, aliasesCap);
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
+  aliases: Aliases,
   colours: ColoursShown,
   dark: themeForScheme("dark", "solarized-dark"),
   day: DayShown,
@@ -754,5 +834,9 @@ export const uiValueKept = (
     return decoded.value;
   }
 
-  return option === "themes" ? themesKept(value) : undefined;
+  if (option === "themes") {
+    return themesKept(value);
+  }
+
+  return option === "aliases" ? aliasesKept(value) : undefined;
 };

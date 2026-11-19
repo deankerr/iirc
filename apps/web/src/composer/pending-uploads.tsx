@@ -25,6 +25,7 @@ import { useRef, useState } from "react";
 
 import { openOptions } from "../options/atoms.ts";
 import { RenameField } from "../options/rename-field.tsx";
+import { aliasesShown } from "../options/ui.ts";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import { composerState } from "./composer-state.ts";
@@ -190,11 +191,12 @@ export const PendingUploads = ({ place }: { readonly place: Place }) => {
   const options = useAtomSet(openOptions);
   const dismissNote = useAtomSet(dismissUploadNote);
   const composers = useAtomValue(composerState);
+  const aliases = useAtomValue(aliasesShown);
   const files = pendingIn(state, place);
   const missing = noteIn(state, place);
   // Derived as it is drawn from the files still pending, so it names only those, and goes
   // with the last of them, whichever way it went.
-  const held = heldNoteIn(state, composers, place);
+  const held = heldNoteIn(state, composers, place, aliases);
 
   return (
     <>

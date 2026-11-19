@@ -165,6 +165,10 @@ export {
 
 export {
   ActivityShown,
+  Alias,
+  AliasLine,
+  AliasName,
+  Aliases,
   Colour,
   ColoursShown,
   DayShown,
@@ -195,6 +199,8 @@ export {
   UiOptionName,
   UiOptions,
   UiSequence,
+  aliasLineMaxLength,
+  aliasesCap,
   builtInThemeNames,
   fontFamilyMaxLength,
   fontNames,

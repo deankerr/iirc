@@ -17,6 +17,7 @@ import {
 const shared = {
   options: {
     activity: "quiet",
+    aliases: [],
     colours: "theme",
     dark: "dark",
     day: "long",
@@ -155,6 +156,7 @@ describe("a device's overrides", () => {
     }).toStrictEqual({
       before: {
         activity: "all",
+        aliases: [],
         colours: "theme",
         dark: "dark",
         day: "full",

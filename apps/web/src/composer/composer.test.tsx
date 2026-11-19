@@ -961,8 +961,8 @@ describe("the Composer's list of everything it can complete", () => {
     const after = listIn(container).names?.slice(0, 3);
 
     expect({ after, before }).toStrictEqual({
-      after: ["/me", "/away", "/back"],
-      before: ["/away", "/back", "/ban"],
+      after: ["/me", "/alias", "/away"],
+      before: ["/alias", "/away", "/back"],
     });
   });
 });

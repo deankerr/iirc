@@ -3,7 +3,7 @@ import type { ActionRequest } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { commands, interpret, typesCredential } from "./commands.ts";
+import { credentialRefusal, commands, interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, MarkRead, Unseen } from "./commands.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
@@ -20,6 +20,7 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
 });
 
 const around = {
+  aliases: [],
   behind: false,
   draft: undefined,
   head: undefined,
@@ -618,6 +619,143 @@ describe("themes", () => {
   });
 });
 
+/**
+ * A context with aliases made.
+ * @param aliases - The aliases.
+ * @param context - The context, in a Channel unless given.
+ * @returns The context.
+ */
+const withAliases = (
+  aliases: CommandContext["aliases"],
+  context: CommandContext = inChannel
+): CommandContext => ({ ...context, aliases });
+
+describe("aliases of the Owner's own", () => {
+  const join = { line: "/join", name: "j" };
+  const me = { line: "/me $*", name: "m" };
+
+  it("starts /alias with the aliases listed, and makes an alias of a name and a line, in any case", () => {
+    expect([
+      chosen("/alias"),
+      chosen("/alias add j /join $1"),
+      chosen("/ALIAS Add J   /Join  $1 "),
+      chosen("/alias remove J"),
+    ]).toStrictEqual([
+      [{ _tag: "StartCommand", text: "/alias " }],
+      [{ _tag: "EditAliases", edit: { _tag: "Add", alias: { line: "/join $1", name: "j" } } }],
+      [{ _tag: "EditAliases", edit: { _tag: "Add", alias: { line: "/Join  $1", name: "j" } } }],
+      [{ _tag: "EditAliases", edit: { _tag: "Remove", name: "j" } }],
+    ]);
+  });
+
+  it.each([
+    ["a name that is no alias's", "/alias add Bad_Name /join"],
+    ["a name that is too long", `/alias add ${"x".repeat(33)} /join`],
+    ["a command's name", "/alias add me /join $1"],
+    ["a command's fixed alias", "/alias add raw /join $1"],
+    ["/alias itself", "/alias add alias /join $1"],
+    ["a line that is no command line", "/alias add j join $1"],
+    ["a line that says text, with //", "/alias add j //join $1"],
+    ["a line that is only a /", "/alias add j /"],
+    ["a line that names another alias", "/alias add j /k $1"],
+    ["a line that names no command", "/alias add j /frobnicate $1"],
+    ["a line that names its command by a placeholder", "/alias add j /$1"],
+    ["a line that types a Credential", "/alias add p /quote PASS $1"],
+    ["a line with no name", "/alias add"],
+    ["a name with no line", "/alias add j"],
+    ["a removal with no name", "/alias remove"],
+    ["a removal of two names", "/alias remove j k"],
+    ["a word it does not know", "/alias frob j"],
+  ])("refuses %s", (_what, line) => {
+    expect(interpret(line, inChannel)._tag).toBe("Invalid");
+  });
+
+  it("clears a line that makes an alias of a Credential's value, as it clears the Credential", () => {
+    expect([
+      credentialRefusal("/alias add p /quote PASS $1", []),
+      credentialRefusal("/alias add p /quote PRIVMSG $1", []),
+      credentialRefusal("/alias list", []),
+    ]).toStrictEqual([
+      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("runs an alias as the command it stands for, under that command's own conditions", () => {
+    const aliases = [join, me];
+
+    expect({
+      appended: chosen("/j #a", withAliases(aliases)),
+      folded: chosen("/J #a", withAliases(aliases)),
+      nowhere: chosen("/m waves", withAliases(aliases, nowhere)),
+      offline: chosen("/m waves", withAliases(aliases, offline)),
+      placeholder: chosen("/m  waves  hello ", withAliases(aliases)),
+    }).toStrictEqual({
+      appended: chosen("/join #a", inChannel),
+      folded: chosen("/join #a", inChannel),
+      nowhere: chosen("/me waves", nowhere),
+      offline: chosen("/me waves", offline),
+      placeholder: chosen("/me waves  hello", inChannel),
+    });
+  });
+
+  it("refuses what an alias is given too few or too many words of, and runs nothing", () => {
+    const aliases = [{ line: "/msg $1 $2", name: "tell" }];
+
+    expect([
+      interpret("/tell ann", withAliases(aliases))._tag,
+      interpret("/tell ann hi there", withAliases(aliases))._tag,
+      interpret("/tell ann hi", withAliases(aliases))._tag,
+    ]).toStrictEqual(["Invalid", "Invalid", "Parsed"]);
+  });
+
+  it("never runs an alias a command's name or fixed alias takes", () => {
+    const aliases = [
+      { line: "/join #x", name: "me" },
+      { line: "/join #x", name: "raw" },
+    ];
+
+    expect([
+      chosen("/me waves", withAliases(aliases)),
+      chosen("/raw PING x", withAliases(aliases)),
+    ]).toStrictEqual([chosen("/me waves", inChannel), chosen("/quote PING x", inChannel)]);
+  });
+
+  it("runs an alias against the commands alone, so none runs another or says text", () => {
+    const aliases = [
+      { line: "/k #a", name: "j" },
+      { line: "/join", name: "k" },
+      { line: "/nothing $*", name: "z" },
+      { line: "/$1", name: "y" },
+    ];
+
+    expect([
+      interpret("/j", withAliases(aliases))._tag,
+      interpret("/z #a", withAliases(aliases))._tag,
+      interpret("/y /join", withAliases(aliases))._tag,
+    ]).toStrictEqual(["Invalid", "Invalid", "Invalid"]);
+  });
+
+  it("refuses a line an alias expands to a Credential's value of, and clears it", () => {
+    const aliases = [{ line: "/quote $*", name: "p" }];
+
+    expect([
+      typesCredential("/p PASS x", aliases),
+      typesCredential("/P authenticate PLAIN", aliases),
+      typesCredential("/p PRIVMSG #a :pass", aliases),
+      typesCredential("/p PASS x", []),
+      credentialRefusal("/p PASS x", aliases),
+    ]).toStrictEqual([
+      true,
+      true,
+      false,
+      false,
+      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+    ]);
+  });
+});
+
 describe("what is unread", () => {
   const idOf = Schema.decodeSync(TimelineId);
   const own = idOf("00000000000001-00000000-00000000");
@@ -954,11 +1092,11 @@ describe("acting on a Network", () => {
       words("/quote PASS x", inNetwork),
       words("/Raw authenticate PLAIN", inNetwork),
       words("/quote OPER admin pw", inNetwork),
-      typesCredential("/rAw @+a=b oPeR admin pw"),
-      typesCredential("/QUOTE Pass x"),
-      typesCredential("/raw @+a=b :me AUTHENTICATE +"),
-      typesCredential("/quote PRIVMSG #a :pass"),
-      typesCredential("//quote PASS x"),
+      typesCredential("/rAw @+a=b oPeR admin pw", []),
+      typesCredential("/QUOTE Pass x", []),
+      typesCredential("/raw @+a=b :me AUTHENTICATE +", []),
+      typesCredential("/quote PRIVMSG #a :pass", []),
+      typesCredential("//quote PASS x", []),
     ]).toStrictEqual([
       "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
       "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
@@ -975,10 +1113,10 @@ describe("acting on a Network", () => {
     expect([
       words("/oper admin pw", inNetwork),
       words("/OPER", inNetwork),
-      typesCredential("/Oper admin pw"),
-      typesCredential("/pass x"),
-      typesCredential("/operator x"),
-      typesCredential("//oper admin pw"),
+      typesCredential("/Oper admin pw", []),
+      typesCredential("/pass x", []),
+      typesCredential("/operator x", []),
+      typesCredential("//oper admin pw", []),
     ]).toStrictEqual([
       "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
       "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",

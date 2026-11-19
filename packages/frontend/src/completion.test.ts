@@ -13,7 +13,7 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { commands, interpret, namedIn } from "./commands.ts";
+import { aliasCommands, commands, interpret, namedIn } from "./commands.ts";
 import type { CommandContext } from "./commands.ts";
 import {
   announced,
@@ -51,6 +51,7 @@ const peer = timelineId(idOf(4));
 const listing = (...names: readonly string[]) => commands.filter((one) => names.includes(one.name));
 
 const sources: Sources = {
+  aliases: [],
   channels: ["#iirc", "#other", "&local"],
   chantypes: undefined,
   chosen: { dark: uiDefaults.dark, light: uiDefaults.light, theme: uiDefaults.theme },
@@ -736,6 +737,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
 
 /** What completion lists from beyond the Timelines, as a Frontend would hold it. */
 const held: Held = {
+  aliases: [],
   chantypes: new Map(),
   chosen: sources.chosen,
   emoji: undefined,
@@ -864,7 +866,7 @@ describe("the sources", () => {
 
     expect({
       channels: channel.channels,
-      commands: channel.commands === commands,
+      commands: channel.commands,
       directNicks: direct.nicks,
       nicks: channel.nicks,
       nowhere: [nowhere.channels, nowhere.nicks],
@@ -873,7 +875,7 @@ describe("the sources", () => {
       suffix: [channel.suffix, sourcesOf(state, iirc, { ...held, suffix: ", " }).suffix],
     }).toStrictEqual({
       channels: ["#iirc", "&local"],
-      commands: true,
+      commands,
       directNicks: { _tag: "Listed", nicks: ["peer"] },
       nicks: { _tag: "Members", timeline: iirc },
       nowhere: [[], { _tag: "Listed", nicks: [] }],
@@ -881,6 +883,22 @@ describe("the sources", () => {
       recent: ["ann", "bob", "ann"],
       suffix: [": ", ", "],
     });
+  });
+
+  it("hold the aliases, and list one as a command unless a command takes its name", () => {
+    const aliases = [
+      { line: "/join $1", name: "j" },
+      { line: "/join #x", name: "me" },
+      { line: "/join #y", name: "raw" },
+    ];
+
+    const made = sourcesOf(world(), iirc, { ...held, aliases });
+
+    expect({
+      added: made.commands.slice(commands.length).map((one) => one.name),
+      aliases: made.aliases,
+    }).toStrictEqual({ added: ["j"], aliases });
+    expect(made.commands.slice(0, commands.length)).toStrictEqual(commands);
   });
 
   it("take a Network's CHANTYPES only as read during the Session it is in now", () => {
@@ -994,6 +1012,7 @@ describe("everything the Composer's list ranks", () => {
   const nowhere: Sources = { ...everywhere, network: undefined };
 
   const context: CommandContext = {
+    aliases: [],
     behind: false,
     draft: undefined,
     focus: {
@@ -1281,6 +1300,79 @@ describe("everything the Composer's list ranks", () => {
       second: { _tag: "Theme", name: "dark" },
       sent: undefined,
       typed: undefined,
+    });
+  });
+
+  describe("aliases", () => {
+    const aliases = [
+      { line: "/join $1", name: "j" },
+      { line: "/msg $1 $*", name: "tell" },
+    ];
+
+    const given: Sources = {
+      ...everywhere,
+      aliases,
+      commands: [...commands, ...aliasCommands(aliases)],
+    };
+
+    const aliasesOf = (text: string) =>
+      opened(text, given).map((one) =>
+        one._tag === "Alias" ? [one.name, one.line, one.text] : one._tag
+      );
+
+    it("complete and are listed as commands, with what they take and the line they stand for", () => {
+      expect({
+        found: opened("/tell", given),
+        listed: opened("/", given).flatMap((one) =>
+          one._tag === "Command" && ["/j", "/tell"].includes(one.name) ? [one.name] : []
+        ),
+        written: pickedIn("/tell", 0, given),
+      }).toStrictEqual({
+        found: [
+          {
+            _tag: "Command",
+            chords: [],
+            description: "An alias of your own: /msg $1 $*",
+            name: "/tell",
+            takes: "<1> […]",
+            text: "/tell",
+          },
+        ],
+        listed: ["/j", "/tell"],
+        written: "/tell ",
+      });
+    });
+
+    it("are listed after /alias with their lines, and writing one makes it ready to edit", () => {
+      expect({
+        edited: pickedIn("/alias ", 1, given),
+        listed: aliasesOf("/alias "),
+        narrowed: aliasesOf("/alias te"),
+        typed: aliasesOf("/alias add j "),
+      }).toStrictEqual({
+        edited: "/alias add tell /msg $1 $*",
+        listed: [
+          ["j", "/join $1", "add j /join $1"],
+          ["tell", "/msg $1 $*", "add tell /msg $1 $*"],
+        ],
+        narrowed: [["tell", "/msg $1 $*", "add tell /msg $1 $*"]],
+        typed: [],
+      });
+    });
+
+    it("are listed by name after /alias remove, which writes only the name", () => {
+      expect({
+        listed: aliasesOf("/alias remove "),
+        narrowed: aliasesOf("/alias Remove te"),
+        written: pickedIn("/alias remove ", 1, given),
+      }).toStrictEqual({
+        listed: [
+          ["j", "/join $1", "j"],
+          ["tell", "/msg $1 $*", "tell"],
+        ],
+        narrowed: [["tell", "/msg $1 $*", "tell"]],
+        written: "/alias remove tell",
+      });
     });
   });
 

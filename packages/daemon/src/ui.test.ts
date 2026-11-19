@@ -48,6 +48,7 @@ describe("folding the ui options", () => {
     ).toStrictEqual({
       options: {
         activity: "quiet",
+        aliases: [],
         colours: "theme",
         dark: "dark",
         day: "full",
@@ -92,6 +93,7 @@ describe("folding the ui options", () => {
     ).toStrictEqual({
       options: {
         activity: "all",
+        aliases: [],
         colours: "theme",
         dark: "dark",
         day: "full",
@@ -192,6 +194,7 @@ describe("the ui options, kept", () => {
       again: {
         options: {
           activity: "all",
+          aliases: [],
           colours: "theme",
           dark: "dark",
           day: "full",
@@ -232,6 +235,7 @@ describe("the ui options, kept", () => {
         inForce: {
           options: {
             activity: "all",
+            aliases: [],
             colours: "theme",
             dark: "dark",
             day: "full",

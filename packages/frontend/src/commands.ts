@@ -15,7 +15,8 @@ import type {
   TimelineId,
 } from "@iirc/api";
 import type { OwnerOptionName } from "@iirc/api/options";
-import type { PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
+import { AliasLine, AliasName } from "@iirc/api/ui";
+import type { Alias, Aliases, PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 import { IgnoreMask } from "@iirc/protocol/mask";
@@ -23,6 +24,8 @@ import { Schema } from "effect";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
+import { expand, takes, usageOf } from "./aliases.ts";
+import type { AliasesEdit } from "./aliases.ts";
 import type { ArrangeEdit } from "./arrangement.ts";
 import type { Flag } from "./formatting.ts";
 import type { Axis, Direction } from "./layout.ts";
@@ -153,6 +156,8 @@ export interface CommandContext {
    * `CHANTYPES`, which an action on a Channel is parsed by, as the Client checks it.
    */
   readonly head: ChannelHeader | undefined;
+  /** The aliases the Owner made, shared by every device, or none until they are read. */
+  readonly aliases: Aliases;
 }
 
 /** A Timeline with something unread, as a command sees it. */
@@ -240,6 +245,8 @@ export interface Act {
  *   it, or `light` or `dark` to have `system` draw it while the device is light or dark.
  * - `EditThemes`: read the themes imported, apply the edit, and send them whole, made from
  *   the options read, applying it once more after a conflict, as `Configure` does.
+ * - `EditAliases`: read the aliases made, apply the edit, and send them whole, made from
+ *   the options read, applying it once more after a conflict, as `EditThemes` does.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `ChoosePreviews`: set a Timeline's own choice in `ui.previews.timelines` to `mode`, or
  *   remove it with none, so it follows `ui.previews`: the option read, the choice made,
@@ -307,6 +314,7 @@ export type Intent =
       readonly device: boolean;
     }
   | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
+  | { readonly _tag: "EditAliases"; readonly edit: AliasesEdit }
   | { readonly _tag: "ImportTheme" }
   | {
       readonly _tag: "ChoosePreviews";
@@ -1708,6 +1716,14 @@ const rawRefusalOf = (command: string): string | undefined => {
 };
 
 /**
+ * A text in lower case, ASCII letters only, as a command's name is matched.
+ * @param text - The text.
+ * @returns It, lower-cased.
+ */
+const lowerCaseAscii = (text: string): string =>
+  text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+
+/**
  * A text in upper case, ASCII letters only, as an Ircd reads a command.
  * @param text - The text.
  * @returns It, upper-cased.
@@ -2510,6 +2526,23 @@ const setCommand = unfocused({
   when: [],
 });
 
+const aliasUsage = "/alias [add <name> <line> | remove <name>]";
+
+/** Listing, adding, and removing the aliases the Owner made. */
+const aliasesCommand = unfocused({
+  aliases: [],
+  arguments: "Optional",
+  description:
+    "List the aliases of your own, add one that stands for a command line, with $1 to $9 for the words typed after it and $* for all of them, or remove one.",
+  id: "aliases.edit",
+  intents: (intent: Intent) => [intent],
+  name: "alias",
+  // oxlint-disable-next-line no-use-before-define -- `/alias` is one of the commands it checks a name against, which are read below it.
+  parse: (args) => aliasArguments(args),
+  usage: aliasUsage,
+  when: [],
+});
+
 /** Every command, in the order a list of them shows. */
 export const commands: readonly Command[] = [
   sayCommand,
@@ -2626,6 +2659,7 @@ export const commands: readonly Command[] = [
   }),
   ...actions,
   setCommand,
+  aliasesCommand,
   unfocused({
     aliases: [],
     arguments: "Optional",
@@ -3023,18 +3057,31 @@ export const commandWithId = (id: string): Command | undefined => byId.get(id);
  * @param name - The name, without its `/`.
  * @returns The command, or none.
  */
-export const commandNamed = (name: string): Command | undefined =>
-  byName.get(name.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase()));
+export const commandNamed = (name: string): Command | undefined => byName.get(lowerCaseAscii(name));
+
+/**
+ * The alias a name stands for, in any ASCII case.
+ * @param aliases - The aliases.
+ * @param name - The name, without its `/`.
+ * @returns The alias, or none.
+ */
+const aliasFound = (aliases: Aliases, name: string): Alias | undefined => {
+  const folded = lowerCaseAscii(name);
+
+  return aliases.find((one) => one.name === folded);
+};
 
 /**
  * Why a line that types a Credential is refused, in words, or nothing when it types none:
  * a value after `/set <credential option>`, or a `/quote` or `/raw` of `PASS`,
- * `AUTHENTICATE`, or `OPER`, in any ASCII case. The composer refuses and clears such a
- * line at once, keeping it nowhere.
+ * `AUTHENTICATE`, or `OPER`, in any ASCII case, or one that an alias expands to, or
+ * `/alias add` makes an alias of. The composer refuses and clears such a line at once,
+ * keeping it nowhere.
  * @param line - The line.
+ * @param aliases - The aliases, which a line that names one is judged by the expansion of.
  * @returns The words, or none.
  */
-export const credentialRefusal = (line: string): string | undefined => {
+export const credentialRefusal = (line: string, aliases: Aliases): string | undefined => {
   const [command = "", name = "", ...rest] = line.split(" ");
   const found = commandNamed(command.slice(1));
 
@@ -3046,8 +3093,24 @@ export const credentialRefusal = (line: string): string | undefined => {
     return rawRefusalOf(rawCommandOf(line.slice(command.length)));
   }
 
-  // `/oper`, `/pass`, and `/authenticate` are no commands, and would carry a Credential.
+  if (found === aliasesCommand) {
+    const made = /^\s*add\s+\S+\s+(?<line>.*)$/isu.exec(line.slice(command.length))?.groups?.line;
+
+    // What an alias stands for is never another alias, so none is judged by its expansion.
+    return made === undefined ? undefined : credentialRefusal(made, []);
+  }
+
   if (found === undefined) {
+    const alias = aliasFound(aliases, command.slice(1));
+
+    if (alias !== undefined) {
+      const expanded = expand(alias.line, line.slice(command.length + 1));
+
+      // An expansion that is refused runs nothing, so it carries nothing.
+      return expanded._tag === "Parsed" ? credentialRefusal(expanded.value, []) : undefined;
+    }
+
+    // `/oper`, `/pass`, and `/authenticate` are no commands, and would carry a Credential.
     return rawRefusalOf(upperCaseAscii(command.slice(1)));
   }
 
@@ -3065,9 +3128,11 @@ export const credentialRefusal = (line: string): string | undefined => {
  * Whether a line types a Credential, as `credentialRefusal` says, which the composer
  * refuses and clears at once, so it is not kept as the draft.
  * @param line - The line.
+ * @param aliases - The aliases.
  * @returns Whether it does.
  */
-export const typesCredential = (line: string): boolean => credentialRefusal(line) !== undefined;
+export const typesCredential = (line: string, aliases: Aliases): boolean =>
+  credentialRefusal(line, aliases) !== undefined;
 
 /**
  * Why the Timeline in focus has no Target to say something to, in words, or nothing.
@@ -3171,9 +3236,190 @@ export const runIn = (
   return reason === undefined ? found.run(args, context) : invalid<readonly Intent[]>(reason);
 };
 
+const decodeAliasName = Schema.decodeUnknownOption(AliasName);
+
+const decodeAliasLine = Schema.decodeUnknownOption(AliasLine);
+
+/**
+ * Why a name cannot be given to a command that is not there, in words.
+ * @param name - The name, without its `/`.
+ * @returns The words.
+ */
+const unknownCommand = (name: string): string =>
+  rawRefusalOf(upperCaseAscii(name)) ??
+  `There is no command /${name}. Start with // to say text that begins with /.`;
+
+/**
+ * An alias's name as typed, in any ASCII case.
+ * @param text - The name.
+ * @returns The name, or why it is not one.
+ */
+const parseAliasName = (text: string): Parsed<AliasName> => {
+  const name = decodeAliasName(lowerCaseAscii(text));
+
+  return name._tag === "Some"
+    ? parsed(name.value)
+    : invalid(
+        `${text} is not an alias's name: 1 to 32 lower-case letters and digits, in words joined by -, such as j or join-quiet.`
+      );
+};
+
+/**
+ * The line an alias is to stand for: one command line, naming a command of the Frontend's
+ * own, so an alias never stands for another, and none chains or loops. A line is refused
+ * as a Credential is, which a Credential typed after `$1` would also carry.
+ * @param text - The line, as typed.
+ * @returns The line, or why it cannot be one.
+ */
+const parseAliasLine = (text: string): Parsed<AliasLine> => {
+  if (text.startsWith("//")) {
+    return invalid(
+      "A line that starts with // says text, not a command. An alias stands for a command, such as /join $1."
+    );
+  }
+
+  const line = decodeAliasLine(text);
+
+  if (line._tag === "None") {
+    return invalid(
+      `${text} is not a command line: one line of at most 512 characters, / and a command's name, then its arguments.`
+    );
+  }
+
+  const name = /^\/(?<name>\S+)/u.exec(line.value)?.groups?.name ?? "";
+
+  if (commandNamed(name) === undefined) {
+    return invalid(
+      `/${name} is no command. An alias stands for one command, and never for another alias.`
+    );
+  }
+
+  const refusal = credentialRefusal(line.value, []);
+
+  return refusal === undefined ? parsed(line.value) : invalid(refusal);
+};
+
+/**
+ * What `/alias` was given: nothing, to start `/alias ` with the aliases listed; `add`, a
+ * name, and a line, to make an alias, replacing one of its name; or `remove` and a name.
+ * A name that a command takes is never an alias, since a command always runs first.
+ * @param args - The text after `/alias`.
+ * @returns The intent, or why there is none.
+ */
+const aliasArguments = (args: string): Parsed<Intent> => {
+  const text = args.trim();
+
+  if (text === "") {
+    return parsed({ _tag: "StartCommand", text: "/alias " });
+  }
+
+  const given = /^(?<verb>\S+)(?:\s+(?<name>\S+)(?:\s+(?<line>.*))?)?$/su.exec(text)?.groups;
+  const verb = lowerCaseAscii(given?.verb ?? "");
+  const named = given?.name;
+  const line = given?.line;
+
+  if (verb === "remove" && named !== undefined && line === undefined) {
+    const name = parseAliasName(named);
+
+    return name._tag === "Invalid"
+      ? name
+      : parsed({ _tag: "EditAliases", edit: { _tag: "Remove", name: name.value } });
+  }
+
+  if (verb !== "add" || named === undefined || line === undefined) {
+    return invalid(`Usage: ${aliasUsage}`);
+  }
+
+  const name = parseAliasName(named);
+
+  if (name._tag === "Invalid") {
+    return name;
+  }
+
+  if (commandNamed(name.value) !== undefined) {
+    return invalid(
+      `/${name.value} is a command's name, and a command always runs before an alias, so no alias is named it. Give it another name.`
+    );
+  }
+
+  const parsedLine = parseAliasLine(line);
+
+  return parsedLine._tag === "Invalid"
+    ? parsedLine
+    : parsed({
+        _tag: "EditAliases",
+        edit: { _tag: "Add", alias: { line: parsedLine.value, name: name.value } },
+      });
+};
+
+/**
+ * An expanded line, run against the commands of the Frontend's own alone, so an alias
+ * never runs another, and the command's own conditions apply.
+ * @param line - The line.
+ * @param context - The context.
+ * @returns Its intents, or why there are none.
+ */
+const runExpanded = (line: string, context: CommandContext): Parsed<readonly Intent[]> => {
+  const space = line.indexOf(" ");
+  const name = line.slice(1, space === -1 ? line.length : space);
+  const found = commandNamed(name);
+
+  return found === undefined
+    ? invalid(unknownCommand(name))
+    : runIn(found, space === -1 ? "" : line.slice(space + 1), context);
+};
+
+/**
+ * The command an alias is: it expands its line for what is typed after it, and runs that.
+ * @param alias - The alias.
+ * @returns The command.
+ */
+export const aliasCommand = (alias: Alias): Command => ({
+  aliases: [],
+  arguments: takes(alias.line).words > 0 ? "Required" : "Optional",
+  description: `An alias of your own: ${alias.line}`,
+  id: `alias.${alias.name}`,
+  name: alias.name,
+  run: (args, context) => {
+    const expanded = expand(alias.line, args);
+
+    return expanded._tag === "Invalid" ? expanded : runExpanded(expanded.value, context);
+  },
+  usage: usageOf(alias.name, alias.line),
+  when: [],
+});
+
+/**
+ * The aliases that run, each as a command: those whose name no command takes, since a
+ * command always runs first.
+ * @param aliases - The aliases.
+ * @returns The commands.
+ */
+export const aliasCommands = (aliases: Aliases): readonly Command[] =>
+  aliases.filter((one) => commandNamed(one.name) === undefined).map(aliasCommand);
+
+/**
+ * The command a name runs: a command of the Frontend's own, else an alias, in any ASCII case.
+ * @param name - The name, without its `/`.
+ * @param aliases - The aliases.
+ * @returns The command, or none.
+ */
+export const commandRunBy = (name: string, aliases: Aliases): Command | undefined => {
+  const found = commandNamed(name);
+
+  if (found !== undefined) {
+    return found;
+  }
+
+  const alias = aliasFound(aliases, name);
+
+  return alias === undefined ? undefined : aliasCommand(alias);
+};
+
 /**
  * One line of input, read: plain text is said to the open Timeline, `//text` says
- * `/text`, and `/name args` runs the command it names, if it can run here.
+ * `/text`, and `/name args` runs the command it names, if it can run here: a command of
+ * the Frontend's own, else an alias.
  * @param line - The line, with no line break.
  * @param context - The context.
  * @returns Its intents, or why there are none.
@@ -3199,14 +3445,7 @@ export const interpret = (line: string, context: CommandContext): Parsed<readonl
     return invalid("Type a command after /, or start with // to say text that begins with /.");
   }
 
-  const found = commandNamed(name);
+  const found = commandRunBy(name, context.aliases);
 
-  if (found === undefined) {
-    return invalid(
-      rawRefusalOf(upperCaseAscii(name)) ??
-        `There is no command /${name}. Start with // to say text that begins with /.`
-    );
-  }
-
-  return runIn(found, args, context);
+  return found === undefined ? invalid(unknownCommand(name)) : runIn(found, args, context);
 };

@@ -39,6 +39,7 @@ const channel = timelineId("00000000000002-00000000-00000000");
 const direct = timelineId("00000000000003-00000000-00000000");
 
 const inChannel: CommandContext = {
+  aliases: [],
   behind: false,
   draft: undefined,
   focus: {
