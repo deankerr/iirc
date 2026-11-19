@@ -34,7 +34,7 @@ import {
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import { reduceTimelines, mainOf } from "@iirc/frontend/timelines";
 import type { TimelinesEvent } from "@iirc/frontend/timelines";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Effect, Option, Redacted, Schema, Semaphore } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -439,10 +439,59 @@ const tryOnce = (registry: AtomRegistry.AtomRegistry, network: NetworkId, edit: 
     )
   );
 
+/** One turn at a time for each Network's changes, in each registry. */
+const turns = new WeakMap<AtomRegistry.AtomRegistry, Map<NetworkId, Semaphore.Semaphore>>();
+
 /**
- * Makes a change to a Network's Configuration, which shows at once and until it is answered.
- * If another changed it between the read and the write, it is read again and the same edit
- * applied once more, from what is in force.
+ * Waits for a Network's earlier changes from this page to be answered before the work reads
+ * its Configuration and changes it. Each change is measured against the Configuration in
+ * force, so one made while an earlier was unanswered would be measured against what that
+ * earlier replaces, and an unset following a set would find nothing to unset and send
+ * nothing. Work that reads the Configuration to decide what to change takes the turn around
+ * both, and changes it with `configureInTurn`.
+ * @param registry - The registry.
+ * @param network - The Network.
+ * @param work - What reads and changes it.
+ * @returns What the work came to.
+ */
+export const inTurn = <A, E, R>(
+  registry: AtomRegistry.AtomRegistry,
+  network: NetworkId,
+  work: Effect.Effect<A, E, R>
+) => {
+  const networks = turns.get(registry) ?? new Map<NetworkId, Semaphore.Semaphore>();
+  const turn = networks.get(network) ?? Semaphore.makeUnsafe(1);
+
+  networks.set(network, turn);
+  turns.set(registry, networks);
+
+  return Semaphore.withPermit(turn)(work);
+};
+
+/**
+ * The tries at a change: if another changed the Configuration between the read and the
+ * write, it is read again and the same edit applied once more, from what is in force.
+ * @param registry - The registry.
+ * @param network - The Network.
+ * @param edit - The edit.
+ * @returns What it came to.
+ */
+const tries = (registry: AtomRegistry.AtomRegistry, network: NetworkId, edit: Edit) =>
+  Effect.gen(function* () {
+    const first = yield* tryOnce(registry, network, edit);
+
+    if (first._tag !== "Conflict") {
+      return first;
+    }
+
+    const second = yield* tryOnce(registry, network, edit);
+
+    return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
+  });
+
+/**
+ * Makes a change to a Network's Configuration, which shows at once and until it is answered,
+ * once the Network's earlier changes are answered.
  * @param registry - The registry.
  * @param network - The Network.
  * @param edit - The edit.
@@ -452,18 +501,22 @@ export const configure = (registry: AtomRegistry.AtomRegistry, network: NetworkI
   onItsWay(
     registry,
     { _tag: "Network", edit, network },
-    Effect.gen(function* () {
-      const first = yield* tryOnce(registry, network, edit);
-
-      if (first._tag !== "Conflict") {
-        return first;
-      }
-
-      const second = yield* tryOnce(registry, network, edit);
-
-      return second._tag === "Conflict" ? failedWith("ConfigurationChanged", network) : second;
-    })
+    inTurn(registry, network, tries(registry, network, edit))
   );
+
+/**
+ * Makes a change to a Network's Configuration from work that already holds the Network's
+ * turn, as `inTurn` gives it.
+ * @param registry - The registry.
+ * @param network - The Network.
+ * @param edit - The edit.
+ * @returns What it came to.
+ */
+export const configureInTurn = (
+  registry: AtomRegistry.AtomRegistry,
+  network: NetworkId,
+  edit: Edit
+) => onItsWay(registry, { _tag: "Network", edit, network }, tries(registry, network, edit));
 
 /**
  * Adds a Network, made from none, so a Network already configured is never replaced.
@@ -538,12 +591,13 @@ const holdCredential = (
       .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(value))));
     yield* readHeld(registry);
 
-    return yield* configure(registry, network, {
+    return yield* configureInTurn(registry, network, {
       _tag: "Point",
       credential: name.value,
       path,
     });
   }).pipe(
+    (work) => inTurn(registry, network, work),
     Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(value))),
     Effect.catch((error) => Effect.succeed(failedWith(error._tag, network)))
   );

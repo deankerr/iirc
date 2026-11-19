@@ -24,7 +24,7 @@ import type { AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { decodeIntent, IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
-import { configure, readChannels, signedOut } from "../options/atoms.ts";
+import { configureInTurn, inTurn, readChannels, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { closingState, timelinesState } from "./atoms.ts";
@@ -259,7 +259,8 @@ const parted = (leave: Extract<Leave, { readonly _tag: "Act" }>) =>
  * Leaves the Channel offered: as `/part` with its name does, by editing the Network's
  * Configuration, when it wants the Channel, or it would be joined again, and otherwise by
  * parting it and leaving the Configuration alone, since an edit refuses a Channel that is
- * not among those wanted.
+ * not among those wanted. It reads in the Network's turn, so a change of its Channels on
+ * its way is answered first.
  * @param registry - The registry.
  * @param offered - The offer.
  * @returns What it came to, in words when it was not done.
@@ -268,23 +269,27 @@ const leaveOffered = (
   registry: AtomRegistry.AtomRegistry,
   offered: Extract<Leaving, { readonly _tag: "Offered" }>
 ) =>
-  Effect.gen(function* () {
-    const read = yield* readChannels(registry, offered.network);
+  inTurn(
+    registry,
+    offered.network,
+    Effect.gen(function* () {
+      const read = yield* readChannels(registry, offered.network);
 
-    if (read._tag !== "Read") {
-      return read;
-    }
+      if (read._tag !== "Read") {
+        return read;
+      }
 
-    const leave = leaveOf(offered, read.configuration, read.naming);
+      const leave = leaveOf(offered, read.configuration, read.naming);
 
-    if (leave === undefined) {
-      return { _tag: "Done" } satisfies Outcome;
-    }
+      if (leave === undefined) {
+        return { _tag: "Done" } satisfies Outcome;
+      }
 
-    return leave._tag === "Configure"
-      ? yield* configure(registry, leave.network, leave.edit)
-      : yield* parted(leave);
-  });
+      return leave._tag === "Configure"
+        ? yield* configureInTurn(registry, leave.network, leave.edit)
+        : yield* parted(leave);
+    })
+  );
 
 /**
  * Leaves the Channel offered, once, and takes what came of it. Leaving does not close it:
