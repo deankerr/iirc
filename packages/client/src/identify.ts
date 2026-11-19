@@ -17,6 +17,7 @@
  *
  * @packageDocumentation
  */
+import { sendOwnStart } from "./acts.ts";
 import { joinWanted } from "./channels.ts";
 import { CapName, Instant } from "./ids.ts";
 import type { Run } from "./run.ts";
@@ -71,8 +72,8 @@ export const identify = (run: Run): void => {
 
 /**
  * The Channels need wait no longer: the Ircd said Self is logged in, the bound ran out,
- * or the Credential could not be filled, so there is nothing to wait for. Joins them, if
- * they were waiting.
+ * or the Credential could not be filled, so there is nothing to wait for. Sends the
+ * Owner's own start to the Session and joins them, if they were waiting.
  * @param run - The step.
  */
 export const identified = (run: Run): void => {
@@ -81,15 +82,21 @@ export const identified = (run: Run): void => {
   }
 
   waitUntil(run, undefined);
+  sendOwnStart(run);
   joinWanted(run);
 };
 
 /**
- * A Configuration with no service login: nothing is waited on. The caller joins.
+ * A Configuration with no service login: nothing is waited on, and the Owner's own start
+ * to the Session, held for the login, is sent. The caller joins.
  * @param run - The step.
  */
 export const noLongerIdentifying = (run: Run): void => {
-  if (run.state.configuration?.login._tag !== "Service") {
+  if (
+    run.state.configuration?.login._tag !== "Service" &&
+    sessionOf(run.state)?.identifying !== undefined
+  ) {
     waitUntil(run, undefined);
+    sendOwnStart(run);
   }
 };

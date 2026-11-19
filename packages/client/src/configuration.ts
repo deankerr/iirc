@@ -9,6 +9,7 @@ import { IgnoreMask } from "@iirc/protocol/mask";
 import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
+import { quoted } from "./quoted.ts";
 
 /**
  * The annotation of a field a new Network starts with as its first nick, rather than a
@@ -132,6 +133,35 @@ const maxIgnores = 64;
  */
 const Ignores = Schema.Array(IgnoreMask).check(Schema.isMaxLength(maxIgnores));
 
+/** How many Lines of the Owner's own a Session may begin with. */
+const maxLines = 16;
+
+/** A Line written as text, which `/quote` would send. */
+const QuotedLine = Schema.String.check(
+  Schema.makeFilter((text: string) =>
+    quoted(text) === undefined ? "must be a Line /quote would send" : true
+  )
+);
+
+/**
+ * Lines of the Owner's own sent as each Session begins: at most 16, each one that
+ * `/quote` would send.
+ */
+const OwnLines = Schema.Array(QuotedLine).check(Schema.isMaxLength(maxLines));
+
+/** The longest mode string, which fits a `MODE` on Self with any nick an Ircd allows. */
+const maxUserModes = 64;
+
+/**
+ * User modes to set on Self, as one mode string of at most 64 characters: each `+` or `-`
+ * followed by the letters it applies to, such as `+ix-w`, or empty for none. A user mode
+ * that takes a parameter is set with a Line of the Owner's own instead.
+ */
+const UserModes = Schema.String.check(
+  Schema.isPattern(/^(?:[+-][A-Za-z]+)*$/u),
+  Schema.isMaxLength(maxUserModes)
+);
+
 /**
  * What the Owner wants to be true of one Network. It always arrives whole, and the
  * Client works out what changed, so joining, parting, and quitting are all a change of
@@ -210,6 +240,22 @@ export const NetworkConfiguration = Schema.Struct({
   ircds: Schema.NonEmptyArray(IrcdAddress).annotate({
     description: "The Ircds to connect to, tried in turn.",
   }),
+  /**
+   * Lines the Owner sends as each Session begins. A Journal written before the field
+   * existed holds `Configured` inputs without it, which decode as none.
+   */
+  lines: Schema.optionalKey(Schema.Array(Schema.String))
+    .pipe(
+      Schema.decodeTo(OwnLines, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => [])),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: [],
+      description:
+        "Lines to send as each Session begins, written as /quote takes them, sent in order after any login and before Channels are joined. At most 16. They are stored in the clear, so hold no password.",
+    }),
   login: Login.annotate({
     default: { _tag: "None" },
     description:
@@ -243,6 +289,22 @@ export const NetworkConfiguration = Schema.Struct({
     description: "The real name other Users see in WHOIS.",
     ...startsAsFirstNick,
   }),
+  /**
+   * User modes to set on Self as each Session begins. A Journal written before the field
+   * existed holds `Configured` inputs without it, which decode as none.
+   */
+  userModes: Schema.optionalKey(Schema.String)
+    .pipe(
+      Schema.decodeTo(UserModes, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => "")),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: "",
+      description:
+        "User modes to set on Self as each Session begins, such as +ix-w, sent as one MODE before any of the Lines: at most 64 characters. Empty sets none.",
+    }),
   username: Schema.String.annotate({
     description: "The username, the part of Self's mask before the @.",
     ...startsAsFirstNick,

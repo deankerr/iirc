@@ -375,10 +375,12 @@ export const liberaConfiguration: ConfigurationOnWire = {
   highlights: [],
   ignores: [],
   ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
+  lines: [],
   login: { _tag: "None" },
   nicks: ["iirc"],
   oper: { _tag: "None" },
   realname: "iirc",
+  userModes: "",
   username: "iirc",
   whoOnJoin: true,
 };

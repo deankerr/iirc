@@ -16,6 +16,7 @@ import {
   modeAnswer,
   nickAnswer,
   resendAway,
+  sendOwnStart,
   tiedAction,
   tieRejection,
 } from "./acts.ts";
@@ -555,6 +556,12 @@ const welcome = (run: Run, line: Line): void => {
   oper(run);
   // The Owner's away outlives Sessions: each begins by saying it again.
   resendAway(run);
+
+  // The Owner's own start to the Session waits on a service login, as the Channels do.
+  if (sessionOf(run.state)?.identifying === undefined) {
+    sendOwnStart(run);
+  }
+
   joinWanted(run);
 };
 
