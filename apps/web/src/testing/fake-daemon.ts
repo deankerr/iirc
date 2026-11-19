@@ -16,6 +16,7 @@ import {
   uiDefaults,
   uiOptionNames,
   UploadRename,
+  WindowQuery,
 } from "@iirc/api";
 import type {
   ChannelHeader,
@@ -248,6 +249,32 @@ const windowOf = (
     timeline: held.timeline.id,
     version: 1,
   };
+};
+
+const decodeWindowQuery = Schema.decodeUnknownResult(WindowQuery);
+
+/**
+ * The answer to a read of a window: refused as the API refuses a query its Schema does not
+ * take, the Timeline unknown, or its window.
+ * @param held - The Timeline, if held.
+ * @param id - The Timeline asked for.
+ * @param query - The query.
+ * @param through - The last step folded.
+ * @returns The answer.
+ */
+const windowAnswer = (
+  held: FakeTimeline | undefined,
+  id: string,
+  query: URLSearchParams,
+  through: number
+): Response => {
+  if (Result.isFailure(decodeWindowQuery(Object.fromEntries(query)))) {
+    return json(400, { _tag: "HttpApiSchemaError", message: "the query is not a window's" });
+  }
+
+  return held === undefined
+    ? json(404, { _tag: "UnknownTimeline", timeline: id })
+    : json(200, windowOf(held, query, through));
 };
 
 /**
@@ -1246,11 +1273,7 @@ export const fakeDaemon = () => {
 
       daemon.windowsRead.push(url.search);
 
-      return signedInOnly(() =>
-        held === undefined
-          ? json(404, { _tag: "UnknownTimeline", timeline: id })
-          : json(200, windowOf(held, url.searchParams, daemon.through))
-      );
+      return signedInOnly(() => windowAnswer(held, id, url.searchParams, daemon.through));
     }
 
     return undefined;

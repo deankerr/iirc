@@ -660,16 +660,28 @@ const Lines = ({
   };
 
   /**
-   * Reads the page before without asking while what is drawn cannot be scrolled to reach
-   * it: no item drawn, or less than fills the view, as when `ui.activity` hides a whole
-   * page. Only in a view that can be seen, in the page and with a height.
+   * Reads on without asking while what is drawn cannot be scrolled to reach more: no item
+   * drawn, or less than fills the view, as when `ui.activity` hides a whole page. It reads
+   * the page before, or the page after while a jump's target is held, as after a jump
+   * before a Timeline's first item. Only in a view that can be seen, in the page and with
+   * a height.
    * @param element - The scroller.
    */
   const fill = (element: HTMLDivElement) => {
     const drawsNoItem = !rows.some((row) => row._tag === "Item");
 
-    if (visible(element) && (drawsNoItem || total < element.clientHeight)) {
+    if (!visible(element) || !(drawsNoItem || total < element.clientHeight)) {
+      return;
+    }
+
+    // A jump's window holds what it jumped to at or after its first item, so it reads on
+    // toward it until the Owner scrolls, never back and forth.
+    const onward = window.later && window.target !== undefined;
+
+    if (!onward) {
       readOlder();
+    } else if (!window.newer && !window.reading) {
+      askNewer(timeline);
     }
   };
 

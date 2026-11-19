@@ -2247,6 +2247,31 @@ describe("going to a date", () => {
     expect({ day, first }).toStrictEqual({ day: { both: true, read: [["around"]] }, first: true });
   });
 
+  it("reads newer without scrolling from a date before the start while ui.activity hides every row there", async () => {
+    // 1200 joins, then one Message: a jump before the start lands on more joins than a read gives.
+    const items = [...Array.from({ length: 1200 }, (_, index) => joined(index + 1)), message(1201)];
+    const { daemon, registry } = await signedIn([], items);
+
+    await act(async () => {
+      registry.set(deviceUi, { activity: "quiet" });
+      await Promise.resolve();
+    });
+    await openFromPalette();
+    await settled(() => logOf().textContent?.includes("line 1201"));
+    // Before the first item in any zone, whose items are in the first minutes of 1970 UTC.
+    await typed("/date 1969-12-30");
+    await sentWithEnter();
+    await landedOn("<peer> line 1201");
+
+    const shown = registry.get(openTimeline);
+
+    // Read around the date, from the first join, then on from there to the Message.
+    expect({
+      asked: daemon.windowsRead.some((query) => new URLSearchParams(query).has("after")),
+      later: shown._tag === "Shown" ? shown.window.later : undefined,
+    }).toStrictEqual({ asked: true, later: false });
+  });
+
   it("reads on from a date jumped to, older at the top and newer at the bottom, as after a search result", async () => {
     const { daemon, registry } = await spreadOpen();
 

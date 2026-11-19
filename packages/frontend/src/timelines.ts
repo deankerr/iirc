@@ -4596,11 +4596,12 @@ export const rowsOf = (
 /**
  * The earliest position at an instant, which a jump to a date or a time reads around: an
  * item at or after the instant stands at or after it, and every item before it before, since
- * a position orders by its instant first and no step's sequence or index is below 0.
+ * a position orders by its instant first, a Journal's sequences begin at 1, and a step's
+ * indexes at 0. A cursor with a sequence below 1 is none the API takes.
  * @param at - The instant.
  * @returns The position.
  */
-export const firstAt = (at: Position["at"]): Position => ({ at, n: 0, sequence: 0 });
+export const firstAt = (at: Position["at"]): Position => ({ at, n: 0, sequence: 1 });
 
 /**
  * The key of the row the Owner jumped to, which a view brings into view and marks, or none:

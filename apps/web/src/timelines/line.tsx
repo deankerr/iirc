@@ -298,7 +298,8 @@ const DayLine = ({ at }: { readonly at: number }) => {
             aria-label={`${written}: go to another day`}
             className={styles.dayGo}
             onPress={() => {
-              start([{ _tag: "StartCommand", text: `/date ${iso ?? ""}` }]);
+              // Written apart from `iso`, which HTML's dates bound at the year 1.
+              start([{ _tag: "StartCommand", text: `/date ${dayWritten("iso", at) ?? ""}` }]);
             }}
           >
             <time dateTime={iso}>{written}</time>
