@@ -35,6 +35,15 @@ export const ngircdOperName = "e2eoper";
 /** The password of {@link ngircdOperName}. */
 export const ngircdOperPassword = "an-oper-password-only-the-vault-holds";
 
+/** The operator name a private Ergo grants, whose block gives a vhost. */
+export const ergoOperName = "e2eoper";
+
+/** The password of {@link ergoOperName}. */
+export const ergoOperPassword = "an-ergo-oper-password-only-the-vault-holds";
+
+/** The vhost a private Ergo gives {@link ergoOperName} once it has opered up. */
+export const ergoOperVhost = "staff.ergo.test";
+
 /** A running private Ircd. */
 export interface Ircd {
   readonly kind: "ergo" | "ngircd";
@@ -82,6 +91,13 @@ const selfSigned = async (directory: string, name: string): Promise<string> => {
 
   return await Bun.file(path.join(directory, "fullchain.pem")).text();
 };
+
+/**
+ * Ergo takes an oper's password as a bcrypt hash.
+ * @returns The hash of {@link ergoOperPassword}.
+ */
+const ergoOperHash = (): string =>
+  Bun.password.hashSync(ergoOperPassword, { algorithm: "bcrypt", cost: 4 });
 
 const ergoConfig = (name: string, plainPort: number, tlsPort: number): string => `
 network:
@@ -188,6 +204,16 @@ datastore:
   autoupgrade: true
 languages:
   enabled: false
+oper-classes:
+  staff:
+    title: Staff
+    capabilities: []
+opers:
+  ${ergoOperName}:
+    class: staff
+    hidden: false
+    vhost: ${ergoOperVhost}
+    password: "${ergoOperHash()}"
 `;
 
 /**
