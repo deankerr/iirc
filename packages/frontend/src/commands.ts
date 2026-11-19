@@ -2253,6 +2253,92 @@ const banned = (set: boolean, usage: string) => {
   };
 };
 
+const banAccountUsage = "/ban -a <nick>";
+
+const banPlain = banned(true, "/ban <nick|mask>… | /ban -a <nick>");
+
+/**
+ * What `/ban -a` was given, as one `BanAccount` of the Channel in focus, once the Network's
+ * `CHANMODES` lists `b` and its `ISUPPORT` says how a ban names an account. Which account
+ * the nick has is the Client's to say, and it refuses, as the act's reason, when it has none.
+ * @param rest - The words after `-a`.
+ * @param focus - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read.
+ * @returns The action.
+ */
+const bannedByAccount = (
+  rest: readonly string[],
+  focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest> => {
+  const [nick, ...more] = rest;
+
+  if (nick === undefined) {
+    return invalid(`Ban whose account? ${banAccountUsage}`);
+  }
+
+  if (more.length > 0) {
+    return invalid(`Ban one nick's account at a time. ${banAccountUsage}`);
+  }
+
+  const rules = rulesOf(head);
+
+  if (head === undefined || rules === undefined) {
+    return invalid(rulesUnknown(focus));
+  }
+
+  if (!rules.chanmodes.list.includes("b")) {
+    return invalid(`${focus.network} has no ban list (b) in its CHANMODES.`);
+  }
+
+  if (head.accountBan === null) {
+    return invalid(`${focus.network} offers no ban by account (no ACCOUNTEXTBAN in its ISUPPORT).`);
+  }
+
+  const nickRules = nickRulesOf(head);
+
+  if (nickRules.symbols.includes(nick.charAt(0))) {
+    return invalid(
+      `Leave off the prefix ${nick.charAt(0)}: a nick does not start with it. ${banAccountUsage}`
+    );
+  }
+
+  return isLookupNick(nickRules, nick)
+    ? parsed({ _tag: "BanAccount", channel: focus.name, nick })
+    : invalid(`A ban by account takes one nick, never a Channel or a mask. ${banAccountUsage}`);
+};
+
+/**
+ * What `/ban` was given: masks to ban, or `-a` and a nick to ban by account. A nick never
+ * starts with `-`, so the flag is never one.
+ * @param args - The text after `/ban`.
+ * @param focus - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read.
+ * @returns The action.
+ */
+const banArguments = (
+  args: string,
+  focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest> => {
+  const [first] = wordsOf(args);
+
+  if (first !== "-a") {
+    return banPlain(args, focus, head);
+  }
+
+  // The nick is split at U+0020 alone, as the nick menu writes it, so one holding another
+  // space is read whole, and never as another User whose nick is its first part. A typed
+  // separator of other whitespace, such as a tab, is the separator, never the nick's.
+  const after = args.slice(args.indexOf("-a") + 2);
+
+  const nicks = (after.startsWith(" ") ? after : after.trimStart())
+    .split(" ")
+    .filter((one) => one !== "");
+
+  return bannedByAccount(nicks, focus, head);
+};
+
 /**
  * What `/invite` was given: a nick, and a Channel, the one in focus when left out.
  * @param args - The text after `/invite`.
@@ -2478,11 +2564,12 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Ban masks from the open Channel; a bare nick bans nick!*@*.",
+    description:
+      "Ban masks from the open Channel; a bare nick bans nick!*@*. With -a, ban a nick's account where the Network names one in a ban.",
     id: "act.ban",
     name: "ban",
-    parse: banned(true, "/ban <nick|mask>…"),
-    usage: "/ban <nick|mask>…",
+    parse: banArguments,
+    usage: "/ban <nick|mask>… | /ban -a <nick>",
     when: actingOn,
   }),
   acting({

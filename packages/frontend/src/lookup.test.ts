@@ -924,8 +924,15 @@ describe("a card of a Channel's list", () => {
       body: {
         _tag: "Masks",
         masks: [
-          { mask: "bad!*@*", remove: unban("bad!*@*"), setAt: "T1700000000000", setBy: "peer!u@h" },
           {
+            account: undefined,
+            mask: "bad!*@*",
+            remove: unban("bad!*@*"),
+            setAt: "T1700000000000",
+            setBy: "peer!u@h",
+          },
+          {
+            account: undefined,
             mask: "‮evil!*@*‬",
             remove: unban("‮evil!*@*"),
             setAt: undefined,
@@ -937,6 +944,83 @@ describe("a card of a Channel's list", () => {
       kind: "Bans",
       notes: [],
       subject: { _tag: "Channel", name: "#IIRC" },
+    });
+  });
+
+  it("shows a mask that names an account as the account, where the list's own Channel's head says how, and still unsets the mask", () => {
+    const entries = result({
+      _tag: "Listed",
+      cut: null,
+      masks: [
+        { mask: "~account:bob", setAt: null, setBy: null },
+        { mask: "~a:carol", setAt: null, setBy: null },
+        { mask: "~account:‮evil", setAt: null, setBy: null },
+        { mask: "~account:", setAt: null, setBy: null },
+        { mask: "~channel:#x", setAt: null, setBy: null },
+        { mask: "bad!*@*", setAt: null, setBy: null },
+      ],
+      notes: [],
+    });
+
+    const byAccount = decodeHeader({
+      ...Schema.encodeSync(ChannelHeader)(head),
+      accountBan: { names: ["account", "a"], prefix: "~" },
+      held: { _tag: "Known", at: 1, from: "ircd", value: ["o"] },
+    });
+
+    const accounts = (
+      list: "Bans" | "Exceptions" | "Invitations",
+      channel: string,
+      live?: typeof head
+    ) => {
+      const card = cardAfter(
+        [named, entries],
+        listLookOf(list, channel, network, timelineId(iirc))
+      );
+
+      const { body } = cardShown(world(iirc), card, time, live);
+
+      return body._tag === "Masks" ? body.masks.map((one) => one.account) : [];
+    };
+
+    const none = [undefined, undefined, undefined, undefined, undefined, undefined];
+
+    expect({
+      elsewhere: accounts("Bans", "#Other", byAccount),
+      exceptions: accounts("Exceptions", "#IIRC", byAccount),
+      noExtban: accounts("Bans", "#IIRC", head),
+      noHead: accounts("Bans", "#IIRC"),
+      offered: accounts("Bans", "#IIRC", byAccount),
+    }).toStrictEqual({
+      elsewhere: none,
+      exceptions: ["bob", "carol", "‮evil‬", undefined, undefined, undefined],
+      noExtban: none,
+      noHead: none,
+      offered: ["bob", "carol", "‮evil‬", undefined, undefined, undefined],
+    });
+
+    // Until the Network's casemapping is read, only the exact name is the list's own Channel,
+    // so `#[ops]` never reads `#{ops}`'s head on a Network that folds neither.
+    const unnamed = (channel: string) => {
+      const card = cardAfter([entries], listLookOf("Bans", channel, network, timelineId(iirc)));
+      const { body } = cardShown(world(iirc), card, time, { ...byAccount, name: "#{ops}" });
+
+      return body._tag === "Masks" ? body.masks.map((one) => one.account) : [];
+    };
+
+    expect({ exact: unnamed("#{ops}"), folded: unnamed("#[ops]") }).toStrictEqual({
+      exact: ["bob", "carol", "\u202Eevil\u202C", undefined, undefined, undefined],
+      folded: none,
+    });
+
+    const shown = cardShown(world(iirc), cardAfter([named, entries], bans), time, byAccount);
+
+    expect(shown.body._tag === "Masks" ? shown.body.masks[0] : undefined).toStrictEqual({
+      account: "bob",
+      mask: "~account:bob",
+      remove: unban("~account:bob"),
+      setAt: undefined,
+      setBy: undefined,
     });
   });
 

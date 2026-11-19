@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
-import type { Member, Timeline, TimelineItem } from "@iirc/api";
+import type { ChannelHeader, Member, Timeline, TimelineItem } from "@iirc/api";
 import { Effect, Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -119,11 +119,17 @@ const member = (nick: string, prefixes: readonly string[] = []): typeof Member.E
  * @param timeline - Its Timeline.
  * @param name - Its name.
  * @param held - The prefix modes Self holds.
+ * @param accountBan - How its Network's bans name an account, if they do.
  * @returns The head, as the wire carries it.
  */
-const headOf = (timeline: string, name: string, held: readonly string[]) =>
+const headOf = (
+  timeline: string,
+  name: string,
+  held: readonly string[],
+  accountBan: (typeof ChannelHeader.Encoded)["accountBan"] = null
+) =>
   ({
-    accountBan: null,
+    accountBan,
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
     held: { _tag: "Known", at: 1, from: "ircd", value: [...held] },
@@ -214,10 +220,15 @@ const pause = async (millis: number) => {
  * said something and left, and `peer` joined, its members `op` and `peer`, Self holding the
  * prefixes given there, and `#ops`, where Self holds nothing.
  * @param held - The prefix modes Self holds in `#iirc`.
+ * @param accountBan - How its Network's bans name an account, if they do.
  * @param scripts - How the Daemon answers each `look`.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async (held: readonly string[], ...scripts: readonly LookScript[]) => {
+const signedInNaming = async (
+  held: readonly string[],
+  accountBan: (typeof ChannelHeader.Encoded)["accountBan"],
+  scripts: readonly LookScript[]
+) => {
   const fake = fakeDaemon();
   const items = [joined(1, "peer"), said(2, "peer"), said(3, "gone")];
 
@@ -235,7 +246,7 @@ const signedIn = async (held: readonly string[], ...scripts: readonly LookScript
     { gaps: [], items: [], timeline: listed(ops, "#ops", "Channel") },
   ]);
   fake.daemon.channels.set(iirc, {
-    header: headOf(iirc, "#iirc", held),
+    header: headOf(iirc, "#iirc", held, accountBan),
     members: [member("op", ["o"]), member("peer")],
   });
   fake.daemon.channels.set(ops, { header: headOf(ops, "#ops", []), members: [] });
@@ -279,6 +290,9 @@ const signedIn = async (held: readonly string[], ...scripts: readonly LookScript
 
   return { ...fake, container, registry };
 };
+
+const signedIn = async (held: readonly string[], ...scripts: readonly LookScript[]) =>
+  await signedInNaming(held, null, scripts);
 
 /**
  * The nick that opens a menu in a row of a Pane's log that holds some text.
@@ -447,6 +461,38 @@ describe("the menu on a nick", () => {
       closed: null,
       label: "What to do with peer",
       offered: operator("peer"),
+    });
+  });
+
+  it("offers a ban by account where the Network's bans name one, and sends BanAccount for it", async () => {
+    const { daemon } = await signedInNaming(["o"], { names: ["account"], prefix: "~" }, []);
+
+    await settled(() => nickIn("line 2") !== undefined);
+    await press(nickIn("line 2"));
+    await settled(() => entries().length === 11);
+
+    const offered = entries();
+
+    const word = document.querySelector<HTMLElement>(
+      '[role="menuitem"][aria-label="Ban peer\'s account"]'
+    );
+
+    await press(word);
+    await settled(() => daemon.acts.length === 1);
+
+    expect({ act: daemon.acts[0]?.action, offered, word: word?.textContent }).toStrictEqual({
+      act: { _tag: "BanAccount", channel: "#iirc", nick: "peer" },
+      offered: [
+        ...everyone("peer"),
+        "Ban peer",
+        "Ban peer's account",
+        "Op peer",
+        "Deop peer",
+        "Voice peer",
+        "Devoice peer",
+        "Kick peer",
+      ],
+      word: "ban account",
     });
   });
 

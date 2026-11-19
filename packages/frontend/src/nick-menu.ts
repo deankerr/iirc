@@ -48,17 +48,20 @@ export interface NickEntries {
 const anyone = ["query", "whois"] as const;
 
 /**
- * What can be done in a Channel by an operator, by the command, and what it needs of the
- * User: nothing, to be there, or to be there and not outrank Self. Ban comes first, so
- * what a read of the members adds never moves it.
+ * What can be done in a Channel by an operator: the entry's id and word, the command that
+ * does it, with what follows the nick, and what it needs of the User: nothing, to be
+ * there, or to be there and not outrank Self. Ban and ban account come first, so what a
+ * read of the members adds never moves them. Ban account is offered only where the
+ * Network's bans name an account, which its command says.
  */
 const operating = [
-  { name: "ban", needs: "nothing" },
-  { name: "op", needs: "here" },
-  { name: "deop", needs: "inferior" },
-  { name: "voice", needs: "here" },
-  { name: "devoice", needs: "inferior" },
-  { name: "kick", needs: "inferior" },
+  { args: "", command: "ban", id: "ban", needs: "nothing", text: "ban" },
+  { args: "-a ", command: "ban", id: "ban-account", needs: "nothing", text: "ban account" },
+  { args: "", command: "op", id: "op", needs: "here", text: "op" },
+  { args: "", command: "deop", id: "deop", needs: "inferior", text: "deop" },
+  { args: "", command: "voice", id: "voice", needs: "here", text: "voice" },
+  { args: "", command: "devoice", id: "devoice", needs: "inferior", text: "devoice" },
+  { args: "", command: "kick", id: "kick", needs: "inferior", text: "kick" },
 ] as const;
 
 /**
@@ -69,34 +72,48 @@ const operating = [
 const labelOf = (text: string) => `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
 
 /**
- * An entry that runs a command with the nick, as the Composer would, or none when the
- * command would not run here.
- * @param name - The command.
- * @param nick - The nick.
+ * An entry that runs a command as the Composer would, or none when the command would not
+ * run here.
+ * @param entry - The entry's id, word, and accessible name.
+ * @param line - The command, and the text after its name.
  * @param context - The context.
  * @returns The entry, or none.
  */
 const commandEntry = (
-  name: string,
-  nick: string,
+  entry: Pick<NickEntry, "id" | "label" | "text">,
+  line: { readonly command: string; readonly args: string },
   context: CommandContext
 ): readonly NickEntry[] => {
-  const command = commandNamed(name);
-  const ran = command === undefined ? undefined : runIn(command, nick, context);
+  const command = commandNamed(line.command);
+  const ran = command === undefined ? undefined : runIn(command, line.args, context);
 
-  return ran?._tag === "Parsed"
-    ? [{ id: name, intents: ran.value, label: `${labelOf(name)} ${nick}`, text: name }]
-    : [];
+  return ran?._tag === "Parsed" ? [{ ...entry, intents: ran.value }] : [];
 };
 
 /**
+ * An entry that runs a command with the nick, as the Composer would, or none when the
+ * command would not run here.
+ * @param name - The command, which is also the entry's id and word.
+ * @param nick - The nick.
+ * @param context - The context.
+ * @returns The entry, or none.
+ */
+const nickEntry = (name: string, nick: string, context: CommandContext): readonly NickEntry[] =>
+  commandEntry(
+    { id: name, label: `${labelOf(name)} ${nick}`, text: name },
+    { args: nick, command: name },
+    context
+  );
+
+/**
  * What the menu on a nick offers, in order: query, whois, mention, and ignore, then, in a
- * Channel where Self may operate, ban, op, deop, voice, devoice, and kick. Each but mention
- * runs the command the Composer would, and is offered only when that command runs here.
+ * Channel where Self may operate, ban, ban account, op, deop, voice, devoice, and kick.
+ * Each but mention runs the command the Composer would, and is offered only when that command runs here.
  * Op and voice are offered only while the User is `Here`, and deop, devoice, and kick only
  * while they are too and do not outrank Self, or their rank is not known, which the
- * Network would refuse for want of status. Ban is placed before them, so what a read of
- * the members adds never moves it. More may come in a Channel while its head is not read,
+ * Network would refuse for want of status. Ban and ban account, `/ban -a`, offered only
+ * where the Network's bans name an account, are placed before them, so what a read of the
+ * members adds never moves them. More may come in a Channel while its head is not read,
  * or Self may operate and whether the Network has a Session, or whether the User is there,
  * is still being read, unless the Network is known to have no Session: as many of an
  * operator's entries as are not offered yet. Nothing is offered
@@ -139,22 +156,38 @@ export const nickEntries = (
             presence._tag === "Here" && (one.needs === "here" || !outranks(head, presence.prefixes))
           );
         })
-        .flatMap((one) => commandEntry(one.name, nick, context))
+        .flatMap((one) =>
+          commandEntry(
+            {
+              id: one.id,
+              label:
+                one.id === "ban-account" ? `Ban ${nick}'s account` : `${labelOf(one.text)} ${nick}`,
+              text: one.text,
+            },
+            { args: `${one.args}${nick}`, command: one.command },
+            context
+          )
+        )
     : [];
 
   const entries: readonly NickEntry[] = [
-    ...anyone.flatMap((name) => commandEntry(name, nick, context)),
+    ...anyone.flatMap((name) => nickEntry(name, nick, context)),
     {
       id: "mention",
       intents: [{ _tag: "FocusComposer", text: `${nick}: ` }],
       label: `Mention ${nick}`,
       text: "mention",
     },
-    ...commandEntry("ignore", nick, context),
+    ...nickEntry("ignore", nick, context),
     ...operatorEntries,
   ];
 
-  return { coming: waiting ? operating.length - operatorEntries.length : 0, entries };
+  // A ban by account that the head, once read, says the Network lacks never comes.
+  const possible = operating.filter(
+    (one) => one.id !== "ban-account" || head === undefined || head.accountBan !== null
+  ).length;
+
+  return { coming: waiting ? possible - operatorEntries.length : 0, entries };
 };
 
 /**

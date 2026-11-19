@@ -25,6 +25,7 @@ import type {
 } from "@iirc/api";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
+import { bannedAccount } from "@iirc/protocol/mask";
 
 import { mayOperate } from "./channel.ts";
 import type { Act, Intent, Parsed } from "./commands.ts";
@@ -970,6 +971,11 @@ export interface ProfileShown {
 export interface MaskShown {
   /** The mask, contained. */
   readonly mask: string;
+  /**
+   * The account it bans, contained, where the head of the list's Channel says how the
+   * Network's bans name one and this mask does. `mask` and `remove` are the mask still.
+   */
+  readonly account: string | undefined;
   /** Who set it, contained, where the Ircd said. */
   readonly setBy: string | undefined;
   /** When it was set, by the caller's format, where the Ircd said. */
@@ -1486,28 +1492,45 @@ const noteText = (note: StandardReply): string => {
 };
 
 /**
- * The act that removes a mask from a card's list, while the head of that list's own Channel,
- * as held live, says Self may, and gives the list's mode. A head of any other Channel says
- * nothing of it.
+ * The head of a card's list's own Channel, out of the head held live, which may be any
+ * Channel's.
  * @param card - The card.
- * @param live - The head of the list's Channel as held live, if read.
- * @returns How each mask is removed, or none.
+ * @param live - The head as held live, if read.
+ * @returns The head if it is the list's Channel's, or none.
  */
-const removing = (
-  card: Card,
-  live: ChannelHeader | undefined
-): ((mask: string) => Act) | undefined => {
+const listHead = (card: Card, live: ChannelHeader | undefined): ChannelHeader | undefined => {
   const { lookup, network } = card.look;
 
   if (!isListLookup(lookup)) {
     return undefined;
   }
 
-  const casemapping = card.naming?.casemapping ?? defaultCasemapping;
-  const channel = casefold(casemapping, lookup.channel);
+  // Until the Network's casemapping is read, only the exact name is the same Channel, as a
+  // guessed mapping could fold two Channels the Network keeps apart into one.
+  const same = (one: string, other: string) =>
+    card.naming === undefined
+      ? one === other
+      : casefold(card.naming.casemapping, one) === casefold(card.naming.casemapping, other);
 
-  const head =
-    live?.network === network && casefold(casemapping, live.name) === channel ? live : undefined;
+  return live?.network === network && same(live.name, lookup.channel) ? live : undefined;
+};
+
+/**
+ * The act that removes a mask from a card's list, while the head of that list's own Channel
+ * says Self may, and gives the list's mode.
+ * @param card - The card.
+ * @param head - The head of the list's own Channel, as `listHead` finds it, if read.
+ * @returns How each mask is removed, or none.
+ */
+const removing = (
+  card: Card,
+  head: ChannelHeader | undefined
+): ((mask: string) => Act) | undefined => {
+  const { lookup, network } = card.look;
+
+  if (!isListLookup(lookup)) {
+    return undefined;
+  }
 
   const mode = listMode(head, lookup._tag);
 
@@ -1525,17 +1548,37 @@ const removing = (
 };
 
 /**
+ * The account a mask of a list bans, contained, where the head says how the Network's bans
+ * name one.
+ * @param mask - The mask, as the reply gave it.
+ * @param head - The head of the list's own Channel, if read.
+ * @returns The account, or none.
+ */
+const accountOf = (mask: string, head: ChannelHeader | undefined): string | undefined => {
+  const account =
+    head?.accountBan === null || head?.accountBan === undefined
+      ? undefined
+      : bannedAccount(head.accountBan, mask);
+
+  return account === undefined ? undefined : contained(account);
+};
+
+/**
  * One mask of a list, as the card shows it.
  * @param entry - The mask, as the reply gave it.
  * @param remove - How a mask is removed, while Self may.
  * @param time - Formats an instant.
+ * @param head - The head of the list's own Channel, if read, which says how a ban names an
+ * account.
  * @returns The mask.
  */
 const maskShown = (
   entry: MaskEntry,
   remove: ((mask: string) => Act) | undefined,
-  time: (instant: number) => string | undefined
+  time: (instant: number) => string | undefined,
+  head: ChannelHeader | undefined
 ): MaskShown => ({
+  account: accountOf(entry.mask, head),
   mask: contained(entry.mask),
   remove: remove === undefined ? undefined : { act: remove(entry.mask), mask: entry.mask },
   setAt: entry.setAt === null ? undefined : (time(entry.setAt) ?? "time unavailable"),
@@ -1763,13 +1806,14 @@ const masksBody = (
 ): CardShown["body"] => {
   const { lookup } = card.look;
   const note = result.cut === null ? undefined : partialWords[result.cut];
-  const remove = removing(card, head);
+  const own = listHead(card, head);
+  const remove = removing(card, own);
   const masks = result.masks.filter((entry) => !card.removing.has(entry.mask));
   const kind = isListLookup(lookup) ? listWords[lookup._tag] : "masks";
 
   return masks.length === 0
     ? { _tag: "Said", words: note ?? `${name} has no ${kind}.` }
-    : { _tag: "Masks", masks: masks.map((entry) => maskShown(entry, remove, time)), note };
+    : { _tag: "Masks", masks: masks.map((entry) => maskShown(entry, remove, time, own)), note };
 };
 
 /**

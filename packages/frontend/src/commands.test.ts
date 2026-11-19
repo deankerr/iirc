@@ -1049,6 +1049,7 @@ describe("the Panes", () => {
 
 const headOf = (
   options: {
+    readonly accountBan?: (typeof ChannelHeader.Encoded)["accountBan"];
     readonly topic?: (typeof ChannelHeader.Encoded)["topic"];
     readonly ranks?: (typeof ChannelHeader.Encoded)["ranks"];
     readonly chanmodes?: (typeof ChannelHeader.Encoded)["chanmodes"];
@@ -1056,7 +1057,7 @@ const headOf = (
   } = {}
 ) =>
   Schema.decodeSync(ChannelHeader)({
-    accountBan: null,
+    accountBan: options.accountBan ?? null,
     chanmodes: options.chanmodes ?? { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: options.chantypes ?? "#&",
     held: null,
@@ -1331,6 +1332,62 @@ describe("acting on a Network", () => {
         changes: [{ mode: "b", param: "*!*@bad.test", set: false }],
         target: "#iirc",
       }),
+    });
+  });
+
+  it("bans a User by account with /ban -a, one nick, where the Network names accounts in bans", () => {
+    const byAccount = {
+      ...acting,
+      head: headOf({ accountBan: { names: ["account", "a"], prefix: "~" } }),
+    };
+
+    const noBans = {
+      ...byAccount,
+      head: headOf({
+        accountBan: { names: ["account"], prefix: "~" },
+        chanmodes: { always: "k", flags: "imnpst", list: "", whenSet: "l" },
+      }),
+    };
+
+    const usage = "Ban whose account? /ban -a <nick>";
+
+    expect({
+      ban: interpret("/ban -a bob", byAccount),
+      bareFlag: words("/ban -a", byAccount),
+      channel: words("/ban -a #other", byAccount),
+      mask: words("/ban -a bob!*@*", byAccount),
+      noAccountBan: words("/ban -a bob", acting),
+      noBans: words("/ban -a bob", noBans),
+      noHead: words("/ban -a bob", { ...byAccount, head: undefined }),
+      plain: interpret("/ban bob", byAccount),
+      prefixed: words("/ban -a @bob", byAccount),
+      // A nick is read whole, never cut at a space other than U+0020, so a ban by account
+      // never falls on another User whose nick is its first part.
+      spacedNick: interpret("/ban -a bob\u00A0", byAccount),
+      spacedNickFirst: interpret("/ban -a \u00A0bob", byAccount),
+      tabbed: interpret("/ban -a\tbob", byAccount),
+      tabbedSpaced: interpret("/ban -a\t bob", byAccount),
+      two: words("/ban -a bob eve", byAccount),
+    }).toStrictEqual({
+      ban: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
+      bareFlag: usage,
+      channel: "A ban by account takes one nick, never a Channel or a mask. /ban -a <nick>",
+      mask: "A ban by account takes one nick, never a Channel or a mask. /ban -a <nick>",
+      noAccountBan: "libera offers no ban by account (no ACCOUNTEXTBAN in its ISUPPORT).",
+      noBans: "libera has no ban list (b) in its CHANMODES.",
+      noHead:
+        "The modes libera has are not known yet: open a Channel on it, wait for its head to be read, and try again.",
+      plain: act({
+        _tag: "Mode",
+        changes: [{ mode: "b", param: "bob!*@*", set: true }],
+        target: "#iirc",
+      }),
+      prefixed: "Leave off the prefix @: a nick does not start with it. /ban -a <nick>",
+      spacedNick: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob\u00A0" }),
+      spacedNickFirst: act({ _tag: "BanAccount", channel: "#iirc", nick: "\u00A0bob" }),
+      tabbed: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
+      tabbedSpaced: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
+      two: "Ban one nick's account at a time. /ban -a <nick>",
     });
   });
 
