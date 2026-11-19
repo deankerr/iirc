@@ -2048,3 +2048,268 @@ describe("replying to a Message", () => {
     });
   });
 });
+
+/**
+ * Six items a day, from 08:00 every two hours, over forty local days from 1 October 2026:
+ * more than a window holds either side of any day's first item, and clear of any zone's
+ * midnight. The first item of 21 October is line 121, of 25 October line 145.
+ */
+const spread = Array.from({ length: 240 }, (_, index) => ({
+  ...message(index + 1),
+  position: cursor(
+    new Date(2026, 9, 1 + Math.floor(index / 6), 8 + 2 * (index % 6)).getTime(),
+    index + 1
+  ),
+}));
+
+/** How tall what the log holds is, tall enough to be scrolled to either end of any window. */
+const tall = 6000;
+
+/**
+ * `#iirc` holding `spread`, opened at its latest.
+ * @returns The fake, the registry, and the page.
+ */
+const spreadOpen = async () => {
+  const found = await signedIn([], spread);
+
+  layout.content = tall;
+  await openFromPalette();
+  await settled(() => found.registry.get(openTimeline)._tag === "Shown");
+  await settled(() => logOf().textContent?.includes("line 141") ?? false);
+
+  return found;
+};
+
+/**
+ * The composer.
+ * @returns It.
+ */
+const composerOf = () => {
+  const found = document.querySelector<HTMLTextAreaElement>("textarea[data-composer]");
+
+  if (found === null) {
+    throw new Error("no composer");
+  }
+
+  return found;
+};
+
+/**
+ * Writes text in the composer as typed.
+ * @param text - The whole text.
+ */
+const typed = async (text: string) => {
+  const field = composerOf();
+
+  await act(async () => {
+    Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      field,
+      text
+    );
+    field.setSelectionRange(text.length, text.length);
+    field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    await Promise.resolve();
+  });
+};
+
+/** Sends what the composer holds with Enter. */
+const sentWithEnter = async () => {
+  const field = composerOf();
+
+  await act(async () => {
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" })
+    );
+    await Promise.resolve();
+  });
+  await settled(() => field.value === "");
+};
+
+/**
+ * The text of the row the view marks as jumped to.
+ * @returns What it says, or nothing.
+ */
+const targetRow = () =>
+  plain(document.querySelector("[data-target]")?.textContent)?.replace(/^\S+ /u, "");
+
+/**
+ * Waits for the row jumped to to be drawn and marked, reporting the scroll a browser makes
+ * of where the view put the log, which the Owner did not make.
+ * @param text - What the row says.
+ */
+const landedOn = async (text: string) => {
+  await settled(() => {
+    logOf().dispatchEvent(new Event("scroll"));
+
+    return targetRow() === text;
+  });
+};
+
+/**
+ * The Owner wheels the log to a position, which a browser reports as a scroll.
+ * @param top - Where it ends.
+ */
+const ownerWheels = async (top: number) => {
+  const log = logOf();
+
+  await act(async () => {
+    log.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: top - layout.top }));
+    log.scrollTop = top;
+    log.dispatchEvent(new Event("scroll"));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * What the Timeline was asked for.
+ * @param windows - The queries of the windows read.
+ * @returns Which of `around`, `before`, and `after` each had.
+ */
+const askedFor = (windows: readonly string[]) =>
+  windows.map((query) => {
+    const asked = new URLSearchParams(query);
+
+    return ["around", "before", "after"].filter((name) => asked.has(name));
+  });
+
+/**
+ * What the composer's list offers.
+ * @returns Each option's text.
+ */
+const offered = () =>
+  [...document.querySelectorAll('[role="listbox"][aria-label="Completions"] [role="option"]')].map(
+    (one) => one.textContent
+  );
+
+describe("going to a date", () => {
+  beforeEach(() => {
+    layout.content = 0;
+    layout.row = 20;
+    layout.top = 0;
+    layout.view = 500;
+    layout.width = 800;
+    layOut();
+  });
+
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("lists /date in the palette", async () => {
+    await spreadOpen();
+
+    await act(async () => {
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          key: "P",
+          shiftKey: true,
+        })
+      );
+      await Promise.resolve();
+    });
+    await settled(() => composerOf().value === "/");
+    await typed("/da");
+    await settled(() => offered().length > 0);
+
+    expect(offered().some((text) => text?.includes("/date"))).toBeTruthy();
+  });
+
+  it("reads around a day typed and lands on its first item, or on the nearest end of the Timeline", async () => {
+    const { daemon, registry } = await spreadOpen();
+    const before = daemon.windowsRead.length;
+
+    await typed("/date 2026-10-21");
+    await sentWithEnter();
+    await landedOn("<peer> line 121");
+
+    const shown = registry.get(openTimeline);
+
+    const day = {
+      both: shown._tag === "Shown" && shown.window.earlier && shown.window.later,
+      read: askedFor(daemon.windowsRead.slice(before)),
+    };
+
+    await typed("/date 1990-01-01");
+    await sentWithEnter();
+    await landedOn("<peer> line 1");
+
+    const first = logOf().textContent?.includes("The start of this Timeline");
+
+    await typed("/date 2100-01-01");
+    await sentWithEnter();
+    await landedOn("<peer> line 240");
+
+    expect({ day, first }).toStrictEqual({ day: { both: true, read: [["around"]] }, first: true });
+  });
+
+  it("reads on from a date jumped to, older at the top and newer at the bottom, as after a search result", async () => {
+    const { daemon, registry } = await spreadOpen();
+
+    await typed("/date 2026-10-21");
+    await sentWithEnter();
+    await landedOn("<peer> line 121");
+
+    const held = () => {
+      const shown = registry.get(openTimeline);
+
+      return shown._tag === "Shown"
+        ? [shown.window.items.at(0)?.sequence ?? 0, shown.window.items.at(-1)?.sequence ?? 0]
+        : [];
+    };
+
+    const jumped = held();
+    const before = daemon.windowsRead.length;
+
+    await ownerWheels(0);
+    await settled(() => (held()[0] ?? 0) < (jumped[0] ?? 0));
+
+    const older = askedFor(daemon.windowsRead.slice(before));
+
+    await ownerWheels(tall - layout.view);
+    await settled(() => (held()[1] ?? 0) > (jumped[1] ?? 0));
+
+    expect({
+      newer: askedFor(daemon.windowsRead.slice(before + older.length)),
+      older,
+      window: [jumped, held()],
+    }).toStrictEqual({
+      newer: [["after"]],
+      older: [["before"]],
+      window: [
+        [71, 170],
+        [1, 240],
+      ],
+    });
+  });
+
+  it("offers a day's line as /date with that day, focused, which lands on the day's first item", async () => {
+    await spreadOpen();
+
+    const [, second] = dayLines();
+
+    const button = [
+      ...logOf().querySelectorAll<HTMLButtonElement>('button[aria-label$="go to another day"]'),
+    ].find((one) => one.querySelector("time")?.getAttribute("datetime") === second?.[1]);
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const field = composerOf();
+
+    await settled(() => field.value.startsWith("/date "));
+
+    const offer = { focused: document.activeElement === field, text: field.value };
+
+    await sentWithEnter();
+    await landedOn("<peer> line 145");
+
+    expect(offer).toStrictEqual({ focused: true, text: "/date 2026-10-25" });
+  });
+});
