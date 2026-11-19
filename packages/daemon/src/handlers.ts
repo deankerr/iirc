@@ -44,6 +44,7 @@ import type {
   NewsEvent,
   OptionsEvent,
   PreviewsEvent,
+  ProjectionEvent,
   TimelineChangesEvent,
   UiEvent,
   Upload,
@@ -974,6 +975,14 @@ const timelines = HttpApiBuilder.group(
             version: versionOf(read.version),
           };
         })
+      )
+      .handle("projection", () =>
+        followed(
+          projector.statuses.pipe(
+            Stream.map((now): ProjectionEvent => ({ data: projection(now), event: "projection" }))
+          ),
+          { data: {}, event: "heartbeat" }
+        )
       )
       .handle("changes", ({ headers, query }) =>
         Effect.suspend(() => {

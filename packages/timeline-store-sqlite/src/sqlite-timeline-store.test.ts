@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -530,10 +530,47 @@ describe("a store it cannot read now", () => {
         holder.close();
 
         expect(`${failure._tag}: ${failure.reason}`).toContain("TimelineStoreFailed: cannot read");
-        expect(failure.reason).toContain("database is locked");
+        expect(failure.reason).toContain("database is locked (SQLITE_BUSY)");
         expect(yield* using(file, everything)).toStrictEqual(before);
       })
     );
+  });
+});
+
+// What the fixture prints: how far the store folded, or why it stopped.
+const folding = Schema.fromJsonString(
+  Schema.Union([Schema.Struct({ through: Schema.Int }), Schema.Struct({ reason: Schema.String })])
+);
+
+describe("a process with nowhere to make a temporary file", () => {
+  // SQLite takes `SQLITE_TMPDIR` first, and cannot name a file in a directory whose path is
+  // this long, so the store has nowhere to make one but beside its own file. SQLite reads it
+  // once per process, so the store runs in one of its own.
+  it("folds every step, past the inserts that split the items' indexes", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const directory = yield* temporaryDirectory;
+        const unnamable = path.join(directory, ...Array.from({ length: 6 }, () => "d".repeat(100)));
+
+        yield* Effect.promise(async () => await mkdir(unnamable, { recursive: true }));
+
+        const child = Bun.spawn(
+          [
+            process.execPath,
+            path.join(import.meta.dirname, "fold-messages.fixture.ts"),
+            path.join(directory, "views.sqlite"),
+            "300",
+          ],
+          { env: { ...process.env, SQLITE_TMPDIR: unnamable }, stderr: "ignore", stdout: "pipe" }
+        );
+
+        const printed = yield* Effect.promise(async () => await new Response(child.stdout).text());
+
+        return yield* Schema.decodeEffect(folding)(printed);
+      })
+    );
+
+    expect(result).toStrictEqual({ through: 300 });
   });
 });
 

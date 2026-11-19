@@ -9,17 +9,7 @@ import { Sequence } from "@iirc/runtime/journal";
 import type { JournalFailed } from "@iirc/runtime/journal";
 import { TimelineStore, TimelineStoreFailed } from "@iirc/timeline-store";
 import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
-import {
-  Cause,
-  Context,
-  Effect,
-  Layer,
-  Option,
-  Ref,
-  Schema,
-  Stream,
-  SubscriptionRef,
-} from "effect";
+import { Cause, Context, Effect, Layer, Option, Schema, Stream, SubscriptionRef } from "effect";
 
 /**
  * Whether the store is being kept up to date. `Running` while it follows News, and
@@ -46,6 +36,8 @@ export class Projector extends Context.Service<
   Projector,
   {
     readonly status: Effect.Effect<ProjectorStatus>;
+    /** Whether it is running, given now and again when it stops. */
+    readonly statuses: Stream.Stream<ProjectorStatus>;
     /**
      * The version and the last sequence folded into the store, together, given now and
      * again each time either changes: when the store is reset to a version, which takes its
@@ -133,7 +125,7 @@ const project = (folded: SubscriptionRef.SubscriptionRef<Progress>) =>
  */
 export const layerProjector = Layer.effect(Projector)(
   Effect.gen(function* () {
-    const status = yield* Ref.make<ProjectorStatus>({ _tag: "Running" });
+    const status = yield* SubscriptionRef.make<ProjectorStatus>({ _tag: "Running" });
 
     const folded = yield* SubscriptionRef.make<Progress>({
       through: undefined,
@@ -148,7 +140,7 @@ export const layerProjector = Layer.effect(Projector)(
           onSome: (error) => `${error._tag}: ${error.reason}`,
         });
 
-        yield* Ref.set(status, { _tag: "Stopped", reason });
+        yield* SubscriptionRef.set(status, { _tag: "Stopped", reason });
         yield* Effect.logError(
           "The Timelines stopped being folded, until the Daemon restarts"
         ).pipe(Effect.annotateLogs({ reason }));
@@ -159,6 +151,10 @@ export const layerProjector = Layer.effect(Projector)(
       Effect.forkScoped
     );
 
-    return { folded: SubscriptionRef.changes(folded), status: Ref.get(status) };
+    return {
+      folded: SubscriptionRef.changes(folded),
+      status: SubscriptionRef.get(status),
+      statuses: SubscriptionRef.changes(status),
+    };
   })
 );

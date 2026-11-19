@@ -78,6 +78,13 @@ import {
  */
 const layoutVersion = 10;
 
+const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
+
+// SQLite's extended result code, such as `SQLITE_IOERR_GETTEMPPATH`, which names the cause
+// where the message says only `disk I/O error`. Carried to be read, never decided from.
+const codeOf = (native: Error) =>
+  Option.match(decodeCode(native), { onNone: () => "", onSome: ({ code }) => ` (${code})` });
+
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
 // its cause.
@@ -86,7 +93,7 @@ const failed =
     const native = error instanceof SqlError ? error.reason.cause : error.cause;
 
     return new TimelineStoreFailed({
-      reason: `${what}: ${native instanceof Error ? native.message : error.message}`,
+      reason: `${what}: ${native instanceof Error ? `${native.message}${codeOf(native)}` : error.message}`,
     });
   };
 
@@ -734,6 +741,12 @@ export const makeSqliteTimelineStore = (
     // folded: `through` commits with the rows it describes. So commits need not wait for
     // the disk, as the Journal's do.
     yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
+    // SQLite's temporary files are kept in memory, so the store asks for no directory but its
+    // own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal, which
+    // SQLite otherwise spills to a temporary file past 64 KiB, as when several of `items`'
+    // indexes split their pages in one insert. With nowhere to make one, that insert fails
+    // with `SQLITE_IOERR_GETTEMPPATH`.
+    yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
     yield* sql
       .withTransaction(
         inspect(sql).pipe(
