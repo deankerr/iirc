@@ -1206,6 +1206,9 @@ describe("an option chosen from a menu", () => {
 
     const starting = field.value;
 
+    // The field takes the focus, so the Owner can type, and its row never takes it back.
+    await settled(() => document.activeElement === field);
+
     await typeInto(field, "Comic Sans");
     await press(field, "Enter");
     await settled(() => rowOf(container, "ui.font")?.[1]?.startsWith("Comic Sans") === true);

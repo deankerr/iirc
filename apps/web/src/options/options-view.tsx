@@ -525,6 +525,18 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
     }
   };
 
+  // "Custom…" lets the menu go, as Escape does, and once its row has the focus again opens
+  // the editor, as Enter on the row does. An editor opened while the menu's popover still
+  // holds the page loses the focus to its row.
+  const customise = (name: string) => {
+    edit(undefined);
+    focusRow(name)();
+    requestAnimationFrame(() => {
+      setCustomised(name);
+      edit(name);
+    });
+  };
+
   // Delete or Backspace on a row asks to unset its option.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (editing !== undefined || (event.key !== "Delete" && event.key !== "Backspace")) {
@@ -633,7 +645,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                       {menu === undefined ? null : (
                         <ChoiceMenu
                           custom={() => {
-                            setCustomised(option.name);
+                            customise(option.name);
                           }}
                           done={focusRow(option.name)}
                           menu={menu}
