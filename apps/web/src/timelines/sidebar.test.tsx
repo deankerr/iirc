@@ -197,19 +197,18 @@ const row = (name: string) => {
 };
 
 /**
- * How a Network's row says its connection stands: to a screen reader, and as a mark.
+ * How a Network's row says its connection stands: to a screen reader, as a symbol drawn,
+ * filled, half filled, or empty, whatever else holds it, and in its title.
  * @param name - The Network.
- * @returns Its label, and the mark's symbol and title, if one is drawn.
+ * @returns Its label, the symbols drawn, and the title, if one is.
  */
-const standing = (name: string) => {
-  const mark = row(name).querySelector<HTMLElement>("[title]");
-
-  return {
-    label: row(name).getAttribute("aria-label"),
-    symbol: mark?.textContent ?? null,
-    title: mark?.title ?? null,
-  };
-};
+const standing = (name: string) => ({
+  label: row(name).getAttribute("aria-label"),
+  symbols: [...row(name).querySelectorAll('[aria-hidden="true"]')].flatMap((mark) =>
+    /^[●◐○]$/u.test(mark.textContent) ? [mark.textContent] : []
+  ),
+  title: row(name).querySelector<HTMLElement>("[title]")?.title ?? null,
+});
 
 /**
  * A button, by its label or its text.
@@ -393,10 +392,12 @@ describe("the sidebar", () => {
       },
     ]);
     await signedIn({ listed: 1, timelines: [] }, fake);
+    // Each Network's connection is read on its own, so oftc's may come after libera's.
+    await settled(() => standing("oftc").label === "oftc, offline");
 
     expect([standing("libera"), standing("oftc")]).toStrictEqual([
-      { label: "libera, connected", symbol: null, title: null },
-      { label: "oftc, offline", symbol: "○", title: "offline" },
+      { label: "libera, connected", symbols: [], title: null },
+      { label: "oftc, offline", symbols: ["○"], title: "offline" },
     ]);
   });
 
