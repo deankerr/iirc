@@ -693,8 +693,11 @@ export const AliasLine = Schema.String.check(
   Schema.isMaxLength(aliasLineMaxLength, {
     message: `must be at most ${aliasLineMaxLength} characters`,
   }),
-  Schema.isPattern(/^\/[^/\s]/u, {
-    message: "must be a command line: / and a command's name, and not //",
+  // The command's name is written out, never a placeholder, and ends at an ASCII space, as
+  // a command line is split, so the command an alias runs is fixed when it is made.
+  Schema.isPattern(/^\/[A-Za-z0-9-]+(?: |$)/u, {
+    message:
+      "must be a command line: / and a command's name, of letters, digits, and -, then a space and its arguments",
   }),
   Schema.isPattern(/^[^\p{Cc}\p{Cs}]*$/u, {
     message: "must be one line with no control character",

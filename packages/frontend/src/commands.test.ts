@@ -737,6 +737,20 @@ describe("aliases of the Owner's own", () => {
     ]).toStrictEqual(["Invalid", "Invalid", "Invalid"]);
   });
 
+  it("says what an alias expands to in a Direct Message not yet begun to its nick", () => {
+    const drafting: CommandContext = {
+      ...withAliases([{ line: "/say $*", name: "s" }]),
+      draft: { network, nick: "bob" },
+      focus: undefined,
+      session: true,
+    };
+
+    expect(interpret("/s hello there", drafting)).toStrictEqual({
+      _tag: "Parsed",
+      value: [say("bob", "hello there", "Privmsg", true)],
+    });
+  });
+
   it("refuses a line an alias expands to a Credential's value of, and clears it", () => {
     const aliases = [{ line: "/quote $*", name: "p" }];
 
@@ -745,12 +759,16 @@ describe("aliases of the Owner's own", () => {
       typesCredential("/P authenticate PLAIN", aliases),
       typesCredential("/p PRIVMSG #a :pass", aliases),
       typesCredential("/p PASS x", []),
+      typesCredential("/q PASS x extra", [{ line: "/quote $1 $2", name: "q" }]),
+      typesCredential("/q PASS", [{ line: "/quote $1 $2", name: "q" }]),
       credentialRefusal("/p PASS x", aliases),
     ]).toStrictEqual([
       true,
       true,
       false,
       false,
+      true,
+      true,
       "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
     ]);
   });

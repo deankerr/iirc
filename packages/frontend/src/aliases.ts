@@ -60,6 +60,31 @@ export const usageOf = (name: AliasName, line: AliasLine): string => {
 };
 
 /**
+ * What an alias's line becomes for the text typed after its name, with nothing refused: a
+ * word not typed is empty, and words past those named are left out. `expand` refuses
+ * either; a Credential is looked for in this, so a line refused for its words is still
+ * cleared when what it would carry is one.
+ * @param line - The alias's line.
+ * @param args - The text after the alias's name.
+ * @returns The line, substituted.
+ */
+export const substituted = (line: AliasLine, args: string): string => {
+  const words = args.split(/\s+/u).filter((one) => one !== "");
+  const rest = args.trim();
+  const { all, words: named } = takes(line);
+
+  const text = line.replaceAll(placeholder, (_match, which: string) => {
+    if (which === "$") {
+      return "$";
+    }
+
+    return which === "*" ? rest : (words[Number(which) - 1] ?? "");
+  });
+
+  return named === 0 && !all && rest !== "" ? `${text} ${rest}` : text;
+};
+
+/**
  * What an alias's line becomes for the text typed after its name, in one pass: `$1` to
  * `$9` become the words typed, split on whitespace, `$*` all of them with their spacing,
  * and `$$` one `$`, so a `$` before anything else is itself. A line that names no
@@ -72,7 +97,6 @@ export const usageOf = (name: AliasName, line: AliasLine): string => {
  */
 export const expand = (line: AliasLine, args: string): Parsed<string> => {
   const words = args.split(/\s+/u).filter((one) => one !== "");
-  const rest = args.trim();
   const { all, words: named } = takes(line);
 
   if (words.length < named) {
@@ -91,15 +115,7 @@ export const expand = (line: AliasLine, args: string): Parsed<string> => {
     );
   }
 
-  const text = line.replaceAll(placeholder, (_match, which: string) => {
-    if (which === "$") {
-      return "$";
-    }
-
-    return which === "*" ? rest : (words[Number(which) - 1] ?? "");
-  });
-
-  return parsed(named === 0 && !all && rest !== "" ? `${text} ${rest}` : text);
+  return parsed(substituted(line, args));
 };
 
 /**

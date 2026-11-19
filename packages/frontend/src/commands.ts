@@ -24,7 +24,7 @@ import { Schema } from "effect";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
-import { expand, takes, usageOf } from "./aliases.ts";
+import { expand, substituted, takes, usageOf } from "./aliases.ts";
 import type { AliasesEdit } from "./aliases.ts";
 import type { ArrangeEdit } from "./arrangement.ts";
 import type { Flag } from "./formatting.ts";
@@ -3104,10 +3104,9 @@ export const credentialRefusal = (line: string, aliases: Aliases): string | unde
     const alias = aliasFound(aliases, command.slice(1));
 
     if (alias !== undefined) {
-      const expanded = expand(alias.line, line.slice(command.length + 1));
-
-      // An expansion that is refused runs nothing, so it carries nothing.
-      return expanded._tag === "Parsed" ? credentialRefusal(expanded.value, []) : undefined;
+      // Judged by what it would carry even when its words are refused, as the command it
+      // stands for is when typed with too many or too few.
+      return credentialRefusal(substituted(alias.line, line.slice(command.length + 1)), []);
     }
 
     // `/oper`, `/pass`, and `/authenticate` are no commands, and would carry a Credential.
@@ -3286,7 +3285,7 @@ const parseAliasLine = (text: string): Parsed<AliasLine> => {
     );
   }
 
-  const name = /^\/(?<name>\S+)/u.exec(line.value)?.groups?.name ?? "";
+  const name = /^\/(?<name>[^ ]+)/u.exec(line.value)?.groups?.name ?? "";
 
   if (commandNamed(name) === undefined) {
     return invalid(
@@ -3353,13 +3352,20 @@ const aliasArguments = (args: string): Parsed<Intent> => {
 };
 
 /**
- * An expanded line, run against the commands of the Frontend's own alone, so an alias
+ * An expanded line, said to the nick of a Direct Message not yet begun as `/say` and `/me`
+ * are there, or else run against the commands of the Frontend's own alone, so an alias
  * never runs another, and the command's own conditions apply.
  * @param line - The line.
  * @param context - The context.
  * @returns Its intents, or why there are none.
  */
 const runExpanded = (line: string, context: CommandContext): Parsed<readonly Intent[]> => {
+  const drafted = context.draft === undefined ? undefined : inDraft(line, context, context.draft);
+
+  if (drafted !== undefined) {
+    return drafted;
+  }
+
   const space = line.indexOf(" ");
   const name = line.slice(1, space === -1 ? line.length : space);
   const found = commandNamed(name);
@@ -3374,7 +3380,7 @@ const runExpanded = (line: string, context: CommandContext): Parsed<readonly Int
  * @param alias - The alias.
  * @returns The command.
  */
-export const aliasCommand = (alias: Alias): Command => ({
+const aliasCommand = (alias: Alias): Command => ({
   aliases: [],
   arguments: takes(alias.line).words > 0 ? "Required" : "Optional",
   description: `An alias of your own: ${alias.line}`,
