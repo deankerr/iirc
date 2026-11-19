@@ -4,7 +4,6 @@
 services:
   iirc:
     build: .
-    image: iirc:local
     restart: unless-stopped
     # Nothing more than the systemd service has: no capabilities, no way to gain privileges,
     # and a root that cannot be written, with no writable directory but the data directory.

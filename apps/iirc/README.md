@@ -65,7 +65,7 @@ Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from 
 
 ## In a container
 
-With Docker Compose, from the repository's root. `Dockerfile` builds the executable as `build:iirc` does, with the Bun `package.json` pins, and puts it in a Debian `trixie-slim` image, so building needs nothing but Docker. No image is published. The first key is made by a one-off run of the same image, before the first start, since `iirc key create` holds the data directory.
+With Docker Compose, from the repository's root. `Dockerfile` builds the executable as `build:iirc` does, with the Bun `package.json` pins, and puts it in a Debian `trixie-slim` image, so building needs nothing but Docker. Publishing on loopback alone needs Docker Engine 28 or later, the first that keeps other machines on the network from reaching such a port. No image is published. The first key is made by a one-off run of the same image, before the first start, since `iirc key create` holds the data directory.
 
 ```sh
 docker compose build
