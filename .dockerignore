@@ -1,0 +1,28 @@
+# The build gets only what it needs: the workspace's manifests and lockfile, and the sources
+# of apps/ and packages/. Nothing else in the checkout, such as a data directory bound into
+# the container, a secret, or a cache, reaches Docker, so a bound data directory belongs
+# anywhere but under apps/ or packages/.
+*
+!package.json
+!bun.lock
+!tsconfig.base.json
+!tsconfig.json
+!apps
+!packages
+
+# Inside those, nothing bun install or the builds make again, and nothing a Daemon or a test
+# leaves behind.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/.cache
+**/coverage
+**/*.tsbuildinfo
+**/.vitest
+**/.DS_Store
+**/*.sqlite
+**/*.sqlite-*
+**/keys.json
+**/credentials.json
+**/sign-ins.json

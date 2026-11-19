@@ -1,0 +1,49 @@
+# iirc in a container: the Daemon with the web frontend built in, on 127.0.0.1:7667.
+# apps/iirc/README.md says how to make the first key, start, and upgrade. It holds no secret:
+# the API keys and Credentials live in the data directory.
+services:
+  iirc:
+    build: .
+    restart: unless-stopped
+    # Nothing more than the systemd service has: no capabilities, no way to gain privileges,
+    # and a root that cannot be written, with no writable directory but the data directory.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Docker mounts /dev/shm and /dev/mqueue writable, even over a read-only root. The Daemon
+    # needs neither, so the one is left out and the other is masked by an empty read-only one.
+    ipc: none
+    # A directory of the machine instead of the named volume runs under its owner, and :Z
+    # labels it for SELinux, which does nothing where SELinux is off:
+    # user: "1000:1000"
+    volumes:
+      - data:/var/lib/iirc
+      # - ./data:/var/lib/iirc:Z
+      - type: tmpfs
+        target: /dev/mqueue
+        read_only: true
+    ports:
+      # The API on the machine's loopback alone, as the service's 127.0.0.1:7667 is.
+      - 127.0.0.1:7667:7667
+      # The Link listener, which nothing answers until Uploads are on and uploads.listen is
+      # 0.0.0.0:7668. It is all of iirc meant for the internet.
+      - 7668:7668
+    healthcheck:
+      test: [CMD, /usr/local/bin/iirc, health, --listen, 127.0.0.1:7667]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    # A stop takes about 5.5 s on storage that answers promptly. This leaves room for a slow
+    # disk, as the service's TimeoutStopSec does.
+    stop_grace_period: 30s
+    # Logs are logfmt on stderr, which is the container's log: docker compose logs iirc
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  data:

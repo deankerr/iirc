@@ -63,6 +63,28 @@ Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from 
 - **It sees little of the machine.** The file system is read-only to it, its `/tmp` is its own, and the home directory is an empty one but for the executable, read-only, and the data directory, which is all it can write. It cannot gain privileges, change its personality, take realtime scheduling, make set-user-ID files, or make system calls of another architecture. Each of these was tried in a user service on systemd 259, with the Daemon serving, writing its Journal, dialling a Network by name, and keeping its Configuration across a restart. `MemoryDenyWriteExecute` is left off, since the JIT writes code it then runs.
 - **A missing data directory fails the start,** with status `226/NAMESPACE`, rather than the Daemon writing to a home directory that vanishes when it stops.
 
+## In a container
+
+With Docker Compose, from the repository's root. `Dockerfile` builds the executable as `build:iirc` does, with the Bun `package.json` pins, and puts it in a Debian `trixie-slim` image, so building needs nothing but Docker. Publishing on loopback alone needs Docker Engine 28 or later, the first that keeps other machines on the network from reaching such a port. No image is published. The first key is made by a one-off run of the same image, before the first start, since `iirc key create` holds the data directory.
+
+```sh
+docker compose build
+docker compose run --rm iirc key create browser --data-dir /var/lib/iirc   # prints the key, once
+docker compose up -d
+```
+
+Then open `http://127.0.0.1:7667` and sign in with the key, as for the service. `docker compose logs -f iirc` shows the log. To upgrade, pull the checkout, then `docker compose build` and `docker compose up -d`, which recreates the container on the same data.
+
+`compose.yaml` runs `iirc daemon --data-dir /var/lib/iirc --listen 0.0.0.0:7667 --web`, and holds no secret.
+
+- **It runs as `iirc`, uid 1000, never root,** with every capability dropped, no way to gain privileges, and a read-only root with no writable directory but the data directory.
+- **The data directory is a named volume,** which Docker gives the ownership of `/var/lib/iirc` in the image, owner-only and `iirc`'s, so a fresh one needs no `chown`. To keep it in a directory of the machine instead, mount that over `/var/lib/iirc` with `:Z`, from anywhere but under `apps/` or `packages/`, which go to the build, which labels it for SELinux and does nothing where SELinux is off, and name its owner as `user:`, such as `user: "1000:1000"`, and the Daemon runs under that uid.
+- **The API is published on the machine's loopback alone,** `127.0.0.1:7667`, as the service listens. Inside the container the Daemon listens on every address.
+- **Port 7668 is published for the Link listener,** on every address, and nothing answers there until Uploads are on and `uploads.listen` is `0.0.0.0:7668`.
+- **The container is `unhealthy` while the Daemon says it is unwell,** by a health check that runs `iirc health`. Nothing restarts it for that.
+- **`docker compose stop` sends SIGTERM,** so the Daemon says its `QUIT`, and allows 30 s, as the service does.
+- **Its log is the container's,** in logfmt, kept to five files of 10 MB.
+
 ## What it guarantees
 
 - **SIGINT and SIGTERM exit 0.** `BunRuntime.runMain` interrupts the Daemon, which stops the Runtime, then serving, then the rest, and an interrupt is a clean exit rather than the default 130.
