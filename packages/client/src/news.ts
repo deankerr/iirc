@@ -215,7 +215,7 @@ export const changesNothingHere = (
   activity._tag === "Netjoin";
 
 /** What a `Netsplit` or a `Netjoin` says of one Channel. */
-export interface Split {
+interface Split {
   readonly channel: string;
   /** The two servers the batch named, as it named them. */
   readonly servers: readonly [string, string];
