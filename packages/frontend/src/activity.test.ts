@@ -9,6 +9,7 @@ import {
   TimelineWindow,
   mutedCap,
 } from "@iirc/api";
+import { unreadCap } from "@iirc/timelines";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -532,12 +533,12 @@ describe("a muted Timeline", () => {
 
 describe("bots quieted", () => {
   const talking = [
-    described({ id: iirc, name: "#iirc", unread: { botMessages: 4, messages: 5 } }),
-    described({ id: peer, kind: "Direct", name: "peer", unread: { botDirect: 2, direct: 2 } }),
+    described({ id: iirc, name: "#iirc", unread: { botMessages: 4, messages: 1 } }),
+    described({ id: peer, kind: "Direct", name: "peer", unread: { botDirect: 2 } }),
     described({
       id: other,
       name: "#other",
-      unread: { botMessages: 1, highlights: 2, messages: 3 },
+      unread: { botMessages: 1, highlights: 2, messages: 2 },
     }),
   ];
 
@@ -565,10 +566,25 @@ describe("bots quieted", () => {
       on: activityOf(timelineOf(iirc), false, true),
       onDirect: activityOf(timelineOf(peer), false, true),
     }).toStrictEqual({
-      off: { level: "Message", unread: { ...nothing, botMessages: 4, messages: 5 } },
+      off: { level: "Message", unread: { ...nothing, messages: 5 } },
       on: { level: "Message", unread: { ...nothing, messages: 1 } },
       onDirect: { level: undefined, unread: nothing },
     });
+  });
+
+  const flooded = (messages: number) =>
+    decodeTimeline(
+      described({ id: iirc, name: "#iirc", unread: { botMessages: unreadCap + 1, messages } })
+    );
+
+  // Catches a person's Message hiding among a bot's past the cap, which the Daemon counts
+  // apart, or a sum past the cap showing as an exact count.
+  it("keeps a person's Message beside more of a bot's than the cap, and says more past it", () => {
+    expect({
+      off: activityOf(flooded(unreadCap)).unread.messages,
+      on: activityOf(flooded(unreadCap), false, true).unread.messages,
+      person: activityOf(flooded(1), false, true).unread.messages,
+    }).toStrictEqual({ off: unreadCap + 1, on: unreadCap, person: 1 });
   });
 
   // Catches a bot's Highlight going quiet along with its other Messages.
@@ -584,7 +600,7 @@ describe("bots quieted", () => {
       off: {
         level: "Highlight",
         title: "(4) iirc",
-        unread: { ...nothing, botDirect: 2, botMessages: 5, direct: 2, highlights: 2, messages: 8 },
+        unread: { ...nothing, direct: 2, highlights: 2, messages: 8 },
       },
       on: {
         level: "Highlight",
@@ -603,7 +619,7 @@ describe("bots quieted", () => {
         latest: 30,
         name: "#iirc",
         read: 20,
-        unread: { botMessages: 3, messages: 3 },
+        unread: { botMessages: 3 },
       }),
     ];
 
@@ -641,15 +657,15 @@ describe("bots quieted", () => {
     // Catches a "new" line drawn above what the Owner chose not to be told of.
     it("is not drawn above what only bots said", () => {
       expect({
-        off: rows({ botMessages: 1, messages: 1 }, false),
-        on: rows({ botMessages: 1, messages: 1 }, true),
+        off: rows({ botMessages: 1 }, false),
+        on: rows({ botMessages: 1 }, true),
       }).toStrictEqual({ off: ["New", 1, 2], on: [1, 2] });
     });
 
     it("is still drawn when a person said something unread too, or a Highlight", () => {
       expect({
-        highlight: rows({ botMessages: 1, highlights: 1, messages: 1 }, true),
-        mixed: rows({ botMessages: 1, messages: 2 }, true),
+        highlight: rows({ botMessages: 1, highlights: 1 }, true),
+        mixed: rows({ botMessages: 1, messages: 1 }, true),
       }).toStrictEqual({ highlight: ["New", 1, 2], mixed: ["New", 1, 2] });
     });
   });

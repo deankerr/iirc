@@ -47,9 +47,9 @@ export interface Unread {
   readonly direct: number;
   readonly messages: number;
   readonly activity: number;
-  /** Of those counted in `direct`, how many a bot said. */
+  /** The Direct level's count of those a bot said, which `direct` leaves out. */
   readonly botDirect: number;
-  /** Of those counted in `messages`, how many a bot said. */
+  /** The Message level's count of those a bot said, which `messages` leaves out. */
   readonly botMessages: number;
 }
 
@@ -62,7 +62,7 @@ export const unreadOf = {
 } as const satisfies { readonly [L in Level]: keyof Unread };
 
 /**
- * Which count of {@link Unread} a bot's Message of a level is counted in besides its
+ * Which count of {@link Unread} a bot's Message of a level is counted in instead of its
  * level's, as {@link botUnread} gives it. A Highlight is never told apart.
  */
 const botUnreadOf = {
@@ -71,7 +71,7 @@ const botUnreadOf = {
 } as const satisfies { readonly [L in Level]?: keyof Unread };
 
 /**
- * The count an item is counted in besides its level's, when a bot said it: `botDirect` or
+ * The count a bot's item is counted in instead of its level's: `botDirect` or
  * `botMessages`, alike in every adapter.
  * @param level - The item's level.
  * @param content - What it shows.
@@ -84,6 +84,16 @@ export const botUnread = (
   (level === "Direct" || level === "Message") && content._tag === "Message" && content.bot
     ? botUnreadOf[level]
     : undefined;
+
+/**
+ * The one count an item is counted in: its level's, or a bot's own when a bot said it, so
+ * that no item is counted in two.
+ * @param level - The item's level.
+ * @param content - What it shows.
+ * @returns The count.
+ */
+export const countedIn = (level: Level, content: Content): keyof Unread =>
+  botUnread(level, content) ?? unreadOf[level];
 
 /** No items unread. */
 export const noneUnread: Unread = {

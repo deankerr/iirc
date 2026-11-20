@@ -1266,7 +1266,7 @@ describe("what the view says it shows", () => {
   // Catches a "new" divider still drawn above what only bots said, once the Owner quieted them.
   it('draws no "new" divider above what only bots said while bots are quieted', async () => {
     const { registry } = await signedIn([], [message(1, null, true), message(2, null, true)], {
-      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights: 0, messages: 2 },
+      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights: 0, messages: 0 },
     });
 
     await openFromPalette();

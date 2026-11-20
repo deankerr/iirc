@@ -314,11 +314,9 @@ const countUnread = (items: readonly Item[], read: Instant | undefined): Unread 
 
   for (const { content, level, position: where } of items) {
     if (level !== undefined && (read === undefined || where.at > read)) {
-      for (const field of [unreadOf[level], botUnread(level, content)]) {
-        if (field !== undefined) {
-          counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
-        }
-      }
+      const field = botUnread(level, content) ?? unreadOf[level];
+
+      counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
     }
   }
 
@@ -3078,39 +3076,65 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* apply(store, 2, [
           ...opened(2),
           ...Array.from({ length: unreadCap + 2 }, (_, n) =>
-            added(2, channel, position(n, 2, n), byBot(`${n}`), undefined, libera, "Message")
+            added(2, channel, position(n, 2, n), said(`${n}`), undefined, libera, "Message")
           ),
         ]);
         yield* same("more than the cap", yield* counts(channel), {
           ...noneUnread,
-          botMessages: unreadCap + 1,
           messages: unreadCap + 1,
         });
 
         yield* apply(store, 3, [
-          added(3, channel, position(5000, 3), byBot("more"), undefined, libera, "Message"),
+          added(3, channel, position(5000, 3), said("more"), undefined, libera, "Message"),
         ]);
         yield* same("still more than the cap", yield* counts(channel), {
           ...noneUnread,
-          botMessages: unreadCap + 1,
           messages: unreadCap + 1,
         });
 
         yield* apply(store, 4, [marker(4, channel, at(2))]);
         yield* same("exactly the cap", yield* counts(channel), {
           ...noneUnread,
-          botMessages: unreadCap,
           messages: unreadCap,
         });
 
         yield* apply(store, 5, [marker(5, channel, at(unreadCap - 2))]);
         yield* same("a few", yield* counts(channel), {
           ...noneUnread,
-          botMessages: 4,
           messages: 4,
         });
       }),
     name: "caps each count, one past the cap meaning more",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const counts = Effect.map(
+          store.timelines(libera),
+          (each) => each.find(({ id }) => id === channel)?.unread
+        );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...Array.from({ length: unreadCap + 2 }, (_, n) =>
+            added(2, channel, position(n, 2, n), byBot(`${n}`), undefined, libera, "Message")
+          ),
+          added(2, channel, position(5000, 2), said("hello"), undefined, libera, "Message"),
+        ]);
+        yield* same("a bot's past the cap leaves the others' alone", yield* counts, {
+          ...noneUnread,
+          botMessages: unreadCap + 1,
+          messages: 1,
+        });
+
+        yield* apply(store, 3, [marker(3, channel, at(unreadCap - 2))]);
+        yield* same("each counted again from the Read Marker", yield* counts, {
+          ...noneUnread,
+          botMessages: 3,
+          messages: 1,
+        });
+      }),
+    name: "caps a bot's count apart from the others' in its level",
   },
   {
     check: (store) =>
@@ -3131,13 +3155,13 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           added(2, channel, position(15, 2, 5), byBot("iirc!"), undefined, libera, "Highlight"),
           added(2, channel, position(16, 2, 6), byBot("x"), undefined, libera, "Activity"),
         ]);
-        yield* same("each bot's Message, within its level's count", yield* counts, {
+        yield* same("each Message in one count, a bot's apart", yield* counts, {
           activity: 1,
           botDirect: 1,
           botMessages: 2,
-          direct: 2,
+          direct: 1,
           highlights: 1,
-          messages: 3,
+          messages: 1,
         });
 
         yield* apply(store, 3, [marker(3, channel, at(12))]);
@@ -3147,10 +3171,10 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           botMessages: 1,
           direct: 0,
           highlights: 1,
-          messages: 2,
+          messages: 1,
         });
       }),
-    name: "counts a bot's Messages apart within their levels, and never a Highlight",
+    name: "counts a bot's Messages apart from the others', and never a Highlight",
   },
   {
     check: (store) =>

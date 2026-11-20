@@ -1431,15 +1431,15 @@ const UnreadCount = Schema.Int.check(Schema.isBetween({ maximum: unreadCap + 1, 
  */
 export const Unread = Schema.Struct({
   activity: UnreadCount,
-  /** Of those counted in `direct`, how many a bot said. */
+  /** What `direct` leaves out: how many Direct Messages a bot said. */
   botDirect: UnreadCount,
-  /** Of those counted in `messages`, how many a bot said. A Highlight is never told apart. */
+  /** What `messages` leaves out: how many Messages a bot said. A Highlight is never told apart. */
   botMessages: UnreadCount,
   direct: UnreadCount,
   highlights: UnreadCount,
   messages: UnreadCount,
 }).annotate({
-  description: `How many items of each level stand after the Read Marker, up to ${unreadCap}, and ${unreadCap + 1} for more, and of the direct and other Messages, how many a bot said.`,
+  description: `How many items of each level stand after the Read Marker, up to ${unreadCap}, and ${unreadCap + 1} for more, each item counted once: a bot's Direct Messages and Messages are in botDirect and botMessages, not in direct and messages.`,
 });
 
 /** The decoded form of {@link Unread}. */

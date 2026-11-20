@@ -2675,10 +2675,11 @@ const dividerOf = (timeline: Timeline | undefined): Divider | undefined => {
 
   const { botDirect, botMessages, direct, highlights, messages } = timeline.unread;
 
-  // A Highlight is never counted among a bot's, so one is said by someone who calls.
-  return direct + highlights + messages > 0
+  // A bot's Messages are counted apart, and a Highlight, even a bot's, is never among them, so
+  // only bots said it when nothing else is counted.
+  return direct + highlights + messages + botDirect + botMessages > 0
     ? {
-        bots: highlights === 0 && direct === botDirect && messages === botMessages,
+        bots: highlights === 0 && direct === 0 && messages === 0,
         read: timeline.read,
         timeline: timeline.id,
       }

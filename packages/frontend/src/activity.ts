@@ -85,11 +85,22 @@ export const levelOf = (unread: Unread): Level | undefined =>
   levels.find((level) => countOf(unread, level) > 0);
 
 /**
+ * Two counts added, kept at most `unreadCap + 1`, which says more than `unreadCap`, as the
+ * Daemon's own counts are.
+ * @param left - One count.
+ * @param right - The other.
+ * @returns Their sum.
+ */
+const plus = (left: number, right: number): number => Math.min(left + right, unreadCap + 1);
+
+/**
  * The counts a view shows, which is where a muted Timeline and the quiet of bots are
  * decided. A muted Timeline counts nothing but its Highlights, so what is said or done there
- * is not shown, though the Daemon still counts it. With bots quieted, what a bot said leaves
- * `direct` and `messages`, and a Highlight, which no bot count holds, stays. The Daemon
- * counts exactly up to `unreadCap`, so past it what is left is at least what it shows.
+ * is not shown, though the Daemon still counts it. The Daemon counts what a bot said apart
+ * from the rest, so with bots quieted `direct` and `messages` are the Daemon's, and
+ * otherwise each adds its bot count, kept at most `unreadCap + 1`. A Highlight, which no bot
+ * count holds, stays. The bot counts of what is shown are always 0, since what they hold is
+ * either left out or in `direct` and `messages`.
  * @param unread - The counts the Daemon kept.
  * @param muted - Whether the Timeline is muted.
  * @param quietBots - Whether what bots say is left out of the counts.
@@ -100,15 +111,13 @@ export const unreadShown = (unread: Unread, muted: boolean, quietBots = false): 
     return { ...none, highlights: unread.highlights };
   }
 
-  return quietBots
-    ? {
-        ...unread,
-        botDirect: 0,
-        botMessages: 0,
-        direct: Math.max(0, unread.direct - unread.botDirect),
-        messages: Math.max(0, unread.messages - unread.botMessages),
-      }
-    : unread;
+  return {
+    ...unread,
+    botDirect: 0,
+    botMessages: 0,
+    direct: quietBots ? unread.direct : plus(unread.direct, unread.botDirect),
+    messages: quietBots ? unread.messages : plus(unread.messages, unread.botMessages),
+  };
 };
 
 /**
@@ -123,15 +132,6 @@ export const activityOf = (timeline: Timeline, muted = false, quietBots = false)
 
   return { level: levelOf(unread), unread };
 };
-
-/**
- * Two counts added, kept at most `unreadCap + 1`, which says more than `unreadCap`, as the
- * Daemon's own counts are.
- * @param left - One count.
- * @param right - The other.
- * @returns Their sum.
- */
-const plus = (left: number, right: number): number => Math.min(left + right, unreadCap + 1);
 
 /**
  * What is unread in a Network: each count shown, summed over its Timelines, and the
@@ -289,11 +289,14 @@ export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefine
  * @returns The intent, or none.
  */
 export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined => {
+  // Whatever a bot said is unread too, though a view may leave it out.
+  const unread = unreadShown(timeline.unread, false);
+
   const nothing =
     timeline.detached ||
     timeline.removed ||
     (timeline.read !== null && read <= timeline.read) ||
-    (saidCount(timeline.unread) === 0 && timeline.unread.activity === 0);
+    (saidCount(unread) === 0 && unread.activity === 0);
 
   return nothing
     ? undefined

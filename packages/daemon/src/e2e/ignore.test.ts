@@ -246,6 +246,8 @@ describe("ngircd, ignoring by mask", () => {
       shownBefore: result.shownBefore,
       unread: {
         activity: activity(result.hidden.unread) + 2,
+        botDirect: 0,
+        botMessages: 0,
         direct: 0,
         highlights: 1,
         messages: 3,

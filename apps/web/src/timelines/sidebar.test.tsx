@@ -1071,7 +1071,7 @@ const withBotInPeer = (highlights: number): More => ({
   timelines: [
     {
       ...describeTimeline(peer, "peer", "Direct"),
-      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights, messages: 5 },
+      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights, messages: 3 },
     },
   ],
 });

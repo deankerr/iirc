@@ -362,7 +362,7 @@ const unseenIn = (
   quietBots: boolean
 ): readonly Unseen[] =>
   timelines.flatMap((timeline) =>
-    levelOf(timeline.unread) === undefined
+    levelOf(unreadShown(timeline.unread, false)) === undefined
       ? []
       : [
           {

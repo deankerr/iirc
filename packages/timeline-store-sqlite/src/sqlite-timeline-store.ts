@@ -83,7 +83,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 11;
+const layoutVersion = 12;
 
 const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
 
@@ -179,9 +179,11 @@ const layout = [
   // Each partial index ends in `ignored`, always null there, so SQLite checks the condition
   // from the index alone, and a count or a seek stays covered.
   "CREATE INDEX items_by_changed ON items (changed, timeline, cursor, ignored) WHERE ignored IS NULL",
-  "CREATE INDEX items_by_level ON items (timeline, level, cursor, ignored) WHERE level IS NOT NULL AND ignored IS NULL",
-  // A bot's Messages, which `botDirect` and `botMessages` count apart within their levels.
-  // It ends in `bot` too, always 1 there, so a count of them stays covered.
+  // The items no bot said, which each level but a bot's counts, so a bot's never stand between
+  // a count and its cap. `bot` is 0 there, so it is not in the key.
+  "CREATE INDEX items_by_level ON items (timeline, level, cursor, ignored) WHERE level IS NOT NULL AND ignored IS NULL AND bot = 0",
+  // A bot's Messages, which `botDirect` and `botMessages` count apart from the others of their
+  // levels. It ends in `bot` too, always 1 there, so a count of them stays covered.
   "CREATE INDEX items_by_bot ON items (timeline, level, cursor, ignored, bot) WHERE bot = 1 AND level IS NOT NULL AND ignored IS NULL",
   "CREATE INDEX items_shown ON items (timeline, cursor, ignored) WHERE ignored IS NULL",
   // What `Unignored` reads: a Network's hidden items, and nothing shown.
@@ -894,11 +896,12 @@ export const makeSqliteTimelineStore = (
     // no more than one past the cap, on `items_by_level`, so a long Timeline costs no more to
     // count than a short one. Strictly after, by `cursorsAfter`, so the largest instant has
     // nothing after it, and no instant after it is ever made.
-    // A bot's are counted the same way on `items_by_bot`.
+    // A bot's are counted the same way on `items_by_bot`, apart from the others, which are
+    // those on `items_by_level`.
     const counted = (timeline: TimelineId, level: Level, read: Instant | null, bots = false) => sql`
       (SELECT count(*) FROM (
         SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level}
-          ${bots ? sql`AND bot = 1` : sql``} AND ignored IS NULL
+          AND bot = ${bots ? 1 : 0} AND ignored IS NULL
           ${read === null ? sql`` : sql`AND cursor > ${cursorsAfter(read)}`}
         LIMIT ${unreadCap + 1}
       ))
@@ -1022,17 +1025,15 @@ export const makeSqliteTimelineStore = (
 
         yield* touch(change.timeline, change.sequence);
 
-        // One more of its level, and of a bot's, when it stands after the Read Marker, up to
+        // One more of its level, or of a bot's own, when it stands after the Read Marker, up to
         // one past the cap.
-        for (const field of level === undefined ? [] : [unreadOf[level], bot]) {
-          if (field !== undefined) {
-            const column = sql(unreadColumn[field]);
+        if (level !== undefined) {
+          const column = sql(unreadColumn[bot ?? unreadOf[level]]);
 
-            yield* sql`
-              UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
-              WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.position.at})
-            `;
-          }
+          yield* sql`
+            UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
+            WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.position.at})
+          `;
         }
       });
 
