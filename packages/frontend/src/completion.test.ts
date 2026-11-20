@@ -953,6 +953,7 @@ const networkOf = (
   listed: true,
   muted: new Set(),
   network: on,
+  quietBots: false,
   removed,
   running: undefined,
   timelines,

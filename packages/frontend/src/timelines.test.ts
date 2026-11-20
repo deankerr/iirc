@@ -5583,7 +5583,12 @@ describe("where the day changes", () => {
     const [a, b] = [midnightUtc + 10 * hour, midnightUtc + 34 * hour];
     // A Gap that began after the first item, so it comes before the second.
     const gaps = [{ count: 1, from: cursor(a, 1), to: cursor(b, 2) }];
-    const divider: Divider = { read: message(idOf(3), a, 1).position.at, timeline: three };
+
+    const divider: Divider = {
+      bots: false,
+      read: message(idOf(3), a, 1).position.at,
+      timeline: three,
+    };
 
     expect({
       withGap: dayText(dayRows([a, b], { gaps, zone: fixed(0) })),
@@ -5620,7 +5625,11 @@ describe("where the day changes", () => {
 
     // The "new" divider adds a row before the third day.
     const divided = dayRows(instants, {
-      divider: { read: message(idOf(3), instants[0] ?? 0, 1).position.at, timeline: three },
+      divider: {
+        bots: false,
+        read: message(idOf(3), instants[0] ?? 0, 1).position.at,
+        timeline: three,
+      },
       zone: fixed(0),
     });
 
@@ -5853,7 +5862,7 @@ describe("a run of Messages under one nick", () => {
   it("ends at the Read Marker's line", () => {
     expect(
       runRows([said(1, at), said(2, at + minute)], {
-        divider: { read: said(1, at).position.at, timeline: three },
+        divider: { bots: false, read: said(1, at).position.at, timeline: three },
       })
     ).toStrictEqual([1, "new", 2]);
   });

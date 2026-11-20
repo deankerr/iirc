@@ -2,8 +2,9 @@
  * Which items the changes stream adds call for a notification, and what it says. Only
  * something said live to the Owner, a Highlight, a Direct Message from someone else, or an
  * invitation, that the Owner is not already looking at and has not read, and in a muted
- * Timeline, or in any while what is muted is not known, only a Highlight. The runtime shows them, when the Owner turned notifications
- * on for the device.
+ * Timeline, or in any while what is muted is not known, only a Highlight, and with bots
+ * quieted, nothing a bot said but a Highlight. The runtime shows them, when the Owner turned
+ * notifications on for the device.
  *
  * @packageDocumentation
  */
@@ -72,6 +73,14 @@ const bodyOf = (content: Extract<TimelineItem["content"], { readonly _tag: "Mess
 };
 
 /**
+ * Whether an item is a Message a bot said.
+ * @param item - The item.
+ * @returns Whether it is.
+ */
+const saidByBot = (item: TimelineItem): boolean =>
+  item.content._tag === "Message" && item.content.bot;
+
+/**
  * What an item says, as a notification's body, when it is something said live to the Owner:
  * a Message not ours, a Highlight or a Direct Message, or an invitation, which is a
  * Highlight.
@@ -105,6 +114,7 @@ const saidToOwner = (item: TimelineItem): string | undefined => {
  * @param page - The page.
  * @param muted - The Timelines the Owner muted, which call for a notification only by a
  * Highlight, or `NotKnown`, while every Timeline does.
+ * @param quietBots - Whether a bot's Message calls for one only as a Highlight.
  * @param item - The item.
  * @returns The notification, or none.
  */
@@ -113,6 +123,7 @@ const notifyOf = (
   change: TimelineChange,
   page: Page,
   muted: Muted,
+  quietBots: boolean,
   item: TimelineItem
 ): Notify | undefined => {
   const body = saidToOwner(item);
@@ -123,6 +134,7 @@ const notifyOf = (
     body === undefined ||
     timeline === undefined ||
     ((muted === "NotKnown" || muted.has(timeline.id)) && item.level !== "Highlight") ||
+    (quietBots && saidByBot(item) && item.level !== "Highlight") ||
     (timeline.read !== null && item.position.at <= timeline.read) ||
     lookingAt(after, page, timeline.id)
   ) {
@@ -148,6 +160,8 @@ const notifyOf = (
  * @param page - The page.
  * @param muted - The Timelines the Owner muted, where only a Highlight notifies, or
  * `NotKnown` before the options are read, when only a Highlight notifies anywhere.
+ * @param quietBots - Whether bots are quieted, so what a bot said notifies only as a
+ * Highlight. Not while the options are not read.
  * @returns The notifications, at most one per Timeline, the latest.
  */
 export const notificationsOf = (
@@ -155,7 +169,8 @@ export const notificationsOf = (
   after: Timelines,
   change: TimelineChange,
   page: Page,
-  muted: Muted = new Set()
+  muted: Muted = new Set(),
+  quietBots = false
 ): readonly Notify[] => {
   // A step at or below the boundary was considered before, as when a reset replays it, and
   // one the state did not take, as one given twice, moves no boundary.
@@ -166,7 +181,7 @@ export const notificationsOf = (
   const latest = new Map<TimelineId, Notify>();
 
   for (const item of change.items) {
-    const notify = notifyOf(after, change, page, muted, item);
+    const notify = notifyOf(after, change, page, muted, quietBots, item);
 
     if (notify !== undefined) {
       latest.set(notify.timeline, notify);

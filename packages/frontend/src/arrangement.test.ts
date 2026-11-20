@@ -72,6 +72,7 @@ const net = (
     listed: true,
     muted: new Set(),
     network: network(name),
+    quietBots: false,
     removed: options.removed ?? false,
     running: undefined,
     timelines: [timeline(first, name, "Network", name), ...make(listed, first + 1)].toSorted(
