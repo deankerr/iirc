@@ -145,6 +145,21 @@ describe("invite-notify", () => {
     expect.assertions(0);
   });
 
+  it("opens no Timeline for a Channel Self is not in, keeping it to the Network's own", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannel(["invite-notify"]),
+        lines(
+          "<< :peer!u@h INVITE friend #elsewhere",
+          "?? activity UserInvited #elsewhere friend by=peer in=network"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("leaves an INVITE naming Self as it is without the cap", () => {
     const line = "<< :peer!u@h INVITE iirc #elsewhere";
 
@@ -159,6 +174,8 @@ describe("invite-notify", () => {
     ["a name that is no nick", "<< :peer!u@h INVITE #friend #iirc"],
     ["an empty nick", "<< :peer!u@h INVITE  #iirc"],
     ["a parameter too many", "<< :peer!u@h INVITE friend #iirc :extra"],
+    ["a source that is no nick", "<< :#peer!u@h INVITE friend #iirc"],
+    ["a source that is no whole mask", "<< :peer@ INVITE friend #iirc"],
   ])("ignores an INVITE of another User with %s", (_name, line) => {
     play(client, {
       configuration: base,

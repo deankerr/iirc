@@ -292,7 +292,6 @@ const activityTimelines = (
     case "Joined":
     case "Parted":
     case "Kicked":
-    case "UserInvited":
     case "TopicChanged": {
       return [channel(run, activity.channel)];
     }
@@ -311,6 +310,13 @@ const activityTimelines = (
 
     case "NickChanged": {
       return nickChangedWhere(run, naming, activity, live);
+    }
+
+    // An Ircd tells only a Channel's members of an invitation to it.
+    case "UserInvited": {
+      const invitedTo = channel(run, activity.channel);
+
+      return ownChannels(run).filter((each) => sameWhere(each, invitedTo));
     }
 
     // The core places a standard reply where what it answers belongs, and a CTCP by who

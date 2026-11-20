@@ -12,7 +12,7 @@ import { casefold } from "@iirc/protocol/casemapping";
 import type { Context, Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName } from "../ids.ts";
 import { namingOf, parseChannel, parseNick } from "../names.ts";
-import { userSource } from "./user-source.ts";
+import { wholeSource } from "./user-source.ts";
 
 // The naming rules ISUPPORT gives now, from the tokens that make them.
 const namingNow = (context: Context<undefined>) =>
@@ -44,11 +44,12 @@ export const inviteNotify: Feature = {
     }
 
     const naming = namingNow(context);
-    const source = userSource(line);
+    const source = wholeSource(line);
+    const by = source === undefined ? undefined : parseNick(naming, source.nick);
     const nick = named === undefined ? undefined : parseNick(naming, named);
     const channel = name === undefined ? undefined : parseChannel(naming, name);
 
-    if (source === undefined || nick === undefined || channel === undefined || more.length > 0) {
+    if (by === undefined || nick === undefined || channel === undefined || more.length > 0) {
       return {
         value: [{ _tag: "Ignored", reason: { _tag: "Malformed", command: line.command } }],
       };
@@ -56,7 +57,7 @@ export const inviteNotify: Feature = {
 
     const invited: Meant = {
       _tag: "Activity",
-      activity: { _tag: "UserInvited", by: source.nick, channel, nick },
+      activity: { _tag: "UserInvited", by, channel, nick },
       at: arrival.time,
       id: arrival.id,
       live: arrival.live,
