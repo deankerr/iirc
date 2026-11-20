@@ -326,7 +326,7 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 - **What may have changed a Channel is read again, coalesced, never cancelled.** An Activity in it, its Timeline's `head` moved past the one last seen, a Gap, an overflow, or a reset leaves it dirty. `refreshDelay` spaces the reads: 250 ms after the first change, and no more than once a second while changes keep coming.
 - **Members are read again from the start, as many as were held.** The Daemon orders them by rank, which any `MODE` can move, so patching the list would need to know what each Activity means for every member.
 - **The header says what the head said.** A Channel's shows its topic, formatted, with who set it and when, its modes, and its count, and a Direct Message's whether its partner is on the Network. Where Self stands otherwise is in words, such as kicked or joining.
-- **A member shows their highest rank's symbol, from the Network's `PREFIX`, and their account, the one they are logged in to, logged out, or not known, as it was if that is all that is known.**
+- **A member shows their highest rank's symbol, from the Network's `PREFIX`, and their account, the one they are logged in to, logged out, or not known, as it was if that is all that is known.** It is a bot when their User said so and that is known now, which a stale or unknown fact is not, and a row's label says `bot`.
 
 ## Lookups
 
@@ -388,6 +388,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 - **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end. The work is linear in the text, however hostile.
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
 - **A reply's quotation is one plain line:** its sender in their colour slot, how it was said, its text as plain text, and the position it stands at, for a view to go to. A Direct Message's `context`, the Channel it is about, is contained like any name.
+- **A Message line says its sender is a bot** as the Message says it, in `bot`, for a view to mark beside the nick.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.

@@ -16,6 +16,7 @@ declare const styles: {
   readonly scrim: string;
   readonly sheet: string;
   readonly symbol: string;
+  readonly tag: string;
 };
 
 export default styles;

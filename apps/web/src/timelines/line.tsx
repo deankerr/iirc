@@ -35,6 +35,7 @@ import { NickButton } from "../nick/nick-menu.tsx";
 import { dayShown, lineShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
+import { BotMark } from "../ui/bot-mark.tsx";
 import { Button } from "../ui/button.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
@@ -415,7 +416,8 @@ const MessageMenu = ({
 type Place = "Line" | "Head" | "Later";
 
 /**
- * What comes before a Message's text: what it answers, the time, and the sender as said. A
+ * What comes before a Message's text: what it answers, the time, and the sender as said,
+ * with a quiet `bot` by the sender's nick when their User said they are one. A
  * run's head has its nick and time on a line of their own, with what it answers under them,
  * just above the text that answers it. A later Message of a run has its time alone, still
  * there for a screen reader and shown while the row is hovered or focused, and reached by
@@ -444,7 +446,14 @@ const Said = ({
     return (
       <>
         <span className={styles.heading}>
-          <span className={styles.headNick}>{nick}</span> <Time at={item.position.at} />
+          <span className={styles.headNick}>{nick}</span>
+          {line.bot ? (
+            <>
+              {" "}
+              <BotMark />
+            </>
+          ) : null}{" "}
+          <Time at={item.position.at} />
         </span>{" "}
         <Answered item={item} />
       </>
@@ -470,6 +479,11 @@ const Said = ({
       <Time at={item.position.at} />{" "}
       <span className={styles.sender}>
         <span className={styles.said}>
+          {line.bot ? (
+            <>
+              <BotMark />{" "}
+            </>
+          ) : null}
           {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
           {line.kind === "Notice" ? <>-{nick}-</> : null}
           {line.kind === "Action" ? <>* {nick}</> : null}

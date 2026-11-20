@@ -1060,6 +1060,57 @@ const withUnreadPeer = (highlights: number): More => ({
   ],
 });
 
+/**
+ * A Direct Message with `peer` holding five unread Messages, two of them a bot's, and as
+ * many Highlights as given, which are never a bot's.
+ * @param highlights - How many Highlights.
+ * @returns The Timeline to list.
+ */
+const withBotInPeer = (highlights: number): More => ({
+  listed: 1,
+  timelines: [
+    {
+      ...describeTimeline(peer, "peer", "Direct"),
+      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights, messages: 5 },
+    },
+  ],
+});
+
+describe("bots quieted in the Sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  // Catches bots counted though the Owner quieted them, or left out while the option is off.
+  it("counts what a bot said while bots are not quieted, and leaves it out once they are", async () => {
+    await arrangedWith({}, withBotInPeer(0));
+
+    const off = row("peer").getAttribute("aria-label");
+
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    await arrangedWith({ quietBots: true }, withBotInPeer(0));
+
+    expect({ off, on: row("peer").getAttribute("aria-label") }).toStrictEqual({
+      off: "peer, 5 unread",
+      on: "peer, 3 unread",
+    });
+  });
+
+  // Catches a Highlight dropped with a bot's other Messages.
+  it("still counts a Highlight, whoever it is from, beside what else is unread", async () => {
+    await arrangedWith({ quietBots: true }, withBotInPeer(1));
+
+    expect(row("peer").getAttribute("aria-label")).toBe("peer, 4 unread, 1 highlight");
+  });
+});
+
 describe("muting a Timeline from the Sidebar", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {

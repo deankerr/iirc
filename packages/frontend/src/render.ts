@@ -211,6 +211,8 @@ export type Line =
       readonly kind: "Privmsg" | "Notice" | "Action";
       readonly nick: string;
       readonly colour: number;
+      /** Its sender said they are a bot, which a view marks beside their nick. */
+      readonly bot: boolean;
       readonly text: readonly Inline[];
       /** The Channel a Direct Message is about, contained, when it names one. */
       readonly context: string | undefined;
@@ -1099,6 +1101,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
 
       return {
         _tag: "Message",
+        bot: content.bot,
         colour: nickColour(content.sender),
         context: content.context === null ? undefined : contained(content.context),
         delivered: delivery === undefined ? undefined : deliveryWords(delivery),

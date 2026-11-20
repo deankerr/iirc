@@ -1,0 +1,8 @@
+/* A quiet word, in the text's own font a little smaller, which a copy leaves out. */
+.mark {
+  color: var(--color-muted);
+  font-size: 0.85em;
+  font-style: normal;
+  font-weight: normal;
+  user-select: none;
+}

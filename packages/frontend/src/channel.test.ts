@@ -998,6 +998,33 @@ describe("the members", () => {
     ]);
   });
 
+  // Catches a bot mark drawn on what is not known, or only guessed from an old fact.
+  it("marks a member as a bot only when their User is known now to be one", () => {
+    const { ranks } = header("Joined");
+
+    const bots = [
+      { _tag: "Known", at: 1, from: "ircd", value: true },
+      { _tag: "Known", at: 1, from: "ircd", value: false },
+      { _tag: "Stale", since: 2, was: true },
+      { _tag: "Unknown" },
+    ] as const;
+
+    const decoded = page(bots.map((bot, index) => ({ ...member(`n${index}`, []), bot }))).members;
+
+    expect(
+      decoded.map((one) => {
+        const row = memberRow(one, ranks);
+
+        return [row.bot, row.label];
+      })
+    ).toStrictEqual([
+      [true, "n0, bot"],
+      [false, "n1"],
+      [false, "n2"],
+      [false, "n3"],
+    ]);
+  });
+
   it("shows each one's account as their User is known, and says it in words", () => {
     const { ranks } = header("Joined");
 

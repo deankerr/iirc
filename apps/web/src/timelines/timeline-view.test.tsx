@@ -59,7 +59,8 @@ const message = (
   ours: {
     readonly delivery: { readonly _tag: "Unconfirmed" | "Unsent" };
     readonly intent: string;
-  } | null = null
+  } | null = null,
+  bot = false
 ): typeof TimelineItem.Encoded => ({
   answered: null,
   changed: sequence,
@@ -67,7 +68,7 @@ const message = (
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
-    bot: false,
+    bot,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -308,6 +309,24 @@ const logOf = () => {
 
   return found;
 };
+
+/**
+ * Whether the open Timeline draws the "new" divider.
+ * @returns Whether it does.
+ */
+const dividedNow = () =>
+  [...logOf().querySelectorAll("p")].some((one) => one.textContent === "new");
+
+/**
+ * The text of each row of the log that says a line, its time written `T`.
+ * @returns The texts.
+ */
+const linesOf = () =>
+  [...logOf().querySelectorAll<HTMLElement>("[data-index]")].flatMap((one) =>
+    one.textContent?.includes("line ")
+      ? [plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T")]
+      : []
+  );
 
 /**
  * Each day line's words and the day it is dated, in the order the log draws them.
@@ -1220,6 +1239,48 @@ describe("what the view says it shows", () => {
     expect(row?.textContent?.replaceAll(/[\u2066-\u2069]/gu, "").replace(/^\S+ /u, "")).toBe(
       "<peer> line 1 in #elsewhere"
     );
+  });
+
+  // Catches a bot's Message drawn as any other's, or a mark on every Message.
+  it("marks a Message a bot said by its sender, quietly, in a line and in a stacked run, and no other", async () => {
+    const { registry } = await signedIn([], [message(1, null, true), message(2)]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const inline = linesOf();
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    expect({ inline, stacked: linesOf() }).toStrictEqual({
+      inline: ["T bot <peer> line 1", "T <peer> line 2"],
+      // Line 2 continues the run, so the head alone says who it is.
+      stacked: ["peer bot T line 1", "T line 2"],
+    });
+  });
+
+  // Catches a "new" divider still drawn above what only bots said, once the Owner quieted them.
+  it('draws no "new" divider above what only bots said while bots are quieted', async () => {
+    const { registry } = await signedIn([], [message(1, null, true), message(2, null, true)], {
+      unread: { activity: 0, botDirect: 0, botMessages: 2, direct: 0, highlights: 0, messages: 2 },
+    });
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const loud = dividedNow();
+
+    await act(async () => {
+      uiRead(registry, { options: { ...uiDefaults, quietBots: true }, sequence: 1 });
+      await Promise.resolve();
+    });
+
+    expect({ loud, quiet: dividedNow() }).toStrictEqual({ loud: true, quiet: false });
   });
 
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {

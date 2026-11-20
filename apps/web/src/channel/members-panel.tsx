@@ -35,6 +35,7 @@ import { NickMenu } from "../nick/nick-menu.tsx";
 import { leadingShown, sizeShown } from "../options/ui.ts";
 import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
+import { BotMark } from "../ui/bot-mark.tsx";
 import { IconButton } from "../ui/button.tsx";
 import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
@@ -42,7 +43,8 @@ import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./stat
 import styles from "./members-panel.module.css";
 
 /**
- * One member: their rank's symbol, and their nick in its colour.
+ * One member: their rank's symbol, their nick in its colour, and a quiet `bot` after it when
+ * their User said they are one.
  * @param props - The member.
  * @returns The row's content.
  */
@@ -50,6 +52,11 @@ const Member = ({ row }: { readonly row: MemberRow }) => (
   <span aria-hidden className={row.away ? styles.away : styles.member}>
     <span className={styles.symbol}>{row.symbol ?? " "}</span>
     <Nick colour={row.colour} nick={row.nick} />
+    {row.bot ? (
+      <span className={styles.tag}>
+        <BotMark />
+      </span>
+    ) : null}
   </span>
 );
 

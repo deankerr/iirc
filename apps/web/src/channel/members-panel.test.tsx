@@ -52,17 +52,19 @@ const listed = (
 });
 
 const unknownAccount = { _tag: "Unknown" } as const;
+const unknownBot = { _tag: "Unknown" } as const;
 
 const known = (value: string | null) => ({ _tag: "Known", at: 1, from: "ircd", value }) as const;
 
 const member = (
   nick: string,
   prefixes: readonly string[] = [],
-  account: typeof Member.Encoded.account = unknownAccount
+  account: typeof Member.Encoded.account = unknownAccount,
+  bot: typeof Member.Encoded.bot = unknownBot
 ): typeof Member.Encoded => ({
   account,
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
-  bot: { _tag: "Unknown" },
+  bot,
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });
@@ -517,6 +519,35 @@ describe("a Pane's members", () => {
       peer: "logged outquerywhoismentionignore",
       quiet: "querywhoismentionignore",
     });
+  });
+
+  // Catches a bot unmarked, or a mark drawn on a member who is not known to be one: a
+  // person, a fact gone stale, or one never learned.
+  it("marks a member whose User is known to be a bot, quietly and for a screen reader, and no other", async () => {
+    const { registry } = await signedIn(null, [
+      member("helper", ["o"], unknownAccount, { _tag: "Known", at: 1, from: "ircd", value: true }),
+      member("person", [], unknownAccount, { _tag: "Known", at: 1, from: "ircd", value: false }),
+      member("stale", [], unknownAccount, { _tag: "Stale", since: 2, was: true }),
+      member("unknown"),
+    ]);
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 400);
+    await press(toggle());
+    await settled(() => members()?.querySelector('[data-key="unknown"]') !== null);
+
+    const shown = ["helper", "person", "stale", "unknown"].map((nick) => {
+      const row = members()?.querySelector<HTMLElement>(`[data-key="${nick}"]`);
+
+      return [row?.textContent, row?.getAttribute("aria-label")];
+    });
+
+    expect(shown).toStrictEqual([
+      ["@helperbot", "helper, operator, bot"],
+      [" person", "person"],
+      [" stale", "stale"],
+      [" unknown", "unknown"],
+    ]);
   });
 
   it("offers no kick, deop, or devoice of a member who outranks Self, and does of one who does not", async () => {

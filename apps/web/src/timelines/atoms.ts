@@ -102,13 +102,35 @@ const mutedHeld = Atom.make((get): Muted => {
 });
 
 /**
+ * Whether what bots say is left out of the counts, as the shared options show it with the
+ * change on their way, so the counts follow the switch at once, or not until they are read.
+ */
+export const quietBotsShown = Atom.make((get): boolean => {
+  const shown = uiShown(get(optionsState));
+
+  return shown === undefined ? false : shown.options.quietBots;
+});
+
+/**
+ * Whether bots are quieted as the Daemon holds it, not as a change on its way shows it, or
+ * not until the options are read, so a notification is quieted only by what is settled.
+ */
+const quietBotsHeld = Atom.make((get): boolean => get(optionsState).ui?.options.quietBots ?? false);
+
+/**
  * The Networks and their Timelines, in sidebar order, a Timeline asked to be closed left
- * out from when it is asked, each passing on the Timelines the Owner muted.
+ * out from when it is asked, each passing on the Timelines the Owner muted and whether bots
+ * are quieted.
  */
 export const sidebarNetworks = Atom.make((get) => {
   const state = get(timelinesState);
 
-  return sidebar(state, closingShown(get(closingState), state.networks), get(mutedShown));
+  return sidebar(
+    state,
+    closingShown(get(closingState), state.networks),
+    get(mutedShown),
+    get(quietBotsShown)
+  );
 });
 
 /** Whether the Network list was ever read, so having no Network says none is configured. */
@@ -454,7 +476,8 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
         registry.get(timelinesState),
         event.data,
         registry.get(pageState),
-        registry.get(mutedHeld)
+        registry.get(mutedHeld),
+        registry.get(quietBotsHeld)
       );
 
       // Where an Upload was said is read again beside the stream, never holding it up.

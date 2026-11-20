@@ -97,12 +97,14 @@ const listed = (
  * @param timeline - Where.
  * @param sequence - Its step, and its time in seconds.
  * @param level - How much it calls for the Owner.
+ * @param bot - Whether its sender said they are a bot.
  * @returns The item, as the wire carries it.
  */
 const message = (
   timeline: string,
   sequence: number,
-  level: (typeof TimelineItem.Encoded)["level"] = "Message"
+  level: (typeof TimelineItem.Encoded)["level"] = "Message",
+  bot = false
 ): typeof TimelineItem.Encoded => ({
   answered: null,
   changed: sequence,
@@ -110,7 +112,7 @@ const message = (
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
-    bot: false,
+    bot,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -528,6 +530,61 @@ describe("notifications", () => {
     await eventually(() => notifier.shown.length === 1);
 
     expect(notifier.shown.map((one) => one.body)).toStrictEqual(["<⁨peer⁩> ⁨iirc: ping 4⁩"]);
+  });
+
+  // Catches `ui.quietBots` never reaching the core's notifications, so a bot's Direct
+  // Message still notifies, or a bot's Highlight is silenced with the rest of what it says.
+  it("notifies of a bot's Highlight and none of its Direct Messages once bots are quieted", async () => {
+    const { notifier, opening, registry, send, type } = await reading();
+
+    await opening(iirc);
+    await type(timelineId(iirc), "/notify on");
+    uiRead(registry, { options: { ...uiDefaults, quietBots: true }, sequence: 9 });
+
+    // The bot's Direct Message comes first, so what shows after it shows it was passed over.
+    send(
+      changed(
+        3,
+        [message(peer, 3, "Direct", true)],
+        [listed(peer, { changed: 3, latest: 3000, unread: { botDirect: 1, direct: 1 } })]
+      )
+    );
+    send(
+      changed(
+        4,
+        [message(peer, 4, "Highlight", true)],
+        [
+          listed(peer, {
+            changed: 4,
+            latest: 4000,
+            unread: { botDirect: 1, direct: 1, highlights: 1 },
+          }),
+        ]
+      )
+    );
+    await eventually(() => notifier.shown.length === 1);
+
+    expect(notifier.shown.map((one) => one.body)).toStrictEqual(["<⁨peer⁩> ⁨iirc: ping 4⁩"]);
+  });
+
+  // Catches bots quieted by default, or by an option not yet read: off, a bot's Direct
+  // Message notifies as any other does.
+  it("notifies of a bot's Direct Message while bots are not quieted", async () => {
+    const { notifier, opening, registry, send, type } = await reading();
+
+    await opening(iirc);
+    await type(timelineId(iirc), "/notify on");
+    uiRead(registry, { options: uiDefaults, sequence: 9 });
+    send(
+      changed(
+        3,
+        [message(peer, 3, "Direct", true)],
+        [listed(peer, { changed: 3, latest: 3000, unread: { botDirect: 1, direct: 1 } })]
+      )
+    );
+    await eventually(() => notifier.shown.length === 1);
+
+    expect(notifier.shown.map((one) => one.body)).toStrictEqual(["<⁨peer⁩> ⁨line 3⁩"]);
   });
 
   // Catches a Timeline muted on another device notifying before this one reads the options.
