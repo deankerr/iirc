@@ -5678,7 +5678,8 @@ const said = (
   sequence: number,
   at: number,
   sender = "alice",
-  kind: "Privmsg" | "Action" | "Notice" = "Privmsg"
+  kind: "Privmsg" | "Action" | "Notice" = "Privmsg",
+  bot = false
 ) =>
   decodeItem({
     answered: null,
@@ -5687,7 +5688,7 @@ const said = (
       _tag: "Message",
       answers: null,
       at: unknown,
-      bot: false,
+      bot,
       context: null,
       id: unknown,
       kind,
@@ -5782,6 +5783,19 @@ describe("a run of Messages under one nick", () => {
 
   it("takes a nick in any case as the same User", () => {
     expect(runRows([said(1, at, "Alice"), said(2, at + minute, "aLICE")])).toStrictEqual([1, "+2"]);
+  });
+
+  // Catches a bot's Message left under the head of a run that shows no mark, since only a
+  // run's head does, or an unmarked one under a marked head.
+  it("ends when the mark of its sender changes, either way", () => {
+    expect(
+      runRows([
+        said(1, at),
+        said(2, at + minute, "alice", "Privmsg", true),
+        said(3, at + 2 * minute, "alice", "Privmsg", true),
+        said(4, at + 3 * minute),
+      ])
+    ).toStrictEqual([1, 2, "+3", 4]);
   });
 
   it("ends when another User speaks", () => {

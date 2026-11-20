@@ -1243,11 +1243,14 @@ describe("what the view says it shows", () => {
 
   // Catches a bot's Message drawn as any other's, or a mark on every Message.
   it("marks a Message a bot said by its sender, quietly, in a line and in a stacked run, and no other", async () => {
-    const { registry } = await signedIn([], [message(1, null, true), message(2)]);
+    const { registry } = await signedIn(
+      [],
+      [message(1, null, true), message(2, null, true), message(3)]
+    );
 
     await openFromPalette();
     await settled(() => registry.get(openTimeline)._tag === "Shown");
-    await settled(() => logOf().textContent?.includes("line 2"));
+    await settled(() => logOf().textContent?.includes("line 3"));
 
     const inline = linesOf();
 
@@ -1257,9 +1260,10 @@ describe("what the view says it shows", () => {
     });
 
     expect({ inline, stacked: linesOf() }).toStrictEqual({
-      inline: ["T bot <peer> line 1", "T <peer> line 2"],
-      // Line 2 continues the run, so the head alone says who it is.
-      stacked: ["peer bot T line 1", "T line 2"],
+      inline: ["T bot <peer> line 1", "T bot <peer> line 2", "T <peer> line 3"],
+      // Line 2 continues the run, so the head alone says who it is, and line 3, which no bot
+      // said, begins another, so it is never under a head that marks its sender.
+      stacked: ["peer bot T line 1", "T line 2", "peer T line 3"],
     });
   });
 
