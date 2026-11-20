@@ -665,6 +665,16 @@ export const SidebarPinned = Schema.Array(TimelineId)
 /** The decoded form of {@link SidebarPinned}. */
 export type SidebarPinned = typeof SidebarPinned.Type;
 
+/**
+ * Whether what bots say is left out of unread counts and notifications, as the Daemon's
+ * `botDirect` and `botMessages` count it. A Highlight from a bot still counts and notifies.
+ */
+export const QuietBots = Schema.Boolean.annotate({
+  default: false,
+  description:
+    "Whether what bots say is left out of unread counts and notifications. A Highlight from a bot still counts and notifies.",
+});
+
 /** How many Timelines the Owner may mute, so the options stay small enough to send whole. */
 export const mutedCap = 256;
 
@@ -782,6 +792,7 @@ export const UiOptions = Schema.Struct({
   "previews.players": PreviewsPlayers,
   "previews.style": PreviewsStyle,
   "previews.timelines": PreviewsByTimeline,
+  quietBots: QuietBots,
   read: ReadRule,
   "sidebar.networks": SidebarNetworks,
   "sidebar.order": SidebarOrder,

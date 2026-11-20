@@ -150,6 +150,7 @@ describe("the options, derived from the Schema", () => {
     }).toStrictEqual({
       names: [
         "network.libera.answerCtcp",
+        "network.libera.bot",
         "network.libera.channels",
         "network.libera.channels.#secret.key",
         "network.libera.channels.#iirc.key",
@@ -190,6 +191,7 @@ describe("the options, derived from the Schema", () => {
 
     expect(shown).toStrictEqual({
       answerCtcp: { starts: "on", value: { _tag: "Shown", text: "on" } },
+      bot: { starts: "off", value: { _tag: "Shown", text: "off" } },
       channels: { starts: "", value: { _tag: "Shown", text: "#secret,#iirc" } },
       "channels.#iirc.key": { starts: "unset", value: { _tag: "Unset" } },
       "channels.#secret.key": {
@@ -1390,6 +1392,7 @@ describe("the options under ui", () => {
       "previews.players": ["player.vimeo.com", "w.soundcloud.com"],
       "previews.style": "thumbnail",
       "previews.timelines": {},
+      quietBots: false,
       read: "latest",
       "sidebar.networks": [],
       "sidebar.order": [],
@@ -1505,6 +1508,7 @@ describe("the options under ui", () => {
         "ui.previews.players",
         "ui.previews.style",
         "ui.previews.timelines",
+        "ui.quietBots",
         "ui.read",
         "ui.sidebar.networks",
         "ui.sidebar.order",
@@ -1515,7 +1519,6 @@ describe("the options under ui", () => {
         "ui.theme",
         "ui.themes",
         "ui.time",
-        "ui.width",
       ],
       kept: shared,
       time: [{ _tag: "Shown", text: "HH:mm:ss" }],

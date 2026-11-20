@@ -763,6 +763,8 @@ export const Profile = Schema.Struct({
   ),
   /** The away message, from `301`. */
   away: Schema.NullOr(Untrusted),
+  /** Whether the User is a bot, from `335`, read only where the Ircd names a bot mode. */
+  bot: Schema.Boolean,
   /** From `319`: each Channel, with the membership modes its prefixes stand for, by `PREFIX`. */
   channels: Schema.Array(Schema.Struct({ name: Untrusted, prefixes: Schema.Array(Untrusted) })),
   host: Schema.NullOr(Untrusted),
@@ -955,6 +957,8 @@ export const News = Schema.TaggedUnion({
     /** The id of the Message it answers, from a `+reply` tag. */
     answers: Schema.NullOr(MessageId),
     at: Fact(Instant),
+    /** Whether its sender said it as a bot, by the `bot` tag, where the Ircd names a bot mode. */
+    bot: Schema.Boolean,
     /**
      * The Channel a Direct Message was said in the context of, from a `+channel-context`
      * tag, only on a Message to a User and only when it names a Channel.
@@ -1345,6 +1349,8 @@ export const ItemContent = Schema.TaggedUnion({
     /** The id of the Message it answers, from a `+reply` tag, which the item's `answered` resolves. */
     answers: Schema.NullOr(MessageId),
     at: Fact(Instant),
+    /** Whether its sender said it as a bot, by the `bot` tag, where the Ircd names a bot mode. */
+    bot: Schema.Boolean,
     /**
      * The Channel a Direct Message was said in the context of, from a `+channel-context`
      * tag, only on a Message to a User and only when it names a Channel.
@@ -1425,11 +1431,15 @@ const UnreadCount = Schema.Int.check(Schema.isBetween({ maximum: unreadCap + 1, 
  */
 export const Unread = Schema.Struct({
   activity: UnreadCount,
+  /** Of those counted in `direct`, how many a bot said. */
+  botDirect: UnreadCount,
+  /** Of those counted in `messages`, how many a bot said. A Highlight is never told apart. */
+  botMessages: UnreadCount,
   direct: UnreadCount,
   highlights: UnreadCount,
   messages: UnreadCount,
 }).annotate({
-  description: `How many items of each level stand after the Read Marker, up to ${unreadCap}, and ${unreadCap + 1} for more.`,
+  description: `How many items of each level stand after the Read Marker, up to ${unreadCap}, and ${unreadCap + 1} for more, and of the direct and other Messages, how many a bot said.`,
 });
 
 /** The decoded form of {@link Unread}. */
@@ -1736,6 +1746,8 @@ export type SessionKnowledge = typeof SessionKnowledge.Type;
 export const UserKnowledge = Schema.Struct({
   account: Fact(Schema.NullOr(Untrusted)),
   away: Fact(Schema.NullOr(Schema.Struct({ message: Untrusted }))),
+  /** Whether they say they are a bot, where the Ircd names a bot mode. */
+  bot: Fact(Schema.Boolean),
   mask: Fact(Schema.Struct({ host: Untrusted, user: Untrusted })),
   nick: Untrusted,
   realname: Fact(Untrusted),
@@ -1873,12 +1885,13 @@ export type ChannelHeader = typeof ChannelHeader.Type;
 
 /**
  * A member of a Channel: their nick, the prefix modes they hold, such as `o` and `v`,
- * listed in the order of `PREFIX`, and their User's account, or `null` for logged out, and
- * whether they are away, as their User is known.
+ * listed in the order of `PREFIX`, and their User's account, or `null` for logged out,
+ * whether they are away, and whether they are a bot, as their User is known.
  */
 export const Member = Schema.Struct({
   account: Fact(Schema.NullOr(Untrusted)),
   away: Fact(Schema.NullOr(Schema.Struct({ message: Untrusted }))),
+  bot: Fact(Schema.Boolean),
   nick: Untrusted,
   prefixes: SetFact(Schema.Array(Untrusted)),
 });

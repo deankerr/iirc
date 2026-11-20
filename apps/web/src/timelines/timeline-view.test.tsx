@@ -50,7 +50,7 @@ const listed = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
   ...more,
 });
 
@@ -67,6 +67,7 @@ const message = (
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -102,6 +103,7 @@ const replied = (
     _tag: "Message",
     answers: more.answers === undefined ? "msg-1" : more.answers,
     at: { _tag: "Unknown" },
+    bot: false,
     context: more.context ?? null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -232,6 +234,7 @@ const signedIn = async (
   fake.daemon.selves.set("libera", {
     account: { _tag: "Unknown" },
     away: { _tag: "Unknown" },
+    bot: { _tag: "Unknown" },
     mask: { _tag: "Unknown" },
     nick: "iirc",
     realname: { _tag: "Unknown" },
@@ -247,7 +250,14 @@ const signedIn = async (
       items: [...items],
       timeline: listed(iirc, "#iirc", "Channel", {
         latest: cursor(last * 1000, last),
-        unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+        unread: {
+          activity: 0,
+          botDirect: 0,
+          botMessages: 0,
+          direct: 0,
+          highlights: 0,
+          messages: 2,
+        },
         ...more,
       }),
     },
@@ -699,7 +709,14 @@ describe("what the view says it shows", () => {
         listed(iirc, "#iirc", "Channel", {
           changed: sequence,
           latest: cursor(sequence * 1000, sequence),
-          unread: { activity: 0, direct: 0, highlights: 0, messages: 1 },
+          unread: {
+            activity: 0,
+            botDirect: 0,
+            botMessages: 0,
+            direct: 0,
+            highlights: 0,
+            messages: 1,
+          },
         })
       );
     };
@@ -740,7 +757,7 @@ describe("what the view says it shows", () => {
 
     const { registry } = await signedIn([], items, {
       read: 120_000,
-      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
     });
 
     await openFromPalette();
@@ -1568,7 +1585,7 @@ const live = (fake: Awaited<ReturnType<typeof opened>>, sequence: number) => {
     listed(iirc, "#iirc", "Channel", {
       changed: sequence,
       latest: cursor(sequence * 1000, sequence),
-      unread: { activity: 0, direct: 0, highlights: 0, messages: 1 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 1 },
     })
   );
 };
@@ -1791,6 +1808,7 @@ const fromAlice = (sequence: number, id?: string): typeof TimelineItem.Encoded =
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: id === undefined ? { _tag: "Unknown" } : { _tag: "Known", at: 1, from: "ircd", value: id },
     kind: "Privmsg",

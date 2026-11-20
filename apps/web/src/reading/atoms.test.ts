@@ -41,7 +41,14 @@ const peer = idOf(4);
 
 type Counts = (typeof Timeline.Encoded)["unread"];
 
-const none: Counts = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const none: Counts = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 const names = new Map<string, readonly [string, "Network" | "Channel" | "Direct"]>([
   [iirc, ["#iirc", "Channel"]],
@@ -103,6 +110,7 @@ const message = (
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",

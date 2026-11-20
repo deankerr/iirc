@@ -37,7 +37,14 @@ export interface Activity {
   readonly level: Level | undefined;
 }
 
-const none: Unread = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const none: Unread = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 /**
  * The count of a level.
@@ -123,6 +130,8 @@ export const networkActivity = (network: SidebarNetwork): Activity => {
 
     unread = {
       activity: plus(unread.activity, shown.activity),
+      botDirect: plus(unread.botDirect, shown.botDirect),
+      botMessages: plus(unread.botMessages, shown.botMessages),
       direct: plus(unread.direct, shown.direct),
       highlights: plus(unread.highlights, shown.highlights),
       messages: plus(unread.messages, shown.messages),

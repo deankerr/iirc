@@ -60,7 +60,7 @@ const describeTimeline = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 /**
@@ -496,7 +496,14 @@ describe("closing a Timeline from the sidebar", () => {
             {
               ...describeTimeline(peer, "peer", "Direct"),
               changed: 20,
-              unread: { activity: 0, direct: 1, highlights: 0, messages: 0 },
+              unread: {
+                activity: 0,
+                botDirect: 0,
+                botMessages: 0,
+                direct: 1,
+                highlights: 0,
+                messages: 0,
+              },
             },
           ],
         }),
@@ -1048,7 +1055,7 @@ const withUnreadPeer = (highlights: number): More => ({
   timelines: [
     {
       ...describeTimeline(peer, "peer", "Direct"),
-      unread: { activity: 0, direct: 0, highlights, messages: 3 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights, messages: 3 },
     },
   ],
 });

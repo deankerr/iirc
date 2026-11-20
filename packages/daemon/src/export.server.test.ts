@@ -24,6 +24,7 @@ const said = (text: string, sender = "alice"): Content => ({
   _tag: "Message",
   answers: undefined,
   at: { _tag: "Unknown" },
+  bot: false,
   context: undefined,
   id: { _tag: "Unknown" },
   kind: "Privmsg",

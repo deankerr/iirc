@@ -51,7 +51,7 @@ const listed = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 /**
@@ -67,6 +67,7 @@ const said = (sequence: number, sender: string): typeof TimelineItem.Encoded => 
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Known", at: 1, from: "ircd", value: `msg-${sequence}` },
     kind: "Privmsg",
@@ -110,6 +111,7 @@ const joined = (sequence: number, nick: string): typeof TimelineItem.Encoded => 
 const member = (nick: string, prefixes: readonly string[] = []): typeof Member.Encoded => ({
   account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
+  bot: { _tag: "Unknown" },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });

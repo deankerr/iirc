@@ -791,6 +791,7 @@ const item = (
       _tag: "Message",
       answers: null,
       at: { _tag: "Unknown" },
+      bot: false,
       context: null,
       id: known("msg-1"),
       kind: "Privmsg",

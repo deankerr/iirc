@@ -718,6 +718,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -750,7 +751,14 @@ const held: Held = {
 };
 
 describe("the sources", () => {
-  const nothing = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+  const nothing = {
+    activity: 0,
+    botDirect: 0,
+    botMessages: 0,
+    direct: 0,
+    highlights: 0,
+    messages: 0,
+  };
 
   const described = (
     id: string,
@@ -974,7 +982,7 @@ describe("everything the Composer's list ranks", () => {
       network: on,
       read: null,
       removed: false,
-      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
     });
 
   const bar: readonly SidebarNetwork[] = [

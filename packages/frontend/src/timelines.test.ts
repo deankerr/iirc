@@ -381,6 +381,7 @@ const wireContent = (item: ModelItem): (typeof TimelineItem.Encoded)["content"] 
         _tag: "Message",
         answers: null,
         at: unknown,
+        bot: false,
         context: null,
         id: unknown,
         kind: "Privmsg",
@@ -432,7 +433,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
     network: timeline.network,
     read: null,
     removed: false,
-    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const wireGap = (gap: ModelGap) => ({
@@ -1365,7 +1366,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     network: "alpha",
     read: null,
     removed: false,
-    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const listOf = (through: number, ...timelines: readonly ReturnType<typeof timelineOf>[]) =>
@@ -1385,6 +1386,7 @@ const message = (timeline: string, at: number, sequence: number, changed = seque
       _tag: "Message",
       answers: null,
       at: unknown,
+      bot: false,
       context: null,
       id: unknown,
       kind: "Privmsg",
@@ -1625,7 +1627,7 @@ const direct = (id: string, name: string, detached = false) =>
       network: "alpha",
       read: null,
       removed: false,
-      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );
 
@@ -1657,6 +1659,8 @@ const listedAndClosed = (state: Timelines) =>
 
 const unreadOf = (more: Partial<(typeof Timeline.Encoded)["unread"]>) => ({
   activity: 0,
+  botDirect: 0,
+  botMessages: 0,
   direct: 0,
   highlights: 0,
   messages: 0,
@@ -1817,7 +1821,14 @@ describe("the Timelines' state", () => {
             ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)),
             closed: true,
             latest: cursor(6000, 6),
-            unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+            unread: {
+              activity: 0,
+              botDirect: 0,
+              botMessages: 0,
+              direct: 0,
+              highlights: 0,
+              messages: 2,
+            },
           },
         ],
       })
@@ -1876,7 +1887,14 @@ describe("the Timelines' state", () => {
   });
 
   it("breaks a tie in /next-unread by the order shown, so a pinned Timeline comes first", () => {
-    const unread = { activity: 0, direct: 0, highlights: 0, messages: 1 };
+    const unread = {
+      activity: 0,
+      botDirect: 0,
+      botMessages: 0,
+      direct: 0,
+      highlights: 0,
+      messages: 1,
+    };
 
     // alpha's own Timeline and #b each have a Message unread, and #a is open.
     const state = reduceTimelines(
@@ -4627,7 +4645,14 @@ describe("what a Pane is called, and what the composer counts as open", () => {
         timelines: [
           Schema.encodeSync(Timeline)({
             ...timelineOf(idOf(3), "Channel", "#a", 6),
-            unread: { activity: 0, direct: 0, highlights: 1, messages: 1 },
+            unread: {
+              activity: 0,
+              botDirect: 0,
+              botMessages: 0,
+              direct: 0,
+              highlights: 1,
+              messages: 1,
+            },
           }),
         ],
       })
@@ -5653,6 +5678,7 @@ const said = (
       _tag: "Message",
       answers: null,
       at: unknown,
+      bot: false,
       context: null,
       id: unknown,
       kind,
@@ -6012,6 +6038,7 @@ const statusOf = (state: Timelines, self: string | null) =>
         : Schema.decodeSync(UserKnowledge)({
             account: { _tag: "Unknown" },
             away: { _tag: "Unknown" },
+            bot: { _tag: "Unknown" },
             mask: { _tag: "Unknown" },
             nick: self,
             realname: { _tag: "Unknown" },

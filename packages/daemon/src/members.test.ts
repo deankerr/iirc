@@ -56,13 +56,16 @@ const order = new Map([
   ["v", 2],
 ]);
 
-// A User known by their account alone, keyed by their nick.
-const user = (nick: string, account: Fact<string | null>) =>
+// A User known by their account, and whether they are a bot, alone, keyed by their nick.
+const unknownBot: Fact<boolean> = { _tag: "Unknown" };
+
+const user = (nick: string, account: Fact<string | null>, bot: Fact<boolean> = unknownBot) =>
   [
     nick,
     {
       account,
       away: { _tag: "Unknown" },
+      bot,
       mask: { _tag: "Unknown" },
       nick,
       realname: { _tag: "Unknown" },
@@ -136,6 +139,29 @@ describe("members", () => {
     expect(placed).toStrictEqual([
       ["bob", loggedIn],
       ["carol", loggedOut],
+      ["dave", { _tag: "Unknown" }],
+    ]);
+  });
+
+  it("places whether each member is a bot from their User, and Unknown where none is known", () => {
+    const bot: Fact<boolean> = { _tag: "Known", at, from: "ircd", value: true };
+    const human: Fact<boolean> = { _tag: "Known", at, from: "replied", value: false };
+    const unknown: Fact<string | null> = { _tag: "Unknown" };
+
+    const view = channelOf([
+      ["bob", known()],
+      ["carol", known()],
+      ["dave", known()],
+    ]);
+
+    const placed = membersPage(
+      { ...view, users: new Map([user("bob", unknown, bot), user("carol", unknown, human)]) },
+      { limit: 10 }
+    ).members.map(({ bot: mark, member }) => [member.nick, mark]);
+
+    expect(placed).toStrictEqual([
+      ["bob", bot],
+      ["carol", human],
       ["dave", { _tag: "Unknown" }],
     ]);
   });

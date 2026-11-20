@@ -57,7 +57,14 @@ const peer = idOf(4);
 
 type Counts = (typeof Timeline.Encoded)["unread"];
 
-const nothing: Counts = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const nothing: Counts = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 interface Described {
   readonly id: string;
@@ -129,6 +136,7 @@ const said = ({
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind,
@@ -311,7 +319,14 @@ describe("what is unread", () => {
       levels: ["Activity", "Highlight", "Message", "Direct"],
       network: {
         level: "Highlight",
-        unread: { activity: 4, direct: 2, highlights: 1, messages: 1000 },
+        unread: {
+          activity: 4,
+          botDirect: 0,
+          botMessages: 0,
+          direct: 2,
+          highlights: 1,
+          messages: 1000,
+        },
       },
       none: undefined,
     });
@@ -468,7 +483,7 @@ describe("a muted Timeline", () => {
       network: network === undefined ? undefined : networkActivity(network).unread,
     }).toStrictEqual({
       activity: { level: "Highlight", unread: { ...nothing, highlights: 3 } },
-      network: { activity: 6, direct: 3, highlights: 3, messages: 5 },
+      network: { activity: 6, botDirect: 0, botMessages: 0, direct: 3, highlights: 3, messages: 5 },
     });
   });
 

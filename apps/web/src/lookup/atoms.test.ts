@@ -30,7 +30,7 @@ const timelineId = Schema.decodeSync(TimelineId);
 const own = idOf(1);
 const iirc = idOf(2);
 
-const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const none = { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 };
 
 const listed = (
   id: string,

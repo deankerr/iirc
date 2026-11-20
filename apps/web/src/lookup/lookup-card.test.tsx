@@ -52,12 +52,13 @@ const listed = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 const member = (nick: string, prefixes: readonly string[] = []): typeof Member.Encoded => ({
   account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: null },
+  bot: { _tag: "Unknown" },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });

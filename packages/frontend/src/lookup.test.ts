@@ -59,7 +59,14 @@ const other = idOf(3);
 const peer = idOf(4);
 const square = idOf(5);
 
-const nothing = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const nothing = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 const described = (
   id: string,
@@ -204,6 +211,7 @@ const profile = (fields: Partial<typeof Profile.Encoded> = {}): typeof Profile.E
   account: null,
   actual: null,
   away: null,
+  bot: false,
   channels: [],
   host: null,
   idle: null,

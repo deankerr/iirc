@@ -555,6 +555,7 @@ const message = (
       _tag: "Message",
       answers: null,
       at: { _tag: "Unknown" },
+      bot: false,
       context: null,
       id: { _tag: "Unknown" },
       kind: "Privmsg",
