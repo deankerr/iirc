@@ -10,7 +10,7 @@
  * A `netsplit` or `netjoin` batch opened outside any other, naming exactly two servers, is
  * a split: its `BATCH +`, the Lines tagged with it, and its `BATCH -` carry a
  * {@link SplitMark}, and the core decides from each Line whether the batch is what its
- * type says. Any other is read as a batch of a type the Client does not know.
+ * type says. A Line in a split carries no batch, so it is read as it would be unbatched. Any other is read as a batch of a type the Client does not know.
  *
  * @packageDocumentation
  */
@@ -123,7 +123,9 @@ const markOf = (
   }
 
   if (reference.startsWith("-")) {
-    return before.open.get(ref)?.split === true ? { _tag: "Ends", ref } : undefined;
+    return before.open.get(ref)?.split === true
+      ? { _tag: "Ends", ref, whole: arrival.line.params.length === 1 }
+      : undefined;
   }
 
   return after.open.get(ref)?.split === true ? splitOf(arrival.line.params, parent) : undefined;
@@ -140,10 +142,11 @@ export const batch: Feature<Batches> = {
 
     const split = markOf(context.own, own, arrival, parent);
 
+    // A Line of a split is read as it would be unbatched, whatever becomes of the split.
+    const batch = split?._tag === "In" ? undefined : parent;
+
     const carried =
-      parent === arrival.batch && split === arrival.split
-        ? arrival
-        : { ...arrival, batch: parent, split };
+      batch === arrival.batch && split === arrival.split ? arrival : { ...arrival, batch, split };
 
     return own === context.own ? { value: [carried] } : { own, value: [carried] };
   },

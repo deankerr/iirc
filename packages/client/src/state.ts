@@ -226,7 +226,8 @@ type LinkPhase =
       readonly motd: MotdCollecting | undefined;
       /**
        * The `netsplit` and `netjoin` batches this Connection is reading, by reference, at
-       * most {@link maxSplits}, each with the Activity it holds back until it ends.
+       * most {@link maxSplits}, with the Activity they hold back until each ends, at most
+       * {@link maxHeld} together.
        */
       readonly splits: ReadonlyMap<string, Splitting>;
     };
@@ -246,7 +247,10 @@ export interface Splitting {
 /** How many splits are read at once. One opened past it is read unbatched. */
 export const maxSplits = 64;
 
-/** How many quits or joins a split holds. One past it gives back what it held, and is read unbatched. */
+/**
+ * How many quits or joins the splits of a Connection hold, together. One past it makes its
+ * split give back what it held, and is read unbatched.
+ */
 export const maxHeld = 4096;
 
 /**

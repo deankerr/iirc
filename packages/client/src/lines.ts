@@ -88,7 +88,7 @@ import {
   updateOpen,
 } from "./run.ts";
 import { runStage } from "./seam.ts";
-import { held, splitBefore } from "./splits.ts";
+import { giveBackSplits, held, heldBefore, splitAfter, splitBefore } from "./splits.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { noUsers, userIn } from "./users.ts";
@@ -721,6 +721,7 @@ const isupport = (run: Run, line: Line): void => {
     run.state = { ...run.state, declared: mapping };
 
     if (mapping !== before) {
+      giveBackSplits(run);
       run.news.push({ _tag: "Refolded", casemapping: mapping });
       refoldMarkers(run, mapping);
     }
@@ -1303,6 +1304,8 @@ export const interpret = (
 
   splitBefore(run, arrival);
 
+  const count = heldBefore(run, arrival);
+
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
   // A refusal of `MONITOR` or `WATCH` itself turns it off for the Connection, whatever else it answers.
@@ -1336,4 +1339,5 @@ export const interpret = (
   }
 
   endLone(run, arrival);
+  splitAfter(run, arrival, count);
 };

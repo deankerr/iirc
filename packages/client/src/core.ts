@@ -67,7 +67,7 @@ import {
   updateOpen,
 } from "./run.ts";
 import { runEffects, runStage } from "./seam.ts";
-import { releaseSplits } from "./splits.ts";
+import { giveBackSplits, releaseSplits } from "./splits.ts";
 import type { Link, State } from "./state.ts";
 import { initialState, maxActions } from "./state.ts";
 import { addressFor, pruned, rescheduled } from "./sts.ts";
@@ -189,6 +189,7 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const unignored = dropped(run, previous?.ignores ?? [], configuration.ignores);
 
   if (unignored.length > 0) {
+    giveBackSplits(run);
     run.news.push({ _tag: "Unignored", masks: unignored });
   }
 

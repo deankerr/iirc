@@ -8,9 +8,11 @@
  *
  * A batch that is not what its type says is read as its Lines would be unbatched: what it
  * held is given back as it was, in order, and the rest of it is read without it. That is
- * a Line in it of another command, or naming Self, a batch opened inside it, history, or
- * more than {@link maxHeld} of them. So is one that never ends, when its Connection does,
- * or when `batch` turns off.
+ * a Line in it of another command, or naming Self, or one that means no quit or join, a
+ * batch opened inside it, history, a `BATCH -` with more than its reference, or a quit or
+ * join past {@link maxHeld} held across the Connection. So is one that never ends, when its
+ * Connection does, or when `batch` turns off, and every one open when the casemapping
+ * changes or ignore masks are taken away, which change how what came before is read.
  *
  * @packageDocumentation
  */
@@ -18,7 +20,7 @@ import type { Arrival } from "./feature.ts";
 import { isSelf } from "./meaning.ts";
 import type { News, Where } from "./news.ts";
 import type { Run } from "./run.ts";
-import { updateOpen } from "./run.ts";
+import { linkOf, updateOpen } from "./run.ts";
 import type { Link, Splitting } from "./state.ts";
 import { maxHeld, maxSplits } from "./state.ts";
 import { openOf } from "./views.ts";
@@ -142,11 +144,38 @@ export const splitBefore = (run: Run, arrival: Arrival): void => {
   if (ends || arrival.line.command !== commands[splitting.kind] || !arrival.live) {
     setSplits(run, (each) => each.delete(mark.ref));
 
-    if (ends) {
+    if (ends && mark.whole) {
       show(run, splitting);
     } else {
       giveBack(run, splitting);
     }
+  }
+};
+
+/**
+ * How many quits or joins a Line's split holds now, before the Line is read, for
+ * {@link splitAfter}.
+ * @param run - The step.
+ * @param arrival - The Line.
+ * @returns How many, or `undefined` for a Line in no split.
+ */
+export const heldBefore = (run: Run, arrival: Arrival): number | undefined =>
+  arrival.split?._tag === "In" ? splitsOf(run).get(arrival.split.ref)?.held.length : undefined;
+
+/**
+ * After a Line in a split is read: one that meant no quit or join the split held, such as
+ * one the core found malformed, makes the split give back what it held.
+ * @param run - The step.
+ * @param arrival - The Line.
+ * @param count - What {@link heldBefore} said.
+ */
+export const splitAfter = (run: Run, arrival: Arrival, count: number | undefined): void => {
+  const ref = arrival.split?._tag === "In" ? arrival.split.ref : undefined;
+  const splitting = ref === undefined ? undefined : splitsOf(run).get(ref);
+
+  if (ref !== undefined && splitting !== undefined && splitting.held.length === count) {
+    setSplits(run, (each) => each.delete(ref));
+    giveBack(run, splitting);
   }
 };
 
@@ -174,7 +203,9 @@ export const held = (run: Run, arrival: Arrival, news: ActivityNews): boolean =>
 
   const nick = activity._tag === "Quit" || activity._tag === "Joined" ? activity.nick : undefined;
 
-  if (!holds || nick === undefined || isSelf(run, nick) || splitting.held.length >= maxHeld) {
+  const total = [...splitsOf(run).values()].reduce((sum, each) => sum + each.held.length, 0);
+
+  if (!holds || nick === undefined || isSelf(run, nick) || total >= maxHeld) {
     setSplits(run, (each) => each.delete(ref));
     giveBack(run, splitting);
 
@@ -200,5 +231,18 @@ export const releaseSplits = (run: Run, link: Link): void => {
 
   if (splits.size > 0) {
     updateOpen(run, (open) => ({ ...open, splits: new Map() }));
+  }
+};
+
+/**
+ * Gives back what every split held, before News that changes how a projection reads what
+ * came before it: a new casemapping, or ignore masks taken away.
+ * @param run - The step.
+ */
+export const giveBackSplits = (run: Run): void => {
+  const link = linkOf(run);
+
+  if (link !== undefined) {
+    releaseSplits(run, link);
   }
 };

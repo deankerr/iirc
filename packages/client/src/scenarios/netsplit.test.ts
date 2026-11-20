@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 
 import { client } from "../core.ts";
+import { ConnectionId, Instant } from "../ids.ts";
+import { maxHeld } from "../state.ts";
 import { configured, joined, play, registered, replay } from "../testing/index.ts";
 
 const base = configured();
@@ -294,5 +296,136 @@ describe("a batch that is not what its type says", () => {
     });
 
     expect.assertions(0);
+  });
+
+  it("ends with more than its reference, and gives back what it held", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "<< :irc.test BATCH -s1 extra",
+          "?? activity Quit alice in=channel:#a in=existing-direct:alice :hub.test leaf.test"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("holds a QUIT that means no quit, and gives back what it held", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "<< @batch=s1 QUIT :hub.test leaf.test",
+          "...",
+          "?? activity Quit alice in=channel:#a in=existing-direct:alice :hub.test leaf.test",
+          "<< :irc.test BATCH -s1"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("holds a numeric, which is shown as it would be unbatched", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "<< @batch=s1 :irc.test 999 iirc :odd",
+          "?? activity Quit alice in=channel:#a in=existing-direct:alice :hub.test leaf.test",
+          "?? activity Numeric 999 in=network :odd",
+          "<< :irc.test BATCH -s1"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+describe("a split still open", () => {
+  it("gives back what it held before a new casemapping, as unbatched", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "<< :irc.test 005 iirc CASEMAPPING=ascii :are supported",
+          "?? activity Quit alice in=channel:#a in=existing-direct:alice :hub.test leaf.test",
+          "..."
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives back what it held before ignore masks are taken away, as unbatched", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "!! configure ignores=alice!*@*",
+          "...",
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "!! configure ignores=",
+          '?? activity Quit alice ignored="alice!*@*" in=channel:#a in=existing-direct:alice :hub.test leaf.test',
+          "..."
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives back what it held once the splits of a Connection hold too many", () => {
+    let { state } = replay(client, { configuration: base, transcript: inChannels("batch") });
+    const shown: string[] = [];
+
+    const receive = (line: string): void => {
+      const step = client.step(state, {
+        _tag: "Received",
+        at: Instant.make(120_000),
+        bytes: new TextEncoder().encode(line),
+        connection: ConnectionId.make(1),
+      });
+
+      ({ state } = step);
+      shown.push(
+        ...step.news.flatMap((each) => (each._tag === "Activity" ? [each.activity._tag] : []))
+      );
+    };
+
+    const join = (batch: string, from: number, count: number): void => {
+      for (let index = from; index < from + count; index += 1) {
+        receive(`@batch=${batch} :u${index}!u@h JOIN #a`);
+      }
+    };
+
+    receive(":irc.test BATCH +j1 netjoin hub.test leaf.test");
+    receive(":irc.test BATCH +j2 netjoin hub.test other.test");
+    join("j1", 0, maxHeld / 2);
+    join("j2", maxHeld / 2, maxHeld / 2 + 1);
+    receive(":irc.test BATCH -j1");
+    receive(":irc.test BATCH -j2");
+
+    // `j2` gave back its joins at the one past the bound, and `j1` was shown whole.
+    expect(shown.filter((tag) => tag === "Joined")).toHaveLength(maxHeld / 2 + 1);
+    expect(shown.filter((tag) => tag === "Netjoin")).toHaveLength(1);
   });
 });

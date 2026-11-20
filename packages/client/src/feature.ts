@@ -150,7 +150,8 @@ export type SplitMark =
       readonly servers: readonly [string, string];
     }
   | { readonly _tag: "In"; readonly ref: string }
-  | { readonly _tag: "Ends"; readonly ref: string };
+  /** `whole` is false for a `BATCH -` with more than its reference, which ends it malformed. */
+  | { readonly _tag: "Ends"; readonly ref: string; readonly whole: boolean };
 
 /**
  * What the core derived from a Line, before the model folds it in: News, and changes
