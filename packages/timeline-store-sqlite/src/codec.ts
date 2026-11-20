@@ -87,6 +87,12 @@ const ctcp = {
   target: Schema.String,
 };
 
+const split = {
+  channel: Schema.String,
+  nicks: Schema.Array(Schema.String),
+  servers: Schema.Tuple([Schema.String, Schema.String]),
+};
+
 const Activity = Schema.TaggedUnion({
   AccountChanged: { account: Schema.NullOr(Schema.String), nick: Schema.String },
   AwayChanged: {
@@ -124,6 +130,8 @@ const Activity = Schema.TaggedUnion({
   },
   ModeChanged: { by: Schema.String, changes: Schema.Array(ModeChange), target: Schema.String },
   Motd: { cut: Schema.Boolean, lines: Schema.Array(Schema.String) },
+  Netjoin: split,
+  Netsplit: split,
   NickChanged: { from: Schema.String, to: Schema.String },
   Numeric: { numeric: Schema.String, params: Schema.Array(Schema.String) },
   OperGranted: { nick: Schema.String },

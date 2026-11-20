@@ -179,15 +179,14 @@ describe("batches", () => {
     expect.assertions(0);
   });
 
-  it("reads each Line of a batch as it comes, whatever its type", () => {
+  it("reads each Line of a batch as it comes, even one whose News waits for its end", () => {
     const played = play(client, {
       configuration: base,
       transcript: [
         ...inChannel("batch"),
         lines(
           "<< :irc.test BATCH +split netsplit irc.hub other.host",
-          "<< @batch=split :peer!u@h QUIT :irc.hub other.host",
-          "?? activity Quit peer in=channel:#iirc in=existing-direct:peer :irc.hub other.host"
+          "<< @batch=split :peer!u@h QUIT :irc.hub other.host"
         ),
       ],
     });

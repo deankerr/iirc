@@ -175,6 +175,7 @@ export const begin = (run: Run): void => {
     },
     reclaims: [],
     seam: freshSeam,
+    splits: new Map(),
     users: noUsers,
     whoAsked: new Map(),
     whoQuery: undefined,

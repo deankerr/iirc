@@ -341,6 +341,36 @@ describe("which items a Timeline shows", () => {
     });
   });
 
+  it("treats a netsplit or a netjoin as the quits and joins it tells: quiet hides it, and spoke shows it when any of its members spoke", () => {
+    const split = (sequence: number, nicks: string[]) =>
+      happened(sequence, 5 * minute, {
+        _tag: "Netsplit",
+        channel: "#iirc",
+        nicks,
+        servers: ["a.net", "b.net"],
+      });
+
+    const items = [
+      said(1, 0, "alice"),
+      split(2, ["bob", "ALICE"]),
+      split(3, ["bob", "carol"]),
+      happened(4, 5 * minute, {
+        _tag: "Netjoin",
+        channel: "#iirc",
+        nicks: ["bob"],
+        servers: ["a.net", "b.net"],
+      }),
+    ];
+
+    expect({
+      quiet: items.map(showsIn("quiet", "Channel", items, "me")),
+      spoke: items.map(showsIn("spoke", "Channel", items, "me")),
+    }).toStrictEqual({
+      quiet: [true, false, false, false],
+      spoke: [true, true, false, false],
+    });
+  });
+
   it("under spoke, follows a User across a change of nick, and measures from their latest Message", () => {
     const items = [
       said(1, 0, "bob"),

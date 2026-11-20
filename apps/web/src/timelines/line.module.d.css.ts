@@ -54,6 +54,7 @@ declare const styles: {
   readonly said: string;
   readonly sender: string;
   readonly session: string;
+  readonly splitNicks: string;
   readonly text: string;
   readonly time: string;
   readonly unsent: string;

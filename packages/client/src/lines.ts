@@ -8,7 +8,7 @@
 import { casemappingOf, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { isupportTokens } from "@iirc/protocol/isupport";
 import { parseSource, pong, upperCaseAscii } from "@iirc/protocol/line";
-import type { Line, RawParam } from "@iirc/protocol/line";
+import type { Line, RawParam, Source } from "@iirc/protocol/line";
 
 import {
   actionByCommand,
@@ -54,7 +54,7 @@ import { applyModes, readModes } from "./modes.ts";
 import { isMonitorReply, left, monitorRefused, monitorReply } from "./monitor.ts";
 import { collectMotd } from "./motd.ts";
 import { changesNothingHere } from "./news.ts";
-import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
+import type { Activity, ModeChange, News, StandardReply, Unrouted, Where } from "./news.ts";
 import { answersOper, oper, operAnswered } from "./oper.ts";
 import {
   reclaim,
@@ -88,6 +88,7 @@ import {
   updateOpen,
 } from "./run.ts";
 import { runStage } from "./seam.ts";
+import { held, splitBefore } from "./splits.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { noUsers, userIn } from "./users.ts";
@@ -489,6 +490,23 @@ const foldLive = (run: Run, activity: Activity): void => {
   }
 };
 
+// Reports an Activity, unless a split holds it, and follows a rename where it goes.
+const reportActivity = (
+  run: Run,
+  meant: Unrouted<Extract<News, { readonly _tag: "Activity" }>>,
+  arrival: Arrival,
+  source: Source | undefined
+): void => {
+  const routed = routeActivity(run, meant, source);
+
+  if (!held(run, arrival, routed)) {
+    run.news.push(routed);
+  }
+
+  followRenames(run, routed.where);
+  followSays(run, routed.where);
+};
+
 // Folds what a Line meant into the model, and reports it. History is reported, and
 // never changes what is known now.
 const fold = (
@@ -512,11 +530,7 @@ const fold = (
   if (meant._tag === "Message") {
     run.news.push(routeMessage(run, meant, source));
   } else if (meant._tag === "Activity") {
-    const routed = routeActivity(run, meant, source);
-
-    run.news.push(routed);
-    followRenames(run, routed.where);
-    followSays(run, routed.where);
+    reportActivity(run, meant, arrival, source);
   } else {
     run.news.push(meant);
   }
@@ -1286,6 +1300,8 @@ export const interpret = (
 ): void => {
   const { line } = arrival;
   const { command } = line;
+
+  splitBefore(run, arrival);
 
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 

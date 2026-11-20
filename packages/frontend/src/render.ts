@@ -203,7 +203,8 @@ export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rej
  * One item as a line: a Message, by its sender, with its text and, for one of ours, its
  * delivery, or a description of an Activity, a Session's start or end, or an action of
  * ours that was refused, whose tone is `Refused`, as a `FAIL`'s is, or an Ircd's message of
- * the day, which a view draws folded to one line and opens to its text.
+ * the day, which a view draws folded to one line and opens to its text, or a netsplit or
+ * netjoin, which it draws folded to one line and opens to the nicks.
  */
 export type Line =
   | {
@@ -247,6 +248,15 @@ export type Line =
        * a view to show in monospace with every space kept and none wrapped.
        */
       readonly lines: readonly (readonly Inline[])[];
+    }
+  | {
+      readonly _tag: "Split";
+      /** `<--` for a netsplit, `-->` for a netjoin, as a quit and a join are marked. */
+      readonly marker: Marker;
+      /** What the folded line says: which two servers, and how many of the Channel's members. */
+      readonly summary: readonly Part[];
+      /** The members who went or came back, in order, each a `Nick` part, for a view to list opened. */
+      readonly nicks: readonly Part[];
     };
 
 /**
@@ -255,15 +265,22 @@ export type Line =
  */
 export type Marker = string;
 
+const arriving: ReadonlySet<Activity["_tag"]> = new Set(["Joined", "CameOnline", "Netjoin"]);
+
+const leaving: ReadonlySet<Activity["_tag"]> = new Set([
+  "Parted",
+  "Quit",
+  "Kicked",
+  "WentOffline",
+  "Netsplit",
+]);
+
 /**
- * What marks an Activity that is not a numeric or the message of the day: `-->` for a join or a partner coming online,
- * `<--` for a part, a quit, a kick, or a partner going offline, and `--` for anything else.
+ * What marks an Activity that is not a numeric or the message of the day: `-->` for a join, a partner coming online, or a netjoin,
+ * `<--` for a part, a quit, a kick, a partner going offline, or a netsplit, and `--` for anything else.
  * @param activity - The Activity.
  * @returns Its marker.
  */
-const arriving: ReadonlySet<Activity["_tag"]> = new Set(["Joined", "CameOnline"]);
-const leaving: ReadonlySet<Activity["_tag"]> = new Set(["Parted", "Quit", "Kicked", "WentOffline"]);
-
 const arrowOf = (activity: Exclude<Activity, { readonly _tag: "Numeric" | "Motd" }>): Marker => {
   if (arriving.has(activity._tag)) {
     return "-->";
@@ -451,7 +468,10 @@ const describePresence = (activity: Presence): readonly Part[] => {
  * @returns Its parts.
  */
 const describeOtherActivity = (
-  activity: Exclude<Activity, OperAnswer | { readonly _tag: "Invited" | "Motd" }>
+  activity: Exclude<
+    Activity,
+    OperAnswer | { readonly _tag: "Invited" | "Motd" | "Netsplit" | "Netjoin" }
+  >
 ): readonly Part[] => {
   if (isPresence(activity)) {
     return describePresence(activity);
@@ -606,7 +626,7 @@ const describeOtherActivity = (
  * @returns Its parts.
  */
 const describeActivity = (
-  activity: Exclude<Activity, { readonly _tag: "Motd" }>,
+  activity: Exclude<Activity, { readonly _tag: "Motd" | "Netsplit" | "Netjoin" }>,
   network: NetworkId
 ): readonly Part[] => {
   if (isOperAnswer(activity)) {
@@ -1012,6 +1032,20 @@ const toneOf = (activity: Activity): "Activity" | "Refused" | "Numeric" => {
 };
 
 /**
+ * How a netsplit or a netjoin reads folded: which two servers, as the batch named them, and
+ * how many of the Channel's members went or came back.
+ * @param split - The netsplit or netjoin.
+ * @returns The parts.
+ */
+const splitSummary = (split: Extract<Activity, { readonly _tag: "Netsplit" | "Netjoin" }>) => [
+  words(split._tag === "Netsplit" ? "netsplit " : "netjoin "),
+  name(split.servers[0]),
+  words(" <-> "),
+  name(split.servers[1]),
+  words(`: ${split.nicks.length} ${split._tag === "Netsplit" ? "quit" : "joined"}`),
+];
+
+/**
  * How the message of the day reads folded: that it is one, how many lines it has, and that
  * it was cut short, if it was.
  * @param motd - The message of the day.
@@ -1133,6 +1167,15 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
           lines: activity.lines.map(motdLine),
           marker: markerOf(activity),
           summary: motdSummary(activity),
+        };
+      }
+
+      if (activity._tag === "Netsplit" || activity._tag === "Netjoin") {
+        return {
+          _tag: "Split",
+          marker: markerOf(activity),
+          nicks: activity.nicks.map(nickPart),
+          summary: splitSummary(activity),
         };
       }
 

@@ -511,6 +511,13 @@ const CtcpAnswer = Schema.TaggedUnion({
   },
 });
 
+/** What a `Netsplit` or a `Netjoin` says of one Channel. */
+const split = {
+  channel: Untrusted,
+  nicks: Schema.Array(Untrusted),
+  servers: Schema.Tuple([Untrusted, Untrusted]),
+};
+
 /** A numeric reply's number: three digits, as an Ircd sends it. */
 const NumericReply = Schema.String.check(
   Schema.isPattern(/^\d{3}$/u, { message: "must be three digits" })
@@ -532,7 +539,11 @@ const NumericReply = Schema.String.check(
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
  * `channel`, which it may join. A `UserInvited` is an `INVITE` naming another User, where the
  * Network offers `invite-notify`, in that Channel's Timeline: `by` invited `nick` to `channel`.
- * An `AccountChanged` is a User logging in to `account`, or
+ * A `Netsplit` is the Network splitting, as one `netsplit` batch tells it, in one Channel's
+ * Timeline: the two `servers` that parted, as the batch named them, and the `nicks` of that
+ * Channel's members who went, in the order they quit. A `Netjoin` is its healing, as a
+ * `netjoin` batch tells it: the members who came back, in the order they joined. An
+ * `AccountChanged` is a User logging in to `account`, or
  * out of theirs with `null`. A `HostChanged` is a User's user and host changing, with no
  * quit or join, and a `RealnameChanged` a User setting their realname, each told where the
  * User is, or in the Network's own Timeline for Self. `CameOnline` and `WentOffline` are a monitored Direct Message
@@ -561,6 +572,8 @@ export const Activity = Schema.TaggedUnion({
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },
   Motd: { cut: Schema.Boolean, lines: Schema.Array(Untrusted) },
+  Netjoin: split,
+  Netsplit: split,
   NickChanged: { from: Untrusted, to: Untrusted },
   Numeric: { numeric: NumericReply, params: Schema.Array(Untrusted) },
   OperGranted: { nick: Untrusted },

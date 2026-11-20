@@ -21,7 +21,7 @@ import {
   quotedOf,
   requested,
 } from "./render.ts";
-import type { Inline, Line } from "./render.ts";
+import type { Inline, Line, Part } from "./render.ts";
 
 const bold = { ...plainStyle, bold: true };
 
@@ -333,43 +333,53 @@ const reply = (kind: "FAIL" | "WARN" | "NOTE", context: readonly string[], descr
  * @param line - The line.
  * @returns Its words.
  */
+/**
+ * Parts as a line reads them.
+ * @param parts - The parts.
+ * @returns Them as text.
+ */
+const readParts = (parts: readonly Part[]): string =>
+  parts
+    .map((part) => {
+      switch (part._tag) {
+        case "Nick": {
+          return `<${part.nick}>`;
+        }
+
+        case "Said": {
+          return texts(part.inlines);
+        }
+
+        case "Name":
+        case "Words": {
+          return part.text;
+        }
+
+        case "Command": {
+          return `\`${part.text}\``;
+        }
+
+        case "Join": {
+          return `[join ${part.channel} on ${part.network}]`;
+        }
+
+        default: {
+          return part satisfies never;
+        }
+      }
+    })
+    .join("");
+
 const read = (line: Line): string => {
   if (line._tag === "Motd") {
     return line.summary;
   }
 
-  return line._tag === "Message"
-    ? `<${line.nick}> ${texts(line.text)}`
-    : line.parts
-        .map((part) => {
-          switch (part._tag) {
-            case "Nick": {
-              return `<${part.nick}>`;
-            }
+  if (line._tag === "Split") {
+    return readParts(line.summary);
+  }
 
-            case "Said": {
-              return texts(part.inlines);
-            }
-
-            case "Name":
-            case "Words": {
-              return part.text;
-            }
-
-            case "Command": {
-              return `\`${part.text}\``;
-            }
-
-            case "Join": {
-              return `[join ${part.channel} on ${part.network}]`;
-            }
-
-            default: {
-              return part satisfies never;
-            }
-          }
-        })
-        .join("");
+  return line._tag === "Message" ? `<${line.nick}> ${texts(line.text)}` : readParts(line.parts);
 };
 
 /** An action refused, as the wire carries it. */
@@ -812,6 +822,31 @@ describe("lines", () => {
       "<peer> invited <friend> to #iirc",
     ]);
   });
+
+  it.each([
+    ["Netsplit", "<--", "netsplit a.net <-> b.net: 3 quit"],
+    ["Netjoin", "-->", "netjoin a.net <-> b.net: 3 joined"],
+  ] as const)(
+    "shows a %s as one line of its two servers and how many, marked %s, and the nicks to list when opened",
+    (_tag, marker, summary) => {
+      const line = lineOf(
+        activity({
+          _tag,
+          channel: "#iirc",
+          nicks: ["alice", "bob", "carol"],
+          servers: ["a.net", "b.net"],
+        })
+      );
+
+      expect(
+        line._tag === "Split" && [
+          line.marker,
+          read(line),
+          line.nicks.map((part) => (part._tag === "Nick" ? part.nick : undefined)),
+        ]
+      ).toStrictEqual([marker, summary, ["alice", "bob", "carol"]]);
+    }
+  );
 
   it("offers to join the Channel as the Network said it, and shows its name contained", () => {
     const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#a\u202Eb" }));
