@@ -120,6 +120,12 @@
   text-overflow: ellipsis;
 }
 
+/* A bot's mark, after the nick: kept whole, so it is the nick that is cut where it is long. */
+.tag {
+  flex-shrink: 0;
+  margin-left: var(--space-1);
+}
+
 /* Away: dimmed, the nick's colour kept underneath. */
 .away {
   opacity: 0.5;

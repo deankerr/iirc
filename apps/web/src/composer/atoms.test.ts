@@ -44,7 +44,7 @@ const describeTimeline = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 const offerOf = (notice: Notice | undefined) =>
@@ -166,6 +166,7 @@ const placeAt10 = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
         _tag: "Message",
         answers: null,
         at: { _tag: "Unknown" },
+        bot: false,
         context: null,
         id: { _tag: "Unknown" },
         kind: "Privmsg",
@@ -439,6 +440,7 @@ describe("saying", () => {
                 _tag: "Message",
                 answers: null,
                 at: { _tag: "Unknown" },
+                bot: false,
                 context: null,
                 id: { _tag: "Unknown" },
                 kind: "Privmsg",
@@ -697,6 +699,7 @@ describe("acting", () => {
           message === null
             ? { _tag: "Known", at: sequence, from: "ircd", value: null }
             : { _tag: "Known", at: sequence, from: "ircd", value: { message } },
+        bot: { _tag: "Unknown" },
         mask: { _tag: "Unknown" },
         nick: "iirc",
         realname: { _tag: "Unknown" },

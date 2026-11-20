@@ -120,6 +120,18 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
         break;
       }
 
+      case "user.bot": {
+        updateOpen(run, (open) => ({
+          ...open,
+          presence:
+            open.presence._tag === "Session"
+              ? { ...open.presence, bot: staled(open.presence.bot, since) }
+              : open.presence,
+          users: usersStaled(open.users, (seen) => ({ ...seen, bot: staled(seen.bot, since) })),
+        }));
+        break;
+      }
+
       // Each fact of a User kept only because `MONITOR` says they are online.
       case "user.monitored": {
         updateOpen(run, (open) => ({
@@ -131,6 +143,7 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
                   ...seen,
                   account: staled(seen.account, since),
                   away: staled(seen.away, since),
+                  bot: staled(seen.bot, since),
                   mask: staled(seen.mask, since),
                   realname: staled(seen.realname, since),
                 }

@@ -80,6 +80,7 @@ import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import {
   latest,
   mutedShown,
+  quietBotsShown,
   open,
   paned,
   showDraft,
@@ -101,7 +102,8 @@ export const commandContext = Atom.make((get) =>
     get(channelState),
     get(arrangement),
     get(aliasesShown),
-    get(mutedShown)
+    get(mutedShown),
+    get(quietBotsShown)
   )
 );
 

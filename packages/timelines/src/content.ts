@@ -71,6 +71,8 @@ export type Content =
       /** The Channel a Direct Message was said in the context of, from `+channel-context`. */
       readonly context: string | undefined;
       readonly ours: OursItem | undefined;
+      /** Whether its sender said it as a bot, by the `bot` tag. */
+      readonly bot: boolean;
     }
   | {
       readonly _tag: "Activity";

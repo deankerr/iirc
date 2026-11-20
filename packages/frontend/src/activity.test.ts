@@ -9,6 +9,7 @@ import {
   TimelineWindow,
   mutedCap,
 } from "@iirc/api";
+import { unreadCap } from "@iirc/timelines";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -26,8 +27,10 @@ import {
   titleOf,
 } from "./activity.ts";
 import type { Page } from "./activity.ts";
+import { contextOf } from "./composer.ts";
 import { notificationsOf } from "./notifications.ts";
 import {
+  dividerShown,
   followFrom,
   initialTimelines,
   opened,
@@ -57,7 +60,14 @@ const peer = idOf(4);
 
 type Counts = (typeof Timeline.Encoded)["unread"];
 
-const nothing: Counts = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const nothing: Counts = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 interface Described {
   readonly id: string;
@@ -105,6 +115,7 @@ interface Said {
   readonly level?: (typeof TimelineItem.Encoded)["level"];
   readonly live?: boolean;
   readonly ours?: boolean;
+  readonly bot?: boolean;
   readonly kind?: "Privmsg" | "Notice" | "Action";
   readonly text?: string;
   readonly sender?: string;
@@ -113,6 +124,7 @@ interface Said {
 
 const said = ({
   at,
+  bot = false,
   changed,
   kind = "Privmsg",
   level = "Message",
@@ -129,6 +141,7 @@ const said = ({
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot,
     context: null,
     id: { _tag: "Unknown" },
     kind,
@@ -311,7 +324,14 @@ describe("what is unread", () => {
       levels: ["Activity", "Highlight", "Message", "Direct"],
       network: {
         level: "Highlight",
-        unread: { activity: 4, direct: 2, highlights: 1, messages: 1000 },
+        unread: {
+          activity: 4,
+          botDirect: 0,
+          botMessages: 0,
+          direct: 2,
+          highlights: 1,
+          messages: 1000,
+        },
       },
       none: undefined,
     });
@@ -468,7 +488,7 @@ describe("a muted Timeline", () => {
       network: network === undefined ? undefined : networkActivity(network).unread,
     }).toStrictEqual({
       activity: { level: "Highlight", unread: { ...nothing, highlights: 3 } },
-      network: { activity: 6, direct: 3, highlights: 3, messages: 5 },
+      network: { activity: 6, botDirect: 0, botMessages: 0, direct: 3, highlights: 3, messages: 5 },
     });
   });
 
@@ -507,6 +527,146 @@ describe("a muted Timeline", () => {
       noHighlight: ["iirc", undefined],
       onlyOne: ["iirc", "Message"],
       unmuted: ["(6) iirc", "Highlight"],
+    });
+  });
+});
+
+describe("bots quieted", () => {
+  const talking = [
+    described({ id: iirc, name: "#iirc", unread: { botMessages: 4, messages: 1 } }),
+    described({ id: peer, kind: "Direct", name: "peer", unread: { botDirect: 2 } }),
+    described({
+      id: other,
+      name: "#other",
+      unread: { botMessages: 1, highlights: 2, messages: 2 },
+    }),
+  ];
+
+  const networks = (quiet: boolean) =>
+    sidebar(world(talking, undefined), new Set(), new Set(), quiet);
+
+  const shown = (quiet: boolean) => {
+    const [network] = networks(quiet);
+
+    return {
+      level: saidLevel(networks(quiet)),
+      title: titleOf(networks(quiet)),
+      unread: network === undefined ? undefined : networkActivity(network).unread,
+    };
+  };
+
+  const timelineOf = (id: string) =>
+    decodeTimeline(talking.find((one) => one.id === id) ?? described({ id, name: id }));
+
+  // Catches a switch that counts a bot's Messages as the Owner's, or one that hides them
+  // while it is off.
+  it("counts a bot's Messages while it is off, and leaves them out while it is on", () => {
+    expect({
+      off: activityOf(timelineOf(iirc)),
+      on: activityOf(timelineOf(iirc), false, true),
+      onDirect: activityOf(timelineOf(peer), false, true),
+    }).toStrictEqual({
+      off: { level: "Message", unread: { ...nothing, messages: 5 } },
+      on: { level: "Message", unread: { ...nothing, messages: 1 } },
+      onDirect: { level: undefined, unread: nothing },
+    });
+  });
+
+  const flooded = (messages: number) =>
+    decodeTimeline(
+      described({ id: iirc, name: "#iirc", unread: { botMessages: unreadCap + 1, messages } })
+    );
+
+  // Catches a person's Message hiding among a bot's past the cap, which the Daemon counts
+  // apart, or a sum past the cap showing as an exact count.
+  it("keeps a person's Message beside more of a bot's than the cap, and says more past it", () => {
+    expect({
+      off: activityOf(flooded(unreadCap)).unread.messages,
+      on: activityOf(flooded(unreadCap), false, true).unread.messages,
+      person: activityOf(flooded(1), false, true).unread.messages,
+    }).toStrictEqual({ off: unreadCap + 1, on: unreadCap, person: 1 });
+  });
+
+  // Catches a bot's Highlight going quiet along with its other Messages.
+  it("still counts a Highlight, and what a person said beside a bot", () => {
+    expect(activityOf(timelineOf(other), false, true)).toStrictEqual({
+      level: "Highlight",
+      unread: { ...nothing, highlights: 2, messages: 2 },
+    });
+  });
+
+  it("leaves a bot out of a Network's counts, the page's title, and its sidebar button", () => {
+    expect({ off: shown(false), on: shown(true) }).toStrictEqual({
+      off: {
+        level: "Highlight",
+        title: "(4) iirc",
+        unread: { ...nothing, direct: 2, highlights: 2, messages: 8 },
+      },
+      on: {
+        level: "Highlight",
+        title: "(2) iirc",
+        unread: { ...nothing, highlights: 2, messages: 3 },
+      },
+    });
+  });
+
+  // Catches /next-unread going to a Timeline where only bots spoke, while `/read all` must
+  // still mark it.
+  it("lets /next-unread pass a Timeline only bots spoke in, which /read all still marks", () => {
+    const only = [
+      described({
+        id: iirc,
+        latest: 30,
+        name: "#iirc",
+        read: 20,
+        unread: { botMessages: 3 },
+      }),
+    ];
+
+    const unseen = (quiet: boolean) =>
+      contextOf(
+        world(only, undefined),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        quiet
+      ).unread.map((one) => [one.level, one.mark !== undefined]);
+
+    expect({ off: unseen(false), on: unseen(true) }).toStrictEqual({
+      off: [["Message", true]],
+      on: [[undefined, true]],
+    });
+  });
+
+  describe("the new divider", () => {
+    const items = [said({ at: 10, bot: true, sequence: 1 }), said({ at: 30, sequence: 2 })];
+
+    const rows = (unread: Partial<Counts>, quiet: boolean) => {
+      const shown = opened(
+        world([described({ id: iirc, name: "#iirc", read: 5, unread })], iirc, items)
+      );
+
+      return shown._tag === "Shown"
+        ? rowsOf(shown.window, dividerShown(shown.divider, quiet)).map((row) =>
+            row._tag === "Item" ? row.item.sequence : row._tag
+          )
+        : [];
+    };
+
+    // Catches a "new" line drawn above what the Owner chose not to be told of.
+    it("is not drawn above what only bots said", () => {
+      expect({
+        off: rows({ botMessages: 1 }, false),
+        on: rows({ botMessages: 1 }, true),
+      }).toStrictEqual({ off: ["New", 1, 2], on: [1, 2] });
+    });
+
+    it("is still drawn when a person said something unread too, or a Highlight", () => {
+      expect({
+        highlight: rows({ botMessages: 1, highlights: 1 }, true),
+        mixed: rows({ botMessages: 1, messages: 1 }, true),
+      }).toStrictEqual({ highlight: ["New", 1, 2], mixed: ["New", 1, 2] });
     });
   });
 });
@@ -845,7 +1005,7 @@ describe("the new divider", () => {
       again: [1, "New", 2, 3, 11],
       away: [],
       // Opened again later, it is read as far as `#iirc`'s marker now, 40, so 11 is new.
-      back: { read: 40, timeline: iirc },
+      back: { bots: false, read: 40, timeline: iirc },
       marked: [1, "New", 2, 3, 11],
     });
   });
@@ -880,7 +1040,8 @@ describe("notifications", () => {
     item: typeof TimelineItem.Encoded,
     page: Page = seeing,
     before = state,
-    muted: readonly string[] | "NotKnown" = []
+    muted: readonly string[] | "NotKnown" = [],
+    quietBots = false
   ) => {
     const event = changed(11, { items: [item] });
 
@@ -889,7 +1050,8 @@ describe("notifications", () => {
       reduceTimelines(before, event),
       event.change,
       page,
-      muted === "NotKnown" ? muted : new Set(muted.map((id) => timelineId(id)))
+      muted === "NotKnown" ? muted : new Set(muted.map((id) => timelineId(id))),
+      quietBots
     ).map((one) => one.timeline);
   };
 
@@ -903,6 +1065,27 @@ describe("notifications", () => {
       hidden: notified(highlight(iirc), { compact: false, focused: true, visible: false }),
       unfocused: notified(highlight(iirc), { compact: false, focused: false, visible: true }),
     }).toStrictEqual({ direct: [peer], elsewhere: [other], hidden: [iirc], unfocused: [iirc] });
+  });
+
+  // Catches a bot's Message still calling for a notification once the Owner quieted bots,
+  // and a bot's Highlight going quiet with the rest.
+  it("notifies of a bot's Message only as a Highlight once bots are quieted", () => {
+    const direct = said({ at: 50, bot: true, level: "Direct", sequence: 11, timeline: peer });
+    const calling = highlight(other, { bot: true });
+
+    expect({
+      directOff: notified(direct),
+      directOn: notified(direct, seeing, state, [], true),
+      highlightOn: notified(calling, seeing, state, [], true),
+      // A person's Message is never quieted by it.
+      person: notified(
+        said({ at: 50, level: "Direct", sequence: 11, timeline: peer }),
+        seeing,
+        state,
+        [],
+        true
+      ),
+    }).toStrictEqual({ directOff: [peer], directOn: [], highlightOn: [other], person: [peer] });
   });
 
   it("notifies of a Highlight in a muted Timeline, and of nothing else there", () => {

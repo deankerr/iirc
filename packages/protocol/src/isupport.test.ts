@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { casefold, casemappingOf, sameName } from "./casemapping.ts";
 import {
   accountExtbanOf,
+  botModeOf,
   channelModesOf,
   chantypesOf,
   defaultChannelModes,
@@ -308,6 +309,28 @@ describe(accountExtbanOf, () => {
     ["a name with a control", "~,a", "a\r\nMODE"],
   ])("reads nothing for %s", (_why, extban, account) => {
     expect(accountExtbanOf(extban, account)).toBeUndefined();
+  });
+});
+
+describe(botModeOf, () => {
+  it.each([
+    ["the conventional letter", "B", "B"],
+    ["a lowercase letter", "b", "b"],
+  ])("reads %s", (_why, value, expected) => {
+    expect(botModeOf(value)).toBe(expected);
+  });
+
+  it.each([
+    ["no token", undefined],
+    ["an empty value", ""],
+    ["two letters", "Bb"],
+    ["a digit", "1"],
+    ["punctuation", "+"],
+    ["a space", " "],
+    ["a non-ASCII letter", "é"],
+    ["a letter and a control", "B\r\n"],
+  ])("reads nothing for %s", (_why, value) => {
+    expect(botModeOf(value)).toBeUndefined();
   });
 });
 

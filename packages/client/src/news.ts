@@ -374,6 +374,8 @@ export interface Profile {
   readonly actual: ProfileActual | undefined;
   /** The User's modes, such as `+Zi`, from `379`, when its text holds them as one word. */
   readonly modes: string | undefined;
+  /** Whether the User is a bot, from `335`, read only while the Ircd names a bot mode. */
+  readonly bot: boolean;
   /** Every other numeric of the reply that named this User, in order, so nothing is lost. */
   readonly other: readonly OtherReply[];
 }
@@ -554,6 +556,11 @@ export type News =
       /** Set when we said it, as the Owner's intent. A Message from Self said elsewhere has none. */
       readonly ours: Ours | undefined;
       /**
+       * Whether its sender said it as a bot: its Line carried the `bot` tag while the Ircd
+       * names a bot mode. A projection may leave it out of what calls for the Owner.
+       */
+      readonly bot: boolean;
+      /**
        * Whether it calls for the Owner: said live by a User other than Self, naming Self's
        * nick or one of the Configuration's `highlights` as a whole word.
        */
@@ -649,7 +656,7 @@ export type News =
   | { readonly _tag: "TimelineClosed"; readonly where: Closable }
   /**
    * What is known of a Channel Self is in changed in a way no Activity reports: a reply
-   * gave its modes or its topic, or a `NAMES` listing of its members ended. A projection
+   * gave its modes or its topic, a `NAMES` listing of its members ended, or a Line gave or changed a member's bot mark. A projection
    * tells a Frontend to read the Channel again. `channel` is keyed as a Message's `where`.
    */
   | { readonly _tag: "ChannelLearned"; readonly channel: Named }

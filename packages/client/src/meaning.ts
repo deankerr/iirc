@@ -6,6 +6,7 @@
  * @packageDocumentation
  */
 import { parseCtcp } from "@iirc/protocol/ctcp";
+import { botModeOf } from "@iirc/protocol/isupport";
 import { parseSource } from "@iirc/protocol/line";
 import type { Line, Source } from "@iirc/protocol/line";
 
@@ -19,7 +20,7 @@ import { namingOf, parseChannel, parseNick } from "./names.ts";
 import type { Activity } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, linkOf } from "./run.ts";
-import { openOf, sessionOf } from "./views.ts";
+import { onNow, openOf, sessionOf } from "./views.ts";
 
 /**
  * The Ircd's name: from `001`'s source once in a Session, else the host dialled.
@@ -48,6 +49,17 @@ export const isSelf = (run: Run, nick: string): boolean => {
  * @returns The rules.
  */
 export const rulesNow = (run: Run): ModeRules => rulesOf(openOf(run.state)?.isupport ?? new Map());
+
+/**
+ * The user mode that marks a bot, while a Feature keeps whether a User is one: the `BOT`
+ * token's, read as {@link botModeOf} reads it.
+ * @param run - The step.
+ * @returns The mode, or `undefined` while no bot mode is known and kept.
+ */
+export const botModeNow = (run: Run): string | undefined =>
+  onNow(run.registry, run.state).some((feature) => feature.keeps?.includes("user.bot") === true)
+    ? botModeOf(openOf(run.state)?.isupport.get("BOT"))
+    : undefined;
 
 /**
  * The Network's naming rules now.
@@ -190,6 +202,8 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
       _tag: "Message",
       answers: answersOf(arrival.line),
       at: arrival.time,
+      // The `bot-mode` Feature marks a bot's Message, where the Ircd names a bot mode.
+      bot: false,
       context: contextOf(run, arrival.line, target),
       id: arrival.id,
       kind: kindOf(arrival.line.command, ctcp._tag === "Action"),

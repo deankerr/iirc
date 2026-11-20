@@ -153,6 +153,7 @@ describe("the first Features on the recorded Ircds", () => {
       "batch",
       "echo-message",
       "multi-prefix",
+      "bot-mode",
       "utf8only",
     ]);
     expect(known.self?.account).toMatchObject({ _tag: "Known", value: "iirc" });

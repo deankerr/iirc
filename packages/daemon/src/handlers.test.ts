@@ -1187,7 +1187,14 @@ describe("the handlers", () => {
       })
     );
 
-    const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+    const none = {
+      activity: 0,
+      botDirect: 0,
+      botMessages: 0,
+      direct: 0,
+      highlights: 0,
+      messages: 0,
+    };
 
     expect(result.answers).toStrictEqual({
       sequences: 3,
@@ -1434,7 +1441,14 @@ describe("the handlers", () => {
       })
     );
 
-    const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+    const none = {
+      activity: 0,
+      botDirect: 0,
+      botMessages: 0,
+      direct: 0,
+      highlights: 0,
+      messages: 0,
+    };
 
     expect(result.before).toStrictEqual([
       { name: "libera", read: null, unread: { ...none, activity: 1 } },

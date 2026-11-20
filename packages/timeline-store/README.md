@@ -25,8 +25,10 @@ reset(version): Effect<void, TimelineStoreFailed>
 Summary = Descriptor & { latest: Position | undefined, read: Instant | undefined, unread: Unread,
   head: number | undefined, removed: boolean, closed: boolean, changed }
                                                    // Descriptor is { id, network, life, kind, name, key }
-Unread = { highlights, direct, messages, activity }
+Unread = { highlights, direct, messages, activity, botDirect, botMessages }
 unreadOf: { [L in Level]: keyof Unread }           // which count a level is counted in
+botUnread(level, content): "botDirect" | "botMessages" | undefined   // the count a bot's Message is counted in instead
+countedIn(level, content): keyof Unread            // the one count an item is counted in
 noneUnread: Unread                                 // every count 0
 Item = { network, timeline, position, content, level: Level | undefined, answered: Answered | undefined, changed }
 Answered = { position, sender, kind, text }        // the Message a reply answers
@@ -77,6 +79,8 @@ Each Timeline, item, tombstone, dropped Timeline, removal, and Gap records `chan
 ## Unread counts
 
 Each Timeline's summary says how far it was read, `read`, and `unread`: how many of its items of each level, `Highlight`, `Direct`, `Message`, and `Activity` as the fold gives them, stand after `read`, which is every item while it has no Read Marker. An item stands after it when its position's `at` is strictly later, so a Read Marker at the largest instant has nothing after it. An item with no level, a Message Self said, never counts, and neither does a hidden one. Each count is **capped** at `unreadCap` from `@iirc/timelines`: a count of `unreadCap + 1` means more than that, and nothing is counted past it.
+
+Each item is counted in one count only, as `countedIn` gives it in every adapter. `direct` and `messages` count the Messages no bot said, and `botDirect` and `botMessages` the Messages a bot said, by the Message's `bot`, so a Frontend can leave a bot's out, or add them back, and each is capped on its own. A Highlight from a bot is never told apart: it is counted in `highlights`.
 
 - **An item kept** counts one more of its level, when it stands after the Read Marker, wherever it stands among the others, so late history counts only when it is later than the Read Marker. An item dropped as a duplicate of one there, by message id or position, counts nothing.
 - **A Read Marker moved forward** counts the Timeline again from it.

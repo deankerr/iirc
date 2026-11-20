@@ -140,6 +140,7 @@ const userOf = (nick: string, open: Open, key: string): UserKnowledge => {
   return {
     account: seen?.account ?? unknown,
     away: seen?.away ?? unknown,
+    bot: seen?.bot ?? unknown,
     mask: seen?.mask ?? unknown,
     nick,
     realname: seen?.realname ?? unknown,
@@ -152,6 +153,7 @@ const selfOf = (session: InSession | undefined): UserKnowledge | undefined =>
     : {
         account: session.account,
         away: session.away,
+        bot: session.bot,
         mask: session.mask,
         nick: session.nick,
         realname: session.realname,

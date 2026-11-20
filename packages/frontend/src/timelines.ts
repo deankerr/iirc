@@ -330,7 +330,24 @@ const behind = (main: MainView): BackView => {
 export interface Divider {
   readonly timeline: TimelineId;
   readonly read: Timeline["read"];
+  /**
+   * Everything said that was unread when it opened was said by bots, so it marks nothing
+   * while `ui.quietBots` leaves them out.
+   */
+  readonly bots: boolean;
 }
+
+/**
+ * The divider a view draws: the Timeline's own, except that one for what bots alone said
+ * is not drawn while bots are quieted.
+ * @param divider - The Timeline's divider, if it opened with something unread.
+ * @param quietBots - Whether what bots say is left out, as `ui.quietBots` says.
+ * @returns The divider to draw, or none.
+ */
+export const dividerShown = (
+  divider: Divider | undefined,
+  quietBots: boolean
+): Divider | undefined => (quietBots && divider?.bots === true ? undefined : divider);
 
 /**
  * What one Pane shows: its open Timeline, if any, as the Owner chose it, with its "new"
@@ -2646,7 +2663,8 @@ const listed = (state: Timelines, timeline: TimelineId): Timeline | undefined =>
 
 /**
  * The divider a Timeline opens with: at its Read Marker when something said in it is
- * unread, Highlights, Direct Messages, or Messages, and none otherwise.
+ * unread, Highlights, Direct Messages, or Messages, and none otherwise, noting when only
+ * bots said it.
  * @param timeline - The Timeline, as its Network lists it.
  * @returns The divider, or none.
  */
@@ -2655,10 +2673,16 @@ const dividerOf = (timeline: Timeline | undefined): Divider | undefined => {
     return undefined;
   }
 
-  const { direct, highlights, messages } = timeline.unread;
+  const { botDirect, botMessages, direct, highlights, messages } = timeline.unread;
 
-  return direct + highlights + messages > 0
-    ? { read: timeline.read, timeline: timeline.id }
+  // A bot's Messages are counted apart, and a Highlight, even a bot's, is never among them, so
+  // only bots said it when nothing else is counted.
+  return direct + highlights + messages + botDirect + botMessages > 0
+    ? {
+        bots: highlights === 0 && direct === 0 && messages === 0,
+        read: timeline.read,
+        timeline: timeline.id,
+      }
     : undefined;
 };
 
@@ -4202,6 +4226,8 @@ export interface SidebarNetwork {
    * a Timeline this Network does not list, or that has gone, does nothing.
    */
   readonly muted: ReadonlySet<TimelineId>;
+  /** Whether what bots say is left out of its Timelines' counts, as `ui.quietBots` says. */
+  readonly quietBots: boolean;
 }
 
 /**
@@ -4213,12 +4239,15 @@ export interface SidebarNetwork {
  * @param state - The state.
  * @param closing - The Timelines asked to be closed that the Daemon has yet to say are.
  * @param muted - The Timelines the Owner muted, which each Network passes through.
+ * @param quietBots - Whether what bots say is left out of the counts, which each Network
+ * passes through.
  * @returns The sidebar.
  */
 export const sidebar = (
   state: Timelines,
   closing: ReadonlySet<TimelineId> = new Set(),
-  muted: ReadonlySet<TimelineId> = new Set()
+  muted: ReadonlySet<TimelineId> = new Set(),
+  quietBots = false
 ): readonly SidebarNetwork[] => {
   const open = new Set(openIn(state.layout).map((one) => resolve(state, one)));
 
@@ -4237,6 +4266,7 @@ export const sidebar = (
         listed: network.list.fresh || network.timelines.size > 0,
         muted,
         network: network.network,
+        quietBots,
         removed: isRemoved(network),
         running: network.running,
         timelines: all.filter((timeline) => !hidden(timeline)),
@@ -4441,9 +4471,18 @@ const speaker = (item: TimelineItem): string | undefined =>
     : undefined;
 
 /**
+ * Whether an item says its sender is a bot, which only a Message does.
+ * @param item - The item.
+ * @returns Whether it does.
+ */
+const saidByBot = (item: TimelineItem): boolean =>
+  item.content._tag === "Message" && item.content.bot;
+
+/**
  * Whether an item continues a run that the item drawn just before it is in: both are plain
  * speech, from one User, with no more than {@link runSpan} between their own times, in
- * either direction, since a Network's time can go back.
+ * either direction, since a Network's time can go back, and both say the same of whether
+ * the sender is a bot, since only the head of a run shows its mark.
  * @param item - The item.
  * @param before - The item drawn just before it.
  * @returns Whether it continues the run.
@@ -4454,6 +4493,7 @@ const continuesRun = (item: TimelineItem, before: TimelineItem): boolean => {
   return (
     said !== undefined &&
     said === speaker(before) &&
+    saidByBot(item) === saidByBot(before) &&
     Math.abs(item.position.at - before.position.at) <= runSpan
   );
 };

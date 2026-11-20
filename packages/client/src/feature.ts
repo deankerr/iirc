@@ -30,6 +30,8 @@ export type Kept =
   | "user.mask"
   /** A User's realname, as their join and `SETNAME` say it. */
   | "user.realname"
+  /** Whether a User is a bot, as their Lines, `WHO`, and Self's own modes say it. */
+  | "user.bot"
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
   | "member.prefixes"
   /**
@@ -143,15 +145,17 @@ export type Meant =
     }
   | {
       /**
-       * What a Line said of a User: their account, `null` for logged out, their mask, and
-       * their realname. Only the model sees it. It is folded only from a live Line, and only for
-       * a User who shares a Channel with Self.
+       * What a Line said of a User: their account, `null` for logged out, their mask, their
+       * realname, and whether they are a bot. Only the model sees it. It is folded only from
+       * a live Line, and only for a User who shares a Channel with Self, or Self, of whom
+       * only the mask and whether Self is a bot are read.
        */
       readonly _tag: "Described";
       readonly nick: string;
       readonly account?: string | null;
       readonly mask?: { readonly user: string; readonly host: string };
       readonly realname?: string;
+      readonly bot?: boolean;
     };
 
 /** A Line `egress` will not let leave, which the core does not send. */
@@ -190,7 +194,8 @@ export interface Departure {
  * stages it refines. Every hook is optional, pure, and total.
  *
  * - **On and off.** A Feature is on while every cap in `needs` is enabled and every token
- *   is in ISUPPORT, unless the Owner declined it. This is worked out again on `CAP ACK`,
+ *   is in ISUPPORT, and `accepts`, if it has one, says yes to ISUPPORT, unless the Owner
+ *   declined it. This is worked out again on `CAP ACK`,
  *   `CAP NEW`, `CAP DEL`, ISUPPORT, and at the end of a Session.
  * - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `react`, then
  *   `meaning`. Within a stage, Features run in the registry's order, which is one array
@@ -208,6 +213,13 @@ export interface Departure {
 export interface Feature<Own = undefined> {
   readonly name: FeatureName;
   readonly needs: { readonly caps?: readonly CapName[]; readonly tokens?: readonly string[] };
+  /**
+   * Whether ISUPPORT as it stands is one it can work with, besides naming the tokens in
+   * `needs`: a token with a value it cannot read keeps it off, and turns it off when a later
+   * `005` replaces a good one with it, so the facts it keeps go stale as they do for a token
+   * taken back.
+   */
+  readonly accepts?: (isupport: ReadonlyMap<string, string>) => boolean;
   /**
    * Caps it reads but can be on without. They are asked for with `needs`, and only when
    * every one of both is offered, so a Feature never asks for part of what it wants.

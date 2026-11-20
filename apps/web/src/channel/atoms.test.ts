@@ -32,7 +32,7 @@ const peer = idOf(4);
 const squareBob = idOf(5);
 const curlyBob = idOf(6);
 
-const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const none = { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 };
 
 const listed = (
   id: string,
@@ -62,6 +62,7 @@ const said = (sequence: number, sender: string): typeof TimelineItem.Encoded => 
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -123,6 +124,7 @@ const member = (
 ): typeof Member.Encoded => ({
   account: { _tag: "Unknown" },
   away: { _tag: "Known", at: 1, from: "ircd", value: away ? { message: "out" } : null },
+  bot: { _tag: "Unknown" },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });

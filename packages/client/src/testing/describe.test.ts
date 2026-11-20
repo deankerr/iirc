@@ -12,6 +12,7 @@ const message: Extract<News, { readonly _tag: "Message" }> = {
   _tag: "Message",
   answers: undefined,
   at: { _tag: "Known", at: now, from: "receipt", value: now },
+  bot: false,
   context: undefined,
   highlight: false,
   id: { _tag: "Unknown" },

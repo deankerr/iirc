@@ -187,6 +187,23 @@ export const NetworkConfiguration = Schema.Struct({
       description:
         "Whether to answer CTCP VERSION, PING, TIME, and CLIENTINFO requests. Off, nothing is answered, and each request is still shown.",
     }),
+  /**
+   * Whether Self says it is a bot, by setting the user mode the Ircd's `BOT` token names
+   * as each Session begins. A `Configured` written before the field existed decodes as
+   * off, since the Client then set nothing.
+   */
+  bot: Schema.optionalKey(Schema.Boolean)
+    .pipe(
+      Schema.decodeTo(Schema.Boolean, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => false)),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: false,
+      description:
+        "Whether Self says it is a bot, by setting the bot mode as each Session begins. It is set only where the Ircd names a bot mode.",
+    }),
   channels: Schema.Array(WantedChannel).annotate({
     default: [],
     description: "The Channels to be in, joined on connecting and whenever one is added.",

@@ -44,7 +44,8 @@ export interface Offer {
 
 /**
  * Whether a Feature is on: every cap it needs is enabled, every token it needs is in
- * ISUPPORT, the Owner has not declined it, and none of its hooks has thrown.
+ * ISUPPORT and the Feature accepts it, the Owner has not declined it, and none of its hooks
+ * has thrown.
  * @param feature - The Feature.
  * @param offer - What the Ircd offers now.
  * @param declined - What the Owner declined.
@@ -60,7 +61,8 @@ const isOn = (
   !declined.includes(feature.name) &&
   !seam.failed.has(feature.name) &&
   (feature.needs.caps ?? []).every((cap) => offer.enabled.has(cap)) &&
-  (feature.needs.tokens ?? []).every((token) => offer.isupport.has(token));
+  (feature.needs.tokens ?? []).every((token) => offer.isupport.has(token)) &&
+  (feature.accepts?.(offer.isupport) ?? true);
 
 /**
  * The Features on now, in registry order.

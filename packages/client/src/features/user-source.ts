@@ -9,6 +9,8 @@ import type { Line, Source } from "@iirc/protocol/line";
 import { IgnoreMask } from "@iirc/protocol/mask";
 import { Schema } from "effect";
 
+import type { Meant } from "../feature.ts";
+
 /**
  * A Line's source, when it is a User's. Only a User's has a user or a host, so the Ircd,
  * and another server, whose names are all nick, are not read as one, and a Line with no
@@ -55,4 +57,20 @@ export const wholeSource = (line: Line): Source | undefined => {
     maskOf(source.nick, source.user ?? "", source.host ?? "") !== undefined
     ? source
     : undefined;
+};
+
+/**
+ * The nick a Line's sender has after it: the one they changed to, when it changed their nick.
+ * @param meant - What the Line meant.
+ * @param nick - The nick the Line came from.
+ * @returns Their nick after it.
+ */
+export const afterwards = (meant: readonly Meant[], nick: string): string => {
+  const renamed = meant.find(
+    (each) => each._tag === "Activity" && each.activity._tag === "NickChanged"
+  );
+
+  return renamed?._tag === "Activity" && renamed.activity._tag === "NickChanged"
+    ? renamed.activity.to
+    : nick;
 };

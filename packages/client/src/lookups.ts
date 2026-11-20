@@ -23,7 +23,7 @@ import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import type { Input, Lookup } from "./input.ts";
 import type { Fact, MaskList } from "./known.ts";
-import { isSelf, namingNow, rulesNow } from "./meaning.ts";
+import { botModeNow, isSelf, namingNow, rulesNow } from "./meaning.ts";
 import { listMore } from "./members.ts";
 import type { Listed } from "./modes.ts";
 import { maskListsOf } from "./modes.ts";
@@ -322,6 +322,7 @@ const profileOf = (nick: string): Profile => ({
   account: undefined,
   actual: undefined,
   away: undefined,
+  bot: false,
   channels: [],
   host: undefined,
   idle: undefined,
@@ -540,6 +541,16 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
       account === undefined || text === undefined
         ? undefined
         : (profile) => ({ ...profile, account }),
+  ],
+  // `335 <client> <nick> :is a bot`. Ircds used `335` for other things before bot mode had
+  // a spec, so it says the User is a bot only where the Ircd names a bot mode, and only in
+  // exactly this shape, whatever its text. Otherwise it is kept as it came.
+  [
+    "335",
+    (said, run, line) =>
+      botModeNow(run) === undefined || said.length !== 1
+        ? keepOther(line)
+        : (profile) => ({ ...profile, bot: true }),
   ],
   ["338", readActual],
   ["379", readModes],

@@ -70,7 +70,14 @@ const other = idOf(3);
 const peer = idOf(4);
 const bob = idOf(5);
 
-const nothing = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const nothing = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 const described = (
   id: string,
@@ -110,6 +117,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -280,6 +288,7 @@ const member = (
 ): (typeof MemberPage.Encoded)["members"][number] => ({
   account,
   away: { _tag: "Known", at: 1, from: "ircd", value: away ? { message: "lunch" } : null },
+  bot: { _tag: "Unknown" },
   nick,
   prefixes: { _tag: "Known", at: 1, from: "ircd", value: [...prefixes] },
 });
@@ -986,6 +995,33 @@ describe("the members", () => {
       ["@", false, "op, operator"],
       ["+", true, "voiced, voice, away"],
       [undefined, false, "plain"],
+    ]);
+  });
+
+  // Catches a bot mark drawn on what is not known, or only guessed from an old fact.
+  it("marks a member as a bot only when their User is known now to be one", () => {
+    const { ranks } = header("Joined");
+
+    const bots = [
+      { _tag: "Known", at: 1, from: "ircd", value: true },
+      { _tag: "Known", at: 1, from: "ircd", value: false },
+      { _tag: "Stale", since: 2, was: true },
+      { _tag: "Unknown" },
+    ] as const;
+
+    const decoded = page(bots.map((bot, index) => ({ ...member(`n${index}`, []), bot }))).members;
+
+    expect(
+      decoded.map((one) => {
+        const row = memberRow(one, ranks);
+
+        return [row.bot, row.label];
+      })
+    ).toStrictEqual([
+      [true, "n0, bot"],
+      [false, "n1"],
+      [false, "n2"],
+      [false, "n3"],
     ]);
   });
 

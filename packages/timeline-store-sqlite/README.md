@@ -22,11 +22,12 @@ CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NO
   name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER, head INTEGER,
   unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
   unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL,
+  unread_bot_direct INTEGER NOT NULL, unread_bot_messages INTEGER NOT NULL,
   removed INTEGER NOT NULL, life INTEGER NOT NULL, closed INTEGER) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
   network TEXT NOT NULL, step INTEGER NOT NULL, message_id TEXT, intent TEXT,
   content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT, answers TEXT,
-  ignored TEXT, UNIQUE (timeline, cursor)) STRICT;
+  ignored TEXT, bot INTEGER NOT NULL, UNIQUE (timeline, cursor)) STRICT;
 CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEXT NOT NULL,
   changed INTEGER NOT NULL) STRICT;
 CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT,
@@ -37,7 +38,7 @@ CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed 
   life INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 10;  -- the layout's version
+PRAGMA user_version = 12;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.
@@ -47,6 +48,7 @@ PRAGMA user_version = 10;  -- the layout's version
 - **An item's `id` is its row,** which it keeps when a merge moves it, since a merge moves items in place, so the search index, which knows an item only by its row, still finds it. It is an `INTEGER PRIMARY KEY`, so no `VACUUM` renumbers it. `(timeline, cursor)` is unique beside it, as the key it was.
 - **`sender` is a Message's sender, folded** by `foldForSearch`, for a search kept to one sender, and `NULL` for anything but a Message, which a search never finds.
 - **`answers` is the message id a Message answers,** from its content, so the item it answers is found in its Timeline by `items_by_message_id` without reading the content.
+- **`bot` is 1 for a bot's Message of the `Direct` or `Message` level,** as `botUnread` says, and 0 for anything else, so a bot's are counted apart without reading the content.
 - **`ignored` is the masks that hide an item,** the JSON text of their array, and `NULL` while it is shown. Every read of items asks for `ignored IS NULL`, and the indexes those reads use are partial on it, ending in `ignored` so the condition is checked from the index alone: a hidden item is in none of them, so it costs a read nothing. It stays in the unique key and `items_by_message_id`, so it holds its position and id, in `items_by_step` and `items_by_intent`, and in `search`, so it is found once shown.
 - **`search` holds each Message's text, folded,** as `searchableOf` gives it, under its item's `id`. It is contentless, so it keeps the index and not a second copy of the text, and `contentless_delete` lets a row leave it.
 
@@ -61,7 +63,7 @@ PRAGMA user_version = 10;  -- the layout's version
 | `timeline` | the primary key of `tombstones` for where a merged id went, then the primary key of `timelines`, and `items_shown` for its latest position |
 | `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and `items_shown` for each one's latest position, and for whether a Direct Message Timeline shows anything, one seek each. Each row holds its Read Marker and unread counts |
 | whether a Timeline is closed, on every read of one | `items_by_arrival`, partial on `(timeline, step, ignored)` where shown: one seek for an item from a later step than the sequence `closed` keeps |
-| counting a level again, after a Read Marker moves, a merge, or a mask dropped | `items_by_level`, partial on `(timeline, level, cursor, ignored)` where there is a level and it is shown, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone |
+| counting a level again, after a Read Marker moves, a merge, or a mask dropped | `items_by_level`, partial on `(timeline, level, cursor, ignored)` where there is a level, it is shown, and no bot said it, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone, and a bot's the same way by `items_by_bot`, partial on `(timeline, level, cursor, ignored, bot)` where `bot` is 1 and it has a level and is shown |
 | `Unignored` | `items_hidden`, partial on `(network)` where hidden: it reads the Network's hidden items and nothing shown, then writes each by its row |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |
 | `changedAfter` | `timelines_by_changed`, with a seek of `items_shown` for each Direct Message Timeline, `items_by_changed`, partial where shown, `tombstones_by_changed`, `dropped_by_changed`, `removals_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
@@ -86,7 +88,7 @@ A window's Gaps cost one seek, then one statement for each run between two of it
 
 ## Counting unread
 
-Each Timeline's row keeps its Read Marker, `read`, and a count for each level, so a read of Timelines reads no items to give them. Keeping an item adds one to its level's count, by its primary key, when it stands after the Read Marker and is shown, and stops at `unreadCap + 1`. A Read Marker that moves, a merge, and a mask dropped that shows an item count the Timeline again: one statement, four counts, each a search of `items_by_level` above `cursorsAfter` of the Read Marker, from `@iirc/timelines`, so `at` alone decides and no instant after the Read Marker is ever made, which the largest has not, that stops after `unreadCap + 1` entries. A Timeline with no Read Marker is counted with no bound on the cursor. So counting again reads at most four thousand index entries however long the Timeline is, and a Timeline with no Read Marker and a million items costs the same to keep as an empty one.
+Each Timeline's row keeps its Read Marker, `read`, and a count for each level, so a read of Timelines reads no items to give them. Keeping an item adds one to its level's count, or for a bot's Message to `botDirect` or `botMessages` instead, by its primary key, when it stands after the Read Marker and is shown, and stops at `unreadCap + 1`. A Read Marker that moves, a merge, and a mask dropped that shows an item count the Timeline again: one statement, six counts, each a search of `items_by_level`, or of `items_by_bot` for a bot's, above `cursorsAfter` of the Read Marker, from `@iirc/timelines`, so `at` alone decides and no instant after the Read Marker is ever made, which the largest has not, that stops after `unreadCap + 1` entries. A bot's Messages are in `items_by_bot` and not `items_by_level`, so they never stand between the others' count and its cap. A Timeline with no Read Marker is counted with no bound on the cursor. So counting again reads at most six thousand index entries however long the Timeline is, and a Timeline with no Read Marker and a million items costs the same to keep as an empty one.
 
 ## Settings
 

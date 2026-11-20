@@ -11,7 +11,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
-import { olderUnasked, pageSize, rowsOf, targetKey } from "@iirc/frontend/timelines";
+import { dividerShown, olderUnasked, pageSize, rowsOf, targetKey } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
@@ -23,7 +23,16 @@ import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import { zone } from "../ui/dates.ts";
-import { following, latest, newer, older, paneTimeline, selfNick, windowCapOf } from "./atoms.ts";
+import {
+  following,
+  latest,
+  newer,
+  older,
+  paneTimeline,
+  quietBotsShown,
+  selfNick,
+  windowCapOf,
+} from "./atoms.ts";
 import { Line } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
@@ -240,7 +249,7 @@ const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
  * @returns The log.
  */
 const Lines = ({
-  divider,
+  divider: opened,
   kind,
   label,
   timeline,
@@ -253,6 +262,9 @@ const Lines = ({
   readonly window: Window;
 }) => {
   const activity = useAtomValue(activityShown);
+  const quietBots = useAtomValue(quietBotsShown);
+  // The "new" divider for what only bots said is not drawn while bots are quieted.
+  const divider = dividerShown(opened, quietBots);
   const self = useAtomValue(selfNick(window.network));
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);

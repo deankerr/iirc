@@ -297,6 +297,27 @@ const isSelf = (run: Run, nick: string): boolean => {
 };
 
 /**
+ * The Channels Self is joined to that a User is in, counting a listing still being read:
+ * every one for Self.
+ * @param run - The step.
+ * @param nick - The User.
+ * @returns The Channels' names, as the Owner wrote them.
+ */
+export const channelsSharedWith = (run: Run, nick: string): readonly string[] => {
+  const folded = folder(run.state)(nick);
+  const self = isSelf(run, nick);
+
+  return [...run.state.channels.values()].flatMap(({ name, phase }) =>
+    phase._tag === "Joined" &&
+    (self ||
+      phase.members.has(folded) ||
+      (phase.listing !== undefined && inListing(phase.listing, folded)))
+      ? [name]
+      : []
+  );
+};
+
+/**
  * Records what a Line showed of another User, while they share a Channel with Self, or a
  * Feature keeps them while `MONITOR` says they are online, so what is kept is bounded by
  * the members and the monitored kept.
@@ -316,6 +337,7 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
     const was: Seen = userIn(open.users, folded) ?? {
       account: { _tag: "Unknown" },
       away: { _tag: "Unknown" },
+      bot: { _tag: "Unknown" },
       mask: { _tag: "Unknown" },
       nick,
       realname: { _tag: "Unknown" },

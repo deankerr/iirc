@@ -311,7 +311,7 @@ const DragButton = () => (
 
 /**
  * A Timeline's row, under its Network or pinned, with the button that opens its menu.
- * @param props - The Timeline, whether it is muted, the Network it is of when it is pinned,
+ * @param props - The Timeline, whether it is muted, whether bots are quieted, the Network it is of when it is pinned,
  * the number of the other Pane that shows it, if one does, whether its menu is open, and
  * what opens it.
  * @returns The row.
@@ -322,16 +322,18 @@ const TimelineItem = ({
   of,
   onMenu,
   pane,
+  quietBots,
   timeline,
 }: {
   readonly pane: number | undefined;
   readonly timeline: Timeline;
   readonly muted: boolean;
+  readonly quietBots: boolean;
   readonly of?: string | undefined;
   readonly menu: boolean;
   readonly onMenu: (row: HTMLElement) => void;
 }) => {
-  const activity = activityOf(timeline, muted);
+  const activity = activityOf(timeline, muted, quietBots);
   const name = of === undefined ? timeline.name : `${timeline.name} of ${of}`;
 
   return (
@@ -538,7 +540,7 @@ const networkUnread = (
   expanded: boolean
 ): { readonly activity: Activity; readonly calling: boolean } =>
   expanded && own !== undefined
-    ? { activity: activityOf(own, network.muted.has(own.id)), calling: false }
+    ? { activity: activityOf(own, network.muted.has(own.id), network.quietBots), calling: false }
     : { activity: networkActivity(network), calling: true };
 
 /**
@@ -921,6 +923,7 @@ const PinnedTree = ({ pins }: { readonly pins: readonly Pin[] }) => {
             menu={part.menu === timeline.id}
             muted={network.muted.has(timeline.id)}
             of={network.network}
+            quietBots={network.quietBots}
             onMenu={(row) => {
               part.openMenu(timeline, row);
             }}
@@ -1047,6 +1050,7 @@ const NetworkTrees = ({
                   key={timeline.id}
                   menu={part.menu === timeline.id}
                   muted={network.muted.has(timeline.id)}
+                  quietBots={network.quietBots}
                   onMenu={(row) => {
                     part.openMenu(timeline, row);
                   }}

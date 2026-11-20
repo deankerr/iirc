@@ -47,6 +47,10 @@ export interface Unread {
   readonly direct: number;
   readonly messages: number;
   readonly activity: number;
+  /** The Direct level's count of those a bot said, which `direct` leaves out. */
+  readonly botDirect: number;
+  /** The Message level's count of those a bot said, which `messages` leaves out. */
+  readonly botMessages: number;
 }
 
 /** Which count of {@link Unread} each level is counted in. */
@@ -57,8 +61,49 @@ export const unreadOf = {
   Message: "messages",
 } as const satisfies { readonly [L in Level]: keyof Unread };
 
+/**
+ * Which count of {@link Unread} a bot's Message of a level is counted in instead of its
+ * level's, as {@link botUnread} gives it. A Highlight is never told apart.
+ */
+const botUnreadOf = {
+  Direct: "botDirect",
+  Message: "botMessages",
+} as const satisfies { readonly [L in Level]?: keyof Unread };
+
+/**
+ * The count a bot's item is counted in instead of its level's: `botDirect` or
+ * `botMessages`, alike in every adapter.
+ * @param level - The item's level.
+ * @param content - What it shows.
+ * @returns The count, or `undefined` for an item no bot said, or of another level.
+ */
+export const botUnread = (
+  level: Level | undefined,
+  content: Content
+): "botDirect" | "botMessages" | undefined =>
+  (level === "Direct" || level === "Message") && content._tag === "Message" && content.bot
+    ? botUnreadOf[level]
+    : undefined;
+
+/**
+ * The one count an item is counted in: its level's, or a bot's own when a bot said it, so
+ * that no item is counted in two.
+ * @param level - The item's level.
+ * @param content - What it shows.
+ * @returns The count.
+ */
+export const countedIn = (level: Level, content: Content): keyof Unread =>
+  botUnread(level, content) ?? unreadOf[level];
+
 /** No items unread. */
-export const noneUnread: Unread = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+export const noneUnread: Unread = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 /**
  * A Timeline as a store holds it, with its latest item's position, its Read Marker, what

@@ -289,6 +289,7 @@ const message = (sender: string, text: string, delivery?: typeof Delivery.Encode
     _tag: "Message",
     answers: null,
     at: unknown,
+    bot: false,
     context: null,
     id: unknown,
     kind: "Privmsg",
@@ -412,10 +413,35 @@ const markerOf = (shown: ItemContent) => {
   return line._tag === "Description" ? line.marker : "a Message";
 };
 
+/**
+ * A Message from `peer` as a line.
+ * @param bot - Whether the Message says its sender is a bot.
+ * @returns The line.
+ */
+const saidBy = (bot: boolean) =>
+  lineOf(
+    content({
+      _tag: "Message",
+      answers: null,
+      at: unknown,
+      bot,
+      context: null,
+      id: unknown,
+      kind: "Privmsg",
+      live: true,
+      ours: null,
+      sender: "peer",
+      tags: [],
+      target: "#iirc",
+      text: "hi",
+    })
+  );
+
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
       _tag: "Message",
+      bot: false,
       colour: nickColour("peer"),
       context: undefined,
       delivered: undefined,
@@ -426,12 +452,20 @@ describe("lines", () => {
     });
   });
 
+  // Catches a view that marks every sender, or none, by what the Message says of them.
+  it("says a Message's sender is a bot only when the Message says so", () => {
+    expect(
+      [saidBy(false), saidBy(true)].map((line) => line._tag === "Message" && line.bot)
+    ).toStrictEqual([false, true]);
+  });
+
   it("says which Channel a Direct Message is about, contained, and nothing for one that names none", () => {
     const about = lineOf(
       content({
         _tag: "Message",
         answers: null,
         at: unknown,
+        bot: false,
         context: "#iirc\u202E",
         id: unknown,
         kind: "Privmsg",

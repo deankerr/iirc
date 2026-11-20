@@ -395,6 +395,7 @@ const PressBody = Schema.fromJsonString(
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
+  bot: false,
   channels: [{ name: "#iirc" }],
   declined: [],
   enabled: true,
@@ -483,6 +484,7 @@ export const profileOf = (
   account: null,
   actual: null,
   away: null,
+  bot: false,
   channels: [],
   host: null,
   idle: null,

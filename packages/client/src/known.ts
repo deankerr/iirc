@@ -83,6 +83,8 @@ export interface UserKnowledge {
   readonly away: Fact<{ readonly message: string } | null>;
   /** The realname from registration, which `setname` keeps up to date. */
   readonly realname: Fact<string>;
+  /** Whether they say they are a bot, where the Ircd names a bot mode. */
+  readonly bot: Fact<boolean>;
 }
 
 /** A member of a Channel, with the prefix modes they hold, such as `o` and `v`. */

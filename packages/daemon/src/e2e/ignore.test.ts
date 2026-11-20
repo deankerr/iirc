@@ -219,13 +219,20 @@ describe("ngircd, ignoring by mask", () => {
       direct: [
         undefined,
         ["<spam> spam whispers"],
-        { activity: 0, direct: 1, highlights: 0, messages: 0 },
+        { activity: 0, botDirect: 0, botMessages: 0, direct: 1, highlights: 0, messages: 0 },
         true,
       ],
       hidden: {
         items: ["<pal> pal says hello", "<iirc> iirc says hello", "<pal> pal says goodbye"],
         spamless: true,
-        unread: { activity: activity(result.hidden.unread), direct: 0, highlights: 0, messages: 2 },
+        unread: {
+          activity: activity(result.hidden.unread),
+          botDirect: 0,
+          botMessages: 0,
+          direct: 0,
+          highlights: 0,
+          messages: 2,
+        },
       },
       kept: result.shownBefore,
       order: [
@@ -239,6 +246,8 @@ describe("ngircd, ignoring by mask", () => {
       shownBefore: result.shownBefore,
       unread: {
         activity: activity(result.hidden.unread) + 2,
+        botDirect: 0,
+        botMessages: 0,
         direct: 0,
         highlights: 1,
         messages: 3,

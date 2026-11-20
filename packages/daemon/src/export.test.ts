@@ -17,6 +17,7 @@ const message = (
   _tag: "Message",
   answers: undefined,
   at: { _tag: "Unknown" },
+  bot: false,
   context: undefined,
   id: { _tag: "Unknown" },
   kind,

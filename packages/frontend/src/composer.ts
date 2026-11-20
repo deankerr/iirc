@@ -21,7 +21,7 @@ import type {
 import type { Aliases } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
-import { levelOf, markLatest } from "./activity.ts";
+import { levelOf, markLatest, unreadShown } from "./activity.ts";
 import { arranged, shownOrder, unarranged } from "./arrangement.ts";
 import type { Arrangement } from "./arrangement.ts";
 import { channelIn, initialChannels } from "./channel.ts";
@@ -349,21 +349,26 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
 /**
  * The Timelines with something unread, as a command sees them. A muted one is listed while
  * the Daemon counts anything unread in it, so `/read all` still marks it, but with no level,
- * so navigation passes it over, a Highlight unread there too.
+ * so navigation passes it over, a Highlight unread there too. With bots quieted, the level
+ * leaves out what bots said, so a Timeline with only that unread is listed and passed over.
  * @param timelines - The Timelines.
  * @param muted - The Timelines the Owner muted.
+ * @param quietBots - Whether what bots say is left out.
  * @returns Those with something unread, in their order.
  */
 const unseenIn = (
   timelines: readonly Timeline[],
-  muted: ReadonlySet<TimelineId>
+  muted: ReadonlySet<TimelineId>,
+  quietBots: boolean
 ): readonly Unseen[] =>
   timelines.flatMap((timeline) =>
-    levelOf(timeline.unread) === undefined
+    levelOf(unreadShown(timeline.unread, false)) === undefined
       ? []
       : [
           {
-            level: muted.has(timeline.id) ? undefined : levelOf(timeline.unread),
+            level: muted.has(timeline.id)
+              ? undefined
+              : levelOf(unreadShown(timeline.unread, false, quietBots)),
             mark: markLatest(timeline),
             timeline: timeline.id,
           },
@@ -398,6 +403,7 @@ const sessionOf = (network: NetworkView | undefined): boolean | undefined => {
  * @param arrangement - The Owner's order of the sidebar.
  * @param aliases - The aliases the Owner made.
  * @param muted - The Timelines the Owner muted.
+ * @param quietBots - Whether what bots say is left out of what is unread.
  * @returns The context.
  */
 export const contextOf = (
@@ -405,13 +411,14 @@ export const contextOf = (
   channels: Channels = initialChannels,
   arrangement: Arrangement = unarranged,
   aliases: Aliases = [],
-  muted: ReadonlySet<TimelineId> = new Set()
+  muted: ReadonlySet<TimelineId> = new Set(),
+  quietBots = false
 ): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
   const main = mainOf(timelines);
 
-  const networks = sidebar(timelines, new Set(), muted);
+  const networks = sidebar(timelines, new Set(), muted, quietBots);
   const shownAs = arranged(networks, arrangement);
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
@@ -437,8 +444,8 @@ export const contextOf = (
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
     timelines: shownOrder(shownAs),
-    unread: unseenIn(calling, muted),
-    unreadClosed: unseenIn(closed, muted),
+    unread: unseenIn(calling, muted, quietBots),
+    unreadClosed: unseenIn(closed, muted, quietBots),
   };
 
   // A Direct Message not yet begun stands in front of any Timeline, and has no focus of its

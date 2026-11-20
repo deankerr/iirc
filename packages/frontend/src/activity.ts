@@ -37,7 +37,14 @@ export interface Activity {
   readonly level: Level | undefined;
 }
 
-const none: Unread = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+const none: Unread = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 /**
  * The count of a level.
@@ -78,29 +85,6 @@ export const levelOf = (unread: Unread): Level | undefined =>
   levels.find((level) => countOf(unread, level) > 0);
 
 /**
- * The counts a view shows, which is where a muted Timeline is decided: a muted Timeline
- * counts nothing but its Highlights, so what is said or done there is not shown, though
- * the Daemon still counts it.
- * @param unread - The counts the Daemon kept.
- * @param muted - Whether the Timeline is muted.
- * @returns The counts to show.
- */
-export const unreadShown = (unread: Unread, muted: boolean): Unread =>
-  muted ? { ...none, highlights: unread.highlights } : unread;
-
-/**
- * What is unread in a Timeline, as a view shows it.
- * @param timeline - The Timeline, as its Network lists it.
- * @param muted - Whether it is muted.
- * @returns Its activity.
- */
-export const activityOf = (timeline: Timeline, muted = false): Activity => {
-  const unread = unreadShown(timeline.unread, muted);
-
-  return { level: levelOf(unread), unread };
-};
-
-/**
  * Two counts added, kept at most `unreadCap + 1`, which says more than `unreadCap`, as the
  * Daemon's own counts are.
  * @param left - One count.
@@ -110,8 +94,49 @@ export const activityOf = (timeline: Timeline, muted = false): Activity => {
 const plus = (left: number, right: number): number => Math.min(left + right, unreadCap + 1);
 
 /**
+ * The counts a view shows, which is where a muted Timeline and the quiet of bots are
+ * decided. A muted Timeline counts nothing but its Highlights, so what is said or done there
+ * is not shown, though the Daemon still counts it. The Daemon counts what a bot said apart
+ * from the rest, so with bots quieted `direct` and `messages` are the Daemon's, and
+ * otherwise each adds its bot count, kept at most `unreadCap + 1`. A Highlight, which no bot
+ * count holds, stays. The bot counts of what is shown are always 0, since what they hold is
+ * either left out or in `direct` and `messages`.
+ * @param unread - The counts the Daemon kept.
+ * @param muted - Whether the Timeline is muted.
+ * @param quietBots - Whether what bots say is left out of the counts.
+ * @returns The counts to show.
+ */
+export const unreadShown = (unread: Unread, muted: boolean, quietBots = false): Unread => {
+  if (muted) {
+    return { ...none, highlights: unread.highlights };
+  }
+
+  return {
+    ...unread,
+    botDirect: 0,
+    botMessages: 0,
+    direct: quietBots ? unread.direct : plus(unread.direct, unread.botDirect),
+    messages: quietBots ? unread.messages : plus(unread.messages, unread.botMessages),
+  };
+};
+
+/**
+ * What is unread in a Timeline, as a view shows it.
+ * @param timeline - The Timeline, as its Network lists it.
+ * @param muted - Whether it is muted.
+ * @param quietBots - Whether what bots say is left out.
+ * @returns Its activity.
+ */
+export const activityOf = (timeline: Timeline, muted = false, quietBots = false): Activity => {
+  const unread = unreadShown(timeline.unread, muted, quietBots);
+
+  return { level: levelOf(unread), unread };
+};
+
+/**
  * What is unread in a Network: each count shown, summed over its Timelines, and the
- * highest level. A muted Timeline adds only its Highlights.
+ * highest level. A muted Timeline adds only its Highlights, and with bots quieted none
+ * adds what a bot said.
  * @param network - The Network, as the sidebar shows it.
  * @returns Its activity.
  */
@@ -119,10 +144,12 @@ export const networkActivity = (network: SidebarNetwork): Activity => {
   let unread = none;
 
   for (const timeline of network.timelines) {
-    const shown = unreadShown(timeline.unread, network.muted.has(timeline.id));
+    const shown = unreadShown(timeline.unread, network.muted.has(timeline.id), network.quietBots);
 
     unread = {
       activity: plus(unread.activity, shown.activity),
+      botDirect: plus(unread.botDirect, shown.botDirect),
+      botMessages: plus(unread.botMessages, shown.botMessages),
       direct: plus(unread.direct, shown.direct),
       highlights: plus(unread.highlights, shown.highlights),
       messages: plus(unread.messages, shown.messages),
@@ -262,11 +289,14 @@ export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefine
  * @returns The intent, or none.
  */
 export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined => {
+  // Whatever a bot said is unread too, though a view may leave it out.
+  const unread = unreadShown(timeline.unread, false);
+
   const nothing =
     timeline.detached ||
     timeline.removed ||
     (timeline.read !== null && read <= timeline.read) ||
-    (saidCount(timeline.unread) === 0 && timeline.unread.activity === 0);
+    (saidCount(unread) === 0 && unread.activity === 0);
 
   return nothing
     ? undefined

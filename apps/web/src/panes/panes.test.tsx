@@ -53,7 +53,7 @@ const describeTimeline = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
@@ -79,6 +79,7 @@ const said = (sequence: number): typeof TimelineItem.Encoded => ({
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -289,7 +290,14 @@ const signedIn = async ({
             ...describeTimeline(other, "#other", "Channel"),
             latest: cursor(40_000, 40),
             read: 10_000,
-            unread: { activity: 0, direct: 0, highlights: 0, messages: 30 },
+            unread: {
+              activity: 0,
+              botDirect: 0,
+              botMessages: 0,
+              direct: 0,
+              highlights: 0,
+              messages: 30,
+            },
           }
         : describeTimeline(other, "#other", "Channel"),
     },

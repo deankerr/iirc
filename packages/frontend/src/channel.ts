@@ -1082,11 +1082,13 @@ export interface MemberRow {
   /** The prefixes they hold, or none while which they hold is not known. */
   readonly prefixes: readonly string[] | undefined;
   readonly away: boolean;
+  /** Their User said they are a bot, as is known now: a stale or unknown fact is not. */
+  readonly bot: boolean;
   /** Their User's account, as it was if that is all that is known. */
   readonly account: MemberAccount;
   /** Their nick's colour slot. */
   readonly colour: number;
-  /** Their nick, rank, whether they are away, and their account, in words, for a screen reader. */
+  /** Their nick, rank, whether they are a bot or away, and their account, in words, for a screen reader. */
   readonly label: string;
 }
 
@@ -1194,10 +1196,12 @@ export const memberRow = (member: Member, ranks: readonly Rank[]): MemberRow => 
     (member.away._tag === "Stale" && member.away.was !== null);
 
   const account = accountOf(member.account);
+  const bot = member.bot._tag === "Known" && member.bot.value;
 
   const words = [
     member.nick,
     ...(highest === undefined ? [] : [rankNames.get(highest.mode) ?? `mode ${highest.mode}`]),
+    ...(bot ? ["bot"] : []),
     ...(away ? ["away"] : []),
     ...(account._tag === "LoggedIn" ? [`account ${account.name}`] : []),
     ...(account._tag === "LoggedOut" ? ["logged out"] : []),
@@ -1206,6 +1210,7 @@ export const memberRow = (member: Member, ranks: readonly Rank[]): MemberRow => 
   return {
     account,
     away,
+    bot,
     colour: nickColour(member.nick),
     label: words.join(", "),
     nick: member.nick,

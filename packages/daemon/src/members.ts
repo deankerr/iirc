@@ -19,6 +19,7 @@ export interface Placed extends MemberPlace {
   readonly member: MemberKnowledge;
   readonly account: UserKnowledge["account"];
   readonly away: UserKnowledge["away"];
+  readonly bot: UserKnowledge["bot"];
 }
 
 /** A page of members, and where the next begins, or `undefined` when no more follow. */
@@ -155,6 +156,7 @@ export const membersPage = (view: ChannelView, query: MembersQuery): MembersPage
         ...place,
         account: user?.account ?? unknown,
         away: user?.away ?? unknown,
+        bot: user?.bot ?? unknown,
         member,
       });
     }

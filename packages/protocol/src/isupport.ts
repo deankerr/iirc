@@ -350,3 +350,15 @@ export const accountExtbanOf = (
 
   return first === undefined ? undefined : { names: [first, ...rest], prefix };
 };
+
+const oneLetter = /^[A-Za-z]$/u;
+
+/**
+ * Reads `BOT`: the user mode that marks a User as a bot, which is also the flag `WHO`
+ * shows for one. Hostile input, so a value that is not exactly one ASCII letter means no
+ * bot mode is offered, never a guessed letter.
+ * @param value - The token's value, or `undefined` if it was not sent.
+ * @returns The mode, or `undefined` when the token was not sent or is not one letter.
+ */
+export const botModeOf = (value: string | undefined): string | undefined =>
+  value !== undefined && oneLetter.test(value) ? value : undefined;

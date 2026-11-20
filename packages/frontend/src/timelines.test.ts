@@ -381,6 +381,7 @@ const wireContent = (item: ModelItem): (typeof TimelineItem.Encoded)["content"] 
         _tag: "Message",
         answers: null,
         at: unknown,
+        bot: false,
         context: null,
         id: unknown,
         kind: "Privmsg",
@@ -432,7 +433,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
     network: timeline.network,
     read: null,
     removed: false,
-    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const wireGap = (gap: ModelGap) => ({
@@ -1365,7 +1366,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     network: "alpha",
     read: null,
     removed: false,
-    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const listOf = (through: number, ...timelines: readonly ReturnType<typeof timelineOf>[]) =>
@@ -1385,6 +1386,7 @@ const message = (timeline: string, at: number, sequence: number, changed = seque
       _tag: "Message",
       answers: null,
       at: unknown,
+      bot: false,
       context: null,
       id: unknown,
       kind: "Privmsg",
@@ -1625,7 +1627,7 @@ const direct = (id: string, name: string, detached = false) =>
       network: "alpha",
       read: null,
       removed: false,
-      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+      unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );
 
@@ -1657,6 +1659,8 @@ const listedAndClosed = (state: Timelines) =>
 
 const unreadOf = (more: Partial<(typeof Timeline.Encoded)["unread"]>) => ({
   activity: 0,
+  botDirect: 0,
+  botMessages: 0,
   direct: 0,
   highlights: 0,
   messages: 0,
@@ -1817,7 +1821,14 @@ describe("the Timelines' state", () => {
             ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)),
             closed: true,
             latest: cursor(6000, 6),
-            unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+            unread: {
+              activity: 0,
+              botDirect: 0,
+              botMessages: 0,
+              direct: 0,
+              highlights: 0,
+              messages: 2,
+            },
           },
         ],
       })
@@ -1876,7 +1887,14 @@ describe("the Timelines' state", () => {
   });
 
   it("breaks a tie in /next-unread by the order shown, so a pinned Timeline comes first", () => {
-    const unread = { activity: 0, direct: 0, highlights: 0, messages: 1 };
+    const unread = {
+      activity: 0,
+      botDirect: 0,
+      botMessages: 0,
+      direct: 0,
+      highlights: 0,
+      messages: 1,
+    };
 
     // alpha's own Timeline and #b each have a Message unread, and #a is open.
     const state = reduceTimelines(
@@ -4627,7 +4645,14 @@ describe("what a Pane is called, and what the composer counts as open", () => {
         timelines: [
           Schema.encodeSync(Timeline)({
             ...timelineOf(idOf(3), "Channel", "#a", 6),
-            unread: { activity: 0, direct: 0, highlights: 1, messages: 1 },
+            unread: {
+              activity: 0,
+              botDirect: 0,
+              botMessages: 0,
+              direct: 0,
+              highlights: 1,
+              messages: 1,
+            },
           }),
         ],
       })
@@ -5558,7 +5583,12 @@ describe("where the day changes", () => {
     const [a, b] = [midnightUtc + 10 * hour, midnightUtc + 34 * hour];
     // A Gap that began after the first item, so it comes before the second.
     const gaps = [{ count: 1, from: cursor(a, 1), to: cursor(b, 2) }];
-    const divider: Divider = { read: message(idOf(3), a, 1).position.at, timeline: three };
+
+    const divider: Divider = {
+      bots: false,
+      read: message(idOf(3), a, 1).position.at,
+      timeline: three,
+    };
 
     expect({
       withGap: dayText(dayRows([a, b], { gaps, zone: fixed(0) })),
@@ -5595,7 +5625,11 @@ describe("where the day changes", () => {
 
     // The "new" divider adds a row before the third day.
     const divided = dayRows(instants, {
-      divider: { read: message(idOf(3), instants[0] ?? 0, 1).position.at, timeline: three },
+      divider: {
+        bots: false,
+        read: message(idOf(3), instants[0] ?? 0, 1).position.at,
+        timeline: three,
+      },
       zone: fixed(0),
     });
 
@@ -5644,7 +5678,8 @@ const said = (
   sequence: number,
   at: number,
   sender = "alice",
-  kind: "Privmsg" | "Action" | "Notice" = "Privmsg"
+  kind: "Privmsg" | "Action" | "Notice" = "Privmsg",
+  bot = false
 ) =>
   decodeItem({
     answered: null,
@@ -5653,6 +5688,7 @@ const said = (
       _tag: "Message",
       answers: null,
       at: unknown,
+      bot,
       context: null,
       id: unknown,
       kind,
@@ -5749,6 +5785,19 @@ describe("a run of Messages under one nick", () => {
     expect(runRows([said(1, at, "Alice"), said(2, at + minute, "aLICE")])).toStrictEqual([1, "+2"]);
   });
 
+  // Catches a bot's Message left under the head of a run that shows no mark, since only a
+  // run's head does, or an unmarked one under a marked head.
+  it("ends when the mark of its sender changes, either way", () => {
+    expect(
+      runRows([
+        said(1, at),
+        said(2, at + minute, "alice", "Privmsg", true),
+        said(3, at + 2 * minute, "alice", "Privmsg", true),
+        said(4, at + 3 * minute),
+      ])
+    ).toStrictEqual([1, 2, "+3", 4]);
+  });
+
   it("ends when another User speaks", () => {
     expect(
       runRows([said(1, at), said(2, at + minute, "bob"), said(3, at + 2 * minute)])
@@ -5827,7 +5876,7 @@ describe("a run of Messages under one nick", () => {
   it("ends at the Read Marker's line", () => {
     expect(
       runRows([said(1, at), said(2, at + minute)], {
-        divider: { read: said(1, at).position.at, timeline: three },
+        divider: { bots: false, read: said(1, at).position.at, timeline: three },
       })
     ).toStrictEqual([1, "new", 2]);
   });
@@ -6012,6 +6061,7 @@ const statusOf = (state: Timelines, self: string | null) =>
         : Schema.decodeSync(UserKnowledge)({
             account: { _tag: "Unknown" },
             away: { _tag: "Unknown" },
+            bot: { _tag: "Unknown" },
             mask: { _tag: "Unknown" },
             nick: self,
             realname: { _tag: "Unknown" },

@@ -198,6 +198,7 @@ const Content = exactly<Content>()(
     Message: {
       answers: Schema.UndefinedOr(MessageId),
       at: Fact(Instant),
+      bot: Schema.Boolean,
       context: Schema.UndefinedOr(Schema.String),
       id: Fact(MessageId),
       kind: SayKind,
@@ -266,6 +267,8 @@ const Count = Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 export const SummaryRow = Schema.toCodecJson(
   Schema.Struct({
     activity: Count,
+    botDirect: Count,
+    botMessages: Count,
     changed: Int,
     closed: Schema.BooleanFromBit,
     direct: Count,

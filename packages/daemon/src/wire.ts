@@ -661,6 +661,7 @@ const profile = (source: Profile): Fields<Profile, WireProfile> => ({
       ? null
       : { ip: source.actual.ip ?? null, mask: source.actual.mask ?? null },
   away: source.away ?? null,
+  bot: source.bot,
   channels: source.channels.map(({ name, prefixes }) => ({ name, prefixes })),
   host: source.host ?? null,
   idle: source.idle ?? null,
@@ -1210,6 +1211,7 @@ const news = (source: News): WireNews => {
         _tag: "Message",
         answers: orNull(source.answers),
         at: fact(source.at, same),
+        bot: source.bot,
         context: orNull(source.context),
         highlight: source.highlight,
         id: fact(source.id, same),
@@ -1329,6 +1331,7 @@ export const happened = (source: Happened): Fields<Happened, WireHappened> => ({
 const user = (source: UserKnowledge): Fields<UserKnowledge, WireUserKnowledge> => ({
   account: fact(source.account, same),
   away: fact(source.away, (away) => (away === null ? null : { message: away.message })),
+  bot: fact(source.bot, same),
   mask: fact(source.mask, ({ host, user: name }) => ({ host, user: name })),
   nick: source.nick,
   realname: fact(source.realname, same),
@@ -1455,16 +1458,18 @@ export const channelHeader = (
 /**
  * A member, as the contract says it, with the prefix modes they hold in the order of
  * `PREFIX`.
- * @param placed - The member, and their User's account and whether they are away.
+ * @param placed - The member, and their User's account, whether they are away, and whether
+ * they are a bot.
  * @param order - Each prefix mode's index in `PREFIX`.
  * @returns Its wire form.
  */
 export const member = (
   placed: Placed,
   order: ReadonlyMap<string, number>
-): Fields<MemberKnowledge, WireMember, "account" | "away"> => ({
+): Fields<MemberKnowledge, WireMember, "account" | "away" | "bot"> => ({
   account: fact(placed.account, same),
   away: fact(placed.away, (away) => (away === null ? null : { message: away.message })),
+  bot: fact(placed.bot, same),
   nick: placed.member.nick,
   prefixes: setFact(placed.member.prefixes, (held) => inRankOrder(held, order)),
 });
@@ -1691,6 +1696,7 @@ const itemContent = (source: Content): WireItemContent => {
         _tag: "Message",
         answers: orNull(source.answers),
         at: fact(source.at, same),
+        bot: source.bot,
         context: orNull(source.context),
         id: fact(source.id, same),
         kind: source.kind,
@@ -1755,6 +1761,8 @@ export const timelineItem = (source: Item): Fields<Item, WireTimelineItem, "sequ
  */
 const unread = (source: Unread): Fields<Unread, WireUnread> => ({
   activity: source.activity,
+  botDirect: source.botDirect,
+  botMessages: source.botMessages,
   direct: source.direct,
   highlights: source.highlights,
   messages: source.messages,

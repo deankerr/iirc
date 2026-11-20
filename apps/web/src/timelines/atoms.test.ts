@@ -44,7 +44,7 @@ const describeTimeline = (
   network: "libera",
   read: null,
   removed: false,
-  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+  unread: { activity: 0, botDirect: 0, botMessages: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 const message = (sequence: number, text = `line ${sequence}`): typeof TimelineItem.Encoded => ({
@@ -54,6 +54,7 @@ const message = (sequence: number, text = `line ${sequence}`): typeof TimelineIt
     _tag: "Message",
     answers: null,
     at: { _tag: "Unknown" },
+    bot: false,
     context: null,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
