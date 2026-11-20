@@ -382,8 +382,8 @@ describe("WHO flags", () => {
   });
 });
 
-// A `WHOIS` of `robo`, whose reply holds a `335`.
-const whois = (isupport: readonly string[]) =>
+// A `WHOIS` of `robo`, whose reply holds a `335` with the parameters after the nick.
+const whois = (isupport: readonly string[], after = ":is a Bot on iirc-test") =>
   lookedUp(
     played([
       ...inChannel({ isupport }),
@@ -391,7 +391,7 @@ const whois = (isupport: readonly string[]) =>
         "!! whois robo",
         ">> WHOIS robo",
         "<< :irc.test 311 iirc robo ~r robo.test * :Robo",
-        "<< :irc.test 335 iirc robo :is a Bot on iirc-test",
+        `<< :irc.test 335 iirc robo ${after}`,
         "<< :irc.test 318 iirc robo :End of WHOIS list"
       ),
     ])
@@ -400,6 +400,20 @@ const whois = (isupport: readonly string[]) =>
 describe("a WHOIS's 335", () => {
   it("says the User is a bot where the Ircd names a bot mode", () => {
     expect(whois(bot)).toMatchObject({ profiles: [{ bot: true, other: [] }] });
+  });
+
+  it("says so for any text, even none", () => {
+    expect(whois(bot, ":")).toMatchObject({ profiles: [{ bot: true, other: [] }] });
+  });
+
+  // Catches a `335` of another shape, which an Ircd used for something else, marking a bot.
+  it.each([
+    ["no text", "", ["robo"]],
+    ["a parameter before the text", "extra :is a Bot", ["robo", "extra", "is a Bot"]],
+  ])("is kept as it came with %s, though the Ircd names a bot mode", (_why, after, params) => {
+    expect(whois(bot, after)).toMatchObject({
+      profiles: [{ bot: false, other: [{ numeric: "335", params }] }],
+    });
   });
 
   it("is kept as it came where it names none, as Ircds used it for other things", () => {

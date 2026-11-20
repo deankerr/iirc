@@ -543,12 +543,14 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
         : (profile) => ({ ...profile, account }),
   ],
   // `335 <client> <nick> :is a bot`. Ircds used `335` for other things before bot mode had
-  // a spec, so it says the User is a bot only where the Ircd names a bot mode, and is kept
-  // as it came where it does not.
+  // a spec, so it says the User is a bot only where the Ircd names a bot mode, and only in
+  // exactly this shape, whatever its text. Otherwise it is kept as it came.
   [
     "335",
-    (_said, run, line) =>
-      botModeNow(run) === undefined ? keepOther(line) : (profile) => ({ ...profile, bot: true }),
+    (said, run, line) =>
+      botModeNow(run) === undefined || said.length !== 1
+        ? keepOther(line)
+        : (profile) => ({ ...profile, bot: true }),
   ],
   ["338", readActual],
   ["379", readModes],
