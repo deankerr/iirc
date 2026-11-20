@@ -3,7 +3,7 @@ import type { TailLevel } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { lastNumber, linesShown, reduceTail, tailCap } from "./tail.ts";
+import { lastNumber, leastShown, linesShown, reduceTail, tailCap } from "./tail.ts";
 import type { HeldTail } from "./tail.ts";
 
 const started = 1_700_000_000_000;
@@ -102,6 +102,18 @@ describe("the Tail held", () => {
       ["Debug", "Info", "Warn", "Error", "Fatal"],
       ["Info", "Warn", "Error", "Fatal"],
       ["Warn", "Error", "Fatal"],
+    ]);
+  });
+
+  // Regression: a `ui.tail` value names the wrong level, so the view shows too much or too little.
+  it("takes each ui.tail value as the least level it names", () => {
+    expect(
+      (["debug", "info", "warning", "error"] as const).map((tail) => [tail, leastShown(tail)])
+    ).toStrictEqual([
+      ["debug", "Debug"],
+      ["info", "Info"],
+      ["warning", "Warn"],
+      ["error", "Error"],
     ]);
   });
 });

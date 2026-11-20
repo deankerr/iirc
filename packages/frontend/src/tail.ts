@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import type { TailDaemon, TailLevel, TailLine, TailRead } from "@iirc/api";
+import type { TailDaemon, TailLevel, TailLine, TailRead, TailShown } from "@iirc/api";
 
 /** The most lines held, as many as the Daemon keeps: one more lets go of the oldest. */
 export const tailCap = 4096;
@@ -97,3 +97,18 @@ export const atLeast = (level: TailLevel, least: TailLevel): boolean =>
  */
 export const linesShown = (held: HeldTail, least: TailLevel): readonly TailLine[] =>
   held.lines.filter((line) => atLeast(line.level, least));
+
+/** The least level each value of `ui.tail` names. */
+const leastOf: Readonly<Record<TailShown, TailLevel>> = {
+  debug: "Debug",
+  error: "Error",
+  info: "Info",
+  warning: "Warn",
+};
+
+/**
+ * The least level a view shows under a value of `ui.tail`.
+ * @param shown - The value.
+ * @returns The level.
+ */
+export const leastShown = (shown: TailShown): TailLevel => leastOf[shown];

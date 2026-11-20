@@ -250,7 +250,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
-- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, `ui.muted`, the Timelines the Owner silenced, and `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the sidebar: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
+- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, `ui.muted`, the Timelines the Owner silenced, `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the sidebar, and `ui.tail`, the least level the `iirc` view shows: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and for `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.** `showsIn` works out once for a window which items a Channel's Timeline draws, and shows every item of another kind of Timeline. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`. `spoke` hides the joins, parts, and quits of Users who did not say a Message, of any kind, in that window no more than five minutes before it, measured between the two items' own times in the window's order, and a User is followed across a change of nick. Self's are always shown, as far as `rowsOf` says Self is known, and with Self's nick unknown, every one is. Only the window's Messages count, so one near its start may be hidden though its User spoke just before the window begins.
@@ -283,7 +283,7 @@ The Tail as a Frontend holds it, as a reducer (`reduceTail`): read whole, then e
 - **A line is taken once.** One numbered at or before the last held was given already, as a stream followed again can, and changes nothing. `lastNumber` says where to follow from.
 - **At most `tailCap` lines are held, 4096,** as many as the Daemon keeps, and one more lets go of the oldest.
 - **A stream of another Daemon lets go of the Tail held.** `Opened` with a `started` other than the one held is a Daemon that restarted, so nothing is held until the Tail is read again.
-- **What a view shows is derived.** `linesShown` gives the lines at a least level and above, oldest first, and `atLeast` compares two levels.
+- **What a view shows is derived.** `linesShown` gives the lines at a least level and above, oldest first, and `atLeast` compares two levels. `leastShown` is the least level each value of `ui.tail` names: `debug` is Debug, `info` Info, `warning` Warn, and `error` Error, under which Fatal shows too.
 
 ## Uploading
 

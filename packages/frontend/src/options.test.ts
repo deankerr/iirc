@@ -1400,6 +1400,7 @@ describe("the options under ui", () => {
       size: 14,
       spellcheck: false,
       suffix: ", ",
+      tail: "info",
       theme: "dark",
       themes: [],
       time: "HH:mm",
@@ -1485,7 +1486,7 @@ describe("the options under ui", () => {
     expect({
       first: listed(state, "")
         .map((option) => option.name)
-        .slice(0, 29),
+        .slice(0, 30),
       kept: state.ui,
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
@@ -1516,6 +1517,7 @@ describe("the options under ui", () => {
         "ui.size",
         "ui.spellcheck",
         "ui.suffix",
+        "ui.tail",
         "ui.theme",
         "ui.themes",
         "ui.time",

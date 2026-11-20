@@ -1,9 +1,9 @@
 /**
  * iirc's own view, labelled `iirc`, which a Pane with nothing open shows: a banner, `iirc`
- * drawn in blocks with the Daemon's version under it, then the Tail's lines at Info and
- * above, oldest first, each its time, its words, its annotations, dimmer, and its cause.
- * A line at Warn and above is drawn in the theme's colour for danger. Everything a line
- * holds is text, never markup. The banner stands above the oldest line and scrolls with
+ * drawn in blocks with the Daemon's version under it, then the Tail's lines at the level
+ * `ui.tail` names and above, oldest first, each its time, its words, its annotations,
+ * dimmer, and its cause. A line at Warn and above is drawn in the theme's colour for
+ * danger. Everything a line holds is text, never markup. The banner stands above the oldest line and scrolls with
  * the lines, and the view stays at the latest line while the Owner is there, as a Timeline
  * does, by the scroller's reversed column. While no Network is configured, how to start
  * follows the banner.
