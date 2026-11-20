@@ -575,7 +575,7 @@ const tailLineEvent = (line: typeof TailLine.Encoded) =>
   `event: line\nid: ${line.n}\ndata: ${JSON.stringify(line)}\n\n`;
 
 /** When the fake Daemon first started, as the Tail says. */
-export const tailStarted = 1_700_000_000_000;
+const tailStarted = 1_700_000_000_000;
 
 /**
  * The Tail of a Daemon that has just started: its one line, which says so with its version.

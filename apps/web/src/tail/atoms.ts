@@ -88,7 +88,7 @@ const followed = runtime.atom((get) =>
 );
 
 /** The Tail held, or none until it is read. */
-export const tailHeld = Atom.make((get): HeldTail | undefined =>
+const tailHeld = Atom.make((get): HeldTail | undefined =>
   Option.getOrUndefined(AsyncResult.value(get(followed)))
 );
 
