@@ -802,6 +802,17 @@ describe("lines", () => {
     ]);
   });
 
+  it("shows another User's invitation by who invited whom and where, with nothing to join", () => {
+    const line = lineOf(
+      activity({ _tag: "UserInvited", by: "peer", channel: "#iirc", nick: "friend" })
+    );
+
+    expect([line._tag === "Description" && line.marker, read(line)]).toStrictEqual([
+      "--",
+      "<peer> invited <friend> to #iirc",
+    ]);
+  });
+
   it("offers to join the Channel as the Network said it, and shows its name contained", () => {
     const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#a\u202Eb" }));
 

@@ -15,6 +15,7 @@ import { chghost } from "./features/chghost.ts";
 import { echo } from "./features/echo.ts";
 import { extendedJoin } from "./features/extended-join.ts";
 import { extendedMonitor } from "./features/extended-monitor.ts";
+import { inviteNotify } from "./features/invite-notify.ts";
 import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
 import { saslPlain } from "./features/sasl.ts";
@@ -60,6 +61,7 @@ export const registry: readonly Registered[] = [
   register(extendedMonitor),
   register(chghost),
   register(setname),
+  register(inviteNotify),
   register(botMode),
   // After `multi-prefix`, which reads the raw names and finds each member by the nick the core read.
   register(userhostInNames),

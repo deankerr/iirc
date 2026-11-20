@@ -388,6 +388,23 @@ describe("an invitation", () => {
 
     expect(ofTag(changes, "Added").map(({ level }) => level)).toStrictEqual(["Activity"]);
   });
+
+  it("of another User is only Activity, though it is happening now", () => {
+    const { changes } = fold([
+      happened(1, [
+        {
+          _tag: "Activity",
+          activity: { _tag: "UserInvited", by: "peer", channel: "#elsewhere", nick: "friend" },
+          at: known(t0),
+          id: unknown,
+          live: true,
+          where: [network],
+        },
+      ]),
+    ]);
+
+    expect(ofTag(changes, "Added").map(({ level }) => level)).toStrictEqual(["Activity"]);
+  });
 });
 
 const numeric = (live: boolean): News => ({

@@ -406,10 +406,25 @@ const writeNetworkOnly = (activity: NetworkOnly): ActivityParts => {
   }
 };
 
+type ByAnother = Extract<Activity, { readonly _tag: "Kicked" | "UserInvited" }>;
+
+const isByAnother = (activity: Activity): activity is ByAnother =>
+  activity._tag === "Kicked" || activity._tag === "UserInvited";
+
+// A User kicking another from a Channel, with its reason, or inviting another to one.
+const writeByAnother = (activity: ByAnother): ActivityParts => ({
+  head: [atom(activity.channel), atom(activity.nick), `by=${atom(activity.by)}`],
+  tail: activity._tag === "Kicked" ? trailing(activity.reason) : [],
+});
+
 // The positional fields and trailing text of an Activity other than a presence change.
 const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts => {
   if (isNetworkOnly(activity)) {
     return writeNetworkOnly(activity);
+  }
+
+  if (isByAnother(activity)) {
+    return writeByAnother(activity);
   }
 
   switch (activity._tag) {
@@ -426,13 +441,6 @@ const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts
 
     case "Quit": {
       return { head: [atom(activity.nick)], tail: trailing(activity.reason) };
-    }
-
-    case "Kicked": {
-      return {
-        head: [atom(activity.channel), atom(activity.nick), `by=${atom(activity.by)}`],
-        tail: trailing(activity.reason),
-      };
     }
 
     case "NickChanged": {

@@ -665,7 +665,8 @@ export const foldActivity = (
 ): void => {
   const fold = folder(run.state);
 
-  // An invitation, an answer to `OPER`, and what `MONITOR` tells change no Channel.
+  // An invitation, Self's or another's, an answer to `OPER`, and what `MONITOR` tells change no
+  // Channel.
   if (changesNothingHere(activity)) {
     return;
   }

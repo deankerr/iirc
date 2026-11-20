@@ -316,9 +316,40 @@ const ircdReport = (source: IrcdReport): WireActivity => {
   return wire;
 };
 
+type Invitation = Extract<Activity, { readonly _tag: "Invited" | "UserInvited" }>;
+
+const isInvitation = (source: Activity): source is Invitation =>
+  source._tag === "Invited" || source._tag === "UserInvited";
+
+// An invitation: of Self, or of another User, as `invite-notify` tells.
+const invitation = (source: Invitation): WireActivity => {
+  if (source._tag === "Invited") {
+    const wire: Case<Activity, WireActivity, "Invited"> = {
+      _tag: "Invited",
+      by: source.by,
+      channel: source.channel,
+    };
+
+    return wire;
+  }
+
+  const wire: Case<Activity, WireActivity, "UserInvited"> = {
+    _tag: "UserInvited",
+    by: source.by,
+    channel: source.channel,
+    nick: source.nick,
+  };
+
+  return wire;
+};
+
 const activity = (source: Activity): WireActivity => {
   if (isPresence(source)) {
     return presence(source);
+  }
+
+  if (isInvitation(source)) {
+    return invitation(source);
   }
 
   if (isIrcdReport(source)) {
@@ -406,16 +437,6 @@ const activity = (source: Activity): WireActivity => {
         args: source.args,
         command: source.command,
         nick: source.nick,
-      };
-
-      return wire;
-    }
-
-    case "Invited": {
-      const wire: Case<Activity, WireActivity, "Invited"> = {
-        _tag: "Invited",
-        by: source.by,
-        channel: source.channel,
       };
 
       return wire;

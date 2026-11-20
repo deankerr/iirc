@@ -116,6 +116,13 @@ export type Activity =
   /** A User set their realname to `realname`, as a `SETNAME` Line says. */
   | { readonly _tag: "RealnameChanged"; readonly nick: string; readonly realname: string }
   | { readonly _tag: "Invited"; readonly channel: string; readonly by: string }
+  /** `by` invited `nick`, another User, to `channel`, as `invite-notify` tells its members. */
+  | {
+      readonly _tag: "UserInvited";
+      readonly channel: string;
+      readonly nick: string;
+      readonly by: string;
+    }
   | { readonly _tag: "CameOnline"; readonly nick: string }
   | { readonly _tag: "WentOffline"; readonly nick: string }
   | { readonly _tag: "OperGranted"; readonly nick: string }
@@ -178,14 +185,19 @@ export const isUserChange = (activity: Activity): activity is UserChange =>
   activity._tag === "HostChanged" ||
   activity._tag === "RealnameChanged";
 
+/** Another User's invitation, which `invite-notify` tells a Channel's members of. */
+export type OthersInvitation = Extract<Activity, { readonly _tag: "UserInvited" }>;
+
 /**
  * Whether an Activity changes no Channel and answers nothing Self sent: one that is
- * {@link NetworkOnly}, or a {@link PresenceChange}.
+ * {@link NetworkOnly}, a {@link PresenceChange}, or another User's invitation.
  * @param activity - The Activity.
  * @returns Whether it does.
  */
-export const changesNothingHere = (activity: Activity): activity is NetworkOnly | PresenceChange =>
-  isNetworkOnly(activity) || isPresenceChange(activity);
+export const changesNothingHere = (
+  activity: Activity
+): activity is NetworkOnly | PresenceChange | OthersInvitation =>
+  isNetworkOnly(activity) || isPresenceChange(activity) || activity._tag === "UserInvited";
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

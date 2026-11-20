@@ -292,6 +292,7 @@ const activityTimelines = (
     case "Joined":
     case "Parted":
     case "Kicked":
+    case "UserInvited":
     case "TopicChanged": {
       return [channel(run, activity.channel)];
     }
