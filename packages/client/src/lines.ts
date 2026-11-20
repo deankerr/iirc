@@ -1304,7 +1304,7 @@ export const interpret = (
 
   splitBefore(run, arrival);
 
-  const count = heldBefore(run, arrival);
+  const count = heldBefore(run);
 
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 

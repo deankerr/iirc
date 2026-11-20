@@ -7,12 +7,13 @@
  * still gets that quit, and a User the Owner ignores is shown as they were, as unbatched.
  *
  * A batch that is not what its type says is read as its Lines would be unbatched: what it
- * held is given back as it was, in order, and the rest of it is read without it. That is
- * a Line in it of another command, or naming Self, or one that means no quit or join, a
- * batch opened inside it, history, a `BATCH -` with more than its reference, or a quit or
- * join past {@link maxHeld} held across the Connection. So is one that never ends, when its
- * Connection does, or when `batch` turns off, and every one open when the casemapping
- * changes or ignore masks are taken away, which change how what came before is read.
+ * held is given back as it was, in the order it came, and the rest of it is read without
+ * it. That is a Line in it of another command, or naming Self, or one that means no quit
+ * or join, a batch opened inside it, history, a `BATCH -` with more than its reference, or
+ * a quit or join past {@link maxHeld} held across the Connection. So is one that never
+ * ends, when its Connection does, or when `batch` turns off, and every one open when the
+ * casemapping changes, which changes how what came before is read, or holding a User whose
+ * ignore mask is taken away.
  *
  * @packageDocumentation
  */
@@ -21,8 +22,8 @@ import { isSelf } from "./meaning.ts";
 import type { News, Where } from "./news.ts";
 import type { Run } from "./run.ts";
 import { linkOf, updateOpen } from "./run.ts";
-import type { Link, Splitting } from "./state.ts";
-import { maxHeld, maxSplits } from "./state.ts";
+import type { Held, Link, Splits, Splitting } from "./state.ts";
+import { maxHeld, maxSplits, noSplits } from "./state.ts";
 import { openOf } from "./views.ts";
 
 type ActivityNews = Extract<News, { readonly _tag: "Activity" }>;
@@ -30,32 +31,38 @@ type ActivityNews = Extract<News, { readonly _tag: "Activity" }>;
 /** The command each kind of split holds. */
 const commands = { Netjoin: "JOIN", Netsplit: "QUIT" } as const;
 
-const splitsOf = (run: Run): ReadonlyMap<string, Splitting> =>
-  openOf(run.state)?.splits ?? new Map();
+const splitsOf = (run: Run): Splits => openOf(run.state)?.splits ?? noSplits;
 
-const setSplits = (run: Run, change: (splits: Map<string, Splitting>) => void): void => {
-  updateOpen(run, (open) => {
-    const splits = new Map(open.splits);
-
-    change(splits);
-
-    return { ...open, splits };
-  });
+const setSplits = (run: Run, splits: Splits): void => {
+  updateOpen(run, (open) => ({ ...open, splits }));
 };
 
-// Gives back what a split held, as it was, in order.
-const giveBack = (run: Run, splitting: Splitting): void => {
-  run.news.push(...splitting.held);
+// Closes the splits a test picks, and gives back what they held, as it was, in the order it
+// came, which the others keep holding.
+const close = (run: Run, closing: (ref: string) => boolean): readonly Held[] => {
+  const { open, held } = splitsOf(run);
+  const given = held.filter((each) => closing(each.ref));
+
+  setSplits(run, {
+    held: held.filter((each) => !closing(each.ref)),
+    open: new Map([...open].filter(([ref]) => !closing(ref))),
+  });
+
+  return given;
+};
+
+const giveBack = (run: Run, closing: (ref: string) => boolean): void => {
+  run.news.push(...close(run, closing).map(({ news }) => news));
 };
 
 // A split's end: one Activity in each Channel it touched, in the order they were first
 // touched, then each quit as it was where else it was placed, which is a Direct Message
 // Timeline that exists.
-const show = (run: Run, splitting: Splitting): void => {
+const show = (run: Run, splitting: Splitting, held: readonly Held[]): void => {
   const channels = new Map<string, { readonly where: Where; readonly nicks: string[] }>();
   const elsewhere: ActivityNews[] = [];
 
-  for (const news of splitting.held) {
+  for (const { news } of held) {
     const { activity } = news;
 
     // A User the Owner ignores is shown as they were, stamped, so a projection still hides them.
@@ -112,28 +119,28 @@ const show = (run: Run, splitting: Splitting): void => {
  */
 export const splitBefore = (run: Run, arrival: Arrival): void => {
   const mark = arrival.split;
-  const splits = splitsOf(run);
+  const { open, held } = splitsOf(run);
 
   if (mark === undefined) {
     return;
   }
 
   if (mark._tag === "Opens") {
-    if (arrival.live && !splits.has(mark.ref) && splits.size < maxSplits) {
-      setSplits(run, (each) =>
-        each.set(mark.ref, {
+    if (arrival.live && !open.has(mark.ref) && open.size < maxSplits) {
+      setSplits(run, {
+        held,
+        open: new Map(open).set(mark.ref, {
           at: arrival.time,
-          held: [],
           kind: mark.kind,
           servers: mark.servers,
-        })
-      );
+        }),
+      });
     }
 
     return;
   }
 
-  const splitting = splits.get(mark.ref);
+  const splitting = open.get(mark.ref);
 
   if (splitting === undefined) {
     return;
@@ -141,41 +148,39 @@ export const splitBefore = (run: Run, arrival: Arrival): void => {
 
   const ends = mark._tag === "Ends";
 
-  if (ends || arrival.line.command !== commands[splitting.kind] || !arrival.live) {
-    setSplits(run, (each) => each.delete(mark.ref));
-
-    if (ends && mark.whole) {
-      show(run, splitting);
-    } else {
-      giveBack(run, splitting);
-    }
+  if (ends && mark.whole) {
+    show(
+      run,
+      splitting,
+      close(run, (ref) => ref === mark.ref)
+    );
+  } else if (ends || arrival.line.command !== commands[splitting.kind] || !arrival.live) {
+    giveBack(run, (ref) => ref === mark.ref);
   }
 };
 
 /**
- * How many quits or joins a Line's split holds now, before the Line is read, for
+ * How many quits or joins the Connection's splits hold now, before a Line is read, for
  * {@link splitAfter}.
  * @param run - The step.
- * @param arrival - The Line.
- * @returns How many, or `undefined` for a Line in no split.
+ * @returns How many.
  */
-export const heldBefore = (run: Run, arrival: Arrival): number | undefined =>
-  arrival.split?._tag === "In" ? splitsOf(run).get(arrival.split.ref)?.held.length : undefined;
+export const heldBefore = (run: Run): number => splitsOf(run).held.length;
 
 /**
  * After a Line in a split is read: one that meant no quit or join the split held, such as
- * one the core found malformed, makes the split give back what it held.
+ * one the core found malformed, makes the split give back what it held. Only a Line's own
+ * split can hold anything as it is read, so whether the count grew says whether it did.
  * @param run - The step.
  * @param arrival - The Line.
  * @param count - What {@link heldBefore} said.
  */
-export const splitAfter = (run: Run, arrival: Arrival, count: number | undefined): void => {
+export const splitAfter = (run: Run, arrival: Arrival, count: number): void => {
   const ref = arrival.split?._tag === "In" ? arrival.split.ref : undefined;
-  const splitting = ref === undefined ? undefined : splitsOf(run).get(ref);
+  const { open, held } = splitsOf(run);
 
-  if (ref !== undefined && splitting !== undefined && splitting.held.length === count) {
-    setSplits(run, (each) => each.delete(ref));
-    giveBack(run, splitting);
+  if (ref !== undefined && open.has(ref) && held.length === count) {
+    giveBack(run, (each) => each === ref);
   }
 };
 
@@ -189,7 +194,8 @@ export const splitAfter = (run: Run, arrival: Arrival, count: number | undefined
  */
 export const held = (run: Run, arrival: Arrival, news: ActivityNews): boolean => {
   const ref = arrival.split?._tag === "In" ? arrival.split.ref : undefined;
-  const splitting = ref === undefined ? undefined : splitsOf(run).get(ref);
+  const splits = splitsOf(run);
+  const splitting = ref === undefined ? undefined : splits.open.get(ref);
 
   if (ref === undefined || splitting === undefined) {
     return false;
@@ -203,46 +209,53 @@ export const held = (run: Run, arrival: Arrival, news: ActivityNews): boolean =>
 
   const nick = activity._tag === "Quit" || activity._tag === "Joined" ? activity.nick : undefined;
 
-  const total = [...splitsOf(run).values()].reduce((sum, each) => sum + each.held.length, 0);
-
-  if (!holds || nick === undefined || isSelf(run, nick) || total >= maxHeld) {
-    setSplits(run, (each) => each.delete(ref));
-    giveBack(run, splitting);
+  if (!holds || nick === undefined || isSelf(run, nick) || splits.held.length >= maxHeld) {
+    giveBack(run, (each) => each === ref);
 
     return false;
   }
 
-  setSplits(run, (each) => each.set(ref, { ...splitting, held: [...splitting.held, news] }));
+  setSplits(run, { ...splits, held: [...splits.held, { news, ref }] });
 
   return true;
 };
 
 /**
- * Gives back what every split held, when its Connection ends or `batch` turns off.
+ * Gives back what every split held, in the order it came, when its Connection ends or
+ * `batch` turns off.
  * @param run - The step.
  * @param link - The Connection, as it was.
  */
 export const releaseSplits = (run: Run, link: Link): void => {
-  const splits = link.phase._tag === "Open" ? link.phase.splits : new Map<string, Splitting>();
+  const splits = link.phase._tag === "Open" ? link.phase.splits : noSplits;
 
-  for (const splitting of splits.values()) {
-    giveBack(run, splitting);
-  }
+  run.news.push(...splits.held.map(({ news }) => news));
 
-  if (splits.size > 0) {
-    updateOpen(run, (open) => ({ ...open, splits: new Map() }));
+  if (splits.open.size > 0) {
+    updateOpen(run, (open) => ({ ...open, splits: noSplits }));
   }
 };
 
 /**
- * Gives back what every split held, before News that changes how a projection reads what
- * came before it: a new casemapping, or ignore masks taken away.
+ * Gives back what splits held, in the order it came, before News that changes how a
+ * projection reads what came before it: every split before a new casemapping, which keys
+ * its Timelines again, and before ignore masks are taken away, each split holding a User
+ * they stamped.
  * @param run - The step.
+ * @param masks - The masks taken away, or `undefined` for a new casemapping.
  */
-export const giveBackSplits = (run: Run): void => {
-  const link = linkOf(run);
-
-  if (link !== undefined) {
-    releaseSplits(run, link);
+export const giveBackSplits = (run: Run, masks?: readonly string[]): void => {
+  if (linkOf(run) === undefined) {
+    return;
   }
+
+  const stamped = new Set(
+    splitsOf(run).held.flatMap(({ news, ref }) =>
+      masks === undefined || news.ignored?.some((mask) => masks.includes(mask)) === true
+        ? [ref]
+        : []
+    )
+  );
+
+  giveBack(run, (ref) => masks === undefined || stamped.has(ref));
 };

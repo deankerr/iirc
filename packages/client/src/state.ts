@@ -224,25 +224,36 @@ type LinkPhase =
       readonly monitoring: Monitoring;
       /** The message of the day this Connection is receiving, or `undefined` outside one. */
       readonly motd: MotdCollecting | undefined;
-      /**
-       * The `netsplit` and `netjoin` batches this Connection is reading, by reference, at
-       * most {@link maxSplits}, with the Activity they hold back until each ends, at most
-       * {@link maxHeld} together.
-       */
-      readonly splits: ReadonlyMap<string, Splitting>;
+      /** The `netsplit` and `netjoin` batches this Connection is reading, and what they hold. */
+      readonly splits: Splits;
     };
 
 /**
- * A `netsplit` or `netjoin` batch being read: its kind and the two servers it names, when
- * its `BATCH +` came, and the quits or joins it holds, already placed, in order, at most
- * {@link maxHeld}.
+ * The splits a Connection is reading, by reference, at most {@link maxSplits}, and the
+ * quits or joins they hold back until each ends, already placed, in the order they came,
+ * at most {@link maxHeld} together. One list for all keeps their order when several give
+ * back what they held at once.
  */
+export interface Splits {
+  readonly open: ReadonlyMap<string, Splitting>;
+  readonly held: readonly Held[];
+}
+
+/** A `netsplit` or `netjoin` batch being read: its kind, the two servers it names, and when its `BATCH +` came. */
 export interface Splitting {
   readonly kind: SplitKind;
   readonly servers: readonly [string, string];
   readonly at: Fact<Instant>;
-  readonly held: readonly Extract<News, { readonly _tag: "Activity" }>[];
 }
+
+/** A quit or join a split holds, by the split's reference. */
+export interface Held {
+  readonly ref: string;
+  readonly news: Extract<News, { readonly _tag: "Activity" }>;
+}
+
+/** No splits, and nothing held. */
+export const noSplits: Splits = { held: [], open: new Map() };
 
 /** How many splits are read at once. One opened past it is read unbatched. */
 export const maxSplits = 64;

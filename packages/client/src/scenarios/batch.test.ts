@@ -127,7 +127,7 @@ describe("batches", () => {
   it("keeps at most a bounded number open, and drops them when the Connection ends", () => {
     const opening = Array.from(
       { length: maxOpen + 1 },
-      (_unused, index) => `<< :irc.test BATCH +b${index} netsplit`
+      (_unused, index) => `<< :irc.test BATCH +b${index} example.test/other`
     );
 
     play(withHistory, {
@@ -169,7 +169,7 @@ describe("batches", () => {
       transcript: [
         ...inChannel(),
         lines(
-          "<< :irc.test BATCH +b1 netsplit",
+          "<< :irc.test BATCH +b1 example.test/other",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :hi",
           "?? message Privmsg peer #iirc in=channel:#iirc :hi"
         ),
@@ -202,7 +202,7 @@ describe("batches", () => {
       transcript: [
         ...inChannel("cap-notify", "batch"),
         lines(
-          "<< :irc.test BATCH +b1 netsplit",
+          "<< :irc.test BATCH +b1 example.test/other",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :in it",
           "?? message Privmsg peer #iirc history in=channel:#iirc :in it",
           "<< :irc.test CAP iirc DEL :batch",

@@ -189,7 +189,7 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const unignored = dropped(run, previous?.ignores ?? [], configuration.ignores);
 
   if (unignored.length > 0) {
-    giveBackSplits(run);
+    giveBackSplits(run, unignored);
     run.news.push({ _tag: "Unignored", masks: unignored });
   }
 
@@ -492,7 +492,7 @@ const received = (run: Run, link: Link, bytes: Uint8Array): void => {
 
   // A split outlives the `batch` that told it only until `batch` turns off.
   const now = linkOf(run);
-  const splitting = now?.phase._tag === "Open" && now.phase.splits.size > 0;
+  const splitting = now?.phase._tag === "Open" && now.phase.splits.open.size > 0;
 
   if (
     now !== undefined &&

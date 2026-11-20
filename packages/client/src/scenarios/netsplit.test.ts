@@ -354,7 +354,71 @@ describe("a batch that is not what its type says", () => {
   });
 });
 
+describe("a batch typed as a split that is not one", () => {
+  it("reads its Lines as unbatched, a numeric among them", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test",
+          "<< @batch=s1 :irc.test 999 iirc :odd",
+          "?? activity Numeric 999 in=network :odd",
+          "<< :irc.test BATCH -s1"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
 describe("a split still open", () => {
+  it("keeps holding when an ignore mask that stamped none of it is taken away", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "!! configure ignores=zed!*@*",
+          "...",
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< @batch=s1 :alice!u@h QUIT :hub.test leaf.test",
+          "!! configure ignores=",
+          '?? unignored "zed!*@*"',
+          "<< :irc.test BATCH -s1",
+          "?? activity Netsplit #a hub.test leaf.test nicks=alice in=channel:#a",
+          "?? activity Quit alice in=existing-direct:alice :hub.test leaf.test"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives back what several held in the order it came", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannels("batch"),
+        lines(
+          "<< :irc.test BATCH +s1 netsplit hub.test leaf.test",
+          "<< :irc.test BATCH +s2 netsplit hub.test other.test",
+          "<< @batch=s2 :alice!u@h QUIT :hub.test other.test",
+          "<< @batch=s1 :bob!u@h QUIT :hub.test leaf.test",
+          "<< @batch=s2 :carol!u@h QUIT :hub.test other.test",
+          "== closed Reset",
+          "?? activity Quit alice in=channel:#a in=existing-direct:alice :hub.test other.test",
+          "?? activity Quit bob in=channel:#a in=channel:#b in=existing-direct:bob :hub.test leaf.test",
+          "?? activity Quit carol in=channel:#a in=existing-direct:carol :hub.test other.test",
+          "..."
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("gives back what it held before a new casemapping, as unbatched", () => {
     play(client, {
       configuration: base,
