@@ -143,6 +143,7 @@ const Activity = Schema.TaggedUnion({
     kind: Schema.Literals(["FAIL", "WARN", "NOTE"]),
   },
   TopicChanged: { by: Schema.String, channel: Schema.String, topic: Schema.NullOr(Topic) },
+  UserInvited: { by: Schema.String, channel: Schema.String, nick: Schema.String },
   WentOffline: { nick: Schema.String },
 });
 

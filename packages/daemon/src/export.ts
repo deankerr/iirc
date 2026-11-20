@@ -308,6 +308,10 @@ const changeText = (activity: Exclude<Activity, Movement | CtcpActivity | FromIr
       return `-- ${plain(activity.nick)} set their real name to ${plain(activity.realname)}`;
     }
 
+    case "UserInvited": {
+      return `-- ${plain(activity.by)} invited ${plain(activity.nick)} to ${plain(activity.channel)}`;
+    }
+
     default: {
       return activity satisfies never;
     }

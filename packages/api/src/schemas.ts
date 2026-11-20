@@ -530,7 +530,9 @@ const NumericReply = Schema.String.check(
  * the Network's own Timeline: Self, by its nick, is an IRC operator now, or the Ircd refused
  * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`. An
  * `Invited` is an `INVITE` naming Self, in the Network's own Timeline: `by` invited Self to
- * `channel`, which it may join. An `AccountChanged` is a User logging in to `account`, or
+ * `channel`, which it may join. A `UserInvited` is an `INVITE` naming another User, where the
+ * Network offers `invite-notify`, in that Channel's Timeline: `by` invited `nick` to `channel`.
+ * An `AccountChanged` is a User logging in to `account`, or
  * out of theirs with `null`. A `HostChanged` is a User's user and host changing, with no
  * quit or join, and a `RealnameChanged` a User setting their realname, each told where the
  * User is, or in the Network's own Timeline for Self. `CameOnline` and `WentOffline` are a monitored Direct Message
@@ -568,6 +570,7 @@ export const Activity = Schema.TaggedUnion({
   RealnameChanged: { nick: Untrusted, realname: Untrusted },
   StandardReply: standardReply,
   TopicChanged: { by: Untrusted, channel: Untrusted, topic: Schema.NullOr(Topic) },
+  UserInvited: { by: Untrusted, channel: Untrusted, nick: Untrusted },
   WentOffline: { nick: Untrusted },
 });
 

@@ -264,6 +264,12 @@ const userChangedWhere = (run: Run, naming: Naming, activity: UserChange): reado
     : [...sharedChannels(run, activity.nick), ...theirs(run, naming, activity.nick)];
 };
 
+// A Channel, while Self is in it as the Connection folds names, or nothing.
+const joinedChannel = (run: Run, name: string): readonly Where[] =>
+  run.state.channels.get(folder(run.state)(name))?.phase._tag === "Joined"
+    ? [channel(run, name)]
+    : [];
+
 /**
  * The Timelines an Activity touches, before {@link placed}.
  * @param run - The step, before the Activity is folded in.
@@ -310,6 +316,12 @@ const activityTimelines = (
 
     case "NickChanged": {
       return nickChangedWhere(run, naming, activity, live);
+    }
+
+    // An Ircd tells only a Channel's members of an invitation to it, so one to a Channel Self
+    // is not in opens no Timeline.
+    case "UserInvited": {
+      return joinedChannel(run, activity.channel);
     }
 
     // The core places a standard reply where what it answers belongs, and a CTCP by who

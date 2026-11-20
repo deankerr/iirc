@@ -486,6 +486,18 @@ const describeOtherActivity = (
       ];
     }
 
+    // Another User's invitation, told to the Channel's members: no offer to join, which is
+    // only for Self's own.
+    case "UserInvited": {
+      return [
+        nickPart(activity.by),
+        words(" invited "),
+        nickPart(activity.nick),
+        words(" to "),
+        name(activity.channel),
+      ];
+    }
+
     case "NickChanged": {
       return [nickPart(activity.from), words(" is now "), nickPart(activity.to)];
     }

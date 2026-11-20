@@ -33,7 +33,7 @@ describe("asking for caps", () => {
       configuration: base,
       transcript: lines(
         opened.trimEnd(),
-        `<< :irc.test CAP * LS :${all.split(" ").toReversed().join(" ")} invite-notify draft/chathistory`,
+        `<< :irc.test CAP * LS :${all.split(" ").toReversed().join(" ")} no-implicit-names draft/chathistory`,
         `>> CAP REQ :${all}`,
         `<< :irc.test CAP * ACK :${all.split(" ").toReversed().join(" ")}`,
         ">> CAP END"
@@ -112,7 +112,10 @@ describe("asking for caps", () => {
   it("asks for nothing when no Feature wants what is offered", () => {
     play(client, {
       configuration: base,
-      transcript: registered(base, { offered: ["invite-notify", "account-extban"], requested: [] }),
+      transcript: registered(base, {
+        offered: ["no-implicit-names", "account-extban"],
+        requested: [],
+      }),
     });
 
     expect.assertions(0);
@@ -209,7 +212,7 @@ describe("caps changing mid-Session", () => {
       transcript: [
         ...steady,
         lines(
-          "<< :irc.test CAP iirc NEW :away-notify invite-notify",
+          "<< :irc.test CAP iirc NEW :away-notify no-implicit-names",
           ">> CAP REQ away-notify",
           "<< :irc.test CAP iirc ACK :away-notify"
         ),
@@ -225,7 +228,7 @@ describe("caps changing mid-Session", () => {
   it("asks for nothing when a CAP NEW holds nothing it wants", () => {
     const played = play(client, {
       configuration: base,
-      transcript: [...steady, lines("<< :irc.test CAP iirc NEW :invite-notify")],
+      transcript: [...steady, lines("<< :irc.test CAP iirc NEW :no-implicit-names")],
     });
 
     expect(client.inspect(played.state).states.caps).toBe("Ready.Steady");
@@ -354,7 +357,7 @@ describe("an ACK that will not end", () => {
         opened.trimEnd(),
         "<< :irc.test CAP * LS :multi-prefix away-notify",
         ">> CAP REQ :multi-prefix away-notify",
-        ...continuing(15, "multi-prefix invite-notify sasl -away-notify"),
+        ...continuing(15, "multi-prefix no-implicit-names sasl -away-notify"),
         "<< :irc.test CAP iirc ACK :multi-prefix",
         ">> CAP END"
       ),
@@ -388,9 +391,9 @@ describe("an ACK that will not end", () => {
       configuration: base,
       transcript: lines(
         opened.trimEnd(),
-        "<< :irc.test CAP * LS :multi-prefix invite-notify",
+        "<< :irc.test CAP * LS :multi-prefix no-implicit-names",
         ">> CAP REQ multi-prefix",
-        "<< :irc.test CAP * ACK :multi-prefix invite-notify",
+        "<< :irc.test CAP * ACK :multi-prefix no-implicit-names",
         ">> CAP END"
       ),
     });

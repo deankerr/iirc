@@ -253,8 +253,8 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
     },
   ],
   [
-    // `INVITE <nick> <channel>`. One naming another User is for `invite-notify`, and not Self's
-    // to report.
+    // `INVITE <nick> <channel>`. One naming another User is for `invite-notify`, which reads
+    // it, and not Self's to report.
     "INVITE",
     ({ run, params: [nick, name], source, activity }) => {
       if (nick === undefined || name === undefined || source === undefined) {
