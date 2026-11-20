@@ -22,6 +22,7 @@ import {
 } from "./acts.ts";
 import {
   changeJoined,
+  channelsSharedWith,
   endOfNames,
   foldActivity,
   foldListed,
@@ -89,6 +90,7 @@ import {
 import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
+import { noUsers, userIn } from "./users.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
 import { followSays, named, routeActivity, routeMessage, saidWhere } from "./where.ts";
 import {
@@ -391,7 +393,7 @@ const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): Read
 };
 
 // What a live Line said of a User who shares a Channel with Self: each fact it gave.
-const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
+const describing = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
   const { account, bot, mask, realname } = meant;
 
   // Self's own mask and bot mark are known as a Line from Self shows them, and `see` is for
@@ -421,6 +423,30 @@ const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" 
         ? seen.realname
         : { _tag: "Known", at: run.at, from: "ircd", value: realname },
   }));
+};
+
+// Whether a User is shown as a bot: their mark, while it is known now, which a Frontend's
+// list of members reads, and nothing when it is stale or not known.
+const shownBot = (run: Run, nick: string): boolean | undefined => {
+  const fact = isSelf(run, nick)
+    ? sessionOf(run.state)?.bot
+    : userIn(openOf(run.state)?.users ?? noUsers, folder(run.state)(nick))?.bot;
+
+  return fact?._tag === "Known" ? fact.value : undefined;
+};
+
+// A bot mark a Line first gave, or changed, is no Activity, so each Channel the User is in is
+// reported learned, for a Frontend to read its members again.
+const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
+  const before = shownBot(run, meant.nick);
+
+  describing(run, meant);
+
+  if (meant.bot !== undefined && shownBot(run, meant.nick) !== before) {
+    for (const channel of channelsSharedWith(run, meant.nick)) {
+      run.news.push({ _tag: "ChannelLearned", channel: named(run, channel) });
+    }
+  }
 };
 
 type ModelOnly = Extract<Meant, { readonly _tag: "Listed" | "Described" }>;

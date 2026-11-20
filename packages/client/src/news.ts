@@ -656,7 +656,7 @@ export type News =
   | { readonly _tag: "TimelineClosed"; readonly where: Closable }
   /**
    * What is known of a Channel Self is in changed in a way no Activity reports: a reply
-   * gave its modes or its topic, or a `NAMES` listing of its members ended. A projection
+   * gave its modes or its topic, a `NAMES` listing of its members ended, or a Line gave or changed a member's bot mark. A projection
    * tells a Frontend to read the Channel again. `channel` is keyed as a Message's `where`.
    */
   | { readonly _tag: "ChannelLearned"; readonly channel: Named }

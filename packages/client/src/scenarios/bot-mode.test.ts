@@ -175,6 +175,58 @@ describe("the bot tag", () => {
   });
 });
 
+// The Channels a Frontend is told to read again, by the steps after the first `from`, sorted.
+const learnedAfter = (run: Played<State>, from: number): readonly string[] =>
+  run.steps
+    .slice(from)
+    .flatMap((step) => step.news)
+    .flatMap((news) => (news._tag === "ChannelLearned" ? [news.channel.key] : []))
+    .toSorted();
+
+describe("telling a Frontend a bot mark is known", () => {
+  // A bot mark is no Activity, so a Frontend reading a Channel's members would keep showing a
+  // User unmarked until something else changed. Catches a mark learned from a Message, or
+  // changed by one, that no Channel is reported learned for.
+  const twoChannels = [
+    registered(base, { isupport: bot, offered: ["message-tags"] }),
+    joined(base, "#iirc", ["robo", "peer"]),
+    joined(base, "#other", ["robo"]),
+  ];
+
+  const learning = (...said: readonly string[]) => {
+    const before = played(twoChannels).steps.length;
+
+    return learnedAfter(played([...twoChannels, lines(...said)]), before);
+  };
+
+  it("names each Channel Self shares with the User, once their mark is first learned", () => {
+    expect(learning("<< @bot :robo!u@h PRIVMSG #iirc :beep")).toStrictEqual(["#iirc", "#other"]);
+  });
+
+  it("names only the Channels the User is in", () => {
+    expect(learning("<< @bot :peer!u@h PRIVMSG #iirc :beep")).toStrictEqual(["#iirc"]);
+  });
+
+  it("names none when a Message only says what is already known", () => {
+    expect(
+      learning("<< @bot :robo!u@h PRIVMSG #iirc :beep", "<< @bot :robo!u@h PRIVMSG #iirc :boop")
+    ).toStrictEqual(["#iirc", "#other"]);
+  });
+
+  it("names the Channels again when the mark changes", () => {
+    expect(
+      learning("<< @bot :robo!u@h PRIVMSG #iirc :beep", "<< :robo!u@h PRIVMSG #iirc :human now")
+    ).toStrictEqual(["#iirc", "#iirc", "#other", "#other"]);
+  });
+
+  it("names every Channel Self is in when Self's own mark is first learned", () => {
+    expect(learning("<< @bot :iirc!~iirc@iirc.test PRIVMSG #iirc :beep")).toStrictEqual([
+      "#iirc",
+      "#other",
+    ]);
+  });
+});
+
 describe("Self as a bot", () => {
   it("sets the bot mode once, when ISUPPORT names it after the welcome", () => {
     const run = played(
