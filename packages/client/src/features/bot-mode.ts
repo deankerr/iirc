@@ -1,8 +1,9 @@
 /**
  * `BOT`, an ISUPPORT token: the Ircd lets a User mark themselves as a bot with the user
  * mode it names, shows that mode among a bot's `WHO` flags, and may tag a bot's Lines
- * with `bot`. A value that is not exactly one letter offers nothing, so the Feature then
- * marks no one and sets no mode.
+ * with `bot`. A value that is not exactly one letter offers nothing: the Feature is off,
+ * so it marks no one and sets no mode, and what it knew goes stale as when the token is
+ * taken back.
  *
  * - **The tag.** A User's Line that means a Message or an Activity, with the `bot` tag, of
  *   any value or none, says they are a bot, and a Message it carries is marked as a bot's.
@@ -84,6 +85,8 @@ const selfMode = (
 
 /** The `bot-mode` Feature. */
 export const botMode: Feature<Own> = {
+  // A `BOT` that is not one letter is as good as none, also when it replaces a good one.
+  accepts: (isupport) => botModeOf(isupport.get("BOT")) !== undefined,
   keeps: ["user.bot"],
   meaning: (meant, arrival, context) => {
     const letter = botModeOf(context.token("BOT"));

@@ -183,6 +183,40 @@ const learnedAfter = (run: Played<State>, from: number): readonly string[] =>
     .flatMap((news) => (news._tag === "ChannelLearned" ? [news.channel.key] : []))
     .toSorted();
 
+describe("a BOT that is replaced by a malformed one", () => {
+  // Catches the Feature staying on, so marks stay known, and a mode still being sent, from a
+  // token that now reads as none.
+  it("goes stale like a BOT taken back, and sends no mode", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "<< @bot :robo!u@h PRIVMSG #iirc :beep",
+        "<< :irc.test 005 iirc BOT=BB :are supported by this server",
+        "<< @bot :peer!u@h PRIVMSG #iirc :not read",
+        "?? message Privmsg peer #iirc in=channel:#iirc :not read"
+      ),
+    ]);
+
+    expect(userOf(run, "robo")?.bot).toMatchObject({ _tag: "Stale", was: true });
+    expect(userOf(run, "peer")?.bot).toStrictEqual(unknown);
+    expect(modesOnSelf(run)).toStrictEqual([]);
+  });
+
+  it("is read again when a good one follows", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "<< :irc.test 005 iirc BOT=BB :are supported by this server",
+        "<< :irc.test 005 iirc BOT=B :are supported by this server",
+        "<< @bot :peer!u@h PRIVMSG #iirc :read",
+        "?? message Privmsg peer #iirc bot in=channel:#iirc :read"
+      ),
+    ]);
+
+    expect(userOf(run, "peer")?.bot).toMatchObject(known(true));
+  });
+});
+
 describe("telling a Frontend a bot mark is known", () => {
   // A bot mark is no Activity, so a Frontend reading a Channel's members would keep showing a
   // User unmarked until something else changed. Catches a mark learned from a Message, or
