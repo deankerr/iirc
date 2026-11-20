@@ -29,6 +29,7 @@ import type { Line, OutboundLine } from "@iirc/protocol/line";
 import { see } from "./channels.ts";
 import { Instant } from "./ids.ts";
 import type { Fact } from "./known.ts";
+import { botModeNow } from "./meaning.ts";
 import type { Run } from "./run.ts";
 import { folder, linkOf, send, updateOpen } from "./run.ts";
 import type { Open, Seen, WhoAsked } from "./state.ts";
@@ -286,6 +287,9 @@ const describe = (run: Run, described: Described): void => {
 
   const { account, flags, host, realname, user } = described;
   const away = awayOf(flags);
+  const botMode = botModeNow(run);
+  // The bot mode's letter among the flags after `H` or `G`, as `BOT` names it.
+  const bot = botMode === undefined ? undefined : flags.slice(1).includes(botMode);
 
   const known = <T>(value: T): Fact<T> => ({
     _tag: "Known",
@@ -301,6 +305,7 @@ const describe = (run: Run, described: Described): void => {
       ...seen,
       account: account === undefined ? seen.account : known(account),
       away: away === undefined ? seen.away : known(awayNow),
+      bot: bot === undefined ? seen.bot : known(bot),
       mask: known({ host, user }),
       realname: realname === undefined ? seen.realname : known(realname),
     };

@@ -30,6 +30,8 @@ export type Kept =
   | "user.mask"
   /** A User's realname, as their join and `SETNAME` say it. */
   | "user.realname"
+  /** Whether a User is a bot, as their Lines, `WHO`, and Self's own modes say it. */
+  | "user.bot"
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
   | "member.prefixes"
   /**
@@ -143,15 +145,17 @@ export type Meant =
     }
   | {
       /**
-       * What a Line said of a User: their account, `null` for logged out, their mask, and
-       * their realname. Only the model sees it. It is folded only from a live Line, and only for
-       * a User who shares a Channel with Self.
+       * What a Line said of a User: their account, `null` for logged out, their mask, their
+       * realname, and whether they are a bot. Only the model sees it. It is folded only from
+       * a live Line, and only for a User who shares a Channel with Self, or Self, of whom
+       * only the mask and whether Self is a bot are read.
        */
       readonly _tag: "Described";
       readonly nick: string;
       readonly account?: string | null;
       readonly mask?: { readonly user: string; readonly host: string };
       readonly realname?: string;
+      readonly bot?: boolean;
     };
 
 /** A Line `egress` will not let leave, which the core does not send. */

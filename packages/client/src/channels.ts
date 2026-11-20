@@ -316,6 +316,7 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
     const was: Seen = userIn(open.users, folded) ?? {
       account: { _tag: "Unknown" },
       away: { _tag: "Unknown" },
+      bot: { _tag: "Unknown" },
       mask: { _tag: "Unknown" },
       nick,
       realname: { _tag: "Unknown" },

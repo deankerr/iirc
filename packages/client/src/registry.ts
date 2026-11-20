@@ -9,6 +9,7 @@ import { accountNotify } from "./features/account-notify.ts";
 import { accountTag } from "./features/account-tag.ts";
 import { awayNotify } from "./features/away-notify.ts";
 import { batch } from "./features/batch.ts";
+import { botMode } from "./features/bot-mode.ts";
 import { capNotify } from "./features/cap-notify.ts";
 import { chghost } from "./features/chghost.ts";
 import { echo } from "./features/echo.ts";
@@ -59,6 +60,7 @@ export const registry: readonly Registered[] = [
   register(extendedMonitor),
   register(chghost),
   register(setname),
+  register(botMode),
   // After `multi-prefix`, which reads the raw names and finds each member by the nick the core read.
   register(userhostInNames),
   register(utf8Only),

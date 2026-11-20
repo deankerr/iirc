@@ -82,6 +82,7 @@ describe("a WHOIS on the floor", () => {
           account: undefined,
           actual: undefined,
           away: "gone fishing",
+          bot: false,
           channels: [
             { name: "#iirc", prefixes: ["o"] },
             { name: "#other", prefixes: ["v"] },

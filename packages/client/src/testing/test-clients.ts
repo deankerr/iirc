@@ -429,6 +429,7 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
           _tag: "Message",
           answers: undefined,
           at: { _tag: "Known", at: input.at, from: "ours", value: input.at },
+          bot: false,
           context: undefined,
           highlight: false,
           id: { _tag: "Unknown" },
@@ -697,6 +698,7 @@ export const knowsSeededClient: Client<{ readonly dialled: boolean }> = {
         {
           account: { _tag: "Unknown" },
           away: { _tag: "Unknown" },
+          bot: { _tag: "Unknown" },
           mask: { _tag: "Unknown" },
           nick: String(seed),
           realname: { _tag: "Unknown" },

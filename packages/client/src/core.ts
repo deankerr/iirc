@@ -566,6 +566,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
       _tag: "Message",
       answers,
       at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
+      bot: false,
       context: undefined,
       id: { _tag: "Unknown" },
       kind: input.kind,

@@ -137,6 +137,21 @@ const ownMask = (run: Run, user: string, host: string): void => {
   );
 };
 
+// Whether Self is a bot, as Self's own Lines and modes say it.
+const ownBot = (run: Run, bot: boolean): void => {
+  updateOpen(run, (open) =>
+    open.presence._tag === "Session"
+      ? {
+          ...open,
+          presence: {
+            ...open.presence,
+            bot: { _tag: "Known", at: run.at, from: "ircd", value: bot },
+          },
+        }
+      : open
+  );
+};
+
 // Self's away status, as the Ircd says it.
 const selfAway = (run: Run, away: { readonly message: string } | null): void => {
   updateOpen(run, (open) =>
@@ -377,11 +392,18 @@ const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): Read
 
 // What a live Line said of a User who shares a Channel with Self: each fact it gave.
 const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" }>): void => {
-  const { account, mask, realname } = meant;
+  const { account, bot, mask, realname } = meant;
 
-  // Self's own mask is known as a Line from Self shows it, and `see` is for other Users.
-  if (mask !== undefined && isSelf(run, meant.nick)) {
-    ownMask(run, mask.user, mask.host);
+  // Self's own mask and bot mark are known as a Line from Self shows them, and `see` is for
+  // other Users.
+  if (isSelf(run, meant.nick)) {
+    if (mask !== undefined) {
+      ownMask(run, mask.user, mask.host);
+    }
+
+    if (bot !== undefined) {
+      ownBot(run, bot);
+    }
 
     return;
   }
@@ -392,6 +414,7 @@ const described = (run: Run, meant: Extract<Meant, { readonly _tag: "Described" 
       account === undefined
         ? seen.account
         : { _tag: "Known", at: run.at, from: "ircd", value: account },
+    bot: bot === undefined ? seen.bot : { _tag: "Known", at: run.at, from: "ircd", value: bot },
     mask: mask === undefined ? seen.mask : { _tag: "Known", at: run.at, from: "ircd", value: mask },
     realname:
       realname === undefined
@@ -593,6 +616,8 @@ const welcome = (run: Run, line: Line): void => {
       // A User who has just registered is not away, until an `AWAY` of ours says so.
       away: { _tag: "Known", at: run.at, from: "receipt", value: null },
       began: run.at,
+      // Whether Self is a bot is unknown until a Line from Self, or its own `MODE`, says.
+      bot: { _tag: "Unknown" },
       chosen: false,
       identifying: undefined,
       keepalive: { check: Instant.make(run.at + lagAfter), heard: run.at, pinged: false },

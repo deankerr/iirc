@@ -95,6 +95,8 @@ type Presence =
       readonly account: Fact<string | null>;
       /** Self's realname, as registration sent it. */
       readonly realname: Fact<string>;
+      /** Whether Self is a bot, as Self's own Lines and modes say it: unknown as the Session begins. */
+      readonly bot: Fact<boolean>;
       /** Whether Self is away, as the Ircd confirmed it: not away as the Session begins. */
       readonly away: Fact<{ readonly message: string } | null>;
       readonly keepalive: Keepalive;
@@ -488,6 +490,7 @@ export interface Seen {
   /** The account they are logged in to, or `null` when known to be logged out. */
   readonly account: Fact<string | null>;
   readonly realname: Fact<string>;
+  readonly bot: Fact<boolean>;
 }
 
 /** The Network: whether it is wanted, and the Connection or the wait for one. */
