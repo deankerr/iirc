@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-export { defaultListen, layerDaemon, layerLogger } from "./daemon.ts";
+export { defaultListen, layerDaemon, layerLogger, version } from "./daemon.ts";
 
 export type { Beside, DaemonOptions, Listen } from "./daemon.ts";
 
@@ -33,3 +33,5 @@ export { layerLinkListener } from "./link-listener.ts";
 export { Previews, layerPreviews } from "./previews/previews.ts";
 
 export { Following, layerAwayWhenClosed } from "./away-when-closed.ts";
+
+export { Tail, layerTail, layerTailLogging, tailCapacity } from "./tail.ts";

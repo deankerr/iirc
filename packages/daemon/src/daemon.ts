@@ -18,7 +18,18 @@ import { layerSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
 import { layerBun as layerVault } from "@iirc/vault-file";
-import { Context, Duration, Effect, Exit, FileSystem, Latch, Layer, Logger, Scope } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Latch,
+  Layer,
+  LogLevel,
+  Logger,
+  Scope,
+} from "effect";
 import type { Path } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { HttpRouter } from "effect/http";
@@ -34,9 +45,13 @@ import { layerPreviews } from "./previews/previews.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import { layerStoreBytes } from "./store-bytes.ts";
+import { layerTailLogging } from "./tail.ts";
 import { layerUiConfiguration } from "./ui.ts";
 import type { UiConfiguration } from "./ui.ts";
 import { ByteStoreMaker, layerUploads } from "./uploads/uploads.ts";
+
+/** iirc's version, which `iirc --version` prints and the Daemon logs as it starts. */
+export const version = "0.0.0";
 
 /** What a Daemon needs besides where to listen. */
 export interface DaemonOptions {
@@ -52,7 +67,7 @@ export interface DaemonOptions {
   readonly hangupDrain?: Duration.Input | undefined;
   /** How long stopping waits for each Network's Connections to close. 5 seconds unless given. */
   readonly stopTimeout?: Duration.Input | undefined;
-  /** iirc's version, which the link fetch names in its user agent. `0.0.0` unless given. */
+  /** iirc's version, which the link fetch names in its user agent and the Tail says. {@link version} unless given. */
   readonly version?: string | undefined;
   /**
    * How Previews fetch a stranger's link. The guard under the fixed policy unless given, as
@@ -197,7 +212,7 @@ const layerCore = (options: DaemonOptions) => {
     Layer.provide(Layer.merge(Layer.succeed(ByteStoreMaker, makeS3ByteStore), platform))
   );
 
-  const linkFetch = options.linkFetch ?? layerBunLinkFetch({ version: options.version ?? "0.0.0" });
+  const linkFetch = options.linkFetch ?? layerBunLinkFetch({ version: options.version ?? version });
 
   // Previews read the Timelines and the `ui` options, fetch through the link fetch, are
   // kept in the Preview cache, and keep their images in the bucket the options name.
@@ -265,7 +280,8 @@ export type Beside<E> = Layer.Layer<
 
 /**
  * The Daemon: the core, provided outside `HttpRouter.serve`, which forks the MemoMap and
- * would build anything shared inside it twice, and the API served on `listen`.
+ * would build anything shared inside it twice, and the API served on `listen`. Outermost
+ * is the Tail with its Logger, so everything the Daemon builds and runs logs into it.
  * @param options - The data directory and the Transport's options.
  * @param listen - Where to listen.
  * @param beside - Routes to serve beside the API, none unless given.
@@ -284,8 +300,21 @@ export const layerDaemon = <E = never>(
         )
       )
     ),
-    Layer.provide(layerCore(options))
+    Layer.provide(layerCore(options)),
+    Layer.provideMerge(layerTailLogging(options.version ?? version))
   );
 
-/** Logs as logfmt to stderr, so stdout holds only what a command was asked for. */
-export const layerLogger = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);
+const logfmtToStderr = Logger.withConsoleError(Logger.formatLogFmt);
+
+/**
+ * Logs as logfmt to stderr, so stdout holds only what a command was asked for. It writes
+ * `Info` and above whatever the minimum level in force is, since the Daemon lowers that to
+ * keep the Tail's `Debug` lines, and they are not for stderr.
+ */
+export const layerLogger = Logger.layer([
+  Logger.make((options: Logger.Options<unknown>) => {
+    if (LogLevel.isGreaterThanOrEqualTo(options.logLevel, "Info")) {
+      logfmtToStderr.log(options);
+    }
+  }),
+]);

@@ -37,6 +37,9 @@ import type {
   OwnerInForce,
   PreviewItem,
   Projection,
+  TailLevel,
+  TailLine,
+  TailRead,
   UiInForce,
   Upload,
   UploadsStatus,
@@ -80,6 +83,7 @@ type Answer =
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
   | typeof Located.Encoded
+  | typeof TailRead.Encoded
   | typeof ChannelHeader.Encoded
   | typeof MemberPage.Encoded
   | { readonly _tag: "NotInChannel"; readonly standing: string | null; readonly timeline: string }
@@ -562,6 +566,29 @@ const heldUntilReleased = async (releases: (() => void)[], init: RequestInit) =>
  */
 const folding = (): typeof Projection.Encoded => ({ _tag: "Running" });
 
+/**
+ * One line of the Tail as an event of its stream.
+ * @param line - The line, as the wire carries it.
+ * @returns The event, as the wire carries it.
+ */
+const tailLineEvent = (line: typeof TailLine.Encoded) =>
+  `event: line\nid: ${line.n}\ndata: ${JSON.stringify(line)}\n\n`;
+
+/** When the fake Daemon first started, as the Tail says. */
+export const tailStarted = 1_700_000_000_000;
+
+/**
+ * The Tail of a Daemon that has just started: its one line, which says so with its version.
+ * @param started - When it started.
+ * @param version - Its version.
+ * @returns The Tail, as the wire carries it.
+ */
+const startedTail = (started: number, version: string): typeof TailRead.Encoded => ({
+  lines: [{ annotations: { version }, at: started, level: "Info", message: "Started", n: 1 }],
+  started,
+  version,
+});
+
 const uploadsOn = (): typeof UploadsStatus.Encoded => ({
   _tag: "On",
   maxSize: 100 * 1024 * 1024,
@@ -625,6 +652,7 @@ export const fakeDaemon = () => {
   const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
   const previewFollowers: Follower[] = [];
   const projectionFollowers: Follower[] = [];
+  const tailFollowers: Follower[] = [];
 
   const presses: {
     readonly timeline: string;
@@ -824,6 +852,10 @@ export const fakeDaemon = () => {
     statusesHeld,
     /** Each `GET /api/uploads/status` asked. */
     statusesRead: 0,
+    /** The Tail, oldest first, with the Daemon's version and when it started. */
+    tail: startedTail(tailStarted, "0.0.0"),
+    /** Each follower of the Tail. */
+    tailFollowers,
     /** The last step folded, which every Timeline read gives as `through`. */
     through: 1,
     /** The Timelines of each Network, in the order they opened. */
@@ -947,6 +979,65 @@ export const fakeDaemon = () => {
     for (const follower of followers.splice(0)) {
       follower.controller.close();
     }
+  };
+
+  /**
+   * Logs a line to the Tail and sends it to every follower of it.
+   * @param level - Its level.
+   * @param message - Its words.
+   * @param annotations - Its annotations.
+   * @param cause - Its cause, as text.
+   */
+  const log = (
+    level: TailLevel,
+    message: string,
+    annotations: Readonly<Record<string, string>> = {},
+    cause?: string
+  ) => {
+    const n = (daemon.tail.lines.at(-1)?.n ?? 0) + 1;
+    const at = daemon.tail.started + n * 1000;
+
+    const line =
+      cause === undefined
+        ? { annotations, at, level, message, n }
+        : { annotations, at, cause, level, message, n };
+
+    daemon.tail = { ...daemon.tail, lines: [...daemon.tail.lines, line] };
+
+    for (const follower of tailFollowers) {
+      follower.controller.enqueue(encoder.encode(tailLineEvent(line)));
+    }
+  };
+
+  /**
+   * Restarts the Daemon as the Tail sees it: it started anew, at a later instant, with a
+   * Tail of its start line alone, and every stream of the Tail ends.
+   * @param version - The version it starts as.
+   */
+  const restart = (version = daemon.tail.version) => {
+    daemon.tail = startedTail(daemon.tail.started + 60_000, version);
+
+    for (const follower of tailFollowers.splice(0)) {
+      follower.controller.close();
+    }
+  };
+
+  /**
+   * The Tail's stream: which Daemon it is of, then every line held after where it was
+   * asked to follow from, `Last-Event-ID` winning, then live.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The response.
+   */
+  const followingTail = (url: URL, init: RequestInit) => {
+    const headers = new Headers(init.headers);
+    const after = Number(headers.get("last-event-id") ?? url.searchParams.get("after") ?? 0);
+    const { started, version } = daemon.tail;
+
+    return following(tailFollowers, url, headers, init, [
+      `event: daemon\ndata: ${JSON.stringify({ started, version })}\n\n`,
+      ...daemon.tail.lines.filter((line) => line.n > after).map(tailLineEvent),
+    ]);
   };
 
   const signedInOnly = (answer: () => Response) =>
@@ -2215,6 +2306,14 @@ export const fakeDaemon = () => {
         );
       }
 
+      case "GET /api/tail": {
+        return signedInOnly(() => json(200, daemon.tail));
+      }
+
+      case "GET /api/tail/changes": {
+        return signedInOnly(() => followingTail(url, init));
+      }
+
       case "POST /api/networks/libera/read": {
         return await markRead(init);
       }
@@ -2387,7 +2486,9 @@ export const fakeDaemon = () => {
     endStreams,
     expire,
     fetch,
+    log,
     lose,
+    restart,
     send,
     sendPreview,
     sendUi,

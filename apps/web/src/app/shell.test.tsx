@@ -129,25 +129,6 @@ describe("the shell", () => {
     }
   });
 
-  it("says how to start, in one paragraph, when no Timeline is open", async () => {
-    const { container } = await signedIn();
-    const main = await shown<HTMLElement>(container, "main");
-
-    const paragraphs = [...main.querySelectorAll("p")].filter((one) =>
-      one.textContent.startsWith("Choose a Timeline")
-    );
-
-    expect({
-      nested: paragraphs.some((one) => one.querySelector("p") !== null),
-      text: paragraphs.map((one) => one.textContent),
-    }).toStrictEqual({
-      nested: false,
-      text: [
-        "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.",
-      ],
-    });
-  });
-
   it("says across its top that the Daemon hit a fatal error, and why, once it stops folding the Timelines", async () => {
     const { container, daemon, stopProjection } = await signedIn();
 

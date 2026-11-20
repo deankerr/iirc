@@ -1,0 +1,118 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* A reversed column starts scrolled to its end and stays there as lines come while the
+   Owner is there, as a Timeline does, and stays where they scrolled to otherwise. */
+.scroller {
+  display: flex;
+  flex: 1;
+  flex-direction: column-reverse;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.scroller:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+/* Short of the view, the banner and the lines stand at its top. */
+.content {
+  flex-shrink: 0;
+  margin-bottom: auto;
+}
+
+/* The art as wide as it is drawn, with the version at its right edge under it. */
+.banner {
+  display: grid;
+  justify-content: start;
+  padding: var(--space-4) var(--space-3) var(--space-3);
+}
+
+.heading {
+  margin: 0;
+  font: inherit;
+}
+
+/* Blocks meet only in a monospace font, at a line height of one, whatever `ui.font` is. */
+.art {
+  margin: 0;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  line-height: 1;
+  white-space: pre;
+}
+
+.version {
+  justify-self: end;
+  margin: var(--space-1) 0 0;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--color-muted);
+}
+
+.lines {
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.time {
+  color: var(--color-muted);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+/* Every time as wide as the widest of its form, as a Timeline's are. */
+.time[data-sample]::before {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: pre;
+  content: attr(data-sample);
+}
+
+.text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.annotation {
+  margin-left: 1ch;
+  color: var(--color-muted);
+}
+
+.cause {
+  display: block;
+}
+
+.causeLine {
+  display: block;
+  white-space: pre-wrap;
+}
+
+/* Warn and above, in the theme's colour for danger: the words and the cause. */
+.line[data-warning] .message,
+.line[data-warning] .cause {
+  color: var(--color-danger);
+}

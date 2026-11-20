@@ -47,6 +47,7 @@ import type {
   OptionsEvent,
   PreviewsEvent,
   ProjectionEvent,
+  TailEvent,
   TimelineChangesEvent,
   UiEvent,
   Upload,
@@ -101,6 +102,7 @@ import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
+import { Tail } from "./tail.ts";
 import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
 import { saidOf } from "./uploads/said.ts";
@@ -1252,6 +1254,35 @@ const options = HttpApiBuilder.group(
   })
 );
 
+// The Tail is read whole, or followed: the Daemon it is of first, then the lines held after
+// `after`, then each as it is logged. A line's number is its id, within one Daemon.
+const tail = HttpApiBuilder.group(
+  DaemonApi,
+  "tail",
+  Effect.fn(function* (handlers) {
+    const kept = yield* Tail;
+
+    return handlers
+      .handle("read", () => kept.read)
+      .handle("changes", ({ headers, query }) =>
+        Effect.suspend(() => {
+          // As for News, the header comes with the URL first used, so it wins.
+          const after = headers["last-event-id"] ?? query.after;
+
+          const lines = kept
+            .follow(after)
+            .pipe(Stream.map((line): TailEvent => ({ data: line, event: "line", id: line.n })));
+
+          const daemon = Stream.succeed<TailEvent>({ data: kept.daemon, event: "daemon" });
+
+          return followed<TailEvent, never, never>(lines, { data: {}, event: "heartbeat" }).pipe(
+            Effect.map((rest) => Stream.concat(daemon, rest))
+          );
+        })
+      );
+  })
+);
+
 // A value arrives `Redacted` and goes straight to the Vault, and nothing comes back but
 // names.
 const credentials = HttpApiBuilder.group(
@@ -1569,7 +1600,7 @@ const contentUnavailable = HttpRouter.middleware(
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
  * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the options
- * beyond `ui`, the count of Frontends open, the keys, and the sign-ins.
+ * beyond `ui`, the count of Frontends open, the Tail, the keys, and the sign-ins.
  */
 export const ApiHandlers = Layer.mergeAll(
   health,
@@ -1581,7 +1612,8 @@ export const ApiHandlers = Layer.mergeAll(
   options,
   uploads,
   previews,
-  credentials
+  credentials,
+  tail
 ).pipe(Layer.provideMerge(Layer.mergeAll(requestValidation, authorization)));
 
 /** The API, as routes on the enclosing `HttpRouter`, with the body limit. */

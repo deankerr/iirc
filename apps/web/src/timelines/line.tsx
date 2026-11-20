@@ -51,7 +51,7 @@ import styles from "./line.module.css";
  * @param props - The instant.
  * @returns The time, with the full date and time on hover.
  */
-const Time = ({
+export const Time = ({
   at,
   className = styles.time,
   focusable = false,

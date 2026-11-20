@@ -676,6 +676,15 @@ export const showDraft = Atom.fnSync((draft: Drafted, get) => {
   happened(get.registry, { _tag: "DraftShown", ...draft });
 }).pipe(Atom.keepAlive);
 
+/**
+ * Shows the Tail in the focused Pane, which then shows nothing else, letting go of what was
+ * being completed, since the composer then stands under it.
+ */
+export const openTail = Atom.fnSync((_: undefined, get) => {
+  cancelCompletion(get.registry);
+  happened(get.registry, { _tag: "TailShown" });
+}).pipe(Atom.keepAlive);
+
 /** Closes the focused Pane's Direct Message not yet begun, showing what it showed before. */
 export const closeDraft = Atom.fnSync((_, get) => {
   cancelCompletion(get.registry);

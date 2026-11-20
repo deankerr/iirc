@@ -242,6 +242,7 @@ export interface Act {
  * - `Act`: act on a Network, above.
  * - `OpenOptions`: show the options view, filtered as given.
  * - `OpenUploads`: show the Uploads view.
+ * - `OpenTail`: show the Tail in the focused Pane, which then shows nothing else.
  * - `Configure`: read the Network's Configuration, apply the edit to it, and send the whole
  *   of it back, made from the one read. On a conflict, read it again and apply the same
  *   edit once more, since an edit is a pure function of the Configuration.
@@ -311,6 +312,7 @@ export type Intent =
   | Act
   | { readonly _tag: "OpenOptions"; readonly filter: string }
   | { readonly _tag: "OpenUploads" }
+  | { readonly _tag: "OpenTail" }
   | { readonly _tag: "Configure"; readonly network: NetworkId; readonly edit: Edit }
   | {
       readonly _tag: "AddNetwork";
@@ -3198,6 +3200,18 @@ export const commands: readonly Command[] = [
     name: "uploads",
     parse: nothingAfter("uploads"),
     usage: "/uploads",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description:
+      "Show iirc's own view in the focused Pane: the most recent of what the Daemon logged.",
+    id: "tail.open",
+    intents: () => [{ _tag: "OpenTail" }],
+    name: "tail",
+    parse: nothingAfter("tail"),
+    usage: "/tail",
     when: [],
   }),
   paneCommand({

@@ -568,6 +568,8 @@ export type WindowRequest =
  * - `UploadsShown`: the Uploads show in the Pane they show in already, which takes the
  *   focus, or in the focused one, which counts as going elsewhere. `UploadsClosed`: the
  *   Pane they show in shows what it showed before them.
+ * - `TailShown`: the focused Pane shows the Tail, which is to show nothing else, letting go
+ *   of what it showed, which counts as going elsewhere.
  * - `DraftShown`: the focused Pane shows a Direct Message not yet begun, to a nick on a
  *   Network. `DraftClosed`: the focused Pane shows what it showed before it.
  * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
@@ -650,6 +652,7 @@ export type TimelinesEvent =
   | { readonly _tag: "OptionsClosed" }
   | { readonly _tag: "UploadsShown" }
   | { readonly _tag: "UploadsClosed" }
+  | { readonly _tag: "TailShown" }
   | ({ readonly _tag: "DraftShown" } & Drafted)
   | { readonly _tag: "DraftClosed" }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
@@ -2736,20 +2739,27 @@ export const openOf = (state: Timelines): TimelineId | undefined => focusedView(
 export const mainOf = (state: Timelines): MainView => focusedView(state).main;
 
 /**
- * A view of iirc's own, which a Pane shows in front of its Timeline, and the sidebar lists
- * as a row, as it does a Timeline. Each shows in one Pane at most.
+ * A view of iirc's own, which the sidebar lists as a row, as it does a Timeline. The
+ * search, the Uploads, and the options show in front of a Pane's Timeline, each in one Pane
+ * at most. `Tail`, the banner and the Tail, labelled `iirc`, is what a Pane with nothing
+ * open shows, so any number of Panes may show it.
  */
-export type OwnView = "Search" | "Uploads" | "Options";
+export type OwnView = "Tail" | "Search" | "Uploads" | "Options";
 
 /**
- * Which view of iirc's own a Pane shows, if one.
- * @param main - What it shows.
+ * Which view of iirc's own a Pane shows, if one: the Tail while it has nothing open.
+ * @param view - What it shows.
  * @returns The view, or none.
  */
-const ownViewOf = (main: MainView): OwnView | undefined =>
-  main._tag === "Search" || main._tag === "Uploads" || main._tag === "Options"
+const ownViewOf = ({ main, open }: PaneView): OwnView | undefined => {
+  if (main._tag === "Timeline") {
+    return open === undefined ? "Tail" : undefined;
+  }
+
+  return main._tag === "Search" || main._tag === "Uploads" || main._tag === "Options"
     ? main._tag
     : undefined;
+};
 
 /**
  * What the sidebar marks as chosen: what the focused Pane shows, a view of iirc's own or
@@ -2768,7 +2778,7 @@ export type Chosen =
  */
 export const chosenOf = (state: Timelines): Chosen => {
   const view = focusedView(state);
-  const own = ownViewOf(view.main);
+  const own = ownViewOf(view);
 
   if (own !== undefined) {
     return { _tag: own };
@@ -2782,15 +2792,16 @@ export const chosenOf = (state: Timelines): Chosen => {
 /**
  * What the sidebar marks, more quietly than what is chosen: each Timeline, and each view of
  * iirc's own, that a Pane other than the focused one shows, with that Pane's number, counted
- * as the Panes lie. A Timeline behind something else is not shown, as for `chosenOf`.
+ * as the Panes lie. A Timeline behind something else is not shown, as for `chosenOf`. The
+ * Tail, which several Panes may show, takes the first one's number.
  * @param state - The state.
  * @returns Each Timeline or view shown elsewhere, with its Pane's number.
  */
 export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId | OwnView, number> =>
   new Map(
-    panesOf(state.layout.root).flatMap(
-      (pane, index): (readonly [TimelineId | OwnView, number])[] => {
-        const own = ownViewOf(pane.view.main);
+    panesOf(state.layout.root)
+      .flatMap((pane, index): (readonly [TimelineId | OwnView, number])[] => {
+        const own = ownViewOf(pane.view);
 
         if (pane.id === state.layout.focused) {
           return [];
@@ -2803,8 +2814,8 @@ export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId | OwnView,
         return pane.view.main._tag !== "Timeline" || pane.view.open === undefined
           ? []
           : [[resolve(state, pane.view.open), index + 1] as const];
-      }
-    )
+      })
+      .filter(([shown], at, all) => all.findIndex(([first]) => first === shown) === at)
   );
 
 /**
@@ -3177,6 +3188,7 @@ type Navigation = Extract<
       | "OptionsClosed"
       | "UploadsShown"
       | "UploadsClosed"
+      | "TailShown"
       | "DraftShown"
       | "DraftClosed"
       | "Pane"
@@ -3195,6 +3207,7 @@ const navigations: ReadonlySet<string> = new Set([
   "OptionsClosed",
   "UploadsShown",
   "UploadsClosed",
+  "TailShown",
   "DraftShown",
   "DraftClosed",
   "Pane",
@@ -3718,6 +3731,17 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
 
     case "UploadsShown": {
       return showingUploads(elsewhere(state));
+    }
+
+    // The Tail is what a Pane with nothing open shows, so the focused Pane lets go of what
+    // it showed, and its Timeline joins those closed most recently.
+    case "TailShown": {
+      const moved = elsewhere(state);
+
+      return retained(moved, {
+        ...moved,
+        layout: withView(moved.layout, moved.layout.focused, emptyView),
+      });
     }
 
     case "OptionsFiltered":
@@ -4752,7 +4776,7 @@ export const removedIn = (state: Timelines, pane = state.layout.focused): Networ
 /**
  * A Pane's name, as the switcher, the composer's prompt, and its label say it: what it
  * shows, never what stands behind it. `options`, `uploads`, or `search` by name, a draft by its nick,
- * its Timeline by name, `…` while that is read, and `empty` with none open.
+ * its Timeline by name, `…` while that is read, and `iirc`, the Tail's, with none open.
  * @param state - The state.
  * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The name.
@@ -4784,7 +4808,7 @@ export const paneName = (state: Timelines, pane = state.layout.focused): string 
         return shown.description?.name ?? "Timeline";
       }
 
-      return shown._tag === "Closed" ? "empty" : "\u2026";
+      return shown._tag === "Closed" ? "iirc" : "\u2026";
     }
 
     default: {

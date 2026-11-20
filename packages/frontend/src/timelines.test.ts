@@ -2689,6 +2689,17 @@ const split = (state: Timelines, timeline: TimelineId | undefined, vertical = fa
   });
 
 /**
+ * The Tail shown in a Pane, focused first.
+ * @param state - The state.
+ * @param pane - The Pane's id.
+ * @returns The state after.
+ */
+const tailShownIn = (state: Timelines, pane: string) =>
+  reduceTimelines(reduceTimelines(state, { _tag: "Pane", change: { _tag: "Focus", pane } }), {
+    _tag: "TailShown",
+  });
+
+/**
  * What each Pane has open, by its id.
  * @param state - The state.
  * @returns Each Pane's id and open Timeline.
@@ -3140,7 +3151,7 @@ describe("the Panes", () => {
       letGo: [opened(letGo)._tag, paneName(letGo)],
       waiting: [opened(waiting)._tag, paneName(waiting)],
     }).toStrictEqual({
-      letGo: ["Closed", "empty"],
+      letGo: ["Closed", "iirc"],
       waiting: ["Restoring", "…"],
     });
   });
@@ -4001,7 +4012,7 @@ describe("what stands in front of a Timeline", () => {
     }).toStrictEqual({
       chosen: [{ _tag: "Timeline", timeline: three }, { _tag: "Timeline" }],
       draft: { _tag: "Nothing" },
-      empty: { _tag: "Nothing" },
+      empty: { _tag: "Tail" },
       options: { _tag: "Options" },
       search: { _tag: "Search" },
       start: { _tag: "Timeline", timeline: three },
@@ -4062,6 +4073,41 @@ describe("what stands in front of a Timeline", () => {
       views: [
         ["Search", 1],
         [two, 2],
+      ],
+    });
+  });
+
+  it("shows the Tail by letting go of what the focused Pane showed, chosen there and by the first other Pane's number elsewhere", () => {
+    // Three Panes, the third focused, then the first two shown the Tail, the options in
+    // front of the first's Timeline let go too.
+    const three_ = split(split(following(), two), one, true);
+
+    const first = tailShownIn(
+      reduceTimelines(
+        reduceTimelines(three_, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } }),
+        { _tag: "OptionsShown", filter: "" }
+      ),
+      "p0"
+    );
+
+    const both = tailShownIn(first, "p1");
+
+    const elsewhereNow = reduceTimelines(both, {
+      _tag: "Pane",
+      change: { _tag: "Focus", pane: "p2" },
+    });
+
+    expect({
+      chosen: chosenOf(both),
+      elsewhere: [...elsewhereOf(elsewhereNow)],
+      mains: panesOf(both.layout.root).map((pane) => [pane.view.main._tag, pane.view.open]),
+    }).toStrictEqual({
+      chosen: { _tag: "Tail" },
+      elsewhere: [["Tail", 1]],
+      mains: [
+        ["Timeline", undefined],
+        ["Timeline", undefined],
+        ["Timeline", one],
       ],
     });
   });
@@ -4634,7 +4680,7 @@ describe("what a Pane is called, and what the composer counts as open", () => {
       paneName(searching(start, "m3 word")),
       paneName(draft),
       paneName(nothingOpen()),
-    ]).toStrictEqual(["#a", "options", "search", "bob", "empty"]);
+    ]).toStrictEqual(["#a", "options", "search", "bob", "iirc"]);
   });
 
   it("counts a Timeline behind something in front as not shown, so /next-unread goes to it", () => {

@@ -112,6 +112,7 @@ import {
   UiValue,
   WindowQuery,
 } from "./schemas.ts";
+import { TailEvent, TailRead } from "./tail.ts";
 import { UiInForce, UiOptionName } from "./ui.ts";
 import {
   Upload,
@@ -497,6 +498,22 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
   )
   .middleware(Authorization) {}
 
+/**
+ * The Tail: the most recent of what the Daemon logged, held in its memory, read whole,
+ * oldest first, and followed as Server-Sent Events, each line after `after` or
+ * `Last-Event-ID` as it is logged, or every line held without either, then live.
+ */
+export class TailGroup extends HttpApiGroup.make("tail")
+  .add(
+    HttpApiEndpoint.get("read", "/tail", { success: TailRead }),
+    HttpApiEndpoint.get("changes", "/tail/changes", {
+      headers: { "last-event-id": Schema.optionalKey(After) },
+      query: { after: Schema.optionalKey(After) },
+      success: HttpApiSchema.StreamSse({ events: TailEvent }),
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -553,6 +570,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(UploadsGroup)
   .add(PreviewsGroup)
   .add(CredentialsGroup)
+  .add(TailGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)
   .prefix("/api")

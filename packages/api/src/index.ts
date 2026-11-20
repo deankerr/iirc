@@ -18,6 +18,7 @@ export {
   requestParseOptions,
   SignInGroup,
   signInCookie,
+  TailGroup,
   TimelinesGroup,
   UiGroup,
   UploadsGroup,
@@ -265,6 +266,8 @@ export {
   UploadsStatus,
   uploadNameMaxLength,
 } from "./uploads.ts";
+
+export { TailDaemon, TailEvent, TailLevel, TailLine, TailNumber, TailRead } from "./tail.ts";
 
 export {
   MediaHash,
