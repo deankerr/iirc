@@ -20,6 +20,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that belongs to no Network, such as an option or an Upload. _Avoid_: Update, mutation
 
+**Tail**: The most recent of what the Daemon logged, held in memory for any Frontend to read and gone when the Daemon restarts. Nothing is derived from it. _Avoid_: Log, Journal, console, core buffer
+
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
 **Credential**: A secret the Owner gives the Daemon to use on their behalf, which it can use but never reveal. Nothing a Network sends is a Credential. _Avoid_: Password, secret

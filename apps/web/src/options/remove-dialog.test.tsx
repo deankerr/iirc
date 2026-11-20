@@ -298,9 +298,9 @@ describe("removing a Network", () => {
         composer: "libera was removed: nothing can be said here",
         note: "libera was removed. Its Timelines are kept to read and search, and nothing can be said here.",
         removals: [{ keep: true, network: "libera" }],
-        sidebar: ["Networks", "Removed", "libera, removed", "#iirc"],
+        sidebar: ["Removed", "libera, removed", "#iirc"],
       },
-      left: ["Networks"],
+      left: [],
       refused:
         "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.",
       removals: [

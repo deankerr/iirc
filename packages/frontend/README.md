@@ -60,6 +60,7 @@ For each Network it holds its Timelines, its connection, whether Self is away, a
 
 - **A Timeline is open in one Pane at most.** Opening one that another Pane has open focuses that Pane. Two Panes at different places in one Timeline would need every rule of reading to say which Pane wins, for little gain.
 - **A Pane shows its Timeline, or something in front of it:** the options, the Uploads, the search, or a Direct Message not yet begun. It remembers one step back, which closing shows again. The options, the Uploads, and the search each show in one Pane at most.
+- **A Pane with nothing open shows the Tail,** iirc's own view, so `chosenOf` and `elsewhereOf` name it `Tail`, the first such Pane's number elsewhere, and `paneName` says `iirc`. `TailShown` shows it in the focused Pane by letting go of what that showed, which joins the Timelines closed most recently. It has no step back, and any number of Panes may show it.
 - **A Direct Message not yet begun is a view, not a Timeline.** The API makes a Timeline only when something is said. The draft shows its Timeline as soon as one is listed, matched by the casemapping read when the draft was made, never one held from another time, which could match another User's Timeline.
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
 - **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
@@ -120,7 +121,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Aliases | `/alias`, `/alias add`, `/alias remove` |
-| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/focus` |
+| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/tail`, `/focus` |
 | Arranging | `/move`, `/pin`, `/mute`, `/unmute` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
@@ -274,6 +275,15 @@ The Uploads view lists the Uploads, newest first, live ones only unless the dele
 - **Where an Upload was said is the Daemon's, read again when it may have changed.** Saying a Message makes no Upload Change, so `saidIn` gives the Uploads held whose `/<id>/` a Message of ours among a Timeline change's items holds, by its text or the text the Ircd confirmed, for the runtime to read again and fold in as `Answered`. `saidPlace` says where one was said as its Network and Target.
 - **What the Owner asked of each is beside them** (`reduceUploadEdits`): the Upload a delete is being confirmed for, and each rename or delete waiting on the Daemon or failed, until it is sent again. `nameOf` reads a typed name as the contract takes one, and `editFailureText` says a failure in words.
 - **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
+
+## The Tail
+
+The Tail as a Frontend holds it, as a reducer (`reduceTail`): read whole, then each line the stream gave, of one Daemon. Nothing in it is derived from the Journal.
+
+- **A line is taken once.** One numbered at or before the last held was given already, as a stream followed again can, and changes nothing. `lastNumber` says where to follow from.
+- **At most `tailCap` lines are held, 4096,** as many as the Daemon keeps, and one more lets go of the oldest.
+- **A stream of another Daemon lets go of the Tail held.** `Opened` with a `started` other than the one held is a Daemon that restarted, so nothing is held until the Tail is read again.
+- **What a view shows is derived.** `linesShown` gives the lines at a least level and above, oldest first, and `atLeast` compares two levels.
 
 ## Uploading
 

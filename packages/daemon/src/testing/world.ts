@@ -45,6 +45,7 @@ import { layerPreviews } from "../previews/previews.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
 import { layerStoreBytes } from "../store-bytes.ts";
+import { layerTail } from "../tail.ts";
 import { layerUiConfiguration } from "../ui.ts";
 import { ByteStoreMaker, layerUploads } from "../uploads/uploads.ts";
 
@@ -193,7 +194,12 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
         )
       )
     ),
-    SignIns.layer(dataDir).pipe(Layer.provideMerge(ApiKeys.layer(dataDir)), Layer.provide(platform))
+    SignIns.layer(dataDir).pipe(
+      Layer.provideMerge(ApiKeys.layer(dataDir)),
+      Layer.provide(platform)
+    ),
+    // The Tail alone, which keeps nothing unless a test puts its Logger in force.
+    layerTail("0.0.0")
   ).pipe(
     // Beneath every other Layer, so what one says as it is built is kept too, not printed.
     Layer.provideMerge(

@@ -1,5 +1,5 @@
 /**
- * The sidebar: a tree of the Networks, each its own Timeline's row with how its connection
+ * The sidebar: `iirc`, its first row, which shows the Tail, then a tree of the Networks, each its own Timeline's row with how its connection
  * stands, and their Channels and Direct Messages under them, each coloured by what is
  * unread in it with small counts of what calls for the Owner, and a footer with a row for
  * each view of iirc's own, the search, the Uploads, and the options, and signing out.
@@ -76,7 +76,14 @@ import { SignOutButton } from "../sign-in/sign-out-button.tsx";
 import { IconButton, useKeysOf } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
-import { listedNetworks, mutedShown, open, sidebarNetworks, timelinesState } from "./atoms.ts";
+import {
+  listedNetworks,
+  mutedShown,
+  open,
+  openTail,
+  sidebarNetworks,
+  timelinesState,
+} from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
 
@@ -602,7 +609,10 @@ const NetworkRow = ({
 };
 
 /** The views of iirc's own, in the order their rows stack, each with its command. */
-const ownViews: readonly { readonly view: OwnView; readonly command: string }[] = [
+// The Tail has its row at the top of the sidebar, not in the foot.
+type FootView = Exclude<OwnView, "Tail">;
+
+const ownViews: readonly { readonly view: FootView; readonly command: string }[] = [
   { command: "search.open", view: "Search" },
   { command: "uploads.open", view: "Uploads" },
   { command: "options.set", view: "Options" },
@@ -610,16 +620,18 @@ const ownViews: readonly { readonly view: OwnView; readonly command: string }[] 
 
 /**
  * A view's row: its name, and its keys, dim, where the keymap binds any.
- * @param props - The view, its command, and the number of the other Pane that shows it, if
- * one does.
+ * @param props - The view, its name, its command, and the number of the other Pane that
+ * shows it, if one does.
  * @returns The row.
  */
 const ViewItem = ({
   command,
-  pane,
   view,
+  name = view,
+  pane,
 }: {
   readonly view: OwnView;
+  readonly name?: string;
   readonly command: string;
   readonly pane: number | undefined;
 }) => {
@@ -627,21 +639,53 @@ const ViewItem = ({
 
   return (
     <ListBoxItem
-      aria-label={pane === undefined ? view : `${view}, in Pane ${pane}`}
+      aria-label={pane === undefined ? name : `${name}, in Pane ${pane}`}
       className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
       id={view}
-      textValue={view}
+      textValue={name}
     >
       <span aria-hidden className={`${styles.gutter} ${styles.pane}`}>
         {pane}
       </span>
-      <span className={styles.name}>{view}</span>
+      <span className={styles.name}>{name}</span>
       {keys === undefined ? null : (
         <kbd className={styles.keys} title={keys}>
           {keys}
         </kbd>
       )}
     </ListBoxItem>
+  );
+};
+
+/**
+ * The sidebar's first row, `iirc`, which shows the Tail in the focused Pane, marked as a
+ * view's row is, and never with anything unread.
+ * @returns The row.
+ */
+const TailRow = () => {
+  const chosen = useAtomValue(selected);
+  const others = useAtomValue(elsewhere);
+  const showTail = useAtomSet(openTail);
+  const setDrawer = useAtomSet(drawerState);
+
+  // Choosing it again while it shows, an empty selection, shows it again, which changes
+  // nothing. Escape leaves the selection alone, so only a press or Enter or Space does.
+  const onSelectionChange = () => {
+    showTail(undefined);
+    setDrawer("None");
+  };
+
+  return (
+    <ListBox
+      aria-label="iirc"
+      className={styles.views}
+      escapeKeyBehavior="none"
+      onSelectionChange={onSelectionChange}
+      selectedKeys={chosen._tag === "Tail" ? ["Tail"] : []}
+      selectionMode="single"
+    >
+      <ViewItem command="tail.open" name="iirc" pane={others.get("Tail")} view="Tail" />
+    </ListBox>
   );
 };
 
@@ -663,7 +707,7 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
   const drawer = useAtomValue(compact);
   const shown = ownViews.find(({ view }) => view === chosen._tag)?.view;
 
-  const opening: Readonly<Record<OwnView, () => void>> = {
+  const opening: Readonly<Record<FootView, () => void>> = {
     Options: () => {
       showOptions("");
     },
@@ -1067,7 +1111,7 @@ const NetworkTrees = ({
 };
 
 /**
- * The Timelines pinned, when any are, the tree of Networks and their Timelines, those
+ * The `iirc` row, the Timelines pinned, when any are, the tree of Networks and their Timelines, those
  * removed with their Timelines kept apart under their own heading, each in the Owner's
  * order, and the footer.
  * @param props - The attempt to sign out.
@@ -1082,13 +1126,13 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
   return (
     <nav aria-label="Networks" className={styles.sidebar}>
       <div className={styles.scroll}>
+        <TailRow />
         {pinned.length === 0 ? null : (
           <>
             <h2 className={styles.heading}>Pinned</h2>
             <PinnedTree pins={pinned} />
           </>
         )}
-        <h2 className={styles.heading}>Networks</h2>
         {live.length > 0 ? (
           <NetworkTrees label="Networks and their Timelines" networks={live} />
         ) : (

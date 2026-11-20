@@ -82,6 +82,7 @@ import {
   mutedShown,
   quietBotsShown,
   open,
+  openTail,
   paned,
   showDraft,
   timelinesState,
@@ -450,6 +451,7 @@ type Local = Extract<
     readonly _tag:
       | "OpenOptions"
       | "OpenUploads"
+      | "OpenTail"
       | "PromptCredential"
       | "Open"
       | "Latest"
@@ -481,6 +483,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "Look",
   "Open",
   "OpenOptions",
+  "OpenTail",
   "OpenUploads",
   "Pane",
   "PromptCredential",
@@ -497,17 +500,33 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
  */
 const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
+/** An intent that shows a view of iirc's own. */
+type ShowsView = Extract<
+  Local,
+  { readonly _tag: "OpenOptions" | "OpenUploads" | "OpenTail" | "Search" }
+>;
+
+const viewTags: ReadonlySet<string> = new Set<ShowsView["_tag"]>([
+  "OpenOptions",
+  "OpenTail",
+  "OpenUploads",
+  "Search",
+]);
+
 /**
- * Carries out an intent in the page: shows the options, the Uploads, the search, or a Timeline, jumps
- * to a Timeline's latest or to a date in it, opens the password prompt, focuses the composer, starting an
- * empty draft with text, or starting a command over any draft, with its list open, shows or
- * hides the members or the sidebar, changes the Panes, or starts a Lookup, which goes on
- * beside the composer's turn.
+ * Whether an intent shows a view of iirc's own.
+ * @param intent - The intent.
+ * @returns Whether it does.
+ */
+const isView = (intent: Local): intent is ShowsView => viewTags.has(intent._tag);
+
+/**
+ * Shows a view of iirc's own: the options, filtered, the Uploads, the Tail, or the search,
+ * searching a query when there is one.
  * @param registry - The registry.
- * @param place - Where the composer under the main view is.
  * @param intent - The intent.
  */
-const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent: Local): void => {
+const showView = (registry: AtomRegistry.AtomRegistry, intent: ShowsView): void => {
   switch (intent._tag) {
     case "OpenOptions": {
       registry.set(openOptions, intent.filter);
@@ -519,6 +538,40 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
       break;
     }
 
+    case "OpenTail": {
+      registry.set(openTail, undefined);
+      break;
+    }
+
+    case "Search": {
+      registry.set(showSearch, intent.query);
+      break;
+    }
+
+    default: {
+      intent satisfies never;
+    }
+  }
+};
+
+/**
+ * Carries out an intent in the page: shows the options, the Uploads, the Tail, the search, or a Timeline, jumps
+ * to a Timeline's latest or to a date in it, opens the password prompt, focuses the composer, starting an
+ * empty draft with text, or starting a command over any draft, with its list open, shows or
+ * hides the members or the sidebar, changes the Panes, or starts a Lookup, which goes on
+ * beside the composer's turn.
+ * @param registry - The registry.
+ * @param place - Where the composer under the main view is.
+ * @param intent - The intent.
+ */
+const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent: Local): void => {
+  if (isView(intent)) {
+    showView(registry, intent);
+
+    return;
+  }
+
+  switch (intent._tag) {
     case "PromptCredential": {
       const { _tag, ...asked } = intent;
 
@@ -581,11 +634,6 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "Pane": {
       registry.set(paned, intent.change);
-      break;
-    }
-
-    case "Search": {
-      registry.set(showSearch, intent.query);
       break;
     }
 

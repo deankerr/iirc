@@ -68,6 +68,8 @@ Every route is under `/api`. Every one but signing a browser in and out, and ask
 | `GET /api/credentials` | The names of the Credentials held | `{ names }` | `VaultFailed` |
 | `PUT /api/credentials/{name}` | Holds a value, `{ value }`, replacing any before | `204` | `VaultFailed` |
 | `DELETE /api/credentials/{name}` | Forgets one. Forgetting one not held does nothing | `204` | `VaultFailed` |
+| `GET /api/tail` | The Tail whole, oldest first, with the Daemon's version and the instant it started | `{ version, started, lines }` |  |
+| `GET /api/tail/changes?after=` | Server-Sent Events of each line logged after `after`, or of every line held without it, then live | `daemon`, `line`, and `heartbeat` events |  |
 
 Every route can also answer `InvalidRequest` (400), and every route behind the key check `Unauthorized` (401) and `CrossOrigin` (403).
 
@@ -107,6 +109,13 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **Upload Changes resume exactly.** Each `changed` event is one Upload, whole, as it is now, with its link from the public URL in force as it is sent, and its id is the sequence of the Change. A Frontend keeps each Upload by its id and takes the latest. It resumes with `after` or `Last-Event-ID`, which wins, and is sent every Upload changed since, then live, with nothing missed and nothing twice. Without either, it is sent only what changes from now.
 - **Missing is a fact about the store, learnt by reading it.** A live Upload is `missing` once a read of its link or its bytes found them gone, and answered 404, never while the store cannot be reached, which is 503. Its record can still be deleted. Uploading the same bytes again, or a read that finds them, takes the mark away, so its link works again. A deleted Upload's link stays 404 whatever the store holds. Nothing marks one after a restart until a read finds its bytes gone again. The `missing` event carries the ids of every missing Upload, whole, as the stream opens and each time they change, with no id, so it moves no `Last-Event-ID`.
 - **Uploading, renaming, and deleting need what saying needs, and reading needs a read.** Key scopes do not exist yet, so every key and sign-in may do all of them, and each write by cookie must come from the Daemon's own origin, as every write must.
+
+### The Tail
+
+- **The Tail is the Daemon's memory, never the Journal's.** It holds the last 4096 lines the Daemon logged at `Debug` and above, anywhere in its process, a Network's included, and one more drops the oldest. A restart empties it, and nothing is journaled for it or derived from it.
+- **A line is what was logged, as text.** `n` numbers it from `1`, the first this Daemon logged, `at` is when, `level` is `Debug`, `Info`, `Warn`, `Error`, or `Fatal`, `message` its words, `annotations` each name with its value as text, such as `network`, and `cause` the cause it was logged with, as text, when there was one. There is no record for each kind of line, and any part may hold an Ircd's words, so a Frontend draws it as text, never as markup.
+- **The first line is the Daemon's start,** at `Info`, with its `version` as an annotation.
+- **The stream resumes by number, within one Daemon.** Each `line` event's id is its `n`. A Frontend resumes with `after` or `Last-Event-ID`, which wins, and is sent every line held after it, then live. Without either, it is sent every line held. The `daemon` event comes first as the stream opens, with `version` and `started`, and no id, so a Frontend whose `started` differs knows the Daemon restarted, and reads the Tail again.
 
 ### Previews
 

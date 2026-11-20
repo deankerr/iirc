@@ -21,6 +21,7 @@ import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
+import { TailView } from "../tail/tail-view.tsx";
 import { Button } from "../ui/button.tsx";
 import { zone } from "../ui/dates.ts";
 import {
@@ -891,7 +892,7 @@ const Lines = ({
 };
 
 /**
- * A Pane's open Timeline, or what stands in for it.
+ * A Pane's open Timeline, or what stands in for it: the Tail with none open.
  * @param props - The Pane.
  * @returns The view.
  */
@@ -899,14 +900,9 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(paneTimeline(pane));
 
   switch (shown._tag) {
+    // A Pane with nothing open shows iirc's own view.
     case "Closed": {
-      return (
-        <p className={styles.placeholder}>
-          {
-            "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options."
-          }
-        </p>
-      );
+      return <TailView />;
     }
 
     case "Vanished": {

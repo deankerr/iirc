@@ -12,6 +12,7 @@ import {
   KeyName,
   layerDaemon,
   layerLogger,
+  version,
 } from "@iirc/daemon";
 import type { Beside } from "@iirc/daemon";
 import { Cause, Console, Effect, Exit, FileSystem, Layer, Option, Redacted, Runtime } from "effect";
@@ -234,7 +235,7 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
   }
 };
 
-Command.run(iirc, { version: "0.0.0" }).pipe(
+Command.run(iirc, { version }).pipe(
   Effect.provide(Layer.merge(BunServices.layer, layerLogger)),
   BunRuntime.runMain({ teardown })
 );

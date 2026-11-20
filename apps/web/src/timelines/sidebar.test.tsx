@@ -944,7 +944,7 @@ describe("the Sidebar in the Owner's order", () => {
       names: names(),
       text: row("peer").textContent,
     }).toStrictEqual({
-      headings: ["Pinned", "Networks"],
+      headings: ["Pinned"],
       label: "peer of libera",
       names: ["peer", "libera", "#iirc", "#other"],
       text: "peer· libera…↕",
