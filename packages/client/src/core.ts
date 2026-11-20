@@ -67,6 +67,7 @@ import {
   updateOpen,
 } from "./run.ts";
 import { runEffects, runStage } from "./seam.ts";
+import { giveBackSplits, releaseSplits } from "./splits.ts";
 import type { Link, State } from "./state.ts";
 import { initialState, maxActions } from "./state.ts";
 import { addressFor, pruned, rescheduled } from "./sts.ts";
@@ -188,6 +189,7 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const unignored = dropped(run, previous?.ignores ?? [], configuration.ignores);
 
   if (unignored.length > 0) {
+    giveBackSplits(run, unignored);
     run.news.push({ _tag: "Unignored", masks: unignored });
   }
 
@@ -222,6 +224,7 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
   run.state = rescheduled(run.state, link, run.at);
   endLookups(run, link);
   endMotd(run, link);
+  releaseSplits(run, link);
 
   const session =
     phase._tag === "Open" && phase.presence._tag === "Session" ? phase.presence : undefined;
@@ -372,6 +375,7 @@ const arrivalOf = (run: Run, line: Line): Arrival => ({
   label: undefined,
   line,
   live: true,
+  split: undefined,
   time: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
   within: undefined,
 });
@@ -485,6 +489,19 @@ const received = (run: Run, link: Link, bytes: Uint8Array): void => {
 
   ingress(run, parsed.line, rawParams(bytes));
   recompute(run, was);
+
+  // A split outlives the `batch` that told it only until `batch` turns off.
+  const now = linkOf(run);
+  const splitting = now?.phase._tag === "Open" && now.phase.splits.open.size > 0;
+
+  if (
+    now !== undefined &&
+    splitting &&
+    !onNow(run.registry, run.state).some((each) => each.name === "batch")
+  ) {
+    releaseSplits(run, now);
+  }
+
   settle(run);
 };
 

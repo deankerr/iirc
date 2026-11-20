@@ -31,7 +31,7 @@ import type { Ran } from "./seam.ts";
 import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
 import { markStale } from "./stale.ts";
 import type { Asking, Caps, Negotiated, Open } from "./state.ts";
-import { unmonitored } from "./state.ts";
+import { noSplits, unmonitored } from "./state.ts";
 import { readSts } from "./sts.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { noUsers } from "./users.ts";
@@ -175,6 +175,7 @@ export const begin = (run: Run): void => {
     },
     reclaims: [],
     seam: freshSeam,
+    splits: noSplits,
     users: noUsers,
     whoAsked: new Map(),
     whoQuery: undefined,

@@ -23,6 +23,7 @@ import type {
   Ours,
   NetworkOnly,
   PresenceChange,
+  SplitShown,
   RefusedAction,
   RefusedReason,
   Where,
@@ -418,7 +419,7 @@ const writeByAnother = (activity: ByAnother): ActivityParts => ({
 });
 
 // The positional fields and trailing text of an Activity other than a presence change.
-const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts => {
+const writeChange = (activity: Exclude<Activity, PresenceChange | SplitShown>): ActivityParts => {
   if (isNetworkOnly(activity)) {
     return writeNetworkOnly(activity);
   }
@@ -518,8 +519,25 @@ const writeChange = (activity: Exclude<Activity, PresenceChange>): ActivityParts
 };
 
 // An Activity's positional fields and trailing text, before and after its attributes.
-const writeActivity = (activity: Activity): ActivityParts =>
-  isPresenceChange(activity) ? { head: [atom(activity.nick)], tail: [] } : writeChange(activity);
+const writeActivity = (activity: Activity): ActivityParts => {
+  if (isPresenceChange(activity)) {
+    return { head: [atom(activity.nick)], tail: [] };
+  }
+
+  // A split: its Channel, its two servers, and the nicks.
+  if (activity._tag === "Netsplit" || activity._tag === "Netjoin") {
+    return {
+      head: [
+        atom(activity.channel),
+        ...activity.servers.map(atom),
+        `nicks=${activity.nicks.map(atom).join(",")}`,
+      ],
+      tail: [],
+    };
+  }
+
+  return writeChange(activity);
+};
 
 const words = (parts: readonly string[]): string => parts.join(" ");
 

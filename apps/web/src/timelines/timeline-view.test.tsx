@@ -568,6 +568,12 @@ const foldedText = () => [motdButton()?.textContent, motdButton()?.getAttribute(
 const motdBlock = () => logOf().querySelector("pre")?.textContent;
 
 /**
+ * The nicks a netsplit lists, while it is open.
+ * @returns Their text.
+ */
+const nicks = () => logOf().querySelector("button[aria-expanded] ~ span")?.textContent;
+
+/**
  * What the message of the day shows: its line's words, whether it says it is open, and its text.
  * @returns Them.
  */
@@ -1098,6 +1104,43 @@ describe("what the view says it shows", () => {
       ["\u25B8 Message of the day, 2 lines, cut short", "false", undefined],
       ["\u25BE Message of the day, 2 lines, cut short", "true", "Welcome\n  spaced  out"],
       ["\u25B8 Message of the day, 2 lines, cut short", "false", undefined],
+    ]);
+  });
+
+  it("shows a netsplit as one folded line that a press opens to its nicks", async () => {
+    const split: typeof TimelineItem.Encoded = {
+      ...joined(1),
+      content: {
+        _tag: "Activity",
+        activity: {
+          _tag: "Netsplit",
+          channel: "#iirc",
+          nicks: ["alice", "bob", "carol"],
+          servers: ["a.net", "b.net"],
+        },
+        at: { _tag: "Unknown" },
+        id: { _tag: "Unknown" },
+        live: true,
+      },
+    };
+
+    const { registry } = await signedIn([], [split]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => motdButton() !== null);
+
+    const folded = [foldedText(), nicks()];
+
+    await act(async () => {
+      motdButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settled(() => nicks() !== undefined);
+
+    expect([folded, [foldedText(), nicks()]]).toStrictEqual([
+      [["\u25B8 netsplit a.net <-> b.net: 3 quit", "false"], undefined],
+      [["\u25BE netsplit a.net <-> b.net: 3 quit", "true"], "alice, bob, carol"],
     ]);
   });
 

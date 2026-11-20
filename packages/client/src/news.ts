@@ -123,6 +123,14 @@ export type Activity =
       readonly nick: string;
       readonly by: string;
     }
+  /**
+   * A split of the Network in one Channel, as a `netsplit` batch tells it: `servers` are the
+   * two that parted, as the batch named them, and `nicks` the Channel's members who went,
+   * in the order they quit. A `Netjoin` is its healing, as a `netjoin` batch tells it: the
+   * members who came back, in the order they joined.
+   */
+  | ({ readonly _tag: "Netsplit" } & Split)
+  | ({ readonly _tag: "Netjoin" } & Split)
   | { readonly _tag: "CameOnline"; readonly nick: string }
   | { readonly _tag: "WentOffline"; readonly nick: string }
   | { readonly _tag: "OperGranted"; readonly nick: string }
@@ -188,16 +196,32 @@ export const isUserChange = (activity: Activity): activity is UserChange =>
 /** Another User's invitation, which `invite-notify` tells a Channel's members of. */
 export type OthersInvitation = Extract<Activity, { readonly _tag: "UserInvited" }>;
 
+/** A split, or its healing, shown for quits and joins each read on its own. */
+export type SplitShown = Extract<Activity, { readonly _tag: "Netsplit" | "Netjoin" }>;
+
 /**
  * Whether an Activity changes no Channel and answers nothing Self sent: one that is
- * {@link NetworkOnly}, a {@link PresenceChange}, or another User's invitation.
+ * {@link NetworkOnly}, a {@link PresenceChange}, another User's invitation, or a split.
  * @param activity - The Activity.
  * @returns Whether it does.
  */
 export const changesNothingHere = (
   activity: Activity
-): activity is NetworkOnly | PresenceChange | OthersInvitation =>
-  isNetworkOnly(activity) || isPresenceChange(activity) || activity._tag === "UserInvited";
+): activity is NetworkOnly | PresenceChange | OthersInvitation | SplitShown =>
+  isNetworkOnly(activity) ||
+  isPresenceChange(activity) ||
+  activity._tag === "UserInvited" ||
+  activity._tag === "Netsplit" ||
+  activity._tag === "Netjoin";
+
+/** What a `Netsplit` or a `Netjoin` says of one Channel. */
+interface Split {
+  readonly channel: string;
+  /** The two servers the batch named, as it named them. */
+  readonly servers: readonly [string, string];
+  /** The Channel's members who went, or came back, by nick, in the order of their Lines. */
+  readonly nicks: readonly string[];
+}
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

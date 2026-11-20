@@ -343,13 +343,36 @@ const invitation = (source: Invitation): WireActivity => {
   return wire;
 };
 
+type Split = Extract<Activity, { readonly _tag: "Netsplit" | "Netjoin" }>;
+
+const isSplit = (source: Activity): source is Split =>
+  source._tag === "Netsplit" || source._tag === "Netjoin";
+
+// A batch of quits or joins told as one: the two servers, and the Channel's members it moved.
+const split = (source: Split): WireActivity => {
+  const wire: Case<Activity, WireActivity, typeof source._tag> = {
+    _tag: source._tag,
+    channel: source.channel,
+    nicks: [...source.nicks],
+    servers: [source.servers[0], source.servers[1]],
+  };
+
+  return wire;
+};
+
+const isInvitationOrSplit = (source: Activity): source is Invitation | Split =>
+  isInvitation(source) || isSplit(source);
+
+const invitationOrSplit = (source: Invitation | Split): WireActivity =>
+  isInvitation(source) ? invitation(source) : split(source);
+
 const activity = (source: Activity): WireActivity => {
   if (isPresence(source)) {
     return presence(source);
   }
 
-  if (isInvitation(source)) {
-    return invitation(source);
+  if (isInvitationOrSplit(source)) {
+    return invitationOrSplit(source);
   }
 
   if (isIrcdReport(source)) {
