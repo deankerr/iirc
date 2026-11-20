@@ -20,6 +20,7 @@ const heard = (sequence: number): Change => ({
     _tag: "Message",
     answers: undefined,
     at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    bot: false,
     context: undefined,
     id: { _tag: "Unknown" },
     kind: "Privmsg",

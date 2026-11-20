@@ -48,7 +48,7 @@ import type {
   Tombstone,
   Unread,
 } from "../store.ts";
-import { noneUnread, unreadOf } from "../store.ts";
+import { botUnread, noneUnread, unreadOf } from "../store.ts";
 
 // Maps are shown as their entries, so a failure says what each held.
 const entries = (_key: string, each: unknown) => (each instanceof Map ? [...each] : each);
@@ -112,10 +112,14 @@ const opened = (sequence: number, on = libera): readonly Change[] => [
   described(sequence, other, "Channel", "#b", "#b", on),
 ];
 
-const said = (text: string, delivery?: "Pending" | "Unconfirmed"): Content => ({
+const said = (
+  text: string,
+  delivery?: "Pending" | "Unconfirmed"
+): Extract<Content, { readonly _tag: "Message" }> => ({
   _tag: "Message",
   answers: undefined,
   at: known(at(0)),
+  bot: false,
   context: undefined,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
@@ -135,6 +139,7 @@ const reply = (text: string, answers: string, live = true): Content => ({
   _tag: "Message",
   answers: MessageId.make(answers),
   at: known(at(0)),
+  bot: false,
   context: undefined,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
@@ -145,6 +150,9 @@ const reply = (text: string, answers: string, live = true): Content => ({
   target: "#a",
   text,
 });
+
+// A Message a bot said.
+const byBot = (text: string): Content => ({ ...said(text), bot: true });
 
 // What each reply among items answers, as it was read.
 const answeredOf = (items: readonly Item[]) =>
@@ -304,11 +312,13 @@ const modelOf = (shown: Snapshot): Model => ({
 const countUnread = (items: readonly Item[], read: Instant | undefined): Unread => {
   const counts = { ...noneUnread };
 
-  for (const { level, position: where } of items) {
+  for (const { content, level, position: where } of items) {
     if (level !== undefined && (read === undefined || where.at > read)) {
-      const field = unreadOf[level];
-
-      counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+      for (const field of [unreadOf[level], botUnread(level, content)]) {
+        if (field !== undefined) {
+          counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+        }
+      }
     }
   }
 
@@ -1706,6 +1716,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           _tag: "Message",
           answers: MessageId.make("m2"),
           at: known(at(0)),
+          bot: false,
           context: undefined,
           id: { _tag: "Unknown" },
           kind: "Privmsg",
@@ -2987,21 +2998,21 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("everything, before any Read Marker", yield* unread(channel), {
           changed: 2,
           read: undefined,
-          unread: { activity: 2, direct: 1, highlights: 1, messages: 1 },
+          unread: { ...noneUnread, activity: 2, direct: 1, highlights: 1, messages: 1 },
         });
 
         yield* apply(store, 3, [marker(3, channel, at(11))]);
         yield* same("what lies after the Read Marker", yield* unread(channel), {
           changed: 3,
           read: at(11),
-          unread: { activity: 2, direct: 0, highlights: 0, messages: 1 },
+          unread: { ...noneUnread, activity: 2, direct: 0, highlights: 0, messages: 1 },
         });
 
         yield* apply(store, 4, [marker(4, channel, at(11)), marker(4, channel, at(5))]);
         yield* same("a Read Marker never moves back", yield* unread(channel), {
           changed: 3,
           read: at(11),
-          unread: { activity: 2, direct: 0, highlights: 0, messages: 1 },
+          unread: { ...noneUnread, activity: 2, direct: 0, highlights: 0, messages: 1 },
         });
 
         yield* apply(store, 5, [
@@ -3015,7 +3026,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("late history, and duplicates", yield* unread(channel), {
           changed: 5,
           read: at(11),
-          unread: { activity: 2, direct: 0, highlights: 1, messages: 1 },
+          unread: { ...noneUnread, activity: 2, direct: 0, highlights: 1, messages: 1 },
         });
 
         yield* apply(store, 6, [
@@ -3034,7 +3045,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("delivery and a new description leave the counts", yield* unread(channel), {
           changed: 6,
           read: at(11),
-          unread: { activity: 2, direct: 0, highlights: 1, messages: 1 },
+          unread: { ...noneUnread, activity: 2, direct: 0, highlights: 1, messages: 1 },
         });
 
         yield* apply(store, 7, [marker(7, channel, at(100))]);
@@ -3067,32 +3078,79 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* apply(store, 2, [
           ...opened(2),
           ...Array.from({ length: unreadCap + 2 }, (_, n) =>
-            added(2, channel, position(n, 2, n), said(`${n}`), undefined, libera, "Message")
+            added(2, channel, position(n, 2, n), byBot(`${n}`), undefined, libera, "Message")
           ),
         ]);
         yield* same("more than the cap", yield* counts(channel), {
           ...noneUnread,
+          botMessages: unreadCap + 1,
           messages: unreadCap + 1,
         });
 
         yield* apply(store, 3, [
-          added(3, channel, position(5000, 3), said("more"), undefined, libera, "Message"),
+          added(3, channel, position(5000, 3), byBot("more"), undefined, libera, "Message"),
         ]);
         yield* same("still more than the cap", yield* counts(channel), {
           ...noneUnread,
+          botMessages: unreadCap + 1,
           messages: unreadCap + 1,
         });
 
         yield* apply(store, 4, [marker(4, channel, at(2))]);
         yield* same("exactly the cap", yield* counts(channel), {
           ...noneUnread,
+          botMessages: unreadCap,
           messages: unreadCap,
         });
 
         yield* apply(store, 5, [marker(5, channel, at(unreadCap - 2))]);
-        yield* same("a few", yield* counts(channel), { ...noneUnread, messages: 4 });
+        yield* same("a few", yield* counts(channel), {
+          ...noneUnread,
+          botMessages: 4,
+          messages: 4,
+        });
       }),
     name: "caps each count, one past the cap meaning more",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const counts = Effect.map(
+          store.timelines(libera),
+          (each) => each.find(({ id }) => id === channel)?.unread
+        );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(10, 2, 0), byBot("dm"), undefined, libera, "Direct"),
+          added(2, channel, position(11, 2, 1), said("dm"), undefined, libera, "Direct"),
+          added(2, channel, position(12, 2, 2), byBot("one"), undefined, libera, "Message"),
+          added(2, channel, position(13, 2, 3), byBot("two"), undefined, libera, "Message"),
+          added(2, channel, position(14, 2, 4), said("three"), undefined, libera, "Message"),
+          // A Highlight from a bot still calls for the Owner, and is never told apart.
+          added(2, channel, position(15, 2, 5), byBot("iirc!"), undefined, libera, "Highlight"),
+          added(2, channel, position(16, 2, 6), byBot("x"), undefined, libera, "Activity"),
+        ]);
+        yield* same("each bot's Message, within its level's count", yield* counts, {
+          activity: 1,
+          botDirect: 1,
+          botMessages: 2,
+          direct: 2,
+          highlights: 1,
+          messages: 3,
+        });
+
+        yield* apply(store, 3, [marker(3, channel, at(12))]);
+        yield* same("what lies after the Read Marker", yield* counts, {
+          activity: 1,
+          botDirect: 0,
+          botMessages: 1,
+          direct: 0,
+          highlights: 1,
+          messages: 2,
+        });
+      }),
+    name: "counts a bot's Messages apart within their levels, and never a Highlight",
   },
   {
     check: (store) =>

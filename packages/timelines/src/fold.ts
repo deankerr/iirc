@@ -29,7 +29,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 18;
+export const projectionVersion = 19;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -330,6 +330,7 @@ const contentOf = (news: Routed): Content => {
     _tag: "Message",
     answers: news.answers,
     at: news.at,
+    bot: news.bot,
     context: news.context,
     id: news.id,
     kind: news.kind,

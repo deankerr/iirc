@@ -8,7 +8,13 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Instant } from "@iirc/client";
 import type { MessageId } from "@iirc/client";
-import { TimelineStore, TimelineStoreFailed, answeredOf, unreadOf } from "@iirc/timeline-store";
+import {
+  TimelineStore,
+  TimelineStoreFailed,
+  answeredOf,
+  botUnread,
+  unreadOf,
+} from "@iirc/timeline-store";
 import type {
   Anchor,
   Applied,
@@ -77,7 +83,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 10;
+const layoutVersion = 11;
 
 const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
 
@@ -139,6 +145,8 @@ const layout = [
     unread_direct INTEGER NOT NULL,
     unread_messages INTEGER NOT NULL,
     unread_activity INTEGER NOT NULL,
+    unread_bot_direct INTEGER NOT NULL,
+    unread_bot_messages INTEGER NOT NULL,
     removed INTEGER NOT NULL,
     life INTEGER NOT NULL,
     closed INTEGER
@@ -160,6 +168,7 @@ const layout = [
     sender TEXT,
     answers TEXT,
     ignored TEXT,
+    bot INTEGER NOT NULL,
     UNIQUE (timeline, cursor)
   ) STRICT`,
   "CREATE UNIQUE INDEX items_by_message_id ON items (timeline, message_id) WHERE message_id IS NOT NULL",
@@ -171,6 +180,9 @@ const layout = [
   // from the index alone, and a count or a seek stays covered.
   "CREATE INDEX items_by_changed ON items (changed, timeline, cursor, ignored) WHERE ignored IS NULL",
   "CREATE INDEX items_by_level ON items (timeline, level, cursor, ignored) WHERE level IS NOT NULL AND ignored IS NULL",
+  // A bot's Messages, which `botDirect` and `botMessages` count apart within their levels.
+  // It ends in `bot` too, always 1 there, so a count of them stays covered.
+  "CREATE INDEX items_by_bot ON items (timeline, level, cursor, ignored, bot) WHERE bot = 1 AND level IS NOT NULL AND ignored IS NULL",
   "CREATE INDEX items_shown ON items (timeline, cursor, ignored) WHERE ignored IS NULL",
   // What `Unignored` reads: a Network's hidden items, and nothing shown.
   "CREATE INDEX items_hidden ON items (network) WHERE ignored IS NOT NULL",
@@ -264,6 +276,7 @@ const columns = [
   "items.sender TEXT",
   "items.answers TEXT",
   "items.ignored TEXT",
+  "items.bot INTEGER",
   "removals.network TEXT",
   "removals.keep INTEGER",
   "removals.changed INTEGER",
@@ -281,6 +294,8 @@ const columns = [
   "timelines.unread_direct INTEGER",
   "timelines.unread_messages INTEGER",
   "timelines.unread_activity INTEGER",
+  "timelines.unread_bot_direct INTEGER",
+  "timelines.unread_bot_messages INTEGER",
   "timelines.removed INTEGER",
   "timelines.life INTEGER",
   "timelines.closed INTEGER",
@@ -435,6 +450,8 @@ const decodeSummaryRows = decodeAll(SummaryRow, "a Timeline");
 /** The column each level is counted in. */
 const unreadColumn = {
   activity: "unread_activity",
+  botDirect: "unread_bot_direct",
+  botMessages: "unread_bot_messages",
   direct: "unread_direct",
   highlights: "unread_highlights",
   messages: "unread_messages",
@@ -444,10 +461,20 @@ const unreadColumn = {
 const decodeSummaries = (rows: readonly unknown[]) =>
   decodeSummaryRows(rows).pipe(
     Effect.map((decoded) =>
-      decoded.map(({ highlights, direct, messages, activity, ...summary }): Summary => ({
-        ...summary,
-        unread: { activity, direct, highlights, messages },
-      }))
+      decoded.map(
+        ({
+          highlights,
+          direct,
+          messages,
+          activity,
+          botDirect,
+          botMessages,
+          ...summary
+        }): Summary => ({
+          ...summary,
+          unread: { activity, botDirect, botMessages, direct, highlights, messages },
+        })
+      )
     )
   );
 
@@ -834,6 +861,7 @@ export const makeSqliteTimelineStore = (
       SELECT id, network, kind, name, key, changed, read, head, removed, life,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
+        unread_bot_direct AS botDirect, unread_bot_messages AS botMessages,
         (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id
           AND items.ignored IS NULL) AS latest,
         ${isClosed} AS closed
@@ -866,9 +894,11 @@ export const makeSqliteTimelineStore = (
     // no more than one past the cap, on `items_by_level`, so a long Timeline costs no more to
     // count than a short one. Strictly after, by `cursorsAfter`, so the largest instant has
     // nothing after it, and no instant after it is ever made.
-    const counted = (timeline: TimelineId, level: Level, read: Instant | null) => sql`
+    // A bot's are counted the same way on `items_by_bot`.
+    const counted = (timeline: TimelineId, level: Level, read: Instant | null, bots = false) => sql`
       (SELECT count(*) FROM (
-        SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level} AND ignored IS NULL
+        SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level}
+          ${bots ? sql`AND bot = 1` : sql``} AND ignored IS NULL
           ${read === null ? sql`` : sql`AND cursor > ${cursorsAfter(read)}`}
         LIMIT ${unreadCap + 1}
       ))
@@ -884,12 +914,14 @@ export const makeSqliteTimelineStore = (
         const read = rows[0]?.read ?? null;
 
         yield* sql`
-          UPDATE timelines SET ${sql.csv(
-            levels.map(
+          UPDATE timelines SET ${sql.csv([
+            ...levels.map(
               (level) =>
                 sql`${sql(unreadColumn[unreadOf[level]])} = ${counted(timeline, level, read)}`
-            )
-          )}
+            ),
+            sql`${sql(unreadColumn.botDirect)} = ${counted(timeline, "Direct", read, true)}`,
+            sql`${sql(unreadColumn.botMessages)} = ${counted(timeline, "Message", read, true)}`,
+          ])}
           WHERE id = ${timeline}
         `;
       });
@@ -960,15 +992,16 @@ export const makeSqliteTimelineStore = (
               `.pipe(Effect.flatMap(decodeAnswered));
 
         const level = answering(change, answered);
+        const bot = botUnread(level, change.content);
 
         const [kept] = yield* sql`
           INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
-            level, sender, answers, ignored)
+            level, sender, answers, ignored, bot)
           VALUES (${change.timeline}, ${cursorOf(change.position)}, ${change.network},
             ${change.position.sequence}, ${textOrNull(change.messageId)},
             ${textOrNull(change.intent)}, ${content}, ${change.sequence},
             ${textOrNull(level)}, ${textOrNull(searchable?.sender)}, ${textOrNull(answers)},
-            ${ignored})
+            ${ignored}, ${bot === undefined ? 0 : 1})
           ON CONFLICT DO NOTHING
           RETURNING id
         `.pipe(Effect.flatMap(decodeRows));
@@ -989,14 +1022,17 @@ export const makeSqliteTimelineStore = (
 
         yield* touch(change.timeline, change.sequence);
 
-        // One more of its level, when it stands after the Read Marker, up to one past the cap.
-        if (level !== undefined) {
-          const column = sql(unreadColumn[unreadOf[level]]);
+        // One more of its level, and of a bot's, when it stands after the Read Marker, up to
+        // one past the cap.
+        for (const field of level === undefined ? [] : [unreadOf[level], bot]) {
+          if (field !== undefined) {
+            const column = sql(unreadColumn[field]);
 
-          yield* sql`
-            UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
-            WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.position.at})
-          `;
+            yield* sql`
+              UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
+              WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.position.at})
+            `;
+          }
         }
       });
 
@@ -1064,9 +1100,10 @@ export const makeSqliteTimelineStore = (
             // whether its Network was removed.
             yield* sql`
               INSERT INTO timelines (id, network, kind, name, key, changed, read,
-                unread_highlights, unread_direct, unread_messages, unread_activity, removed, life)
+                unread_highlights, unread_direct, unread_messages, unread_activity,
+                unread_bot_direct, unread_bot_messages, removed, life)
               VALUES (${timeline.id}, ${timeline.network}, ${timeline.kind}, ${timeline.name},
-                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0, 0, ${timeline.life})
+                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0, 0, 0, 0, ${timeline.life})
               ON CONFLICT (id) DO UPDATE SET network = excluded.network, kind = excluded.kind,
                 name = excluded.name, key = excluded.key, changed = excluded.changed,
                 life = excluded.life

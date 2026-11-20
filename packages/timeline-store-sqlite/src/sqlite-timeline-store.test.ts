@@ -73,6 +73,7 @@ const said = (
     _tag: "Message",
     answers: MessageId.make("abc"),
     at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    bot: false,
     context: undefined,
     id:
       id === undefined
@@ -107,6 +108,7 @@ const heard = (
     _tag: "Message",
     answers: undefined,
     at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    bot: false,
     context: undefined,
     id: { _tag: "Unknown" },
     kind: "Privmsg",
@@ -603,7 +605,7 @@ const keyedBothSides = (line: string) =>
 // A count of one level's items after a Read Marker searches `items_by_level` by the key,
 // from the marker on, reading the index alone.
 const byLevel = (line: string) =>
-  /SEARCH items USING COVERING INDEX items_by_level \(timeline=\? AND level=\? AND cursor>=?\?\)/u.test(
+  /SEARCH items USING COVERING INDEX items_by_(?:level|bot) \(timeline=\? AND level=\? AND cursor>=?\?\)/u.test(
     line
   );
 
@@ -800,8 +802,8 @@ describe("the file", () => {
             .map(({ plan }) => plan),
         }).toStrictEqual({
           bounded: [
-            { counts: [true, true, true, true], limited: 4 },
-            { counts: [true, true, true, true], limited: 4 },
+            { counts: [true, true, true, true, true, true], limited: 6 },
+            { counts: [true, true, true, true, true, true], limited: 6 },
           ],
           hidden: ["SEARCH items USING INDEX items_hidden (network=?)"],
         });

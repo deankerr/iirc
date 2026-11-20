@@ -47,6 +47,10 @@ export interface Unread {
   readonly direct: number;
   readonly messages: number;
   readonly activity: number;
+  /** Of those counted in `direct`, how many a bot said. */
+  readonly botDirect: number;
+  /** Of those counted in `messages`, how many a bot said. */
+  readonly botMessages: number;
 }
 
 /** Which count of {@link Unread} each level is counted in. */
@@ -57,8 +61,39 @@ export const unreadOf = {
   Message: "messages",
 } as const satisfies { readonly [L in Level]: keyof Unread };
 
+/**
+ * Which count of {@link Unread} a bot's Message of a level is counted in besides its
+ * level's, as {@link botUnread} gives it. A Highlight is never told apart.
+ */
+const botUnreadOf = {
+  Direct: "botDirect",
+  Message: "botMessages",
+} as const satisfies { readonly [L in Level]?: keyof Unread };
+
+/**
+ * The count an item is counted in besides its level's, when a bot said it: `botDirect` or
+ * `botMessages`, alike in every adapter.
+ * @param level - The item's level.
+ * @param content - What it shows.
+ * @returns The count, or `undefined` for an item no bot said, or of another level.
+ */
+export const botUnread = (
+  level: Level | undefined,
+  content: Content
+): "botDirect" | "botMessages" | undefined =>
+  (level === "Direct" || level === "Message") && content._tag === "Message" && content.bot
+    ? botUnreadOf[level]
+    : undefined;
+
 /** No items unread. */
-export const noneUnread: Unread = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+export const noneUnread: Unread = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
 
 /**
  * A Timeline as a store holds it, with its latest item's position, its Read Marker, what

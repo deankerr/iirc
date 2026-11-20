@@ -38,7 +38,7 @@ import type {
   Unread,
   Window,
 } from "../store.ts";
-import { answeredOf, noneUnread, unreadOf } from "../store.ts";
+import { answeredOf, botUnread, noneUnread, unreadOf } from "../store.ts";
 
 /** An item, what it is found by, and the ignore masks that hide it, empty while it is shown. */
 interface Stored {
@@ -517,11 +517,13 @@ const sortedItems = (memory: Memory, timeline: TimelineId): readonly Item[] =>
 const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => {
   const counts = { ...noneUnread };
 
-  for (const { level, position } of items) {
+  for (const { content, level, position } of items) {
     if (level !== undefined && (read === undefined || position.at > read)) {
-      const field = unreadOf[level];
-
-      counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+      for (const field of [unreadOf[level], botUnread(level, content)]) {
+        if (field !== undefined) {
+          counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+        }
+      }
     }
   }
 
