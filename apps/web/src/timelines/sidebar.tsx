@@ -609,7 +609,10 @@ const NetworkRow = ({
 };
 
 /** The views of iirc's own, in the order their rows stack, each with its command. */
-const ownViews: readonly { readonly view: OwnView; readonly command: string }[] = [
+// The Tail has its row at the top of the sidebar, not in the foot.
+type FootView = Exclude<OwnView, "Tail">;
+
+const ownViews: readonly { readonly view: FootView; readonly command: string }[] = [
   { command: "search.open", view: "Search" },
   { command: "uploads.open", view: "Uploads" },
   { command: "options.set", view: "Options" },
@@ -699,21 +702,17 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
   const showSearchNow = useAtomSet(showSearch);
   const showUploads = useAtomSet(openUploads);
   const showOptions = useAtomSet(openOptions);
-  const showTail = useAtomSet(openTail);
   const setDrawer = useAtomSet(drawerState);
   const carryOut = useAtomSet(perform);
   const drawer = useAtomValue(compact);
   const shown = ownViews.find(({ view }) => view === chosen._tag)?.view;
 
-  const opening: Readonly<Record<OwnView, () => void>> = {
+  const opening: Readonly<Record<FootView, () => void>> = {
     Options: () => {
       showOptions("");
     },
     Search: () => {
       showSearchNow(undefined);
-    },
-    Tail: () => {
-      showTail(undefined);
     },
     Uploads: () => {
       showUploads();

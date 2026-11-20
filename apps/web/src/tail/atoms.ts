@@ -53,11 +53,13 @@ const followed = runtime.atom((get) =>
 
             const after = start === undefined ? undefined : lastNumber(start);
 
-            const events = yield* client.tail
-              .changes({ headers: {}, query: after === undefined ? {} : { after } })
-              .pipe(Effect.timeout(idle));
-
-            const live = events.pipe(
+            // The stream is opened only once what was read is given, so a stream that cannot
+            // open never hides the Tail read, and its retries follow from the read's last line.
+            const live = Stream.unwrap(
+              client.tail
+                .changes({ headers: {}, query: after === undefined ? {} : { after } })
+                .pipe(Effect.timeout(idle))
+            ).pipe(
               Stream.timeout(idle),
               Stream.map((event): TailEvent | undefined => {
                 if (event.event === "daemon") {

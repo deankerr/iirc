@@ -181,7 +181,7 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **A line is plain text.** `at` is the log's date, `level` is `Debug` to `Fatal`, `message` is the words as text, a string as it is and any other part formatted, joined by a space, `annotations` is the fiber's log annotations, each as text, and `cause` is `Cause.pretty` when there is a cause. A line at `Trace` is not kept. Its `n` counts from 1 for this Daemon, so a line dropped from the 4096 leaves its number unused.
 - **Following reads the lines held, then goes live, with none missed or doubled.** `follow(after)` subscribes first, then reads the lines held after `after`, and drops each live line whose number the read already covered. A subscriber that falls more than 4096 lines behind loses the oldest, as the Tail itself does. The stream says which Daemon it is of with the `daemon` event, then each `line` with its `n` as its id, merged with the heartbeat as News is.
 - **stderr is not the Tail.** `layerLogger` still writes `Info` and above as logfmt, whatever the minimum level, so the Tail's `Debug` lines never reach it.
-- **An option's change is logged,** once at `Info`, as set or unset, with the option's full name as the `option` annotation, such as `ui.time` or `uploads.expireAfter`, and never its value.
+- **An option's change is logged,** once at `Info`, as `Changed a ui option` or `Changed an option` with the option's name, such as `time` or `uploads.expireAfter`, among its words, and never its value.
 
 ## Composition
 

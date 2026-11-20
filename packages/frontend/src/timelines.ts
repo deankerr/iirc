@@ -2747,13 +2747,15 @@ export const mainOf = (state: Timelines): MainView => focusedView(state).main;
 export type OwnView = "Tail" | "Search" | "Uploads" | "Options";
 
 /**
- * Which view of iirc's own a Pane shows, if one: the Tail while it has nothing open.
+ * Which view of iirc's own a Pane shows, if one: the Tail while it has nothing open, once no
+ * layout kept waits to be taken, since until then it shows the wait.
+ * @param state - The state.
  * @param view - What it shows.
  * @returns The view, or none.
  */
-const ownViewOf = ({ main, open }: PaneView): OwnView | undefined => {
+const ownViewOf = (state: Timelines, { main, open }: PaneView): OwnView | undefined => {
   if (main._tag === "Timeline") {
-    return open === undefined ? "Tail" : undefined;
+    return open === undefined && state.restoring === undefined ? "Tail" : undefined;
   }
 
   return main._tag === "Search" || main._tag === "Uploads" || main._tag === "Options"
@@ -2778,7 +2780,7 @@ export type Chosen =
  */
 export const chosenOf = (state: Timelines): Chosen => {
   const view = focusedView(state);
-  const own = ownViewOf(view);
+  const own = ownViewOf(state, view);
 
   if (own !== undefined) {
     return { _tag: own };
@@ -2801,7 +2803,7 @@ export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId | OwnView,
   new Map(
     panesOf(state.layout.root)
       .flatMap((pane, index): (readonly [TimelineId | OwnView, number])[] => {
-        const own = ownViewOf(pane.view);
+        const own = ownViewOf(state, pane.view);
 
         if (pane.id === state.layout.focused) {
           return [];
@@ -3734,13 +3736,15 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
     }
 
     // The Tail is what a Pane with nothing open shows, so the focused Pane lets go of what
-    // it showed, and its Timeline joins those closed most recently.
+    // it showed, and its Timeline joins those closed most recently. A layout kept that still
+    // waits is let go too, as going elsewhere lets it go, so the Pane shows the Tail now.
     case "TailShown": {
       const moved = elsewhere(state);
 
       return retained(moved, {
         ...moved,
         layout: withView(moved.layout, moved.layout.focused, emptyView),
+        restoring: undefined,
       });
     }
 

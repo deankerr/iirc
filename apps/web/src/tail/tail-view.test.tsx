@@ -382,6 +382,23 @@ describe("the iirc view", () => {
     expect(words(container)).toStrictEqual(["Started", "Joined"]);
   });
 
+  // Regression: a Tail read whole waits on its stream, so a stream that cannot open hides it.
+  it("shows the Tail read while its stream cannot be followed", async () => {
+    const fake = daemonWith();
+
+    fake.daemon.tailStreamDown = true;
+    fake.log("Info", "Dialling");
+
+    const { container } = await page(fake);
+
+    await settled(() => words(container).length === 2);
+
+    expect({ version: banner(container).version, words: words(container) }).toStrictEqual({
+      version: "0.0.0",
+      words: ["Started", "Dialling"],
+    });
+  });
+
   // Regression: after a restart the view keeps the old Daemon's Tail, or misses the new one's start.
   it("shows the new Tail from its start after the Daemon restarts, with its version", async () => {
     const fake = daemonWith();

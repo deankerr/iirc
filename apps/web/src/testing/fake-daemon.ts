@@ -856,6 +856,8 @@ export const fakeDaemon = () => {
     tail: startedTail(tailStarted, "0.0.0"),
     /** Each follower of the Tail. */
     tailFollowers,
+    /** Whether the Tail's stream answers `502`, as a proxy does while the Daemon cannot be reached. */
+    tailStreamDown: false,
     /** The last step folded, which every Timeline read gives as `through`. */
     through: 1,
     /** The Timelines of each Network, in the order they opened. */
@@ -2311,7 +2313,9 @@ export const fakeDaemon = () => {
       }
 
       case "GET /api/tail/changes": {
-        return signedInOnly(() => followingTail(url, init));
+        return signedInOnly(() =>
+          daemon.tailStreamDown ? new Response(null, { status: 502 }) : followingTail(url, init)
+        );
       }
 
       case "POST /api/networks/libera/read": {

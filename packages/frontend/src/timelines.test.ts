@@ -3156,6 +3156,22 @@ describe("the Panes", () => {
     });
   });
 
+  // Regression: the iirc row is marked over a Pane still waiting, and pressing it leaves
+  // the wait, so the Tail cannot be reached while the Timelines are not read.
+  it("marks the Tail chosen only once a waiting Pane shows it, which showing it lets go of the wait", () => {
+    const layout = single({ ...emptyView, open: one });
+    const waiting = reduceTimelines(timelinesWith(windowCap), { _tag: "Restore", layout });
+    const shown = reduceTimelines(waiting, { _tag: "TailShown" });
+
+    expect({
+      shown: [chosenOf(shown), opened(shown)._tag],
+      waiting: [chosenOf(waiting), opened(waiting)._tag],
+    }).toStrictEqual({
+      shown: [{ _tag: "Tail" }, "Closed"],
+      waiting: [{ _tag: "Nothing" }, "Restoring"],
+    });
+  });
+
   it("refuses a kept layout that is not one, and opens a Timeline kept twice once", () => {
     const twice = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(3))));
 
