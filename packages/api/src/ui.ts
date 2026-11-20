@@ -458,6 +458,22 @@ export type ReadRule = typeof ReadRule.Type;
 export const sharedOnly = { sharedOnly: true } as const;
 
 /**
+ * The least level of the Tail's lines that a Frontend's `iirc` view shows: `debug`,
+ * `info`, `warning`, or `error`, each showing its own level and those above it. It changes
+ * what is shown, never what the Tail keeps or what the console gets. Every device shares
+ * it, so turning it down to see what led to a fault shows on each at once.
+ */
+export const TailShown = Schema.Literals(["debug", "info", "warning", "error"]).annotate({
+  ...sharedOnly,
+  default: "info",
+  description:
+    "The least level of what the Daemon logged that the iirc view shows: debug, info, warning, or error. It changes what is shown, never what the Daemon keeps. Every device shares it.",
+});
+
+/** The decoded form of {@link TailShown}. */
+export type TailShown = typeof TailShown.Type;
+
+/**
  * Whether the Daemon previews the links in Messages: `off`; `links only`, a page's title,
  * description, and site, with no image or media fetched; or `on`, which adds a page's
  * image, or a link's own image, kept in the store when a bucket is set. The Daemon
@@ -800,6 +816,7 @@ export const UiOptions = Schema.Struct({
   size: TextSize,
   spellcheck: SpellcheckShown,
   suffix: NickSuffix,
+  tail: TailShown,
   theme: ThemeShown,
   themes: Themes,
   time: TimeShown,

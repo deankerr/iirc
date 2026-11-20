@@ -5,7 +5,6 @@
  *
  * @packageDocumentation
  */
-import type { TailLevel } from "@iirc/api";
 import { lastNumber, linesShown, reduceTail } from "@iirc/frontend/tail";
 import type { HeldTail, TailEvent } from "@iirc/frontend/tail";
 import { Effect, Option, Ref, Schedule, Stream } from "effect";
@@ -13,11 +12,9 @@ import { AsyncResult, Atom } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { tailLeast } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, Waits } from "../timelines/atoms.ts";
-
-/** The least level the view shows, until the Owner can choose it. */
-const least: TailLevel = "Info";
 
 /**
  * The Tail held, each time it changes, while the page is signed in and something reads
@@ -95,9 +92,9 @@ const tailHeld = Atom.make((get): HeldTail | undefined =>
 /** The Daemon's version, once the Tail is read. */
 export const tailVersion = Atom.make((get) => get(tailHeld)?.version);
 
-/** The lines the view shows, oldest first: those at Info and above. */
+/** The lines the view shows, oldest first: those at the level `ui.tail` names and above. */
 export const tailShown = Atom.make((get) => {
   const held = get(tailHeld);
 
-  return held === undefined ? [] : linesShown(held, least);
+  return held === undefined ? [] : linesShown(held, get(tailLeast));
 });
