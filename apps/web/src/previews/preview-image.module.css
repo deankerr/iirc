@@ -1,7 +1,9 @@
 /*
  * A Preview's image, in a box of its own that its press, its play badge, and its control
- * to open it large sit in. Until it loads, the box stands where the image will be, so a
- * Message's height changes as little as it can.
+ * to open it large sit in. A box the page gives a shape, with `data-reserved`, is that
+ * shape from the first paint and fills it with the picture, so it is the same box before
+ * and after the picture loads. One without a shape is a placeholder until the picture has
+ * loaded.
  */
 
 /* A page's image: a small fixed box, cropped to fill it, so the row stays calm. */
@@ -17,7 +19,8 @@
 
 /*
  * A link that is itself an image, a player's poster, or a card's image: as tall as
- * `--preview-media-height` at most, never wider than the column.
+ * `--preview-media-height` at most, never wider than the column. Reserved, its shape and
+ * width are the page's own.
  */
 .whole {
   position: relative;
@@ -28,9 +31,49 @@
   background: var(--color-surface);
 }
 
-.whole[data-loaded="false"] {
+/*
+ * A box the page gave a shape, as `--box-width` and `--box-height`, which are only the
+ * shape's proportions: as wide as it can be while no taller than `--preview-media-height`
+ * and no wider than the room it has, nor than `--box-at-most` where an image is no larger
+ * than itself.
+ */
+.whole[data-reserved],
+.boxed,
+.frame {
+  width: min(
+    100%,
+    var(--box-at-most, 100%),
+    calc(var(--preview-media-height) * var(--box-width) / var(--box-height))
+  );
+  aspect-ratio: var(--box-width) / var(--box-height);
+}
+
+.whole[data-loaded="false"]:not([data-reserved]) {
   width: 12em;
   height: 6em;
+}
+
+/* While it loads, a picture with no shape to reserve sits unseen in the placeholder. */
+.whole[data-loaded="false"]:not([data-reserved]) .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+/* A reserved box's picture, and the press around it, fill it. */
+.whole[data-reserved] .press {
+  position: absolute;
+  inset: 0;
+}
+
+.whole[data-reserved] .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* A player's poster under its text, which keeps its own height. */
@@ -47,12 +90,9 @@
 }
 
 /*
- * A player's frame under its text: as tall as a poster at most, and never wider than the
- * column, in the shape its page gave it.
+ * A player's frame under its text, in the box its poster stood in, set by the page.
  */
 .frame {
-  --frame-tallest: var(--preview-media-height);
-
   display: block;
   border: 0;
   border-radius: var(--radius);
@@ -60,20 +100,21 @@
 }
 
 /*
- * A video in a box of a fixed shape, as tall as `--preview-media-height` at most, so
- * playing it moves nothing below it, with the control that opens it large in its corner.
+ * A video in the box its poster stood in, as tall as `--preview-media-height` at most,
+ * whose shape and width the page sets, so playing it moves nothing below it, with the
+ * control that opens it large in its corner.
  */
 .boxed {
   position: relative;
   display: block;
-  width: min(100%, calc(var(--preview-media-height) * 16 / 9));
 }
 
 .video {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  max-height: var(--preview-media-height);
-  aspect-ratio: 16 / 9;
+  height: 100%;
   border-radius: var(--radius);
   background: var(--color-surface);
 }

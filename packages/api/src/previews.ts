@@ -68,12 +68,26 @@ export const ImageType = Schema.Literals([
 export type ImageType = typeof ImageType.Type;
 
 /**
+ * An image's width and height in pixels, as its bytes state them, each at least `1` and at
+ * most `32768`, past any screen.
+ */
+export const ImageDimensions = Schema.Struct({
+  height: Schema.Int.check(Schema.isBetween({ maximum: 32_768, minimum: 1 })),
+  width: Schema.Int.check(Schema.isBetween({ maximum: 32_768, minimum: 1 })),
+}).annotate({ identifier: "ImageDimensions" });
+
+/** The decoded form of {@link ImageDimensions}. */
+export type ImageDimensions = typeof ImageDimensions.Type;
+
+/**
  * An image a Preview holds, kept by the Daemon and served from its own origin at
  * `GET /api/previews/images/{hash}`, never from the host it came from: its hash, its type
- * and whether it moves, both read from its bytes, and its size in bytes.
+ * and whether it moves, both read from its bytes, its size in bytes, and its `dimensions`
+ * in pixels, read from its bytes too, or `null` where they do not say.
  */
 export const PreviewImage = Schema.Struct({
   animated: Schema.Boolean,
+  dimensions: Schema.NullOr(ImageDimensions),
   hash: ImageHash,
   size: Schema.Int.check(Schema.isGreaterThan(0)),
   type: ImageType,

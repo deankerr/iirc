@@ -597,16 +597,24 @@ const linkShown = (link: string): LinkShown => {
   };
 };
 
+/** A width and a height, whose shape is all that matters unless said to be pixels. */
+export interface Size {
+  readonly height: number;
+  readonly width: number;
+}
+
 /**
  * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
  * its link; where the Daemon serves it, from its own origin and never the host it came
- * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary,
- * `Card` under a page's text, `Whole` for a link that is itself the image, or `Poster` for
- * a player's or a video's, which a play button is drawn over.
+ * from; whether it moves; its `dimensions` in pixels, when the Daemon read them from its
+ * bytes; and how it is drawn, `Thumbnail` beside a page's summary, `Card` under a page's
+ * text, `Whole` for a link that is itself the image, or `Poster` for a player's or a
+ * video's, which a play button is drawn over.
  */
 export interface ImageShown {
   readonly alt: string;
   readonly animated: boolean;
+  readonly dimensions: Size | undefined;
   readonly drawn: "Card" | "Poster" | "Thumbnail" | "Whole";
   readonly src: string;
 }
@@ -716,6 +724,7 @@ const imageOf = (preview: Preview, style: PreviewsStyle): ImageShown | undefined
           preview.title === null || preview.title === "" ? preview.link : preview.title
         ),
         animated: preview.image.animated,
+        dimensions: preview.image.dimensions ?? undefined,
         drawn,
         src: `/api/previews/images/${preview.image.hash}`,
       };
@@ -787,20 +796,32 @@ const autoplayBy: ReadonlyMap<string, readonly [name: string, value: string]> = 
   ["www.youtube-nocookie.com", ["autoplay", "1"]],
 ]);
 
-/** The size of a player whose page gave none. */
-const defaultPlayerSize = { height: 9, width: 16 } as const;
+/** The shape of a box for a video or a player when nothing else says. */
+const sixteenByNine: Size = { height: 9, width: 16 };
+
+/**
+ * The shape of the one box a poster, the video it plays, and the player it plays share, so
+ * pressing play moves nothing below it: a player's, if its page gave one; else the
+ * poster's own; else 16 by 9. Where the poster fails to load, the box keeps its shape.
+ * @param playing - The player, and the poster, each if there is one.
+ * @returns The box's shape.
+ */
+export const playsIn = (playing: {
+  readonly player?: Pick<PlayerShown, "size"> | undefined;
+  readonly poster?: Pick<ImageShown, "dimensions"> | undefined;
+}): Size => playing.player?.size ?? playing.poster?.dimensions ?? sixteenByNine;
 
 /**
  * A player, as drawn: the host it plays from, the words that say so, and what a frame
  * needs once the Owner presses play. A view loads `src` only then, never before, and shows
- * the frame at `size`, in CSS pixels, whose shape is all that matters.
+ * the frame at `size`, in CSS pixels, whose shape is all that matters, if its page gave one.
  */
 export interface PlayerShown {
   readonly host: string;
   readonly words: string;
   /** The player's address, set to start playing where its host allows that. */
   readonly src: string;
-  readonly size: { readonly height: number; readonly width: number };
+  readonly size: Size | undefined;
 }
 
 /**
@@ -829,7 +850,7 @@ const playerOf = (preview: Preview): PlayerShown | undefined => {
 
   return {
     host,
-    size: preview.player.size ?? defaultPlayerSize,
+    size: preview.player.size ?? undefined,
     src: url.href,
     words: `plays from ${host}`,
   };

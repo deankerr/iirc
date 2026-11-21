@@ -197,7 +197,7 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
       expect(result).toStrictEqual({
         bytes: png,
         headers: {
-          "cache-control": "private",
+          "cache-control": "private, max-age=31536000, immutable",
           "content-length": String(png.length),
           "content-security-policy": "default-src 'none'; sandbox",
           "content-type": "image/png",
@@ -208,7 +208,13 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
           _tag: "Ready",
           preview: {
             description: null,
-            image: { animated: false, hash, size: png.length, type: "image/png" },
+            image: {
+              animated: false,
+              dimensions: { height: 2, width: 2 },
+              hash,
+              size: png.length,
+              type: "image/png",
+            },
             kind: "page",
             link,
             player: null,

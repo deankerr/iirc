@@ -23,6 +23,7 @@ import {
   motionOf,
   opening,
   pressOf,
+  playsIn,
   pressOn,
   previewsModesOf,
   previewsOf,
@@ -661,7 +662,7 @@ describe("a Preview's image", () => {
   it("is the whole image for a link that is itself an image, and says when it moves", () => {
     expect(
       shownReady({
-        image: { animated: true, hash, size: 10, type: "image/gif" },
+        image: { animated: true, dimensions: null, hash, size: 10, type: "image/gif" },
         kind: "image",
         title: null,
         type: "image/gif",
@@ -669,6 +670,7 @@ describe("a Preview's image", () => {
     ).toStrictEqual({
       alt: "https://example.com/cats",
       animated: true,
+      dimensions: undefined,
       drawn: "Whole",
       src: `/api/previews/images/${hash}`,
     });
@@ -678,8 +680,23 @@ describe("a Preview's image", () => {
     expect(shownReady({ image: null })?.image).toBeUndefined();
   });
 
+  it("carries its dimensions in pixels, or none where the Daemon read none", () => {
+    const sized = { animated: false, dimensions: { height: 48, width: 64 }, hash, size: 10 };
+
+    expect([
+      shownReady({ image: { ...sized, type: "image/png" } })?.image?.dimensions,
+      shownReady({ image: { ...sized, dimensions: null, type: "image/png" } })?.image?.dimensions,
+    ]).toStrictEqual([{ height: 48, width: 64 }, undefined]);
+  });
+
   it("is a poster for a video, and a thumbnail for a sound", () => {
-    const image = { animated: false, hash, size: 10, type: "image/jpeg" } as const;
+    const image = {
+      animated: false,
+      dimensions: null,
+      hash,
+      size: 10,
+      type: "image/jpeg",
+    } as const;
 
     expect([
       shownReady({ image, kind: "video", stream: "https://example.com/cats.mp4" })?.image?.drawn,
@@ -692,7 +709,7 @@ const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "text" =
   shownReady({ title: null, ...fields }, mode)?.media;
 
 const playing = {
-  image: { animated: false, hash, size: 10, type: "image/jpeg" },
+  image: { animated: false, dimensions: null, hash, size: 10, type: "image/jpeg" },
   kind: "player",
   link: "https://www.youtube.com/watch?v=abc",
   player: { link: "https://www.youtube-nocookie.com/embed/abc", size: { height: 360, width: 640 } },
@@ -742,10 +759,10 @@ describe("a Preview's player", () => {
     ).toBe("https://bandcamp.com/EmbeddedPlayer/album=1");
   });
 
-  it("is 16 by 9 when its page gave no size", () => {
+  it("has no size when its page gave none", () => {
     expect(
       shownReady({ ...playing, player: { link: playing.player.link, size: null } })?.player?.size
-    ).toStrictEqual({ height: 9, width: 16 });
+    ).toBeUndefined();
   });
 
   it("is none for any kind but a player", () => {
@@ -784,6 +801,7 @@ describe("a Preview's player", () => {
     expect(shownReady(playing)?.image).toStrictEqual({
       alt: "A song",
       animated: false,
+      dimensions: undefined,
       drawn: "Poster",
       src: `/api/previews/images/${hash}`,
     });
@@ -801,7 +819,7 @@ describe("a Preview's player", () => {
   });
 });
 
-const image = { animated: false, hash, size: 10, type: "image/png" } as const;
+const image = { animated: false, dimensions: null, hash, size: 10, type: "image/png" } as const;
 
 describe("ui.previews.style", () => {
   it("draws a page as its site and title alone on a line: no image, no description", () => {
@@ -1095,5 +1113,28 @@ describe("what a press of an image does", () => {
       moving: pressOn({ animated: true }, "Moving"),
       still: pressOn({ animated: true }, "Still"),
     }).toStrictEqual({ moving: "Stop", still: "Play" });
+  });
+});
+
+describe("the box a poster, its video, and its player share", () => {
+  const player = { size: { height: 360, width: 640 } };
+  const poster = { dimensions: { height: 3, width: 4 } };
+
+  it("is the player's shape if its page gave one, else the poster's, else 16 by 9", () => {
+    expect([
+      playsIn({ player, poster }),
+      playsIn({ player: { size: undefined }, poster }),
+      playsIn({ poster }),
+      playsIn({ player: { size: undefined }, poster: { dimensions: undefined } }),
+      playsIn({ player }),
+      playsIn({}),
+    ]).toStrictEqual([
+      { height: 360, width: 640 },
+      { height: 3, width: 4 },
+      { height: 3, width: 4 },
+      { height: 9, width: 16 },
+      { height: 360, width: 640 },
+      { height: 9, width: 16 },
+    ]);
   });
 });

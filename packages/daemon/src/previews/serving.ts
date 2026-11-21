@@ -1,7 +1,8 @@
 /**
  * How an image a Preview holds is answered, on the API's own origin, for a signed-in
- * Frontend: as the type its bytes show, never sniffed again by the browser, kept only by the
- * browser itself, named by its hash, and under a sandbox in which nothing may run or load.
+ * Frontend: as the type its bytes show, never sniffed again by the browser, kept for good by
+ * the browser itself and no one else, named by its hash, and under a sandbox in which nothing
+ * may run or load.
  * A video or sound a link is, is answered likewise, as the host's type, kept by no cache.
  *
  * @packageDocumentation
@@ -52,6 +53,11 @@ const matches = (header: string | undefined, etag: string) =>
     .map((tag) => tag.trim().replace(/^W\//u, ""))
     .some((tag) => tag === "*" || tag === etag);
 
+// An image's hash names its bytes, so what the browser keeps never goes stale. Only the
+// browser keeps it, and only for a request that was let through: an image no Preview holds is
+// refused before it is ever answered with this.
+const keptForGood = "private, max-age=31536000, immutable";
+
 /**
  * An image a Preview holds, as an answer: `304` when the Frontend already holds it, and
  * otherwise its bytes. Its hash names its bytes, so they never change under its tag. A hash
@@ -72,7 +78,7 @@ export const servedImage = (
 > =>
   Effect.gen(function* () {
     const etag = `"${hash}"`;
-    const cached = { "cache-control": "private", etag };
+    const cached = { "cache-control": keptForGood, etag };
 
     if (matches(ifNoneMatch, etag) && (yield* previews.refers(hash))) {
       return HttpServerResponse.empty({ headers: cached, status: 304 });

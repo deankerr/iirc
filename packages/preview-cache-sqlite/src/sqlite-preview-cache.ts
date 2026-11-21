@@ -13,21 +13,32 @@ import type { SqlClient } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
 
 /**
- * The version of the file's layout, in SQLite's `user_version`. A file of the version before
- * is brought up to it, and one of any other is made again.
+ * The version of the file's layout, in SQLite's `user_version`. A file of an earlier version
+ * that has a step to this one is brought up to it, and one of any other is made again.
  */
-const layoutVersion = 5;
+const layoutVersion = 6;
 
-// The version before, whose Previews named their stream `media`. Its table is this one.
-const versionBefore = 4;
+// The versions that have a step, each the layout of this table with Previews as that
+// version wrote them.
+const versionBefore = 5;
+const versionBeforeThat = 4;
 
-// Brings a file of the version before up to this one: each Preview's `media` is its `stream`.
-// A row that is not JSON is left as it is, to fail its own read as it did before.
-const fromBefore = `UPDATE previews SET state = json_set(
+// Brings a file of 4 up to 5: each Preview's `media` is its `stream`. A row that is not JSON
+// is left as it is, to fail its own read as it did before.
+const fromBeforeThat = `UPDATE previews SET state = json_set(
   json_remove(state, '$.preview.media'),
   '$.preview.stream',
   json_extract(state, '$.preview.media')
 ) WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview.media') IS NOT NULL END`;
+
+// Brings a file of 5 up to this one: a Preview's image, which had no size, has none stated
+// now, until the Preview is fetched again. A row that is not JSON, or whose image is none, is
+// left as it is.
+const fromBefore = `UPDATE previews SET state = json_set(
+  state,
+  '$.preview.image.dimensions',
+  json('null')
+) WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview.image') = 'object' END`;
 
 const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
 
@@ -82,12 +93,12 @@ const columns = [
 ].join("\n");
 
 /** What a file was found to be. */
-type Found = "Before" | "Empty" | "Ready" | "Unusable";
+type Found = "Before" | "BeforeThat" | "Empty" | "Ready" | "Unusable";
 
-// Reads only, so it changes nothing in the file. A file is of the version before when its
+// Reads only, so it changes nothing in the file. A file is of an earlier version when its
 // `user_version` says so and its table is this one. A file is unusable when its layout is not
-// this cache's or the one before, or when SQLite says it is not a database or is damaged. Any other failure,
-// such as a lock held too long, fails, and leaves the file as it is.
+// this cache's or one with a step, or when SQLite says it is not a database or is damaged.
+// Any other failure, such as a lock held too long, fails, and leaves the file as it is.
 const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
   Effect.gen(function* () {
     const versions = yield* sql<{
@@ -104,7 +115,7 @@ const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
       return "Empty" as const;
     }
 
-    if (version !== layoutVersion && version !== versionBefore) {
+    if (version !== layoutVersion && version !== versionBefore && version !== versionBeforeThat) {
       return "Unusable" as const;
     }
 
@@ -120,7 +131,11 @@ const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
       return "Unusable" as const;
     }
 
-    return version === layoutVersion ? ("Ready" as const) : ("Before" as const);
+    if (version === layoutVersion) {
+      return "Ready" as const;
+    }
+
+    return version === versionBefore ? ("Before" as const) : ("BeforeThat" as const);
   }).pipe(Effect.catchIf(isDamage, () => Effect.succeed("Unusable" as const)));
 
 // Removes the file and what SQLite keeps beside it, so it is made again from nothing.
@@ -205,6 +220,15 @@ export const makeSqlitePreviewCache = (
                   .unsafe(layout)
                   .pipe(
                     Effect.andThen(sql.unsafe(imageIndex)),
+                    Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`))
+                  );
+              }
+
+              case "BeforeThat": {
+                return sql
+                  .unsafe(fromBeforeThat)
+                  .pipe(
+                    Effect.andThen(sql.unsafe(fromBefore)),
                     Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`))
                   );
               }

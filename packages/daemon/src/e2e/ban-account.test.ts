@@ -34,7 +34,7 @@ describe("ergo, banning by account", () => {
 
   beforeAll(async () => {
     ergo = await startErgo();
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await ergo.stop();

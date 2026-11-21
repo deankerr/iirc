@@ -39,6 +39,7 @@ const states = [
       description: null,
       image: {
         animated: false,
+        dimensions: { height: 480, width: 640 },
         hash: "a".repeat(64),
         size: 1024,
         type: "image/png",

@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
@@ -1229,6 +1230,9 @@ const headersOf = (response: Response) => Object.fromEntries(response.headers.en
 const bytesOf = (response: Response) =>
   Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
 
+// An image's hash names its bytes, so the browser keeps them for good.
+const forever = "private, max-age=31536000, immutable";
+
 const asPageAgain = { kind: "page" } as const;
 const asImage = { kind: "image" } as const;
 
@@ -1264,7 +1268,13 @@ describe("a Preview's image over a real server", () => {
       _tag: "Ready",
       preview: {
         description: null,
-        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        image: {
+          animated: false,
+          dimensions: { height: 2, width: 2 },
+          hash: sha256(png),
+          size: png.length,
+          type: "image/png",
+        },
         kind: "page",
         link: CAT,
         player: null,
@@ -1284,7 +1294,7 @@ describe("a Preview's image over a real server", () => {
       status: 200,
     });
     expect(result.headers).toMatchObject({
-      "cache-control": "private",
+      "cache-control": forever,
       "content-security-policy": "default-src 'none'; sandbox",
       "content-type": "image/png",
       etag: `"${sha256(png)}"`,
@@ -1292,7 +1302,7 @@ describe("a Preview's image over a real server", () => {
     });
     expect(result.again).toMatchObject({
       body: "",
-      headers: { "cache-control": "private", etag: `"${sha256(png)}"` },
+      headers: { "cache-control": forever, etag: `"${sha256(png)}"` },
       status: 304,
     });
   });
@@ -1312,7 +1322,13 @@ describe("a Preview's image over a real server", () => {
       _tag: "Ready",
       preview: {
         description: null,
-        image: { animated: true, hash: sha256(gif), size: gif.length, type: "image/gif" },
+        image: {
+          animated: true,
+          dimensions: { height: 2, width: 2 },
+          hash: sha256(gif),
+          size: gif.length,
+          type: "image/gif",
+        },
         kind: "image",
         link,
         player: null,
@@ -1348,17 +1364,189 @@ describe("a Preview's image over a real server", () => {
 
     expect(imageOf(result.state)).toStrictEqual({
       animated: false,
+      dimensions: { height: 2, width: 2 },
       hash: sha256(svg),
       size: svg.length,
       type: "image/svg+xml",
     });
     expect(result.body).toStrictEqual(svg);
     expect(result.headers).toMatchObject({
-      "cache-control": "private",
+      "cache-control": forever,
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       "content-type": "image/svg+xml",
       etag: `"${sha256(svg)}"`,
       "x-content-type-options": "nosniff",
+    });
+  });
+
+  it("carries an image's size in pixels", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+
+          return (yield* previewedOn(served, CAT)).state;
+        })
+    );
+
+    expect(imageOf(result)).toMatchObject({ dimensions: { height: 2, width: 2 } });
+  });
+
+  it("carries no size for a header that lies, keeping the Preview and its image", async () => {
+    const liar = Uint8Array.from(png);
+
+    // A width of zero in the IHDR.
+    liar.set([0, 0, 0, 0], 16);
+
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: liar, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const { state } = yield* previewedOn(served, CAT);
+          const response = yield* served.request(`/api/previews/images/${sha256(liar)}`);
+
+          return { served: yield* bytesOf(response), state };
+        })
+    );
+
+    expect(result.state).toMatchObject({ _tag: "Ready" });
+    expect(imageOf(result.state)).toStrictEqual({
+      animated: false,
+      dimensions: null,
+      hash: sha256(liar),
+      size: liar.length,
+      type: "image/png",
+    });
+    expect(result.served).toStrictEqual(liar);
+  });
+
+  it("serves an image to be kept for good on both its 200 and its 304, and only to who may reach it", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          yield* previewedOn(served, CAT);
+          const path = `/api/previews/images/${sha256(png)}`;
+          const unknown = `/api/previews/images/${sha256(svg)}`;
+
+          const answers = [
+            yield* served.request(path),
+            yield* served.request(path, { headers: { "if-none-match": `"${sha256(png)}"` } }),
+            yield* served.request(path, { key: null }),
+            yield* served.request(unknown),
+            yield* served.request(unknown, { headers: { "if-none-match": "*" } }),
+          ];
+
+          return answers.map((response) => ({
+            cache: response.headers.get("cache-control"),
+            status: response.status,
+          }));
+        })
+    );
+
+    expect(result.map(({ status }) => status)).toStrictEqual([200, 304, 401, 404, 404]);
+    expect(result.map(({ cache }) => cache === forever)).toStrictEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("answers a Preview kept before sizes without a size, and gives it once the Preview is fetched again", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const dataDir = yield* temporaryDirectory;
+          const key = yield* makeKey(dataDir);
+          const file = `${dataDir}/previews.sqlite`;
+          const answers = { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } };
+
+          const opened = makeSqlitePreviewCache(file).pipe(
+            Effect.provide(BunFileSystem.layer),
+            Effect.orDie
+          );
+
+          const before = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const served = yield* serve(answers, {
+                left: { dataDir, key },
+                previews: yield* opened,
+              });
+
+              yield* setBucket(served);
+              yield* setPreviews(served, "on");
+              yield* talk(served, [`see ${CAT}`]);
+              const [place] = yield* messages(served, 1);
+
+              const items = yield* settled(
+                served,
+                place ?? { position: "", text: "", timeline: "" }
+              );
+
+              return {
+                items,
+                left: { dataDir, journal: served.world.journal, key, store: served.world.store },
+                place: place ?? { position: "", text: "", timeline: "" },
+              };
+            })
+          );
+
+          // The file as the layout before wrote it: its Preview has no size, and is old.
+          const database = new Database(file);
+
+          database.run(
+            `UPDATE previews SET fetched = 0,
+               state = json_remove(state, '$.preview.image.dimensions');
+             PRAGMA user_version = 5`
+          );
+          database.close();
+
+          return yield* Effect.scoped(
+            Effect.gen(function* () {
+              const served = yield* serve(answers, { left: before.left, previews: yield* opened });
+
+              // The bucket outlives the Daemon, which the world's store in memory does not.
+              yield* setBucket(served);
+              const first = yield* asking(served, before.place);
+
+              const gained = yield* Effect.gen(function* () {
+                const now = yield* asking(served, before.place);
+                const image = imageOf(now[0]?.state);
+
+                return image?.dimensions === null ? yield* new NotYet() : image;
+              }).pipe(
+                Effect.retry(Schedule.spaced("20 millis")),
+                Effect.timeout("5 seconds"),
+                Effect.orDie
+              );
+
+              return {
+                before: imageOf(before.items[0]?.state),
+                first: imageOf(first[0]?.state),
+                gained,
+              };
+            })
+          );
+        })
+      )
+    );
+
+    const image = {
+      animated: false,
+      hash: sha256(png),
+      size: png.length,
+      type: "image/png",
+    };
+
+    expect(result).toStrictEqual({
+      before: { ...image, dimensions: { height: 2, width: 2 } },
+      first: { ...image, dimensions: null },
+      gained: { ...image, dimensions: { height: 2, width: 2 } },
     });
   });
 
@@ -2917,7 +3105,13 @@ describe("a player over a real server", () => {
       _tag: "Ready",
       preview: {
         description: null,
-        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        image: {
+          animated: false,
+          dimensions: { height: 2, width: 2 },
+          hash: sha256(png),
+          size: png.length,
+          type: "image/png",
+        },
         kind: "player",
         link: CLIP,
         player: { link: VIMEO, size: { height: 720, width: 1280 } },
@@ -3135,7 +3329,13 @@ describe("a page that names a video file over a real server", () => {
       _tag: "Ready",
       preview: {
         description: null,
-        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        image: {
+          animated: false,
+          dimensions: { height: 2, width: 2 },
+          hash: sha256(png),
+          size: png.length,
+          type: "image/png",
+        },
         kind: "video",
         link: WATCH,
         player: null,
