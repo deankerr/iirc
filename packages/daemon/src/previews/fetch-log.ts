@@ -161,14 +161,15 @@ export const logged = (
   purpose: Purpose
 ): Effect.Effect<Logged, LinkFetchFailure, Scope.Scope> =>
   Effect.gen(function* () {
-    const started = yield* Clock.currentTimeMillis;
+    // The monotonic clock, so a correction to the wall clock never bends how long it took.
+    const started = yield* Clock.monotonicTimeNanos;
     const known = yield* Ref.make<Known>({ bytes: 0 });
 
     const failed = (failure: LinkFetchFailure) => Ref.update(known, (now) => ({ ...now, failure }));
 
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
-        const took = (yield* Clock.currentTimeMillis) - started;
+        const took = Number(((yield* Clock.monotonicTimeNanos) - started) / 1_000_000n);
 
         yield* Effect.logDebug("Fetched a link for a Preview").pipe(
           Effect.annotateLogs(annotationsOf(link, purpose, yield* Ref.get(known), took))

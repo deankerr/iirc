@@ -23,6 +23,7 @@ import {
   Context,
   Duration,
   Effect,
+  Latch,
   Layer,
   Logger,
   Option,
@@ -78,6 +79,8 @@ interface Setup {
   readonly left?: Left;
   /** Whether what the server logs from `Debug` up is kept in its Tail, as the Daemon's is. */
   readonly tail?: boolean;
+  /** Holds each put to the byte store until it opens. */
+  readonly puts?: Latch.Latch;
 }
 
 /** What outlives a Daemon: its data directory and key, its Journal, and its Timelines. */
@@ -107,12 +110,28 @@ const serve = (answers: Readonly<Record<string, Answer>>, setup: Setup = {}) =>
     const key = setup.left?.key ?? (yield* makeKey(dataDir));
     const fake = setup.links ?? (yield* makeFakeLinkFetch(answers));
 
-    const world = yield* makeWorld(
+    const made = yield* makeWorld(
       setup.left?.journal,
       setup.left?.store,
       fake.service,
       setup.previews
     );
+
+    const { puts } = setup;
+
+    const world: World =
+      puts === undefined
+        ? made
+        : {
+            ...made,
+            bytes: {
+              ...made.bytes,
+              store: {
+                ...made.bytes.store,
+                put: (bytes) => Effect.andThen(puts.await, made.bytes.store.put(bytes)),
+              },
+            },
+          };
 
     const server = HttpRouter.serve(ApiRoutes, {
       disableListenLog: true,
@@ -783,78 +802,6 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     type: null,
     ...preview,
   },
-});
-
-const decodeTail = Schema.decodeUnknownSync(Schema.fromJsonString(TailRead));
-
-describe("what each fetch for a Preview came to, in the Tail as a Frontend reads it", () => {
-  it("shows a page that gave a title and no player, and a fetch that failed, at Debug", async () => {
-    const answers = {
-      "https://cats.example/": cats,
-      "https://gone.example/": new LinkUnreachable({ reason: "gone.example has no address" }),
-    };
-
-    const lines = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const served = yield* serve(answers, { tail: true });
-
-          yield* setPreviews(served, "text");
-          yield* talk(served, ["see https://cats.example/ and https://gone.example/"]);
-          const [message] = yield* messages(served, 1);
-
-          yield* settled(served, message ?? { position: "", text: "", timeline: "" });
-
-          // Each line is logged as its fetch's Scope closes, before its Preview settles.
-          const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
-
-          return lines.filter((line) => line.message === "Fetched a link for a Preview");
-        })
-      )
-    );
-
-    expect(
-      lines
-        .map(({ annotations: { took, ...annotations }, level }) => ({
-          annotations,
-          level,
-          took: /^\d+ms$/u.test(took ?? ""),
-        }))
-        .toSorted((one, other) =>
-          (one.annotations.link ?? "").localeCompare(other.annotations.link ?? "")
-        )
-    ).toStrictEqual([
-      {
-        annotations: {
-          answered: "https://cats.example/",
-          as: "page",
-          bytes: String(cats.body.length),
-          description: "yes",
-          image: "no",
-          link: "https://cats.example/",
-          oembed: "no",
-          player: "no",
-          status: "200",
-          title: "yes",
-          type: "text/html",
-          video: "no",
-        },
-        level: "Debug",
-        took: true,
-      },
-      {
-        annotations: {
-          as: "page",
-          bytes: "0",
-          failed: "LinkUnreachable",
-          link: "https://gone.example/",
-          why: "gone.example has no address",
-        },
-        level: "Debug",
-        took: true,
-      },
-    ]);
-  });
 });
 
 describe("a page's oEmbed over a real server", () => {
@@ -3452,5 +3399,122 @@ describe("a page that names a video file over a real server", () => {
     ]);
     expect(result.poster).toStrictEqual(png);
     expect(result.held).toBe(png.length);
+  });
+});
+
+const decodeTail = Schema.decodeUnknownSync(Schema.fromJsonString(TailRead));
+
+describe("what each fetch for a Preview came to, in the Tail as a Frontend reads it", () => {
+  it("shows a page that gave a title and no player, and a fetch that failed, at Debug", async () => {
+    const answers = {
+      "https://cats.example/": cats,
+      "https://gone.example/": new LinkUnreachable({ reason: "gone.example has no address" }),
+    };
+
+    const lines = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const served = yield* serve(answers, { tail: true });
+
+          yield* setPreviews(served, "text");
+          yield* talk(served, ["see https://cats.example/ and https://gone.example/"]);
+          const [message] = yield* messages(served, 1);
+
+          yield* settled(served, message ?? { position: "", text: "", timeline: "" });
+
+          // Each line is logged as its fetch's Scope closes, before its Preview settles.
+          const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
+
+          return lines.filter((line) => line.message === "Fetched a link for a Preview");
+        })
+      )
+    );
+
+    expect(
+      lines
+        .map(({ annotations: { took, ...annotations }, level }) => ({
+          annotations,
+          level,
+          took: /^\d+ms$/u.test(took ?? ""),
+        }))
+        .toSorted((one, other) =>
+          (one.annotations.link ?? "").localeCompare(other.annotations.link ?? "")
+        )
+    ).toStrictEqual([
+      {
+        annotations: {
+          answered: "https://cats.example/",
+          as: "page",
+          bytes: String(cats.body.length),
+          description: "yes",
+          image: "no",
+          link: "https://cats.example/",
+          oembed: "no",
+          player: "no",
+          status: "200",
+          title: "yes",
+          type: "text/html",
+          video: "no",
+        },
+        level: "Debug",
+        took: true,
+      },
+      {
+        annotations: {
+          as: "page",
+          bytes: "0",
+          failed: "LinkUnreachable",
+          link: "https://gone.example/",
+          why: "gone.example has no address",
+        },
+        level: "Debug",
+        took: true,
+      },
+    ]);
+  });
+
+  it("logs an image's fetch once its body is read, before the store has kept it", async () => {
+    const puts = Latch.makeUnsafe(false);
+
+    const line = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const served = yield* serve(
+            { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+            { puts, tail: true }
+          );
+
+          yield* setBucket(served);
+          yield* setPreviews(served, "on");
+          yield* talk(served, [`see ${CAT}`]);
+          const [place] = yield* messages(served, 1);
+
+          yield* ask(served, place ?? { position: "", text: "", timeline: "" });
+
+          // The store holds the put, so the image's line is logged while its Preview is pending.
+          const logged = yield* Effect.gen(function* () {
+            const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
+            const found = lines.find((one) => one.annotations.as === "image");
+
+            return found ?? (yield* new NotYet());
+          }).pipe(
+            Effect.retry(Schedule.spaced("20 millis")),
+            Effect.timeout("5 seconds"),
+            Effect.orDie
+          );
+
+          yield* puts.open;
+
+          return logged;
+        })
+      )
+    );
+
+    expect(line.annotations).toMatchObject({
+      as: "image",
+      bytes: String(png.length),
+      link: CAT_IMAGE,
+      status: "200",
+    });
   });
 });
