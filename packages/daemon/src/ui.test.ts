@@ -164,17 +164,17 @@ describe("a Change of ui.previews.style, which is gone", () => {
   });
 });
 
+const startAfter = (...changes: readonly Change[]) => fold(changes).options["previews.start"];
+
 describe("a Change journaled under ui.previews.folded, which is now ui.previews.start", () => {
   it("is read as start, open as open and summary or chip as closed, and fails nothing", () => {
-    const after = (...changes: readonly Change[]) => fold(changes).options["previews.start"];
-
     expect({
-      chip: after(set("previews.folded", "chip")),
-      open: after(set("previews.folded", "summary"), set("previews.folded", "open")),
-      summary: after(set("previews.folded", "summary")),
-      thenStart: after(set("previews.folded", "chip"), set("previews.start", "open")),
-      unknown: after(set("previews.folded", "chip"), set("previews.folded", "nope")),
-      unset: after(set("previews.folded", "chip"), unset("previews.folded")),
+      chip: startAfter(set("previews.folded", "chip")),
+      open: startAfter(set("previews.folded", "summary"), set("previews.folded", "open")),
+      summary: startAfter(set("previews.folded", "summary")),
+      thenStart: startAfter(set("previews.folded", "chip"), set("previews.start", "open")),
+      unknown: startAfter(set("previews.folded", "chip"), set("previews.folded", "nope")),
+      unset: startAfter(set("previews.folded", "chip"), unset("previews.folded")),
     }).toStrictEqual({
       chip: "closed",
       open: "open",

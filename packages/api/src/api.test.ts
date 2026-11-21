@@ -739,13 +739,13 @@ describe("the contract", () => {
   });
 
   it("reads ui.previews.folded kept before as ui.previews.start, open as open and summary or chip as closed", () => {
-    const kept = (value: string) => {
-      const option = uiNameKept("previews.folded");
+    const option = uiNameKept("previews.folded");
 
-      return option === undefined ? undefined : [option, uiValueKept(option, value)];
-    };
-
-    expect(["open", "summary", "chip", "closed", "folded"].map(kept)).toStrictEqual([
+    expect(
+      ["open", "summary", "chip", "closed", "folded"].map((value) =>
+        option === undefined ? undefined : [option, uiValueKept(option, value)]
+      )
+    ).toStrictEqual([
       ["previews.start", "open"],
       ["previews.start", "closed"],
       ["previews.start", "closed"],

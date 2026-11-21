@@ -16,28 +16,30 @@ import {
   asksAnywhere,
   asksWanted,
   choosing,
-  foldedOf,
   hostNamed,
   initialPreviews,
+  isOpen,
+  linkKey,
   mayPreview,
   messageKey,
   motionOf,
-  opening,
   pressOf,
+  pressesWanted,
   playsIn,
   pressOn,
   previewsModesOf,
   previewsOf,
   reasonWords,
   reducePreviews,
+  togglesIn,
 } from "./previews.ts";
 import type {
   Motion,
   MotionAsked,
+  Opening,
   PressDoes,
   Previews,
   PreviewsAsk,
-  PreviewShown,
   PreviewsEvent,
   PreviewsModes,
 } from "./previews.ts";
@@ -128,6 +130,9 @@ const everywhere = (shown: PreviewsShown): PreviewsModes => ({
 
 const ready = { _tag: "Ready", preview: page } as const;
 
+/** Every Preview open, as `ui.previews.start` starts them, and nothing toggled. */
+const opened: Opening = { start: "open", toggles: new Map() };
+
 const fold = (state: Previews, ...events: readonly PreviewsEvent[]) => {
   let folded = state;
 
@@ -147,10 +152,10 @@ const asking = (sequence: number) => {
   const shown = fold(
     initialPreviews,
     { _tag: "Followed" },
-    { _tag: "Shown", position: at(sequence), timeline }
+    { _tag: "Shown", direct: false, links: 1, position: at(sequence), timeline }
   );
 
-  const [ask] = asksWanted(shown, everywhere("text"));
+  const [ask] = asksWanted(shown, everywhere("text"), opened);
 
   if (ask === undefined) {
     throw new Error("nothing to ask");
@@ -209,24 +214,30 @@ describe("whether to ask", () => {
 
 describe("asking", () => {
   it("asks for a Message only once it was shown, and only while the stream is followed", () => {
-    const shown = fold(initialPreviews, { _tag: "Shown", position: at(1), timeline });
+    const shown = fold(initialPreviews, {
+      _tag: "Shown",
+      direct: false,
+      links: 1,
+      position: at(1),
+      timeline,
+    });
 
-    expect(asksWanted(initialPreviews, everywhere("on"))).toStrictEqual([]);
-    expect(asksWanted(shown, everywhere("on"))).toStrictEqual([]);
-    expect(asksWanted(fold(shown, { _tag: "Followed" }), everywhere("on"))).toHaveLength(1);
+    expect(asksWanted(initialPreviews, everywhere("on"), opened)).toStrictEqual([]);
+    expect(asksWanted(shown, everywhere("on"), opened)).toStrictEqual([]);
+    expect(asksWanted(fold(shown, { _tag: "Followed" }), everywhere("on"), opened)).toHaveLength(1);
   });
 
   it("never asks while the mode is off, or unknown", () => {
     const shown = fold(
       initialPreviews,
       { _tag: "Followed" },
-      { _tag: "Shown", position: at(1), timeline }
+      { _tag: "Shown", direct: false, links: 1, position: at(1), timeline }
     );
 
-    expect([asksWanted(shown, everywhere("off")), asksWanted(shown, undefined)]).toStrictEqual([
-      [],
-      [],
-    ]);
+    expect([
+      asksWanted(shown, everywhere("off"), opened),
+      asksWanted(shown, undefined, opened),
+    ]).toStrictEqual([[], []]);
   });
 
   it("asks once for a Message shown again and again", () => {
@@ -234,13 +245,13 @@ describe("asking", () => {
 
     const again = fold(
       state,
-      { _tag: "Shown", position: at(1), timeline },
+      { _tag: "Shown", direct: false, links: 1, position: at(1), timeline },
       { _tag: "Answered", ask, previews: [item("a", ready)] },
-      { _tag: "Shown", position: at(1), timeline }
+      { _tag: "Shown", direct: false, links: 1, position: at(1), timeline }
     );
 
-    expect(asksWanted(state, everywhere("on"))).toStrictEqual([]);
-    expect(asksWanted(again, everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(state, everywhere("on"), opened)).toStrictEqual([]);
+    expect(asksWanted(again, everywhere("on"), opened)).toStrictEqual([]);
   });
 
   it("never asks again for a Message the Daemon refused", () => {
@@ -248,7 +259,7 @@ describe("asking", () => {
     const refused = fold(state, { _tag: "Refused", ask });
 
     expect(
-      asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on"))
+      asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on"), opened)
     ).toStrictEqual([]);
     expect(previewsOf(refused, "on", timeline, at(1), links, drawing)).toStrictEqual([]);
   });
@@ -257,11 +268,15 @@ describe("asking", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", pending)] });
 
-    expect(asksWanted(fold(answered, { _tag: "Lost" }), everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(fold(answered, { _tag: "Lost" }), everywhere("on"), opened)).toStrictEqual(
+      []
+    );
     expect(
-      asksWanted(fold(answered, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on")).map(
-        (one) => one.key
-      )
+      asksWanted(
+        fold(answered, { _tag: "Lost" }, { _tag: "Followed" }),
+        everywhere("on"),
+        opened
+      ).map((one) => one.key)
     ).toStrictEqual([ask.key]);
   });
 
@@ -276,7 +291,7 @@ describe("asking", () => {
       { _tag: "Followed" }
     );
 
-    expect(asksWanted(settled, everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(settled, everywhere("on"), opened)).toStrictEqual([]);
   });
 
   it("asks again for an ask in flight when the stream was lost, and takes no answer of the first", () => {
@@ -284,7 +299,9 @@ describe("asking", () => {
     const lost = fold(state, { _tag: "Lost" }, { _tag: "Followed" });
     const late = fold(lost, { _tag: "Answered", ask, previews: [item("a", pending)] });
 
-    expect(asksWanted(late, everywhere("on")).map((one) => one.key)).toStrictEqual([ask.key]);
+    expect(asksWanted(late, everywhere("on"), opened).map((one) => one.key)).toStrictEqual([
+      ask.key,
+    ]);
   });
 });
 
@@ -293,11 +310,12 @@ describe("asking per Timeline", () => {
     const shown = fold(
       initialPreviews,
       { _tag: "Followed" },
-      { _tag: "Shown", position: at(1), timeline },
-      { _tag: "Shown", position: at(2), timeline: other }
+      { _tag: "Shown", direct: false, links: 1, position: at(1), timeline },
+      { _tag: "Shown", direct: false, links: 1, position: at(2), timeline: other }
     );
 
-    const keys = (modes: PreviewsModes) => asksWanted(shown, modes).map((one) => one.timeline);
+    const keys = (modes: PreviewsModes) =>
+      asksWanted(shown, modes, opened).map((one) => one.timeline);
 
     expect([
       keys({ players: listed, shown: "on", timelines: { [other]: "off" } }),
@@ -315,7 +333,7 @@ describe("asking per Timeline", () => {
       timelines: { [timeline]: "on" },
     };
 
-    const [again] = asksWanted(answered, chosen);
+    const [again] = asksWanted(answered, chosen, opened);
 
     if (again === undefined) {
       throw new Error("nothing to ask");
@@ -328,8 +346,8 @@ describe("asking per Timeline", () => {
     );
 
     expect({
-      default: asksWanted(answered, everywhere("on")),
-      onceAnswered: asksWanted(reanswered, chosen),
+      default: asksWanted(answered, everywhere("on"), opened),
+      onceAnswered: asksWanted(reanswered, chosen, opened),
       shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/"), drawing).map(
         (one) => one._tag
       ),
@@ -389,7 +407,283 @@ describe("a link waiting for a press", () => {
     const press = pressOf(state, timeline, at(1), 1);
     const refused = fold(state, { _tag: "PressRefused", press });
 
-    expect(asksWanted(refused, everywhere("on")).map((one) => one.key)).toStrictEqual([press.key]);
+    expect(asksWanted(refused, everywhere("on"), opened).map((one) => one.key)).toStrictEqual([
+      press.key,
+    ]);
+  });
+});
+
+/** A Message's place in each kind of Timeline, as whether its Previews are open asks. */
+const inChannel = { direct: false, position: at(1), timeline } as const;
+const inDirect = { direct: true, position: at(1), timeline } as const;
+
+/**
+ * How a view opens Previews.
+ * @param start - `ui.previews.start`.
+ * @param toggled - The links toggled, by their index in the Message at 1, open or closed.
+ * @returns The opening.
+ */
+const opening = (
+  start: "open" | "closed",
+  toggled: readonly (readonly [number, boolean])[] = []
+): Opening => ({
+  start,
+  toggles: new Map(
+    toggled.map(([index, open]) => [linkKey(messageKey(timeline, at(1)), index), open])
+  ),
+});
+
+/** The modes with `ui.previews` `on`, and this Timeline's own choice, if any. */
+const choosingHere = (chosen?: "off" | "text" | "on"): PreviewsModes => ({
+  players: listed,
+  shown: "on",
+  timelines: chosen === undefined ? {} : { [timeline]: chosen },
+});
+
+describe("whether a Preview is open", () => {
+  const waitingHere = () => {
+    const { ask, state } = asking(1);
+
+    return fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
+  };
+
+  it.each([
+    ["as start says, open", initialPreviews, undefined, opening("open"), inChannel, true],
+    ["as start says, closed", initialPreviews, undefined, opening("closed"), inChannel, false],
+    [
+      "closed by the Owner under open",
+      initialPreviews,
+      undefined,
+      opening("open", [[0, false]]),
+      inChannel,
+      false,
+    ],
+    [
+      "opened by the Owner under closed",
+      initialPreviews,
+      undefined,
+      opening("closed", [[0, true]]),
+      inChannel,
+      true,
+    ],
+    [
+      "closed in a Direct Message with no mode of its own, whatever start says",
+      initialPreviews,
+      undefined,
+      opening("open"),
+      inDirect,
+      false,
+    ],
+    [
+      "opened by the Owner in a Direct Message with no mode of its own",
+      initialPreviews,
+      undefined,
+      opening("closed", [[0, true]]),
+      inDirect,
+      true,
+    ],
+    [
+      "as start says in a Direct Message set to on",
+      initialPreviews,
+      "on",
+      opening("open"),
+      inDirect,
+      true,
+    ],
+    [
+      "as start says in a Direct Message set to text",
+      initialPreviews,
+      "text",
+      opening("closed"),
+      inDirect,
+      false,
+    ],
+    [
+      "closed where the Daemon says its link waits for a press",
+      waitingHere(),
+      undefined,
+      opening("open"),
+      inChannel,
+      false,
+    ],
+    [
+      "as start says where a link waited before its Timeline chose a mode",
+      waitingHere(),
+      "on",
+      opening("open"),
+      inChannel,
+      true,
+    ],
+  ] as const)("is %s", (_name, state, chosen, how, where, expected) => {
+    expect(isOpen(state, choosingHere(chosen), how, where, 0)).toBe(expected);
+  });
+});
+
+describe("whether a Message is asked for", () => {
+  /**
+   * Whether a Message with two links, shown in a Timeline, is asked for.
+   * @param direct - Whether the Timeline is a Direct Message.
+   * @param modes - The modes.
+   * @param how - How the view opens Previews.
+   * @returns Whether it is asked for.
+   */
+  const askedFor = (direct: boolean, modes: PreviewsModes, how: Opening) =>
+    asksWanted(
+      fold(
+        initialPreviews,
+        { _tag: "Followed" },
+        { _tag: "Shown", direct, links: 2, position: at(1), timeline }
+      ),
+      modes,
+      how
+    ).length === 1;
+
+  it.each([
+    ["while start is open", false, choosingHere(), opening("open"), true],
+    ["not while start is closed", false, choosingHere(), opening("closed"), false],
+    [
+      "once one link is opened under closed",
+      false,
+      choosingHere(),
+      opening("closed", [[1, true]]),
+      true,
+    ],
+    [
+      "not once every link is closed under open",
+      false,
+      choosingHere(),
+      opening("open", [
+        [0, false],
+        [1, false],
+      ]),
+      false,
+    ],
+    [
+      "while one link of two is still open",
+      false,
+      choosingHere(),
+      opening("open", [[0, false]]),
+      true,
+    ],
+    ["not under off, whatever is open", false, choosingHere("off"), opening("open"), false],
+    [
+      "in a Direct Message with no mode of its own under open, as the Daemon fetches nothing there",
+      true,
+      choosingHere(),
+      opening("open"),
+      true,
+    ],
+    [
+      "in a Direct Message with no mode of its own under closed, as the Daemon fetches nothing there",
+      true,
+      choosingHere(),
+      opening("closed"),
+      true,
+    ],
+    [
+      "not in a Direct Message set to on while start is closed",
+      true,
+      choosingHere("on"),
+      opening("closed"),
+      false,
+    ],
+    [
+      "in a Direct Message set to on while start is open",
+      true,
+      choosingHere("on"),
+      opening("open"),
+      true,
+    ],
+    [
+      "in a Direct Message set to text once one link is opened",
+      true,
+      choosingHere("text"),
+      opening("closed", [[0, true]]),
+      true,
+    ],
+  ] as const)("is %s", (_name, direct, modes, how, expected) => {
+    expect(askedFor(direct, modes, how)).toBe(expected);
+  });
+
+  it("asks again for a Message waiting for a press, once its Timeline chooses a mode, only while one is open", () => {
+    const { ask, state } = asking(1);
+    const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
+
+    expect([
+      asksWanted(answered, choosingHere("on"), opening("open")).length,
+      asksWanted(answered, choosingHere("on"), opening("closed")).length,
+    ]).toStrictEqual([1, 0]);
+  });
+});
+
+describe("whether a link is pressed", () => {
+  const answered = () => {
+    const { ask, state } = asking(1);
+
+    return fold(state, {
+      _tag: "Answered",
+      ask,
+      previews: [item("a", ready), item("b", waitingForPress)],
+    });
+  };
+
+  const toggled = (pairs: readonly (readonly [number, boolean])[]) =>
+    opening("closed", pairs).toggles;
+
+  it.each([
+    ["not while the Owner has not opened it", answered(), toggled([]), []],
+    ["once the Owner opens it", answered(), toggled([[1, true]]), [1]],
+    ["not while the Owner has closed it", answered(), toggled([[1, false]]), []],
+    ["not where it does not wait, though opened", answered(), toggled([[0, true]]), []],
+    [
+      "not twice",
+      fold(answered(), { _tag: "Pressing", press: pressOf(answered(), timeline, at(1), 1) }),
+      toggled([[1, true]]),
+      [],
+    ],
+  ] as const)("is %s", (_name, state, toggles, expected) => {
+    expect(pressesWanted(state, toggles).map((press) => press.link)).toStrictEqual(expected);
+  });
+});
+
+describe("where a toggle stands", () => {
+  const runs = (...hrefs: readonly (string | undefined)[]) =>
+    hrefs.map((href) => (href === undefined ? {} : { href }));
+
+  it.each([
+    [
+      "after each link that may be previewed",
+      runs(undefined, "https://a.example/", undefined, "https://b.example/"),
+      said("see https://a.example/ and https://b.example/"),
+      [
+        [1, 0],
+        [3, 1],
+      ],
+    ],
+    [
+      "after the first of a link said twice",
+      runs("https://a.example/", undefined, "https://a.example/"),
+      said("https://a.example/ and https://a.example/"),
+      [[0, 0]],
+    ],
+    [
+      "after none that may not be previewed",
+      runs("irc://irc.libera.chat/#iirc"),
+      said("irc://irc.libera.chat/#iirc"),
+      [],
+    ],
+    [
+      "after the first three links alone",
+      runs("https://a.example/", "https://b.example/", "https://c.example/", "https://d.example/"),
+      said("https://a.example/ https://b.example/ https://c.example/ https://d.example/"),
+      [
+        [0, 0],
+        [1, 1],
+        [2, 2],
+      ],
+    ],
+  ] as const)("is %s", (_name, drawn, content, expected) => {
+    expect([...togglesIn(drawn, content)]).toStrictEqual(expected);
   });
 });
 
@@ -403,8 +697,8 @@ describe("folding a change", () => {
       previews: [item("a", pending)],
     });
 
-    const shown = fold(one, { _tag: "Shown", position: at(2), timeline });
-    const [second] = asksWanted(shown, everywhere("on"));
+    const shown = fold(one, { _tag: "Shown", direct: false, links: 1, position: at(2), timeline });
+    const [second] = asksWanted(shown, everywhere("on"), opened);
 
     if (second === undefined) {
       throw new Error("nothing to ask");
@@ -447,10 +741,10 @@ describe("folding a change", () => {
       first.state,
       { _tag: "Answered", ask: first.ask, previews: [item("a", pending)] },
       { _tag: "Changed", item: item("a", { _tag: "Failed", reason: "Unreachable" }) },
-      { _tag: "Shown", position: at(2), timeline }
+      { _tag: "Shown", direct: false, links: 1, position: at(2), timeline }
     );
 
-    const [second] = asksWanted(failed, everywhere("on"));
+    const [second] = asksWanted(failed, everywhere("on"), opened);
 
     if (second === undefined) {
       throw new Error("nothing to ask");
@@ -553,8 +847,7 @@ describe("what a Message shows", () => {
         reason: "No preview: the Daemon never fetches this address.",
       },
       {
-        _tag: "Waiting",
-        index: 2,
+        _tag: "Pending",
         key: "2",
         link: { href: "https://c.example/", text: "https://c.example/" },
       },
@@ -952,125 +1245,6 @@ describe("the host a card names", () => {
       shownReady({ link: "https://www.example.com/cats" })?.host,
       shownReady({ link: "https://a.example/" })?.host,
     ]).toStrictEqual(["example.com", undefined]);
-  });
-});
-
-const key = messageKey(timeline, at(1));
-
-const pendingRow: PreviewShown = {
-  _tag: "Pending",
-  key: "0",
-  link: { href: "https://a.example/", text: "https://a.example/" },
-};
-
-const failedRow: PreviewShown = {
-  _tag: "Failed",
-  key: "1",
-  reason: "No preview: this link had nothing to show.",
-};
-
-const waitingRow: PreviewShown = {
-  _tag: "Waiting",
-  index: 2,
-  key: "2",
-  link: { href: "https://c.example/", text: "https://c.example/" },
-};
-
-/**
- * A ready row, under a key, as drawn with some fields of the page's.
- * @param rowKey - Its key.
- * @param fields - Those fields.
- * @returns The row.
- */
-const readyRow = (rowKey: string, fields: Partial<typeof Preview.Encoded>): PreviewShown => {
-  const shown = shownReady(fields);
-
-  if (shown === undefined) {
-    throw new Error("not ready");
-  }
-
-  return { ...shown, key: rowKey };
-};
-
-describe("ui.previews.folded", () => {
-  const plainPage = readyRow("3", { description: null });
-  const withImage = readyRow("4", { image });
-  const rows = [pendingRow, failedRow, waitingRow, plainPage, withImage];
-
-  it("draws every Preview open under open", () => {
-    expect(foldedOf("open", new Set(), key, rows)).toStrictEqual({
-      _tag: "Rows",
-      rows: rows.map((shown) => ({ fold: "Open", shown })),
-    });
-  });
-
-  it("folds under summary only a card that shows more than its title", () => {
-    expect(foldedOf("summary", new Set(), key, rows)).toStrictEqual({
-      _tag: "Rows",
-      rows: [
-        { fold: "Open", shown: pendingRow },
-        { fold: "Open", shown: failedRow },
-        { fold: "Open", shown: waitingRow },
-        { fold: "Open", shown: plainPage },
-        { fold: "Folded", shown: withImage },
-      ],
-    });
-  });
-
-  it("folds a card with a description alone under summary, to its title", () => {
-    expect(foldedOf("summary", new Set(), key, [readyRow("0", {})])).toStrictEqual({
-      _tag: "Rows",
-      rows: [{ fold: "Folded", shown: readyRow("0", {}) }],
-    });
-  });
-
-  it("opens under summary only the Preview pressed, and keeps it open", () => {
-    const other = readyRow("5", { image });
-    const opened = opening(new Set(), key, [withImage]);
-
-    expect(foldedOf("summary", opened, key, [withImage, other])).toStrictEqual({
-      _tag: "Rows",
-      rows: [
-        { fold: "Open", shown: withImage },
-        { fold: "Folded", shown: other },
-      ],
-    });
-  });
-
-  it("keeps a Preview opened in one Message folded in another", () => {
-    const opened = opening(new Set(), messageKey(timeline, at(2)), [withImage]);
-
-    expect(foldedOf("summary", opened, key, [withImage])).toStrictEqual({
-      _tag: "Rows",
-      rows: [{ fold: "Folded", shown: withImage }],
-    });
-  });
-
-  it("draws a Message's Previews as one chip counting them under chip, whatever they are", () => {
-    expect([
-      foldedOf("chip", new Set(), key, rows),
-      foldedOf("chip", new Set(), key, [pendingRow]),
-    ]).toStrictEqual([
-      { _tag: "Chip", count: 5 },
-      { _tag: "Chip", count: 1 },
-    ]);
-  });
-
-  it("opens every Preview of a Message once its chip is pressed", () => {
-    const described = readyRow("6", {});
-    const all = [...rows, described];
-
-    expect(foldedOf("chip", opening(new Set(), key, all), key, all)).toStrictEqual({
-      _tag: "Rows",
-      rows: [
-        { fold: "Open", shown: pendingRow },
-        { fold: "Open", shown: failedRow },
-        { fold: "Open", shown: waitingRow },
-        { fold: "Open", shown: plainPage },
-        { fold: "Open", shown: withImage },
-        { fold: "Open", shown: described },
-      ],
-    });
   });
 });
 

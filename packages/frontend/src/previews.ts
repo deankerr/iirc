@@ -4,9 +4,12 @@
  * stream of their changes. A Message is asked for only once it was shown, and only once
  * while the stream is followed, since the Daemon fetches on the ask. Whether a Message is
  * asked for, and what it shows, follows its Timeline's own mode: its choice in
- * `ui.previews.timelines`, or else `ui.previews`. A link the Daemon holds for a press is
- * fetched only once the Owner presses it. What each Message shows, each Preview's card, and
- * a failure's words are derived as it is drawn, never held.
+ * `ui.previews.timelines`, or else `ui.previews`. Each Preview is open or closed, as the
+ * toggle after its link leaves it, or else as `ui.previews.start` says, and a Message is
+ * asked for only while one of its Previews is open, since a closed one fetches nothing. A
+ * link the Daemon holds for a press is fetched only once the Owner opens it. What each
+ * Message shows, each Preview's card, and a failure's words are derived as it is drawn,
+ * never held.
  *
  * @packageDocumentation
  */
@@ -17,9 +20,9 @@ import type {
   PreviewId,
   PreviewItem,
   PreviewsByTimeline,
-  PreviewsFolded,
   PreviewsPlayers,
   PreviewsShown,
+  PreviewsStart,
   TimelineId,
   UiInForce,
 } from "@iirc/api";
@@ -37,13 +40,16 @@ import { contained } from "./contained.ts";
 type Asking = "Wanted" | "Asking" | "Answered" | "Refused";
 
 /**
- * One Message shown: where it is, where its asking stands, the ids the Daemon answered
+ * One Message shown: where it is, how many links it holds that may be previewed, whether
+ * its Timeline is a Direct Message, where its asking stands, the ids the Daemon answered
  * with, in the Message's order, kept while it is asked again, and its Timeline's own
  * choice when it was last asked for, which a link waiting for a press is answered by.
  */
 interface MessageHeld {
   readonly timeline: TimelineId;
   readonly position: Position;
+  readonly links: number;
+  readonly direct: boolean;
   readonly asking: Asking;
   readonly since: number;
   readonly ids: readonly PreviewId[] | undefined;
@@ -58,22 +64,24 @@ interface ItemHeld {
 
 /**
  * What a Frontend holds of Previews: each Message shown, by `messageKey`; each item by its
- * id; how many changes the stream gave, which orders a change against an answer; and
- * whether the stream is followed now, which an ask waits for, so no change it starts is
- * missed.
+ * id; each link pressed, by `linkKey`, which is never pressed again; how many changes the
+ * stream gave, which orders a change against an answer; and whether the stream is followed
+ * now, which an ask waits for, so no change it starts is missed.
  */
 export interface Previews {
   readonly messages: ReadonlyMap<string, MessageHeld>;
   readonly items: ReadonlyMap<PreviewId, ItemHeld>;
+  readonly pressed: ReadonlySet<string>;
   readonly tick: number;
   readonly following: boolean;
 }
 
-/** Nothing shown, nothing held, and the stream not followed. */
+/** Nothing shown, nothing held, nothing pressed, and the stream not followed. */
 export const initialPreviews: Previews = {
   following: false,
   items: new Map(),
   messages: new Map(),
+  pressed: new Set(),
   tick: 0,
 };
 
@@ -105,11 +113,13 @@ export interface PreviewsPress {
 /**
  * What happened.
  *
- * - `Shown`: a Message came into view.
+ * - `Shown`: a Message came into view, with how many links it holds that may be previewed,
+ *   and whether its Timeline is a Direct Message.
  * - `Asked`: the runtime began an ask.
  * - `Answered`: the Daemon answered an ask with the Message's items.
  * - `Refused`: the Daemon refused an ask for good: no such Timeline or Message, or Previews
  *   are off.
+ * - `Pressing`: the runtime began a press.
  * - `Pressed`: the Daemon answered a press with the link's item.
  * - `PressRefused`: the Daemon refused a press, as the link was not waiting for one, so
  *   its Message is asked for again, to draw what the Daemon holds.
@@ -119,7 +129,13 @@ export interface PreviewsPress {
  * - `Forgotten`: the page signed out.
  */
 export type PreviewsEvent =
-  | { readonly _tag: "Shown"; readonly timeline: TimelineId; readonly position: Position }
+  | {
+      readonly _tag: "Shown";
+      readonly timeline: TimelineId;
+      readonly position: Position;
+      readonly links: number;
+      readonly direct: boolean;
+    }
   | { readonly _tag: "Asked"; readonly ask: PreviewsAsk }
   | {
       readonly _tag: "Answered";
@@ -127,6 +143,7 @@ export type PreviewsEvent =
       readonly previews: readonly PreviewItem[];
     }
   | { readonly _tag: "Refused"; readonly ask: PreviewsAsk }
+  | { readonly _tag: "Pressing"; readonly press: PreviewsPress }
   | { readonly _tag: "Pressed"; readonly press: PreviewsPress; readonly item: PreviewItem }
   | { readonly _tag: "PressRefused"; readonly press: PreviewsPress }
   | { readonly _tag: "Followed" }
@@ -142,6 +159,15 @@ export type PreviewsEvent =
  */
 export const messageKey = (timeline: TimelineId, position: Position): string =>
   `${timeline} ${cursorOf(position)}`;
+
+/**
+ * A link's key: its Message's key and its index among the Message's links that may be
+ * previewed, as one text.
+ * @param key - Its Message's key.
+ * @param index - Its index.
+ * @returns The key.
+ */
+export const linkKey = (key: string, index: number): string => `${key} ${index}`;
 
 /**
  * `ui.previews`, each Timeline's own choice over it, by its id, and the hosts
@@ -376,7 +402,9 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
         : withMessage(state, key, {
             asking: "Wanted",
             chosen: undefined,
+            direct: event.direct,
             ids: undefined,
+            links: event.links,
             position: event.position,
             since: 0,
             timeline: event.timeline,
@@ -409,6 +437,13 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
       return held === undefined
         ? state
         : pruned(withMessage(state, event.ask.key, { ...held, asking: "Refused" }));
+    }
+
+    case "Pressing": {
+      return {
+        ...state,
+        pressed: new Set(state.pressed).add(linkKey(event.press.key, event.press.link)),
+      };
     }
 
     case "Pressed": {
@@ -463,27 +498,126 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
 };
 
 /**
- * The asks to make now, while the stream is followed, and none otherwise: each Message
- * wanted whose Timeline's mode asks, and each holding a link waiting for a press whose
- * Timeline has since chosen a mode of its own that asks, which the Daemon then fetches
- * unpressed.
+ * What the Owner opened or closed with the toggle after a link, by its `linkKey`: the
+ * view's own, kept while a row scrolls away and back, and forgotten when the page is
+ * loaded again.
+ */
+export type Toggles = ReadonlyMap<string, boolean>;
+
+/** How a view opens Previews: `ui.previews.start` on this device, and what was toggled. */
+export interface Opening {
+  readonly start: PreviewsStart;
+  readonly toggles: Toggles;
+}
+
+/**
+ * Whether a Timeline's links wait for a press: in a Direct Message with no mode of its own,
+ * as the Daemon fetches nothing there until the Owner presses.
+ * @param direct - Whether it is a Direct Message.
+ * @param chosen - Its own mode, if any.
+ * @returns Whether they wait.
+ */
+const waitsIn = (direct: boolean, chosen: PreviewsShown | undefined): boolean =>
+  direct && chosen === undefined;
+
+/**
+ * Whether a link's item, as the Daemon last gave it, waits for a press.
+ * @param state - The state.
+ * @param key - Its Message's key.
+ * @param index - Its index among the Message's links that may be previewed.
+ * @returns Whether it waits.
+ */
+const waitingAt = (state: Previews, key: string, index: number): boolean => {
+  const id = state.messages.get(key)?.ids?.[index];
+
+  return id !== undefined && state.items.get(id)?.item.state._tag === "WaitingForPress";
+};
+
+/** A Message, as whether its Previews are open is worked out. */
+export interface MessageAt {
+  readonly timeline: TimelineId;
+  readonly position: Position;
+  readonly direct: boolean;
+}
+
+/**
+ * Whether one of a Message's Previews is open: as the Owner last toggled it, or else as its
+ * Timeline starts, which is `ui.previews.start`, except where links wait for a press, in a
+ * Direct Message with no mode of its own or one the Daemon said waits, which start closed.
  * @param state - The state.
  * @param modes - The modes, once read.
+ * @param opening - `ui.previews.start`, and what was toggled.
+ * @param at - The Message.
+ * @param index - The link's index among its links that may be previewed.
+ * @returns Whether it is open.
+ */
+export const isOpen = (
+  state: Previews,
+  modes: PreviewsModes | undefined,
+  opening: Opening,
+  at: MessageAt,
+  index: number
+): boolean => {
+  const key = messageKey(at.timeline, at.position);
+  const chosen = chosenIn(modes, at.timeline);
+  const toggled = opening.toggles.get(linkKey(key, index));
+
+  if (toggled !== undefined) {
+    return toggled;
+  }
+
+  const waits =
+    waitsIn(at.direct, chosen) || (chosen === undefined && waitingAt(state, key, index));
+
+  return opening.start === "open" && !waits;
+};
+
+/**
+ * Whether any of a Message's Previews is open.
+ * @param state - The state.
+ * @param modes - The modes, once read.
+ * @param opening - `ui.previews.start`, and what was toggled.
+ * @param held - The Message.
+ * @returns Whether one is.
+ */
+const anyOpen = (
+  state: Previews,
+  modes: PreviewsModes | undefined,
+  opening: Opening,
+  held: MessageHeld
+): boolean =>
+  Array.from({ length: held.links }, (_, index) => index).some((index) =>
+    isOpen(state, modes, opening, held, index)
+  );
+
+/**
+ * The asks to make now, while the stream is followed, and none otherwise: each Message
+ * wanted whose Timeline's mode asks and one of whose Previews is open, or whose links wait
+ * for a press, as the Daemon then answers with what it holds and fetches nothing; and each
+ * holding a link waiting for a press whose Timeline has since chosen a mode of its own that
+ * asks, while one of its Previews is open, which the Daemon then fetches unpressed. A
+ * Message whose Previews are all closed is not asked for.
+ * @param state - The state.
+ * @param modes - The modes, once read.
+ * @param opening - `ui.previews.start`, and what was toggled.
  * @returns The asks.
  */
 export const asksWanted = (
   state: Previews,
-  modes: PreviewsModes | undefined
+  modes: PreviewsModes | undefined,
+  opening: Opening
 ): readonly PreviewsAsk[] =>
   state.following
     ? [...state.messages].flatMap(([key, held]) => {
         const chosen = chosenIn(modes, held.timeline);
+        const open = anyOpen(state, modes, opening, held);
 
         const wanted =
-          held.asking === "Wanted" ||
+          (held.asking === "Wanted" && (open || waitsIn(held.direct, chosen))) ||
           (held.asking === "Answered" &&
             asksFor(chosen) &&
             held.chosen !== chosen &&
+            open &&
             pressable(held, state.items));
 
         return wanted && asksFor(modeIn(modes, held.timeline))
@@ -512,6 +646,24 @@ export const pressOf = (
   since: state.tick,
   timeline,
 });
+
+/**
+ * The presses to make now: each link the Owner opened whose item waits for a press, and
+ * was not pressed before. Only the Owner's own toggle presses, never how a Timeline starts.
+ * @param state - The state.
+ * @param toggles - What the Owner opened or closed.
+ * @returns The presses.
+ */
+export const pressesWanted = (state: Previews, toggles: Toggles): readonly PreviewsPress[] =>
+  [...state.messages].flatMap(([key, held]) =>
+    (held.ids ?? []).flatMap((_, index) =>
+      toggles.get(linkKey(key, index)) === true &&
+      waitingAt(state, key, index) &&
+      !state.pressed.has(linkKey(key, index))
+        ? [pressOf(state, held.timeline, held.position, index)]
+        : []
+    )
+  );
 
 /**
  * A failure's reason, in words, as its one line says it.
@@ -844,23 +996,17 @@ export interface CardShown {
 /**
  * One Preview, as drawn:
  *
- * - `Pending`: a placeholder in its card's place, while it is fetched or before it is
- *   asked for.
+ * - `Pending`: a placeholder in its card's place, while it is fetched, before it is
+ *   asked for, or while a link the Daemon holds for a press is pressed.
  * - `Ready`: its card.
  * - `Failed`: one line of why there is none, and never the link again.
- * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
- *   Message's links, as the Daemon holds it until the Owner presses.
+ *
+ * Its `key` is its index among the Message's links that may be previewed, as text.
  */
 export type PreviewShown =
   | { readonly _tag: "Pending"; readonly key: string; readonly link: LinkShown }
   | CardShown
-  | { readonly _tag: "Failed"; readonly key: string; readonly reason: string }
-  | {
-      readonly _tag: "Waiting";
-      readonly key: string;
-      readonly link: LinkShown;
-      readonly index: number;
-    };
+  | { readonly _tag: "Failed"; readonly key: string; readonly reason: string };
 
 /**
  * A ready Preview's card.
@@ -947,8 +1093,9 @@ const itemShown = (
       return { _tag: "Failed", key, reason: reasonWords(item.state.reason) };
     }
 
+    // Drawn only while open, which presses it.
     case "WaitingForPress": {
-      return { _tag: "Waiting", index, key, link: linkShown(address) };
+      return { _tag: "Pending", key, link: linkShown(address) };
     }
 
     default: {
@@ -1052,105 +1199,41 @@ export const previewsOf = (
 };
 
 /**
- * How one Preview stands under `ui.previews.folded`: `Folded`, its card's name alone, its
- * title or else its link, which a press opens; or `Open`, its whole card.
+ * Which of a Message's links that may be previewed has its toggle after it, among the
+ * runs of its text as drawn: the first run that is each such link, by the run's index, with
+ * the link's index among those that may be previewed.
+ * @param runs - The runs of its text, a link's with its `href`.
+ * @param content - What the Message holds.
+ * @returns Each toggle's link, by the index of the run it follows.
  */
-export type Fold = "Folded" | "Open";
+export const togglesIn = (
+  runs: readonly { readonly href?: string }[],
+  content: ItemContent
+): ReadonlyMap<number, number> => {
+  const text = messageText(content);
+  const hrefs = text === undefined ? [] : previewableLinksOf(text).map((link) => link.href);
+  const toggles = new Map<number, number>();
+  const placed = new Set<number>();
 
-/** One Preview as a Message draws it, and how it stands folded. */
-export interface PreviewRow {
-  readonly fold: Fold;
-  readonly shown: PreviewShown;
-}
+  for (const [run, { href }] of runs.entries()) {
+    const link = href === undefined ? -1 : hrefs.indexOf(href);
 
-/**
- * A Message's Previews under `ui.previews.folded`: one `[+n]` that a press opens, for
- * `count` of them, or each in its row.
- */
-export type PreviewsFolding =
-  | { readonly _tag: "Chip"; readonly count: number }
-  | { readonly _tag: "Rows"; readonly rows: readonly PreviewRow[] };
-
-/**
- * Which Previews the Owner pressed open, each by its Message's key and its own, as one
- * text. A Preview opened stays open.
- * @param key - Its Message's key.
- * @param shown - The Preview.
- * @returns Its key among those opened.
- */
-const openedKey = (key: string, shown: PreviewShown): string => `${key} ${shown.key}`;
-
-/**
- * Whether a Preview's card shows more than its title, so folding it hides something: a
- * ready one with a description, an image, media, or a player.
- * @param shown - The Preview.
- * @returns Whether it does.
- */
-const showsMore = (shown: PreviewShown): boolean =>
-  shown._tag === "Ready" &&
-  (shown.description !== undefined ||
-    shown.image !== undefined ||
-    shown.media !== undefined ||
-    shown.player !== undefined);
-
-/**
- * A Message's Previews as `ui.previews.folded` draws them. Under `open`, each is open.
- * Under `summary`, each whose card shows more than its title is folded to its name until it
- * is pressed open, and any other, pending, failed, waiting for a press, or a title alone,
- * is drawn as it is. Under `chip`, they are one `[+n]` until it is pressed, which opens
- * them all.
- * @param folded - `ui.previews.folded` on this device.
- * @param opened - The Previews pressed open, as {@link opening} keeps them.
- * @param key - The Message's key.
- * @param shown - Its Previews, as {@link previewsOf} draws them.
- * @returns How they are drawn.
- */
-export const foldedOf = (
-  folded: PreviewsFolded,
-  opened: ReadonlySet<string>,
-  key: string,
-  shown: readonly PreviewShown[]
-): PreviewsFolding => {
-  const open = (one: PreviewShown): PreviewRow => ({ fold: "Open", shown: one });
-
-  switch (folded) {
-    case "open": {
-      return { _tag: "Rows", rows: shown.map(open) };
-    }
-
-    case "summary": {
-      return {
-        _tag: "Rows",
-        rows: shown.map((one) =>
-          showsMore(one) && !opened.has(openedKey(key, one))
-            ? { fold: "Folded", shown: one }
-            : open(one)
-        ),
-      };
-    }
-
-    case "chip": {
-      return shown.every((one) => opened.has(openedKey(key, one)))
-        ? { _tag: "Rows", rows: shown.map(open) }
-        : { _tag: "Chip", count: shown.length };
-    }
-
-    default: {
-      return folded satisfies never;
+    if (link !== -1 && !placed.has(link)) {
+      placed.add(link);
+      toggles.set(run, link);
     }
   }
+
+  return toggles;
 };
 
 /**
- * The Previews pressed open, with some of one Message's opened too: one, as a folded
- * card is pressed, or all of them, as a chip is.
- * @param opened - The Previews pressed open before.
- * @param key - The Message's key.
- * @param shown - Its Previews pressed open.
- * @returns The Previews pressed open now.
+ * How many links a Message holds that may be previewed, each with a toggle after it.
+ * @param content - What the Message holds.
+ * @returns How many.
  */
-export const opening = (
-  opened: ReadonlySet<string>,
-  key: string,
-  shown: readonly PreviewShown[]
-): ReadonlySet<string> => new Set([...opened, ...shown.map((one) => openedKey(key, one))]);
+export const previewableCount = (content: ItemContent): number => {
+  const text = messageText(content);
+
+  return text === undefined ? 0 : previewableLinksOf(text).length;
+};
