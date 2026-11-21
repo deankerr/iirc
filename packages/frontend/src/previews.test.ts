@@ -648,7 +648,7 @@ describe("whether a link is pressed", () => {
 
 describe("where a toggle stands", () => {
   const runs = (...hrefs: readonly (string | undefined)[]) =>
-    hrefs.map((href) => (href === undefined ? {} : { href }));
+    hrefs.map((href) => (href === undefined ? { _tag: "Text" } : { _tag: "Link", href }));
 
   it.each([
     [

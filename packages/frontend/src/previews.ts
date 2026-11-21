@@ -1207,7 +1207,7 @@ export const previewsOf = (
  * @returns Each toggle's link, by the index of the run it follows.
  */
 export const togglesIn = (
-  runs: readonly { readonly href?: string }[],
+  runs: readonly { readonly _tag: string; readonly href?: string }[],
   content: ItemContent
 ): ReadonlyMap<number, number> => {
   const text = messageText(content);

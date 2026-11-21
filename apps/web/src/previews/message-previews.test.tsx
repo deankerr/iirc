@@ -322,7 +322,7 @@ const layOut = () => {
 };
 
 /** How a card is folded and how tall its media is: `ui.previews.folded` and `mediaHeight`. */
-type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight">>;
+type Look = Partial<Pick<UiOptions, "previews.start" | "previews.mediaHeight">>;
 
 /**
  * The Frontend signed in, with `ui.previews` as given and `#iirc` open, holding a Message
@@ -350,7 +350,7 @@ const opened = async (
       ...uiDefaults,
       previews,
       "previews.animate": animate,
-      "previews.folded": "open",
+      "previews.start": "open",
       "previews.timelines": timelines,
       ...also.look,
     },

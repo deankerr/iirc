@@ -71,8 +71,8 @@ export const spellcheckShown = Atom.make((get) => get(uiInEffect)["composer.spel
 /** Whether animated images play on their own on this device, alone, as `timeShown` is. */
 export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);
 
-/** Whether Previews start folded on this device, alone, as `timeShown` is. */
-export const previewsFoldedShown = Atom.make((get) => get(uiInEffect)["previews.folded"]);
+/** Whether Previews start open or closed on this device, alone, as `timeShown` is. */
+export const previewsStartShown = Atom.make((get) => get(uiInEffect)["previews.start"]);
 
 /** How tall each `ui.previews.mediaHeight` draws a Preview's media at most, in pixels. */
 const mediaPixels: Readonly<Record<PreviewsMediaHeight, number>> = {

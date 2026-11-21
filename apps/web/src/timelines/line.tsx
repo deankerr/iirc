@@ -23,17 +23,18 @@ import type { TimelineId, TimelineItem } from "@iirc/api";
 import { churnOf } from "@iirc/frontend/churn";
 import { replyOf } from "@iirc/frontend/composer";
 import type { Answering } from "@iirc/frontend/composer";
+import { togglesIn } from "@iirc/frontend/previews";
 import { churnLine, lineOf, quotedOf } from "@iirc/frontend/render";
 import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode, RefObject } from "react";
 import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
 
 import { chooseReply, perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
 import { dayShown, lineShown, timeShown } from "../options/ui.ts";
-import { MessagePreviews } from "../previews/message-previews.tsx";
+import { MessagePreviews, PreviewToggle } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
 import { BotMark } from "../ui/bot-mark.tsx";
 import { Button } from "../ui/button.tsx";
@@ -521,6 +522,8 @@ const MessageLine = ({
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const delivery = line.delivered;
+  // Each link that may be previewed has its Preview's toggle right after it.
+  const toggles = useMemo(() => togglesIn(line.text, item.content), [item.content, line.text]);
 
   let tone = item.level === "Highlight" ? styles.highlight : styles.message;
 
@@ -555,7 +558,17 @@ const MessageLine = ({
     >
       <Said focusable={answering === undefined} item={item} line={line} place={place} />
       <bdi className={styles.text}>
-        <Inlines inlines={line.text} />
+        <Inlines
+          after={(run) => {
+            const link = toggles.get(run);
+            const said = line.text[run];
+
+            return link === undefined || said === undefined ? null : (
+              <PreviewToggle item={item} link={link} text={said.text} />
+            );
+          }}
+          inlines={line.text}
+        />
         {line.context === undefined ? null : (
           <>
             {" "}
@@ -582,7 +595,7 @@ const MessageLine = ({
           <Icon name="more" />
         </AriaButton>
       )}
-      <MessagePreviews item={item} />
+      <MessagePreviews item={item} line={anchor} />
       {menu && answering !== undefined ? (
         <MessageMenu
           anchor={anchor}
