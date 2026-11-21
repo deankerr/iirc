@@ -31,11 +31,11 @@ const decodeDimensions = Schema.decodeUnknownOption(ImageDimensions);
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-// The signature, then IHDR, which must be the first chunk: its length of 13, its type, and
-// its width and height.
+// The signature, then IHDR, which must be the first chunk and whole: its length of 13, its
+// type, its width and height among the rest of its data, and its CRC.
 const pngSize = (bytes: Uint8Array): Read =>
   pngSignature.every((byte, index) => bytes[index] === byte) &&
-  bytes.length >= 24 &&
+  bytes.length >= 33 &&
   readBe(bytes, 8, 4) === 13 &&
   asciiAt(bytes, 12, "IHDR")
     ? { height: readBe(bytes, 20, 4), width: readBe(bytes, 16, 4) }
@@ -43,9 +43,9 @@ const pngSize = (bytes: Uint8Array): Read =>
 
 // --- GIF ----------------------------------------------------------------------------------
 
-// The logical screen, which is the size a browser draws a GIF at.
+// The logical screen, whole, which is the size a browser draws a GIF at.
 const gifSize = (bytes: Uint8Array): Read =>
-  (asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a")) && bytes.length >= 10
+  (asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a")) && bytes.length >= 13
     ? { height: readLe(bytes, 8, 2), width: readLe(bytes, 6, 2) }
     : undefined;
 
@@ -161,13 +161,20 @@ const jpegSize = (bytes: Uint8Array): Read => {
 
 // --- WebP ---------------------------------------------------------------------------------
 
-// The first chunk says how the image is coded, and where its size is.
+// The first chunk says how the image is coded, and where its size is. Its own size must hold
+// the header the size is read from.
 const webpSize = (bytes: Uint8Array): Read => {
   if (!asciiAt(bytes, 0, "RIFF") || !asciiAt(bytes, 8, "WEBP")) {
     return undefined;
   }
 
+  const holds = (header: number) => readLe(bytes, 16, 4) >= header;
+
   if (asciiAt(bytes, 12, "VP8 ")) {
+    if (!holds(10)) {
+      return undefined;
+    }
+
     // A key frame's header: its start code, then 14-bit width and height under 2-bit scales.
     return bytes.length >= 30 && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a
       ? { height: readLe(bytes, 28, 2) % 2 ** 14, width: readLe(bytes, 26, 2) % 2 ** 14 }
@@ -176,7 +183,7 @@ const webpSize = (bytes: Uint8Array): Read => {
 
   if (asciiAt(bytes, 12, "VP8L")) {
     // Its signature byte, then 14 bits of width less one, and 14 of height less one.
-    if (bytes.length < 25 || bytes[20] !== 0x2f) {
+    if (bytes.length < 25 || !holds(5) || bytes[20] !== 0x2f) {
       return undefined;
     }
 
@@ -187,7 +194,7 @@ const webpSize = (bytes: Uint8Array): Read => {
 
   if (asciiAt(bytes, 12, "VP8X")) {
     // The canvas, each side less one in 24 bits.
-    return bytes.length >= 30
+    return bytes.length >= 30 && holds(10)
       ? { height: readLe(bytes, 27, 3) + 1, width: readLe(bytes, 24, 3) + 1 }
       : undefined;
   }
@@ -333,6 +340,12 @@ const avifSize = (bytes: Uint8Array): Read => {
 
   const height = readBe(bytes, fullFrom(ispe) + 4, 4);
   const width = readBe(bytes, fullFrom(ispe), 4);
+
+  // An `irot` with no angle in it lies, as an `ispe` too short to hold a size does.
+  if (irot !== undefined && irot.end <= irot.start + irot.header) {
+    return undefined;
+  }
+
   const angle = irot === undefined ? 0 : (bytes[irot.start + irot.header] ?? 0) % 4;
 
   return angle % 2 === 1 ? { height: width, width: height } : { height, width };
@@ -423,9 +436,9 @@ const rootAt = (text: string): number | undefined => {
  * The attributes of a start tag, read by hand so the time is that of the text's length:
  * names, `=`, and values in quotes. The first of a name is kept.
  * @param text - The text after `<svg`.
- * @returns The attributes up to the tag's end.
+ * @returns The attributes, or nothing when the tag does not end in the text.
  */
-const attributesOf = (text: string): ReadonlyMap<string, string> => {
+const attributesOf = (text: string): ReadonlyMap<string, string> | undefined => {
   const found = new Map<string, string>();
   let at = 0;
 
@@ -468,7 +481,7 @@ const attributesOf = (text: string): ReadonlyMap<string, string> => {
     const close = text.indexOf(quote, at + 1);
 
     if (close === -1) {
-      break;
+      return undefined;
     }
 
     if (!found.has(name)) {
@@ -478,7 +491,7 @@ const attributesOf = (text: string): ReadonlyMap<string, string> => {
     at = close + 1;
   }
 
-  return found;
+  return text[at] === ">" ? found : undefined;
 };
 
 // A plain number of pixels: digits with an optional fraction, then nothing or `px`. Its parts
@@ -508,8 +521,8 @@ const svgSize = (bytes: Uint8Array): Read => {
   }
 
   const attributes = attributesOf(text.slice(root + 4));
-  const width = lengthOf(attributes.get("width"));
-  const height = lengthOf(attributes.get("height"));
+  const width = lengthOf(attributes?.get("width"));
+  const height = lengthOf(attributes?.get("height"));
 
   return width === undefined || height === undefined ? undefined : { height, width };
 };

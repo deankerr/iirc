@@ -108,6 +108,15 @@ const sized = (bytes: Uint8Array, at: number | undefined, size: number) => {
   return copy;
 };
 
+// A WebP with its first chunk's size, little-endian as RIFF keeps it, put as `size`.
+const chunkSized = (bytes: Uint8Array, size: number) => {
+  const copy = Uint8Array.from(bytes);
+
+  copy.set(littleEndian(size, 4), 16);
+
+  return copy;
+};
+
 const svgOf = (attributes: string, before = "") =>
   text(`${before}<svg xmlns="http://www.w3.org/2000/svg" ${attributes}><rect/></svg>`);
 
@@ -220,8 +229,8 @@ describe("bytes that lie have no size", () => {
   });
 
   it.each([
-    ["a PNG", pngOf(640, 480), "image/png", 24],
-    ["a GIF", gifOf(640, 480), "image/gif", 10],
+    ["a PNG", pngOf(640, 480), "image/png", 33],
+    ["a GIF", gifOf(640, 480), "image/gif", 13],
     ["a JPEG", jpegOf(640, 480), "image/jpeg", jpegOf(640, 480).length - 14],
     [
       "a JPEG with EXIF",
@@ -242,12 +251,33 @@ describe("bytes that lie have no size", () => {
     expect(dimensionsOf(bytes.subarray(0, needed), type)).not.toBeNull();
   });
 
-  it("reads the size of an SVG whose tag is cut after both, and none of one cut before the second", () => {
-    expect(dimensionsOf(text('<svg width="10" height="20"'), "image/svg+xml")).toStrictEqual({
+  it("reads no size of an SVG whose root tag is cut before its end", () => {
+    expect(dimensionsOf(text('<svg width="10" height="20"'), "image/svg+xml")).toBeNull();
+    expect(dimensionsOf(text('<svg width="10" height="20">'), "image/svg+xml")).toStrictEqual({
       height: 20,
       width: 10,
     });
-    expect(dimensionsOf(text('<svg width="10" hei'), "image/svg+xml")).toBeNull();
+  });
+
+  it.each([
+    [
+      "an extended WebP whose VP8X says it holds nothing",
+      chunkSized(vp8xOf(640, 480), 0),
+      "image/webp",
+    ],
+    [
+      "a lossy WebP whose VP8 says it holds less than its header",
+      chunkSized(vp8Of(640, 480), 4),
+      "image/webp",
+    ],
+    [
+      "a lossless WebP whose VP8L says it holds less than its header",
+      chunkSized(vp8lOf(640, 480), 2),
+      "image/webp",
+    ],
+    ["an AVIF whose irot is empty", avifOf(640, 480, box("irot", new Uint8Array())), "image/avif"],
+  ] as const)("%s has no size", (_name, bytes, type) => {
+    expect(dimensionsOf(bytes, type)).toBeNull();
   });
 
   it.each([
