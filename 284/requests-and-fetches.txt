@@ -1,0 +1,43 @@
+# Daemon request log (a proxy in front of the Daemon; streams omitted) and the link host's own log
+
+## BEFORE (d37aa3ce), reload: one ask per Message, each answered, none held-read
+2026-11-21T16:04:03.276Z GET /api/timelines/00000000000020-00000000-00000001/channel -> 200
+2026-11-21T16:04:23.816Z GET /api/timelines/00000000000020-00000000-00000001/channel -> 200
+2026-11-21T16:04:25.170Z GET /api/timelines/00000000000020-00000000-00000001 -> 200
+2026-11-21T16:04:38.795Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:04:38.796Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:04:40.303Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:04:40.308Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:04:41.807Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:05:05.268Z GET /api/timelines/00000000000020-00000000-00000001/channel -> 200
+2026-11-21T16:05:05.273Z GET /api/timelines/00000000000020-00000000-00000001 -> 200
+2026-11-21T16:05:20.258Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:05:20.259Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:05:21.762Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:05:21.763Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+2026-11-21T16:05:23.265Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 1500ms)
+
+## AFTER (30f52f2e), reload, no added delay: the window read, then ONE held read, no fetch
+2026-11-21T16:06:10.458Z GET / -> 200
+2026-11-21T16:06:10.476Z GET /pressable.css -> 200
+2026-11-21T16:06:10.582Z GET /api/timelines/00000000000020-00000000-00000001/channel -> 200
+2026-11-21T16:06:10.585Z GET /api/timelines/00000000000020-00000000-00000001 -> 200
+2026-11-21T16:06:10.597Z POST /api/timelines/00000000000020-00000000-00000001/previews/held -> 200 (delayed 0ms)
+
+## AFTER, later, as rows near the view: per-Message asks (answered from what is held)
+2026-11-21T16:06:25.576Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 0ms)
+2026-11-21T16:06:25.576Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 0ms)
+2026-11-21T16:06:47.715Z POST /api/timelines/00000000000020-00000000-00000001/previews -> 200 (delayed 0ms)
+
+## Link host (the fixture page server the Daemon fetches from): every request it ever received
+# 8 lines, all at 16:03:02Z, from the FIRST ask of the first build (links a,b,c,d + their images); the 'before' reloads and the 'after' reloads add none
+2026-11-21T16:03:02.305Z GET /a iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.315Z GET /a.png iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.316Z GET /d iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.326Z GET /c iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.326Z GET /d.png iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.331Z GET /b iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.331Z GET /c.png iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+2026-11-21T16:03:02.333Z GET /b.png iirc/0.0.0 (+https://github.com/deankerr/iirc) bot
+
+line count of the link host log at the end of the AFTER reloads: 8 requests
