@@ -49,7 +49,7 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
     await Promise.all([minio.stop(), ngircd.stop()]);
   });
 
-  it("keeps a page's og:image in the bucket and serves it on the media route", async () => {
+  it("keeps a page's og:image in the bucket and serves it on the images route", async () => {
     const fixture = Bun.serve({
       fetch: (request) => {
         const { pathname } = new URL(request.url);
@@ -172,7 +172,7 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
               (answer) => answer.previews.every((one) => one.state._tag !== "Pending")
             ).pipe(Effect.map((answer) => answer.previews));
 
-            const served = yield* send(`/api/previews/media/${hash}`, "GET");
+            const served = yield* send(`/api/previews/images/${hash}`, "GET");
 
             const bytes = new Uint8Array(
               yield* Effect.promise(async () => await served.arrayBuffer())
@@ -211,9 +211,9 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
             image: { animated: false, hash, size: png.length, type: "image/png" },
             kind: "page",
             link,
-            media: null,
             player: null,
             site: `127.0.0.1:${fixture.port}`,
+            stream: null,
             title: "Cat",
             type: null,
           },

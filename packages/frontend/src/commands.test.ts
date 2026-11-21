@@ -959,24 +959,24 @@ describe("what is unread", () => {
   it("chooses the focused Timeline's own Previews with /previews, or returns it to ui.previews", () => {
     expect({
       default: chosen("/previews default"),
-      links: chosen("/previews links"),
-      linksOnly: chosen("/previews Links Only"),
+      linksOnly: chosen("/previews links only"),
       network: chosen("/previews off", inNetwork),
       none: chosen("/previews"),
       nowhere: chosen("/previews on", nowhere),
       on: chosen("/previews on"),
       removed: chosen("/previews on", { ...inChannel, focus: removedFocus }),
       sometimes: chosen("/previews sometimes"),
+      text: chosen("/previews Text"),
     }).toStrictEqual({
       default: [{ _tag: "ChoosePreviews", mode: undefined, timeline }],
-      links: [{ _tag: "ChoosePreviews", mode: "links only", timeline }],
-      linksOnly: [{ _tag: "ChoosePreviews", mode: "links only", timeline }],
+      linksOnly: "Use /previews off, text, on, or default.",
       network: [{ _tag: "ChoosePreviews", mode: "off", timeline }],
-      none: "Use /previews off, links, on, or default.",
+      none: "Use /previews off, text, on, or default.",
       nowhere: "Open a Timeline first.",
       on: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
       removed: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
-      sometimes: "Use /previews off, links, on, or default.",
+      sometimes: "Use /previews off, text, on, or default.",
+      text: [{ _tag: "ChoosePreviews", mode: "text", timeline }],
     });
   });
 });

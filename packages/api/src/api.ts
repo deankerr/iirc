@@ -27,7 +27,7 @@ import {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
-  LinksOnly,
+  PreviewsText,
   NotWaiting,
   PreviewsOff,
   SignInsFailed,
@@ -40,7 +40,7 @@ import {
   UnknownMessage,
   UnknownTimeline,
   StreamFailed,
-  UnknownMedia,
+  UnknownImage,
   UnknownStream,
   UnknownUpload,
   UploadTooLarge,
@@ -53,7 +53,7 @@ import {
 import { Unwell, Well } from "./health.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
 import {
-  MediaHash,
+  ImageHash,
   MessagePreviews,
   PressRequest,
   PreviewItem,
@@ -476,9 +476,9 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
     HttpApiEndpoint.get("changes", "/previews/changes", {
       success: HttpApiSchema.StreamSse({ events: PreviewsEvent }),
     }),
-    HttpApiEndpoint.get("media", "/previews/media/:hash", {
-      error: [UnknownMedia, StoreUnavailable],
-      params: { hash: MediaHash },
+    HttpApiEndpoint.get("images", "/previews/images/:hash", {
+      error: [UnknownImage, StoreUnavailable],
+      params: { hash: ImageHash },
       success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
     }),
     HttpApiEndpoint.get("stream", "/previews/:id/stream", {
@@ -486,7 +486,7 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
         UnknownTimeline,
         UnknownMessage,
         PreviewsOff,
-        LinksOnly,
+        PreviewsText,
         UnknownStream,
         StreamFailed,
         TimelinesFailed,

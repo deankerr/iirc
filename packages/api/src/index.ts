@@ -32,7 +32,7 @@ export {
   LifeChanged,
   NetworkStopped,
   NotAChannel,
-  LinksOnly,
+  PreviewsText,
   NotInChannel,
   NotWaiting,
   OptionsChanged,
@@ -46,7 +46,7 @@ export {
   UnknownNetwork,
   UnknownTimeline,
   StreamFailed,
-  UnknownMedia,
+  UnknownImage,
   UnknownStream,
   UnknownUpload,
   UploadTooLarge,
@@ -272,8 +272,8 @@ export {
 export { TailDaemon, TailEvent, TailLevel, TailLine, TailNumber, TailRead } from "./tail.ts";
 
 export {
-  MediaHash,
-  MediaType,
+  ImageHash,
+  ImageType,
   MessagePreviews,
   Preview,
   PreviewFailure,

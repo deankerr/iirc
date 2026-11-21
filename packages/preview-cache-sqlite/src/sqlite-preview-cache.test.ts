@@ -51,25 +51,24 @@ const raw = (file: string, statement: string) => {
 
 const link = "https://example.com/é";
 
+const page: Extract<Kept["state"], { readonly _tag: "Ready" }>["preview"] = {
+  description: null,
+  image: null,
+  kind: "page",
+  link,
+  player: null,
+  site: "example.com",
+  stream: null,
+  title: "Ünïcode 🙂",
+  type: null,
+};
+
 const kept: Kept = {
   fetched: 1000,
   image: null,
   link,
   shown: 2000,
-  state: {
-    _tag: "Ready",
-    preview: {
-      description: null,
-      image: null,
-      kind: "page",
-      link,
-      media: null,
-      player: null,
-      site: "example.com",
-      title: "Ünïcode 🙂",
-      type: null,
-    },
-  },
+  state: { _tag: "Ready", preview: page },
 };
 
 describe("the SQLite Preview cache", () => {
@@ -89,6 +88,35 @@ describe("the SQLite Preview cache", () => {
 
         expect(failure._tag).toBe("PreviewCacheFailed");
         expect(failure.reason).toContain("cannot decode");
+      })
+    );
+  });
+});
+
+describe("a file of the layout before", () => {
+  it("reads a Preview kept with its stream as media, as it was", async () => {
+    const video = "https://example.com/cat.mp4";
+
+    const streamed: Kept = {
+      ...kept,
+      state: {
+        _tag: "Ready",
+        preview: { ...page, kind: "video", stream: video, type: "video/mp4" },
+      },
+    };
+
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (cache) => cache.put(streamed));
+        raw(
+          file,
+          `UPDATE previews SET state = replace(state, '"stream":', '"media":');
+           PRAGMA user_version = 4`
+        );
+
+        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(streamed));
       })
     );
   });

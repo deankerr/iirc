@@ -13,10 +13,20 @@ import type { SqlClient } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
 
 /**
- * The version of the file's layout, in SQLite's `user_version`. A file of any other is made
- * again.
+ * The version of the file's layout, in SQLite's `user_version`. A file of the version before
+ * is brought up to it, and one of any other is made again.
  */
-const layoutVersion = 4;
+const layoutVersion = 5;
+
+// The version before, whose Previews named their stream `media`. Its table is this one.
+const versionBefore = 4;
+
+// Brings a file of the version before up to this one: each Preview's `media` is its `stream`.
+const fromBefore = `UPDATE previews SET state = json_set(
+  json_remove(state, '$.preview.media'),
+  '$.preview.stream',
+  json_extract(state, '$.preview.media')
+) WHERE json_type(state, '$.preview.media') IS NOT NULL`;
 
 const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
 
@@ -71,10 +81,11 @@ const columns = [
 ].join("\n");
 
 /** What a file was found to be. */
-type Found = "Empty" | "Ready" | "Unusable";
+type Found = "Before" | "Empty" | "Ready" | "Unusable";
 
-// Reads only, so it changes nothing in the file. A file is unusable when its layout is not
-// this cache's, or when SQLite says it is not a database or is damaged. Any other failure,
+// Reads only, so it changes nothing in the file. A file is of the version before when its
+// `user_version` says so and its table is this one. A file is unusable when its layout is not
+// this cache's or the one before, or when SQLite says it is not a database or is damaged. Any other failure,
 // such as a lock held too long, fails, and leaves the file as it is.
 const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
   Effect.gen(function* () {
@@ -92,7 +103,7 @@ const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
       return "Empty" as const;
     }
 
-    if (version !== layoutVersion) {
+    if (version !== layoutVersion && version !== versionBefore) {
       return "Unusable" as const;
     }
 
@@ -104,9 +115,11 @@ const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
       ORDER BY tables.name, info.cid
     `;
 
-    return found.map(({ column }) => column).join("\n") === columns
-      ? ("Ready" as const)
-      : ("Unusable" as const);
+    if (found.map(({ column }) => column).join("\n") !== columns) {
+      return "Unusable" as const;
+    }
+
+    return version === layoutVersion ? ("Ready" as const) : ("Before" as const);
   }).pipe(Effect.catchIf(isDamage, () => Effect.succeed("Unusable" as const)));
 
 // Removes the file and what SQLite keeps beside it, so it is made again from nothing.
@@ -193,6 +206,12 @@ export const makeSqlitePreviewCache = (
                     Effect.andThen(sql.unsafe(imageIndex)),
                     Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`))
                   );
+              }
+
+              case "Before": {
+                return sql
+                  .unsafe(fromBefore)
+                  .pipe(Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`)));
               }
 
               case "Ready": {

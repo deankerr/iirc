@@ -123,7 +123,7 @@ describe("the contract", () => {
       "GET /api/options",
       "GET /api/options/changes",
       "GET /api/previews/changes",
-      "GET /api/previews/media/{hash}",
+      "GET /api/previews/images/{hash}",
       "GET /api/previews/{id}/stream",
       "GET /api/search",
       "GET /api/tail",
@@ -737,6 +737,23 @@ describe("the contract", () => {
       named: [true, true, true],
       namedInAnotherCase: [null, null, null, null],
       refused: Array.from({ length: 15 }, () => null),
+    });
+  });
+
+  it("reads Previews journaled as links only as text, in ui.previews and in each Timeline's own", () => {
+    const one = "00000000000002-00000000-00000000";
+    const two = "00000000000003-00000000-00000000";
+
+    expect({
+      byTimeline: uiValueKept("previews.timelines", { [one]: "links only", [two]: "on" }),
+      byTimelineRefused: uiValueKept("previews.timelines", { [one]: "links" }),
+      shown: ["links only", "text", "on", "links", "Links Only"].map((each) =>
+        uiValueKept("previews", each)
+      ),
+    }).toStrictEqual({
+      byTimeline: { [one]: "text", [two]: "on" },
+      byTimelineRefused: undefined,
+      shown: ["text", "text", "on", undefined, undefined],
     });
   });
 

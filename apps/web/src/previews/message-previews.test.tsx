@@ -102,9 +102,9 @@ const ready = {
     image: null,
     kind: "page",
     link: "https://example.com/cats",
-    media: null,
     player: null,
     site: "example.com",
+    stream: null,
     title: "Cats",
     type: null,
   },
@@ -143,7 +143,7 @@ const readyMedia = (kind: "video" | "audio") =>
     preview: {
       ...ready.preview,
       kind,
-      media: ready.preview.link,
+      stream: ready.preview.link,
       title: null,
       type: kind === "video" ? "video/mp4" : "audio/ogg",
     },
@@ -173,7 +173,7 @@ const readyVideoPage = (poster = true, animated = false) =>
           }
         : null,
       kind: "video",
-      media: videoFile,
+      stream: videoFile,
       title: "A cat",
       type: "video/mp4",
     },
@@ -205,8 +205,8 @@ const readyPlayer = (poster: boolean, animated = false) =>
         : null,
       kind: "player",
       link: "https://www.youtube.com/watch?v=abc123",
-      media: null,
       player: { link: playerAddress, size: { height: 360, width: 640 } },
+      stream: null,
       title: "A song",
     },
   }) as const;
@@ -317,9 +317,9 @@ type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight" |
  * @returns The fake, the registry, and the page.
  */
 const opened = async (
-  previews: "off" | "links only" | "on",
+  previews: "off" | "text" | "on",
   answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" }),
-  timelines: { readonly [timeline: string]: "off" | "links only" | "on" } = {},
+  timelines: { readonly [timeline: string]: "off" | "text" | "on" } = {},
   animate = false,
   also: { readonly look?: Look; readonly dogs?: typeof PreviewItem.Encoded | undefined } = {}
 ) => {
@@ -548,7 +548,7 @@ const animated = () => ({
  * @param mode - `ui.previews`, on unless given.
  * @returns The fake Daemon, to send the stream more.
  */
-const withPlayer = async (poster: boolean, mode: "on" | "links only" = "on") => {
+const withPlayer = async (poster: boolean, mode: "on" | "text" = "on") => {
   const fake = await opened(mode, catsItem(readyPlayer(poster)));
   const { daemon } = fake;
 
@@ -615,11 +615,7 @@ const frame = {
  * @param animatedPoster - Whether the poster moves.
  * @returns The fake Daemon.
  */
-const withVideo = async (
-  mode: "on" | "links only" = "on",
-  poster = true,
-  animatedPoster = false
-) => {
+const withVideo = async (mode: "on" | "text" = "on", poster = true, animatedPoster = false) => {
   const fake = await opened(mode, catsItem(readyVideoPage(poster, animatedPoster)));
 
   await settled(() => fake.daemon.previewFollowers.length === 1 && list() !== null);
@@ -656,7 +652,7 @@ describe("a Message's Previews", () => {
   });
 
   it("asks for nothing until the Message scrolls into view, then once, however often it comes back", async () => {
-    const { daemon } = await opened("links only");
+    const { daemon } = await opened("text");
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
 
@@ -675,7 +671,7 @@ describe("a Message's Previews", () => {
   });
 
   it("shows a pending Preview ready once the stream says so, and opens its description on a press", async () => {
-    const { daemon, sendPreview } = await opened("links only");
+    const { daemon, sendPreview } = await opened("text");
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
@@ -706,10 +702,7 @@ describe("a Message's Previews", () => {
   });
 
   it("shows a failure as the plain link, saying why on hover", async () => {
-    const { daemon } = await opened(
-      "links only",
-      catsItem({ _tag: "Failed", reason: "Unreachable" })
-    );
+    const { daemon } = await opened("text", catsItem({ _tag: "Failed", reason: "Unreachable" }));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
@@ -754,7 +747,7 @@ describe("a Message's Previews", () => {
       drawn: "thumbnail",
       loading: "lazy",
       referrerPolicy: "no-referrer",
-      src: `/api/previews/media/${hash}`,
+      src: `/api/previews/images/${hash}`,
       text: "example.com · Cats",
     });
   });
@@ -774,7 +767,7 @@ describe("a Message's Previews", () => {
       alt: image?.getAttribute("alt"),
       drawn: image?.dataset.drawn,
       src: image?.getAttribute("src"),
-    }).toStrictEqual({ alt: "Cats", drawn: "whole", src: `/api/previews/media/${hash}` });
+    }).toStrictEqual({ alt: "Cats", drawn: "whole", src: `/api/previews/images/${hash}` });
   });
 
   it("draws a link that is itself a video as a player that fetches nothing until pressed", async () => {
@@ -877,7 +870,7 @@ describe("a Message's Previews", () => {
       }).toStrictEqual({
         fetches: [],
         holding: [],
-        poster: `/api/previews/media/${hash}`,
+        poster: `/api/previews/images/${hash}`,
         press: false,
         title: null,
         video: null,
@@ -901,7 +894,7 @@ describe("a Message's Previews", () => {
       }).toStrictEqual({
         autoplay: true,
         controls: true,
-        poster: `/api/previews/media/${hash}`,
+        poster: `/api/previews/images/${hash}`,
         press: null,
         src: streamOfCats,
         still: null,
@@ -943,7 +936,7 @@ describe("a Message's Previews", () => {
         controls: true,
         href: "https://example.com/cats",
         name,
-        poster: `/api/previews/media/${hash}`,
+        poster: `/api/previews/images/${hash}`,
         src: streamOfCats,
       });
     });
@@ -974,7 +967,7 @@ describe("a Message's Previews", () => {
         image: list()?.querySelector("img"),
       }).toStrictEqual({
         button: true,
-        fetches: [`/api/previews/media/${hash}`],
+        fetches: [`/api/previews/images/${hash}`],
         image: null,
       });
 
@@ -1091,7 +1084,7 @@ describe("a Message's Previews", () => {
         disabled: false,
         drawn: "poster",
         hover: `plays from ${playerHost}`,
-        src: `/api/previews/media/${hash}`,
+        src: `/api/previews/images/${hash}`,
         text: "example.com · A song▶",
       });
     });
@@ -1215,7 +1208,7 @@ describe("a Message's Previews", () => {
         pressable: list()?.querySelector("canvas")?.closest("button"),
       }).toStrictEqual({
         button: false,
-        fetches: [`/api/previews/media/${hash}`],
+        fetches: [`/api/previews/images/${hash}`],
         image: null,
         pressable: null,
       });
@@ -1248,10 +1241,7 @@ describe("a Message's Previews", () => {
   });
 
   it("shows a link waiting for a press with a press, which fetches it, and its Preview arrives", async () => {
-    const { daemon, sendPreview } = await opened(
-      "links only",
-      catsItem({ _tag: "WaitingForPress" })
-    );
+    const { daemon, sendPreview } = await opened("text", catsItem({ _tag: "WaitingForPress" }));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
@@ -1288,7 +1278,7 @@ describe("a Message's Previews", () => {
   });
 
   it("follows a Timeline's own choice over ui.previews", async () => {
-    const { daemon } = await opened("off", catsItem({ _tag: "Pending" }), { [iirc]: "links only" });
+    const { daemon } = await opened("off", catsItem({ _tag: "Pending" }), { [iirc]: "text" });
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
@@ -1352,7 +1342,7 @@ describe("a Message's Previews", () => {
 
     expect(open).toStrictEqual({
       href: "https://example.com/cats",
-      image: `/api/previews/media/${hash}`,
+      image: `/api/previews/images/${hash}`,
       name: "Cats",
       outside: true,
       rel: "noopener noreferrer",
@@ -1427,7 +1417,7 @@ describe("a Message's Previews", () => {
       playing: {
         badge: false,
         canvas: false,
-        fetches: [`/api/previews/media/${hash}`],
+        fetches: [`/api/previews/images/${hash}`],
         playing: "blob:media-1",
         stop: true,
       },
@@ -1436,7 +1426,7 @@ describe("a Message's Previews", () => {
         badge: true,
         canvas: true,
         draws: [[64, 48]],
-        fetches: [`/api/previews/media/${hash}`],
+        fetches: [`/api/previews/images/${hash}`],
         playing: null,
       },
       unseen: { fetches: [], image: 0 },

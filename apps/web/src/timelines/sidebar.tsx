@@ -390,7 +390,7 @@ const previewsChoices: readonly {
 }[] = [
   { id: "default", mode: undefined },
   { id: "off", mode: "off" },
-  { id: "links only", mode: "links only" },
+  { id: "text", mode: "text" },
   { id: "on", mode: "on" },
 ];
 

@@ -85,9 +85,9 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
-  media: null,
   player: null,
   site: "example.com",
+  stream: null,
   title: "Cats",
   type: null,
 } as const;
@@ -149,7 +149,7 @@ const asking = (sequence: number) => {
     { _tag: "Shown", position: at(sequence), timeline }
   );
 
-  const [ask] = asksWanted(shown, everywhere("links only"));
+  const [ask] = asksWanted(shown, everywhere("text"));
 
   if (ask === undefined) {
     throw new Error("nothing to ask");
@@ -180,10 +180,10 @@ describe("whether to ask", () => {
     const timelines = { [other]: "off", [timeline]: "on" } as const;
 
     expect([
-      choosing(timelines, timeline, "links only"),
+      choosing(timelines, timeline, "text"),
       choosing(timelines, timeline, undefined),
       choosing({}, other, undefined),
-    ]).toStrictEqual([{ [other]: "off", [timeline]: "links only" }, { [other]: "off" }, {}]);
+    ]).toStrictEqual([{ [other]: "off", [timeline]: "text" }, { [other]: "off" }, {}]);
   });
 
   it("follows the stream while any Timeline asks, even with ui.previews off", () => {
@@ -191,15 +191,15 @@ describe("whether to ask", () => {
       asksAnywhere(undefined),
       asksAnywhere(everywhere("off")),
       asksAnywhere({ players: listed, shown: "off", timelines: { [other]: "off" } }),
-      asksAnywhere({ players: listed, shown: "off", timelines: { [other]: "links only" } }),
+      asksAnywhere({ players: listed, shown: "off", timelines: { [other]: "text" } }),
       asksAnywhere({ players: listed, shown: "on", timelines: { [other]: "off" } }),
     ]).toStrictEqual([false, false, false, true, true]);
   });
 
   it("watches only a Message with a link that may be previewed, while the mode asks", () => {
     expect([
-      mayPreview("links only", links),
-      mayPreview("links only", said("irc://irc.libera.chat/#iirc and no web link")),
+      mayPreview("text", links),
+      mayPreview("text", said("irc://irc.libera.chat/#iirc and no web link")),
       mayPreview("off", links),
       mayPreview(undefined, links),
     ]).toStrictEqual([true, false, false, false]);
@@ -300,7 +300,7 @@ describe("asking per Timeline", () => {
 
     expect([
       keys({ players: listed, shown: "on", timelines: { [other]: "off" } }),
-      keys({ players: listed, shown: "off", timelines: { [other]: "links only" } }),
+      keys({ players: listed, shown: "off", timelines: { [other]: "text" } }),
     ]).toStrictEqual([[timeline], [other]]);
   });
 
@@ -310,7 +310,7 @@ describe("asking per Timeline", () => {
 
     const chosen: PreviewsModes = {
       players: listed,
-      shown: "links only",
+      shown: "text",
       timelines: { [timeline]: "on" },
     };
 
@@ -480,9 +480,7 @@ describe("folding a change", () => {
 
 describe("what a Message shows", () => {
   it("shows a placeholder for each link that may be previewed before it is answered", () => {
-    expect(
-      previewsOf(initialPreviews, "links only", timeline, at(1), links, drawing)
-    ).toStrictEqual([
+    expect(previewsOf(initialPreviews, "text", timeline, at(1), links, drawing)).toStrictEqual([
       {
         _tag: "Pending",
         key: "0",
@@ -633,7 +631,7 @@ const hash = "ab".repeat(32);
  */
 const shownReady = (
   fields: Partial<typeof Preview.Encoded>,
-  mode: "on" | "links only" = "on",
+  mode: "on" | "text" = "on",
   players: readonly string[] = listed,
   style: PreviewsStyle = "thumbnail"
 ) => {
@@ -672,7 +670,7 @@ describe("a Preview's image", () => {
       alt: "https://example.com/cats",
       animated: true,
       drawn: "Whole",
-      src: `/api/previews/media/${hash}`,
+      src: `/api/previews/images/${hash}`,
     });
   });
 
@@ -684,13 +682,13 @@ describe("a Preview's image", () => {
     const image = { animated: false, hash, size: 10, type: "image/jpeg" } as const;
 
     expect([
-      shownReady({ image, kind: "video", media: "https://example.com/cats.mp4" })?.image?.drawn,
-      shownReady({ image, kind: "audio", media: "https://example.com/cats.ogg" })?.image?.drawn,
+      shownReady({ image, kind: "video", stream: "https://example.com/cats.mp4" })?.image?.drawn,
+      shownReady({ image, kind: "audio", stream: "https://example.com/cats.ogg" })?.image?.drawn,
     ]).toStrictEqual(["Poster", "Thumbnail"]);
   });
 });
 
-const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") =>
+const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "text" = "on") =>
   shownReady({ title: null, ...fields }, mode)?.media;
 
 const playing = {
@@ -787,12 +785,12 @@ describe("a Preview's player", () => {
       alt: "A song",
       animated: false,
       drawn: "Poster",
-      src: `/api/previews/media/${hash}`,
+      src: `/api/previews/images/${hash}`,
     });
   });
 
-  it("is text alone under links only: no image, no player", () => {
-    const shown = shownReady(playing, "links only");
+  it("is text alone under text: no image, no player", () => {
+    const shown = shownReady(playing, "text");
 
     expect([shown?.image, shown?.player, shown?.media, shown?.summary]).toStrictEqual([
       undefined,
@@ -841,7 +839,7 @@ describe("ui.previews.style", () => {
       styles.map((style) => [
         shownReady({ image, kind: "image", title: null }, "on", listed, style)?.image?.drawn,
         shownReady(
-          { image, kind: "video", media: "https://example.com/cats.mp4" },
+          { image, kind: "video", stream: "https://example.com/cats.mp4" },
           "on",
           listed,
           style
@@ -994,9 +992,9 @@ describe("a Preview's media", () => {
     expect(streamed({ kind: "audio", type: null })?.type).toBeNull();
   });
 
-  it("is none under links only, even one held from while Previews were on", () => {
-    expect(streamed({ kind: "video", type: "video/mp4" }, "links only")).toBeUndefined();
-    expect(streamed({ kind: "audio", type: "audio/ogg" }, "links only")).toBeUndefined();
+  it("is none under text, even one held from while Previews were on", () => {
+    expect(streamed({ kind: "video", type: "video/mp4" }, "text")).toBeUndefined();
+    expect(streamed({ kind: "audio", type: "audio/ogg" }, "text")).toBeUndefined();
   });
 
   it("is none for a page, an image, or a player", () => {

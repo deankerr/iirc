@@ -23,9 +23,9 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
-  media: null,
   player: null,
   site: "example.com",
+  stream: null,
   title: "Cats",
   type: null,
 } as const;
@@ -45,9 +45,9 @@ const states = [
       },
       kind: "image",
       link: "https://example.com/cat.png",
-      media: null,
       player: null,
       site: "example.com",
+      stream: null,
       title: null,
       type: "image/png",
     },
@@ -76,7 +76,7 @@ const states = [
     preview: {
       ...page,
       kind: "video",
-      media: "https://cdn.example/clip.mp4?Signature=abc",
+      stream: "https://cdn.example/clip.mp4?Signature=abc",
       type: "video/mp4",
     },
   },
@@ -120,7 +120,7 @@ describe("Previews on the wire", () => {
           },
         },
         { _tag: "Ready", preview: { description: null, kind: "page", link: page.link, site: "x" } },
-        { _tag: "Ready", preview: { ...page, media: undefined } },
+        { _tag: "Ready", preview: { ...page, stream: undefined } },
         { _tag: "Ready", preview: { ...page, player: undefined } },
         { _tag: "Ready", preview: { ...page, player: { link: page.link } } },
         {
@@ -240,12 +240,12 @@ describe("Previews on the wire", () => {
 });
 
 describe("ui.previews", () => {
-  it("is off, links only, or on, and the one option no device overrides", () => {
+  it("is off, text, or on, and the one option no device overrides", () => {
     const options = Schema.decodeUnknownOption(UiOptions);
 
     expect({
       sharedOnly: [...uiSharedOnly],
-      taken: ["off", "links only", "on", "links", "Links Only", true].map((previews) =>
+      taken: ["off", "text", "on", "links only", "Text", true].map((previews) =>
         Option.isSome(options({ ...uiDefaults, previews }))
       ),
     }).toStrictEqual({
@@ -325,7 +325,7 @@ describe("ui.previews.timelines", () => {
   const timeline = "0000000000001a-00000000-00000001";
   const other = "0000000000001b-00000000-00000000";
 
-  it("maps a Timeline's id to off, links only, or on", () => {
+  it("maps a Timeline's id to off, text, or on", () => {
     const options = Schema.decodeUnknownOption(UiOptions);
 
     const given = (each: Schema.Json) =>
@@ -340,7 +340,7 @@ describe("ui.previews.timelines", () => {
       [
         {},
         { [timeline]: "off" },
-        { [other]: "on", [timeline]: "links only" },
+        { [other]: "on", [timeline]: "text" },
         { [timeline]: "links" },
         { [timeline]: "default" },
         { [timeline]: true },
@@ -350,7 +350,7 @@ describe("ui.previews.timelines", () => {
     ).toStrictEqual([
       {},
       { [timeline]: "off" },
-      { [other]: "on", [timeline]: "links only" },
+      { [other]: "on", [timeline]: "text" },
       null,
       null,
       null,
