@@ -7,6 +7,8 @@
 import { Context, Schema } from "effect";
 import type { Effect, Scope, Stream } from "effect";
 
+import type { Precedence } from "./pacer.ts";
+
 /**
  * Part of a stream, from `start` up to but not including `end`, as `Blob.slice` takes it.
  * Without `end`, it runs to the end. Both are whole numbers, and `start` is below `end`.
@@ -106,11 +108,13 @@ export interface Fetched {
 export interface LinkFetchService {
   /**
    * Fetches a link for a purpose. The connection lives in the Scope: closing it stops the
-   * fetch and its body, read or not.
+   * fetch and its body, read or not. Its precedence orders it among fetches waiting for a
+   * turn, `first` unless given.
    */
   readonly fetch: (
     link: string,
-    purpose: Purpose
+    purpose: Purpose,
+    precedence?: Precedence
   ) => Effect.Effect<Fetched, LinkFetchFailure, Scope.Scope>;
 }
 

@@ -256,9 +256,12 @@ const observers = new Set<Observer>();
 class Observer {
   readonly #tell: Tell;
   readonly #elements = new Set<Element>();
+  /** Where it observes against, and how far beyond it. */
+  readonly options: IntersectionObserverInit | undefined;
 
-  constructor(tell: Tell) {
+  constructor(tell: Tell, options?: IntersectionObserverInit) {
     this.#tell = tell;
+    this.options = options;
     observers.add(this);
   }
 
@@ -803,6 +806,21 @@ describe("a Message's Previews", () => {
     await scrolledIntoView();
 
     expect(daemon.previewAsks).toStrictEqual([{ position: cursor(2), timeline: iirc }]);
+  });
+
+  it("asks for a Message once it is within a screen of the log's view, above or below, not only in it", async () => {
+    const { container, daemon } = await opened("text");
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+
+    const log = container.querySelector('[role="log"]');
+
+    expect(
+      [...observers].map((observer) => ({
+        margin: observer.options?.rootMargin,
+        rootIsLog: observer.options?.root === log,
+      }))
+    ).toStrictEqual([{ margin: "100% 0px", rootIsLog: true }]);
   });
 
   it("draws a pending Preview as a placeholder, and its card once the stream says so, under text its words alone", async () => {

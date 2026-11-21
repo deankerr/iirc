@@ -616,6 +616,28 @@ describe("what the view says it shows", () => {
     expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
+  it("draws rows a screen beyond the view, so their Previews are asked for and loaded before they scroll in", async () => {
+    const items = Array.from({ length: 100 }, (_, index) => message(index + 1));
+
+    await signedIn([], items);
+
+    // The view is forty rows tall, at the top of a Timeline of over a hundred.
+    layout.view = 800;
+    layout.content = 2100;
+    await openFromPalette();
+    await settled(() => logOf().querySelector("[data-index]") !== null);
+    await scrollTo(0, 2100);
+    await settled(() => logOf().querySelector("[data-index='0']") !== null);
+
+    const indexes = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].map((one) =>
+      Number(one.dataset.index)
+    );
+
+    // Rows 0 to 39 are in view: very nearly the next forty are drawn below them, where
+    // twenty-four rows reach only to the sixties.
+    expect(Math.max(...indexes)).toBeGreaterThanOrEqual(75);
+  });
+
   it("takes this device's ui.unread.markRead shown over asked, which every device shares", async () => {
     await expect(readScrolledUp("asked", "shown")).resolves.toStrictEqual([
       { read: 3000, target: "#iirc" },

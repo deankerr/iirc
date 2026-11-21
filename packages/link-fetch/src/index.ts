@@ -24,7 +24,7 @@ export type {
 
 export { makePacer, pacing } from "./pacer.ts";
 
-export type { Pacer } from "./pacer.ts";
+export type { Pacer, Precedence, Turn } from "./pacer.ts";
 
 export { admit, fixedPolicy, parseLink, readAddress, writeAddress } from "./policy.ts";
 
