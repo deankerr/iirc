@@ -31,9 +31,17 @@ export type PreviewId = typeof PreviewId.Type;
 /**
  * What a link is: a `page`; or `image`, `video`, or `audio`, a link to the media itself,
  * or `video`, a page that names a video file; or a `player`, a page whose media plays in a
- * frame.
+ * frame; or a `file`, a link whose answer is none of these, read from its headers alone but
+ * for a plain-text file's first lines.
  */
-export const PreviewKind = Schema.Literals(["page", "image", "video", "audio", "player"]).annotate({
+export const PreviewKind = Schema.Literals([
+  "page",
+  "image",
+  "video",
+  "audio",
+  "player",
+  "file",
+]).annotate({
   identifier: "PreviewKind",
 });
 
@@ -128,8 +136,11 @@ export type PreviewPlayer = typeof PreviewPlayer.Type;
  * video's is its poster. `stream` is where a Preview of kind `video` or `audio` is: the link
  * itself, or the video file its page names, which only the Daemon fetches, through
  * `GET /api/previews/{id}/stream`, and `null` for any other kind. `player` is the player of
- * a Preview of kind `player`, and `null` for any other. Every field but `kind` and `image`
- * is what a stranger wrote.
+ * a Preview of kind `player`, and `null` for any other. A `file` has no `title`, its
+ * `type` is its media type, its `description` is a plain-text file's first lines, with their
+ * line breaks, or `null`, and its `size` is its length in bytes as its host declared it, or
+ * `null` where it did not; `size` is `null` for any other kind. Every field but `kind`,
+ * `image`, and `size` is what a stranger wrote.
  */
 export const Preview = Schema.Struct({
   description: Schema.NullOr(Untrusted),
@@ -138,6 +149,7 @@ export const Preview = Schema.Struct({
   link: Untrusted,
   player: Schema.NullOr(PreviewPlayer),
   site: Untrusted,
+  size: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   stream: Schema.NullOr(Untrusted),
   title: Schema.NullOr(Untrusted),
   type: Schema.NullOr(Untrusted),

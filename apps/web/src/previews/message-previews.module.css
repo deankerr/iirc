@@ -75,10 +75,16 @@
   line-clamp: 2;
 }
 
-/* The description, three lines at most until it is pressed open. */
+/*
+ * The description, three lines at most until it is pressed open. Its line breaks show as
+ * breaks, as a text file's first lines hold them. A page's description holds none, since
+ * its text is contained and a break in it is a symbol, so only the runs of spaces a page
+ * wrote are kept.
+ */
 .description {
   display: -webkit-box;
   overflow: hidden;
+  white-space: pre-wrap;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   line-clamp: 3;

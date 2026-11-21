@@ -180,6 +180,7 @@ describe(logged, () => {
         fetchOne(
           {
             "https://evil.example/": new LinkWrongType({
+              length: null,
               link: `https://evil.example/${forged}`,
               type: `text/plain${forged}`,
             }),
@@ -221,6 +222,7 @@ describe(logged, () => {
         Effect.as(Effect.sleep("250 millis"), {
           body: Stream.empty,
           headers: {},
+          length: null,
           link: "https://slow.example/",
           status: 200,
           type: "image/png",

@@ -10,7 +10,7 @@ import type { Purpose } from "@iirc/link-fetch";
 export const accept: Record<Purpose["kind"], string> = {
   image: "image/avif, image/webp, image/png, image/jpeg, image/gif, image/svg+xml;q=0.8",
   oembed: "application/json",
-  page: "text/html, application/xhtml+xml;q=0.9",
+  page: "text/html, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1",
   stream: "video/*, audio/*",
 };
 
@@ -22,7 +22,7 @@ export const accept: Record<Purpose["kind"], string> = {
 export const essence = (header: string | null) =>
   (header ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
 
-const pageTypes = new Set(["text/html", "application/xhtml+xml"]);
+const pageTypes = new Set(["text/html", "application/xhtml+xml", "text/plain"]);
 
 // `image/jpg` is not registered, but servers send it often enough that refusing it would only
 // lose Previews.
@@ -56,7 +56,7 @@ export const declared = (purpose: Purpose, type: string) => takes[purpose.kind](
 const caps: Record<Purpose["kind"], (type: string) => number> = {
   image: (type) => (type === svg ? limits.svg : limits.raster),
   oembed: () => limits.oembed,
-  page: () => limits.page,
+  page: (type) => (type === "text/plain" ? limits.text : limits.page),
   stream: () => limits.stream,
 };
 

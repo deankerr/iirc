@@ -153,7 +153,9 @@ describe("the fake link fetch", () => {
       );
 
       expect(exit).toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/a.png", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ length: null, link: "https://example.com/a.png", type: "text/html" })
+        )
       );
     });
 
@@ -163,12 +165,16 @@ describe("the fake link fetch", () => {
       await expect(
         fetching(answers, "https://example.com/", { kind: "oembed" })
       ).resolves.toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ length: null, link: "https://example.com/", type: "text/html" })
+        )
       );
       await expect(
         fetching(answers, "https://example.com/", { kind: "stream" })
       ).resolves.toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ length: null, link: "https://example.com/", type: "text/html" })
+        )
       );
     });
 
@@ -222,6 +228,81 @@ describe("the fake link fetch", () => {
       );
 
       expect(exit).toStrictEqual(Exit.fail(new LinkTooLarge({ limit: limits.oembed })));
+    });
+
+    it("ends a plain-text page over its own limit cleanly at the limit", async () => {
+      const exit = await fetching(
+        {
+          "https://example.com/a.txt": {
+            body: new Uint8Array(limits.text + 10),
+            type: "text/plain",
+          },
+        },
+        "https://example.com/a.txt",
+        { kind: "page" }
+      );
+
+      expect(exit).toStrictEqual(Exit.succeed({ size: limits.text, type: "text/plain" }));
+    });
+
+    it("refuses a type no purpose takes with the length it declared, none when it is encoded", async () => {
+      const answers = {
+        "https://example.com/a.pdf": {
+          headers: { "Content-Length": "1234" },
+          type: "application/pdf",
+        },
+        "https://example.com/b.pdf": {
+          headers: { "content-encoding": "gzip", "content-length": "99" },
+          type: "application/pdf",
+        },
+      };
+
+      await expect(
+        fetching(answers, "https://example.com/a.pdf", { kind: "page" })
+      ).resolves.toStrictEqual(
+        Exit.fail(
+          new LinkWrongType({
+            length: 1234,
+            link: "https://example.com/a.pdf",
+            type: "application/pdf",
+          })
+        )
+      );
+      await expect(
+        fetching(answers, "https://example.com/b.pdf", { kind: "page" })
+      ).resolves.toStrictEqual(
+        Exit.fail(
+          new LinkWrongType({
+            length: null,
+            link: "https://example.com/b.pdf",
+            type: "application/pdf",
+          })
+        )
+      );
+    });
+
+    it("answers with the length it declared", async () => {
+      const fetched = await Effect.runPromise(
+        Effect.scoped(
+          Effect.flatMap(
+            makeFakeLinkFetch({
+              "https://example.com/a.txt": {
+                body: "hi",
+                headers: { "content-length": "2" },
+                type: "text/plain",
+              },
+              "https://example.com/b.txt": { body: "hi", type: "text/plain" },
+            }),
+            (fake) =>
+              Effect.all([
+                fake.service.fetch("https://example.com/a.txt", { kind: "page" }),
+                fake.service.fetch("https://example.com/b.txt", { kind: "page" }),
+              ])
+          )
+        )
+      );
+
+      expect(fetched.map((each) => each.length)).toStrictEqual([2, null]);
     });
 
     it("ends a page over its limit cleanly at the limit", async () => {

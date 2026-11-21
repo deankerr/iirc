@@ -245,13 +245,67 @@ const bomCharset = (head: Uint8Array): string | undefined => {
   return undefined;
 };
 
-const headerCharset = (contentType: string | undefined): string | undefined => {
-  const match = /charset\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)'|(?<bare>[^\s;]+))/iu.exec(
-    contentType ?? ""
-  );
+/**
+ * A Content-Type's parameters, by lower-cased name, as RFC 9110 writes them: after the type,
+ * each `name=value` follows a `;`, and a value is a token or a quoted string, whose `\`
+ * escapes the next character. A `;` inside quotes ends nothing, so no parameter hides in
+ * another's value. The first of a name is kept.
+ * @param contentType - The header, if any.
+ * @returns The parameters.
+ */
+const parametersOf = (contentType: string): ReadonlyMap<string, string> => {
+  const parameters = new Map<string, string>();
+  let at = contentType.indexOf(";");
 
-  return resolveLabel(match?.groups?.double ?? match?.groups?.single ?? match?.groups?.bare);
+  while (at !== -1 && at < contentType.length) {
+    const equals = contentType.indexOf("=", at + 1);
+    const next = contentType.indexOf(";", at + 1);
+
+    if (equals === -1 || (next !== -1 && next < equals)) {
+      at = next;
+      continue;
+    }
+
+    const name = contentType
+      .slice(at + 1, equals)
+      .trim()
+      .toLowerCase();
+
+    let i = equals + 1;
+
+    while (contentType.charAt(i) === " " || contentType.charAt(i) === "\t") {
+      i += 1;
+    }
+
+    let value = "";
+
+    if (contentType.charAt(i) === '"') {
+      i += 1;
+
+      while (i < contentType.length && contentType.charAt(i) !== '"') {
+        i += contentType.charAt(i) === "\\" ? 1 : 0;
+        value += contentType.charAt(i);
+        i += 1;
+      }
+
+      at = contentType.indexOf(";", i);
+    } else {
+      const end = contentType.indexOf(";", i);
+
+      value = contentType.slice(i, end === -1 ? undefined : end).trim();
+      at = end;
+    }
+
+    if (!parameters.has(name)) {
+      parameters.set(name, value);
+    }
+  }
+
+  return parameters;
 };
+
+const headerCharset = (contentType: string | undefined): string | undefined =>
+  resolveLabel(parametersOf(contentType ?? "").get("charset"));
 
 const metaCharset = (head: Uint8Array): string | undefined => {
   const text = new TextDecoder("latin1").decode(head.subarray(0, PRESCAN_BYTES));
@@ -708,4 +762,32 @@ export const readMedia = (contentType: string): "image" | "video" | "audio" | un
   }
 
   return undefined;
+};
+
+/**
+ * A plain-text file's first lines, as the card of its Preview holds them. The characters are
+ * those its byte order mark names, else its Content-Type's charset, else UTF-8, and no `<meta>`
+ * is looked for, since it is no HTML. Line breaks are kept, as LF however the file wrote them,
+ * and so is the indentation, but blank lines before the first line and whitespace after the
+ * last are dropped. It is cut to 500 code points, as a description is. Nothing in it is read
+ * as markup.
+ *
+ * @param bytes - the file's bytes, as far as they were read.
+ * @param contentType - the answer's Content-Type, if any.
+ * @returns the first lines, or undefined when there is nothing in it but whitespace.
+ */
+export const readText = (
+  bytes: Uint8Array,
+  contentType: string | undefined
+): string | undefined => {
+  const charset = bomCharset(bytes) ?? headerCharset(contentType) ?? "utf-8";
+
+  const lines = decoderFor(charset)
+    .decode(bytes)
+    .replaceAll(/\r\n?/gu, "\n")
+    .replace(/^(?:[^\S\n]*\n)+/u, "");
+
+  const first = cut(lines.trimEnd(), DESCRIPTION_LIMIT)?.trimEnd();
+
+  return first === undefined || first === "" ? undefined : first;
 };

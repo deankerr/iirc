@@ -92,6 +92,7 @@ const page = {
   link: "https://example.com/cats",
   player: null,
   site: "example.com",
+  size: null,
   stream: null,
   title: "Cats",
   type: null,
@@ -1397,6 +1398,118 @@ describe("what a card holds", () => {
       shownReady({ description: "a\u0007b", title: "evil\u202E" })?.title,
       shownReady({ description: "a\u0007b", title: "evil\u202E" })?.description,
     ]).toStrictEqual(["Cats", "https://a.example/", "evil\u202E\u202C", "a␇b"]);
+  });
+});
+
+/**
+ * A card for a link to a file, as `holds` reads a card, with no page words of its own.
+ * @param link - The link the file was read from.
+ * @param fields - What the Daemon read of it.
+ * @param mode - `ui.previews`.
+ * @returns The row.
+ */
+const fileHolds = (
+  link: string,
+  fields: Partial<typeof Preview.Encoded> = {},
+  mode: "on" | "text" = "on"
+) => holds({ description: null, kind: "file", link, size: null, title: null, ...fields }, mode);
+
+describe("a file's card", () => {
+  it.each([
+    ["its name from the path", "https://example.com/a/b/report.pdf", "report.pdf"],
+    ["its name without its query or fragment", "https://example.com/a.txt?x=/y#/z", "a.txt"],
+    ["its name percent-decoded", "https://example.com/my%20notes%C3%A9.txt", "my notesé.txt"],
+    ["its name as written where it does not decode", "https://example.com/100%.txt", "100%.txt"],
+    ["its host for a path with no last part", "https://example.com/", "example.com"],
+    ["its host for a trailing slash", "https://example.com/dir/", "example.com"],
+    ["its host for a name that decodes to blank", "https://example.com/%20", "example.com"],
+    ["its name contained", "https://example.com/a%0Ab%E2%80%AEc", "a\u240Ab\u202Ec\u202C"],
+  ] as const)("is %s", (_name, link, title) => {
+    expect(fileHolds(link).split(" | ")[0]).toBe(title);
+  });
+
+  it.each([
+    ["its first lines with their breaks", { description: "one\ntwo\n\nfour" }, "one\ntwo\n\nfour"],
+    [
+      "its first lines in place of its type and size",
+      { description: "one", size: 5, type: "text/plain" },
+      "one",
+    ],
+    [
+      "its lines contained each on its own",
+      { description: "a\u202Eb\nc\u0007d\ne\u2066" },
+      "a\u202Eb\u202C\nc\u2407d\ne\u2066\u2069",
+    ],
+    ["its tabs as spaces", { description: "\tif x:\n\t\ty" }, "    if x:\n        y"],
+    ["its Windows line breaks as breaks", { description: "a\r\nb\r\n" }, "a\nb"],
+    [
+      "its blank lines at either end dropped",
+      { description: "\n \nfirst\nlast\n\n" },
+      "first\nlast",
+    ],
+    [
+      "its type and size when it has no lines",
+      { description: "", size: 1_234_567, type: "text/plain" },
+      "text/plain \u00B7 1.2 MB",
+    ],
+    [
+      "its type and size when its lines are blank",
+      { description: " \n\n", size: 0, type: "text/plain" },
+      "text/plain \u00B7 0 bytes",
+    ],
+    [
+      "its type and size",
+      { size: 1_200_000, type: "application/pdf" },
+      "application/pdf \u00B7 1.2 MB",
+    ],
+    ["its type alone with no size", { type: "application/pdf" }, "application/pdf"],
+    ["its size alone with no type", { size: 1 }, "1 byte"],
+    ["no description with neither", {}, "-"],
+    ["its type contained", { type: "a/b\u202E" }, "a/b\u202E\u202C"],
+  ] as const)("has %s", (_name, fields, description) => {
+    expect(
+      fileHolds("https://example.com/a.bin", fields).split(" | ").slice(1, -3).join(" | ")
+    ).toBe(description);
+  });
+
+  it("is shown under text as under on, with no media", () => {
+    expect(fileHolds("https://example.com/a.bin", { type: "text/x" }, "text")).toBe(
+      "a.bin | text/x | - | - | -"
+    );
+    expect(fileHolds("https://example.com/a.bin", { type: "text/x" }, "on")).toBe(
+      "a.bin | text/x | - | - | -"
+    );
+  });
+
+  it("is named for its file name", () => {
+    expect(
+      shownReady({ kind: "file", link: "https://example.com/x/a.pdf", title: null })?.name
+    ).toBe("a.pdf");
+  });
+});
+
+describe("how big a file is said to be", () => {
+  it.each([
+    [0, "0 bytes"],
+    [1, "1 byte"],
+    [2, "2 bytes"],
+    [999, "999 bytes"],
+    [1000, "1.0 kB"],
+    [1234, "1.2 kB"],
+    [9949, "9.9 kB"],
+    [9950, "10 kB"],
+    [12_345, "12 kB"],
+    [999_499, "999 kB"],
+    [999_500, "1.0 MB"],
+    [999_999, "1.0 MB"],
+    [1_200_000, "1.2 MB"],
+    [12_000_000, "12 MB"],
+    [3_400_000_000, "3.4 GB"],
+    [999_999_999_999, "1.0 TB"],
+    [5_600_000_000_000, "5.6 TB"],
+    [5_600_000_000_000_000, "5600 TB"],
+  ] as const)("%d bytes as %s", (bytes, words) => {
+    expect(fileHolds("https://example.com/a", { size: bytes })).toBe(`a | ${words} | - | - | -`);
   });
 });
 

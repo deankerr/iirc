@@ -38,6 +38,8 @@ export const limits = {
   redirects: 3,
   stream: 200 * 1024 * 1024,
   svg: 1024 * 1024,
+  /** A plain-text file ends here, cleanly. */
+  text: 16 * 1024,
 } as const;
 
 /** The policy refused the link or an address it led to. Never fetched. */
@@ -66,12 +68,18 @@ export class LinkTooLarge extends Schema.TaggedError<
 
 /**
  * The answer is not of a type its purpose takes, by its header or by its leading bytes.
- * `link` is the address that answered, after redirects, as the guard read it.
+ * `link` is the address that answered, after redirects, as the guard read it, and `length` is
+ * the length it declared, in bytes, when that is of the bytes its body would give, else null.
+ * None of its body is read.
  */
 export class LinkWrongType extends Schema.TaggedError<
   LinkWrongType,
   { readonly brand: unique symbol }
->()("LinkWrongType", { link: Schema.String, type: Schema.String }) {}
+>()("LinkWrongType", {
+  length: Schema.NullOr(Schema.Finite),
+  link: Schema.String,
+  type: Schema.String,
+}) {}
 
 /** Why a body stopped before its end. */
 export type BodyFailure = LinkTooLarge | LinkTimedOut | LinkUnreachable;
@@ -96,11 +104,16 @@ export interface Fetched {
    * is any status outside 200 to 299 for any other purpose.
    */
   readonly type: string;
+  /**
+   * The length the answer declared, in bytes, when it is of the bytes the body gives, which it
+   * is not when they are compressed. Null when none was declared.
+   */
+  readonly length: number | null;
   /** Every header, by its lower-cased name. */
   readonly headers: Readonly<Record<string, string>>;
   /**
    * The body as it arrives, decompressed and bounded for the purpose. A page ends early,
-   * cleanly, at the end of its head or at its limit. Anything else over its limit fails. An
+   * cleanly, at the end of its head or at its limit, and a plain-text one at its limit. Anything else over its limit fails. An
    * answer outside 200 to 299, but a stream's, has none, and none of it is read.
    */
   readonly body: Stream.Stream<Uint8Array, BodyFailure>;

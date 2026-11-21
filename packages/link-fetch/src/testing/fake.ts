@@ -130,7 +130,26 @@ const imageTypes = new Map([
   ["image/svg+xml", "image/svg+xml"],
 ]);
 
-const pageTypes = new Set(["text/html", "application/xhtml+xml"]);
+const pageTypes = new Set(["text/html", "application/xhtml+xml", "text/plain"]);
+
+/**
+ * The length a recorded response declares, when it is of the bytes the body gives, as the
+ * guard reads it: its `Content-Length`, unless it is encoded.
+ * @param headers - The headers it is answered with, if any.
+ * @returns The length, or null.
+ */
+const lengthOf = (headers: Readonly<Record<string, string>> = {}) => {
+  const lowered = new Map(
+    Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value])
+  );
+
+  const encoding = (lowered.get("content-encoding") ?? "").trim().toLowerCase();
+  const length = Number(lowered.get("content-length") ?? Number.NaN);
+
+  return (encoding === "" || encoding === "identity") && Number.isSafeInteger(length) && length >= 0
+    ? length
+    : null;
+};
 
 /** The type a purpose takes a declared type as, or nothing when it does not take it. */
 const takes: Record<Purpose["kind"], (type: string) => string | undefined> = {
@@ -144,7 +163,7 @@ const takes: Record<Purpose["kind"], (type: string) => string | undefined> = {
 const caps: Record<Purpose["kind"], (type: string) => number> = {
   image: (type) => (type === "image/svg+xml" ? limits.svg : limits.raster),
   oembed: () => limits.oembed,
-  page: () => limits.page,
+  page: (type) => (type === "text/plain" ? limits.text : limits.page),
   stream: () => limits.stream,
 };
 
@@ -164,6 +183,7 @@ const erred = (link: string, purpose: Purpose, recorded: Recorded) => {
     : Effect.succeed({
         body: Stream.empty,
         headers: { "content-type": recorded.type, ...recorded.headers },
+        length: lengthOf(recorded.headers),
         link: recorded.link === undefined ? link : normalised(recorded.link),
         status,
         type: recorded.type.split(";")[0]?.trim().toLowerCase() ?? "",
@@ -174,8 +194,7 @@ const erred = (link: string, purpose: Purpose, recorded: Recorded) => {
  * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
  * when the purpose does not take its type, a page cut cleanly at its limit, and any other
  * body over its limit giving its bytes up to the limit and then failing with `LinkTooLarge`
- * as it is read. Its leading bytes are not read, so an image is taken by its declared type
- * alone. A stream with a range, of a response with no status recorded, is answered as a host
+ * as it is read. A plain-text page is cut at its own, smaller limit, and cleanly. Its leading bytes are not read, so an image is taken by its declared type alone. A stream with a range, of a response with no status recorded, is answered as a host
  * serving ranges would.
  * @param link - The link asked, normalised.
  * @param purpose - What it is fetched for.
@@ -192,7 +211,13 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
     purpose.kind === "stream" && recorded.status === 416 ? declared : takes[purpose.kind](declared);
 
   if (type === undefined) {
-    return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));
+    return Effect.fail(
+      new LinkWrongType({
+        length: lengthOf(recorded.headers),
+        link: answeredAs,
+        type: declared,
+      })
+    );
   }
 
   const limit = caps[purpose.kind](type);
@@ -200,14 +225,18 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
   const range =
     purpose.kind === "stream" && recorded.status === undefined ? purpose.range : undefined;
 
-  const answer = (status: number, headers: Record<string, string>, body: Fetched["body"]) =>
-    Effect.succeed({
+  const answer = (status: number, headers: Record<string, string>, body: Fetched["body"]) => {
+    const all = { "content-type": recorded.type, ...headers, ...recorded.headers };
+
+    return Effect.succeed({
       body,
-      headers: { "content-type": recorded.type, ...headers, ...recorded.headers },
+      headers: all,
+      length: lengthOf(all),
       link: answeredAs,
       status,
       type,
     } satisfies Fetched);
+  };
 
   if (range !== undefined && range.start >= content.total) {
     return answer(416, { "content-range": `bytes */${content.total}` }, Stream.empty);
@@ -237,7 +266,7 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
 /**
  * Makes a fake link fetch. A link is matched as the URL parser normalises it, and one with no
  * answer is unreachable. A recorded response is answered as the guard would for the purpose:
- * of a type the purpose takes, and bounded for it. Each fetch is paced as the guard paces it,
+ * of a type the purpose takes, and bounded for it, and it carries the length it declared. Each fetch is paced as the guard paces it,
  * as one hop to the name of the link asked, holding its place until the caller's Scope closes.
  * @param answers - What each link answers.
  * @param options - Which links are held.

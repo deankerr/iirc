@@ -1,7 +1,7 @@
 import type { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
+import { fillFromOembed, readMedia, readOembed, readPage, readText } from "./read.ts";
 import type { PageRead } from "./read.ts";
 
 const LINK = "https://example.com/a/b/page.html";
@@ -704,5 +704,87 @@ describe("the video file a page names", () => {
 
   it("is absent when the page names no video address", () => {
     expect(read(`<meta property="og:video:type" content="video/mp4">`).video).toBeUndefined();
+  });
+});
+
+// The test runs where the platform is little-endian, so a 16-bit array's bytes are UTF-16LE.
+const utf16le = (text: string): number[] => [
+  ...new Uint8Array(Uint16Array.from(text, (ch) => ch.codePointAt(0) ?? 0).buffer),
+];
+
+describe(readText, () => {
+  it.each([
+    ["UTF-8 by default", utf8("héllo\nworld"), undefined, "héllo\nworld"],
+    ["UTF-8 with no charset parameter", utf8("héllo"), "text/plain", "héllo"],
+    ["the header's charset", latin1("caf\u00E9"), "text/plain; charset=iso-8859-1", "café"],
+    [
+      "windows-1252 where it differs from Latin-1",
+      bytes([0x93, 0x68, 0x69, 0x94]),
+      "text/plain; charset=windows-1252",
+      "\u201Chi\u201D",
+    ],
+    ["Shift_JIS", bytes([0x82, 0xb1, 0x82, 0xf1]), 'text/plain; charset="Shift_JIS"', "こん"],
+    ["UTF-16LE named by the header", bytes(utf16le("hi")), "text/plain; charset=utf-16le", "hi"],
+    [
+      "the charset parameter itself, not one that ends in its name",
+      utf8("caf\u00E9"),
+      "text/plain; x-charset=windows-1252; charset=utf-8",
+      "café",
+    ],
+    [
+      "the charset parameter, not one quoted inside another's value",
+      utf8("caf\u00E9"),
+      'text/plain; note="a; charset=windows-1252; \\" b"; charset=utf-8',
+      "café",
+    ],
+    [
+      "an unknown charset label, as UTF-8",
+      utf8("héllo"),
+      "text/plain; charset=nonsense-9",
+      "héllo",
+    ],
+    ["a UTF-8 BOM, which is not kept", bytes([0xef, 0xbb, 0xbf], utf8("hi")), "text/plain", "hi"],
+    [
+      "a UTF-16LE BOM over a header that says otherwise",
+      bytes([0xff, 0xfe], utf16le("hi")),
+      "text/plain; charset=windows-1252",
+      "hi",
+    ],
+    [
+      "a UTF-16BE BOM",
+      bytes([0xfe, 0xff, 0x00, 0x68, 0x00, 0x69]),
+      "text/plain; charset=utf-8",
+      "hi",
+    ],
+    ["CRLF as LF", utf8("a\r\nb\r\nc"), "text/plain", "a\nb\nc"],
+    ["a lone CR as LF", utf8("a\rb\rc"), "text/plain", "a\nb\nc"],
+    ["line breaks and indentation kept", utf8("a\n\n    b\n\tc"), "text/plain", "a\n\n    b\n\tc"],
+    ["trailing whitespace dropped", utf8("a\nb  \n\n \t\n"), "text/plain", "a\nb"],
+    ["leading blank lines dropped, indentation kept", utf8("\n \n\r\n  a"), "text/plain", "  a"],
+    ["markup left as text", utf8("<b>hi</b> &amp;"), "text/plain", "<b>hi</b> &amp;"],
+  ] as const)("reads %s", (_, input, contentType, expected) => {
+    expect(readText(input, contentType)).toBe(expected);
+  });
+
+  it("cuts to 500 code points, never half a surrogate pair", () => {
+    const text = readText(utf8("😀".repeat(501)), "text/plain");
+
+    expect(text).toBe("😀".repeat(500));
+  });
+
+  it("drops the whitespace a cut leaves at its end", () => {
+    expect(readText(utf8(`${"a".repeat(499)} \n b`), "text/plain")).toBe("a".repeat(499));
+  });
+
+  it("gives a text of exactly 500 code points whole", () => {
+    expect(readText(utf8("a".repeat(500)), "text/plain")).toBe("a".repeat(500));
+  });
+
+  it.each([
+    ["nothing", utf8("")],
+    ["whitespace", utf8(" \r\n\t\n ")],
+    ["a BOM alone", bytes([0xef, 0xbb, 0xbf])],
+  ])("gives nothing for %s", (_, input) => {
+    expect(readText(input, "text/plain")).toBeUndefined();
   });
 });
