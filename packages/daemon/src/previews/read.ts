@@ -245,12 +245,23 @@ const bomCharset = (head: Uint8Array): string | undefined => {
   return undefined;
 };
 
+// The `charset` parameter of a Content-Type, by its exact name, so `x-charset` is not it. A
+// quoted value is taken between its quotes.
 const headerCharset = (contentType: string | undefined): string | undefined => {
-  const match = /charset\s*=\s*(?:"(?<double>[^"]*)"|'(?<single>[^']*)'|(?<bare>[^\s;]+))/iu.exec(
-    contentType ?? ""
-  );
+  for (const parameter of (contentType ?? "").split(";").slice(1)) {
+    const [name = "", ...value] = parameter.split("=");
 
-  return resolveLabel(match?.groups?.double ?? match?.groups?.single ?? match?.groups?.bare);
+    if (name.trim().toLowerCase() === "charset") {
+      return resolveLabel(
+        value
+          .join("=")
+          .trim()
+          .replace(/^(?<quote>["'])(?<label>.*)\k<quote>$/u, "$<label>")
+      );
+    }
+  }
+
+  return undefined;
 };
 
 const metaCharset = (head: Uint8Array): string | undefined => {

@@ -726,6 +726,12 @@ describe(readText, () => {
     ["Shift_JIS", bytes([0x82, 0xb1, 0x82, 0xf1]), 'text/plain; charset="Shift_JIS"', "こん"],
     ["UTF-16LE named by the header", bytes(utf16le("hi")), "text/plain; charset=utf-16le", "hi"],
     [
+      "the charset parameter itself, not one that ends in its name",
+      utf8("caf\u00E9"),
+      "text/plain; x-charset=windows-1252; charset=utf-8",
+      "café",
+    ],
+    [
       "an unknown charset label, as UTF-8",
       utf8("héllo"),
       "text/plain; charset=nonsense-9",
