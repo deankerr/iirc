@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
+import { optionsState } from "../options/state.ts";
 import { uiSync } from "../options/ui.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
@@ -407,7 +408,10 @@ const opened = async (
     container.remove();
   });
 
-  await settled(() => fake.daemon.followers.length === 1 && fake.daemon.uiFollowers.length === 1);
+  // The shared options read, so a window read knows whether its Timeline's Previews are.
+  await settled(
+    () => fake.daemon.followers.length === 1 && registry.get(optionsState).ui !== undefined
+  );
 
   await act(async () => {
     registry.set(open, Schema.decodeSync(TimelineId)(iirc));
@@ -1778,12 +1782,40 @@ describe("a Message's Previews", () => {
     });
   });
 
+  it("draws a held Preview the first time its Message is drawn, with no placeholder and no ask", async () => {
+    const states = new Set<string | undefined>();
+
+    const watcher = new MutationObserver(() => {
+      for (const one of document.querySelectorAll<HTMLElement>("[data-preview]")) {
+        states.add(one.dataset.preview);
+      }
+    });
+
+    watcher.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+    const { daemon } = await opened("on", catsItem(ready));
+    const first = drawn();
+
+    watcher.disconnect();
+
+    expect({
+      asks: daemon.previewAsks,
+      first,
+      held: daemon.heldReads,
+      states: [...states],
+    }).toStrictEqual({
+      asks: [],
+      first: [{ state: "ready", text: "CatsA page about cats." }],
+      held: [{ positions: [cursor(2)], timeline: iirc }],
+      states: ["ready"],
+    });
+  });
+
   it("draws no image, and gives none a source, until it scrolls into view", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("page")));
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
+    // Held, the card is drawn before the Message is ever seen.
+    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
 
     const before = list()?.querySelectorAll("img, canvas").length;
 
@@ -1873,9 +1905,8 @@ describe("a Message's Previews", () => {
     const { fetches, draws, revoked } = stubMedia();
     const { daemon } = await opened("on", catsItem(readyWithImage("image", true)));
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
+    // Held, the card is drawn before the Message is ever seen.
+    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
 
     const unseen = { fetches: fetches(), image: list()?.querySelectorAll("img, canvas").length };
 
@@ -2015,9 +2046,8 @@ describe("a Message's Previews", () => {
 
     const { daemon } = await opened("on", catsItem(readyWithImage("page", true)));
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
+    // Held, the card is drawn before the Message is ever seen.
+    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
     await imageSeen();
     await settled(() => list()?.querySelector("[data-loaded]") === null);
 

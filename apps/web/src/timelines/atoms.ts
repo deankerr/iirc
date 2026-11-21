@@ -1,23 +1,27 @@
 /**
  * The Timelines, as atoms: the state the pure core folds, the reads it calls for, and the
  * one changes stream for the whole page, which feeds it. While the browser is signed in,
- * `sync` makes every read the core asks for and follows the stream from the place the
- * core says, and the core decides everything else.
+ * `sync` makes every read the core asks for, reading a window's held Previews with it, and
+ * follows the stream from the place the core says, and the core decides everything else.
  *
  * @packageDocumentation
  */
+import { heldLimit } from "@iirc/api";
 import type {
   NetworkId,
   SearchQuery,
   TimelineChangesEvent,
   TimelineId,
   TimelineItem,
+  TimelineWindow,
 } from "@iirc/api";
 import { closingShown, initialClosing } from "@iirc/frontend/closing";
 import type { Closing } from "@iirc/frontend/closing";
 import { notificationsOf } from "@iirc/frontend/notifications";
 import type { Muted } from "@iirc/frontend/notifications";
 import { uiShown } from "@iirc/frontend/options";
+import { heldReadOf, mayPreview, modeIn, reducePreviews } from "@iirc/frontend/previews";
+import type { PreviewsEvent } from "@iirc/frontend/previews";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
@@ -42,7 +46,7 @@ import type {
   Timelines,
   TimelinesEvent,
 } from "@iirc/frontend/timelines";
-import { Context, Duration, Effect, FiberSet, Schedule, Stream } from "effect";
+import { Context, Duration, Effect, Exit, FiberSet, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -57,6 +61,7 @@ import { optionsState } from "../options/state.ts";
 import { saidChanged } from "../options/uploads-state.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
+import { previewsModes, previewsState } from "../previews/state.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
 
 /** Everything the Frontend holds of the Timelines, as the core folds it. */
@@ -279,11 +284,67 @@ const searchRefusals: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * The request a read makes, and the event its answer is.
+ * Folds one event into what the core holds of Previews.
+ * @param registry - The registry.
+ * @param event - What happened.
+ */
+const previewsHappened = (registry: AtomRegistry.AtomRegistry, event: PreviewsEvent) => {
+  registry.set(previewsState, reducePreviews(registry.get(previewsState), event));
+};
+
+/**
+ * Reads what the Daemon already holds of a window's Previews, which fetches nothing, and
+ * folds it in, so a row whose Previews are held is drawn whole the first time. Only the
+ * Messages that may have Previews are read, and only while their Timeline's mode asks. It
+ * never fails: a held read refused or lost is let go of, and each Message is still asked
+ * for as it comes into view.
+ * @param registry - The registry.
+ * @param window - The window read.
+ * @returns The held read, which never fails.
+ */
+const readHeld = (registry: AtomRegistry.AtomRegistry, window: TimelineWindow) =>
+  Effect.gen(function* () {
+    const { timeline } = window;
+    const mode = modeIn(registry.get(previewsModes), timeline);
+
+    const positions = window.items
+      .filter((item) => item.timeline === timeline && mayPreview(mode, item.content))
+      .map((item) => item.position)
+      .slice(-heldLimit);
+
+    if (positions.length === 0) {
+      return;
+    }
+
+    const client = yield* DaemonClient;
+    const read = heldReadOf(registry.get(previewsState), timeline);
+
+    previewsHappened(registry, { _tag: "Reading", read });
+
+    // Every end of the read settles it, however it ends, so no read stays in flight.
+    yield* client.previews.held({ params: { timeline }, payload: { positions } }).pipe(
+      Effect.onExit((exit) =>
+        Effect.sync(() => {
+          previewsHappened(
+            registry,
+            Exit.isSuccess(exit)
+              ? { _tag: "Read", messages: exit.value.messages, read }
+              : { _tag: "ReadDropped", read }
+          );
+        })
+      ),
+      Effect.catchCause(() => Effect.void)
+    );
+  });
+
+/**
+ * The request a read makes, and the event its answer is. A window's held Previews are read
+ * with it, before its answer is folded in.
+ * @param registry - The registry.
  * @param read - The read.
  * @returns The request.
  */
-const request = (read: Read) =>
+const request = (registry: AtomRegistry.AtomRegistry, read: Read) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
 
@@ -324,6 +385,8 @@ const request = (read: Read) =>
           query: { limit: read.limit },
         });
 
+        yield* readHeld(registry, window);
+
         return { _tag: "WindowRead", read, window } as const;
       }
 
@@ -332,6 +395,8 @@ const request = (read: Read) =>
           params: { timeline: read.timeline },
           query: { before: read.before, limit: read.limit },
         });
+
+        yield* readHeld(registry, window);
 
         return { _tag: "WindowRead", read, window } as const;
       }
@@ -342,6 +407,8 @@ const request = (read: Read) =>
           query: { after: read.after, limit: read.limit },
         });
 
+        yield* readHeld(registry, window);
+
         return { _tag: "WindowRead", read, window } as const;
       }
 
@@ -350,6 +417,8 @@ const request = (read: Read) =>
           params: { timeline: read.timeline },
           query: { around: read.around, limit: read.limit },
         });
+
+        yield* readHeld(registry, window);
 
         return { _tag: "WindowRead", read, window } as const;
       }
@@ -395,7 +464,7 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: Read) =>
     // where the stream is when the Daemon is asked, not from when the read was taken on.
     const attempt = Effect.sync(() => {
       happened(registry, { _tag: "Requesting", read });
-    }).pipe(Effect.andThen(request(read)));
+    }).pipe(Effect.andThen(request(registry, read)));
 
     // A search the Daemon refused says why, and is not asked again.
     const refusal = (tag: string) => (read._tag === "Search" ? searchRefusals.get(tag) : undefined);

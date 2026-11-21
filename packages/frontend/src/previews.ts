@@ -7,13 +7,15 @@
  * `ui.previews.timelines`, or else `ui.previews`. Each Preview is open or closed, as the
  * toggle after its link leaves it, or else as `ui.previews.start` says, and a Message is
  * asked for only while one of its Previews is open, since a closed one fetches nothing. A
- * link the Daemon holds for a press is fetched only once the Owner opens it. What each
- * Message shows, each Preview's card, and a failure's words are derived as it is drawn,
- * never held.
+ * link the Daemon holds for a press is fetched only once the Owner opens it. A window's
+ * Messages are read for what the Daemon already holds of them, which fetches nothing, so a
+ * row held is drawn whole before it is ever asked for. What each Message shows, each
+ * Preview's card, and a failure's words are derived as it is drawn, never held.
  *
  * @packageDocumentation
  */
 import type {
+  HeldPreviews,
   ItemContent,
   Preview,
   PreviewFailure,
@@ -63,27 +65,53 @@ interface ItemHeld {
 }
 
 /**
- * What a Frontend holds of Previews: each Message shown, by `messageKey`; each item by its
+ * What a Frontend holds of Previews: each Message shown, by `messageKey`; the ids a held
+ * read gave each Message not yet answered, by `messageKey`, in its order; each item by its
  * id; each link pressed, by `linkKey`, which is never pressed again; how many changes the
- * stream gave, which orders a change against an answer; and whether the stream is followed
- * now, which an ask waits for, so no change it starts is missed.
+ * stream gave, which orders a change against an answer; how many held reads are in flight,
+ * whose answers may name any item; and whether the stream is followed now, which an ask
+ * waits for, so no change it starts is missed.
  */
 export interface Previews {
   readonly messages: ReadonlyMap<string, MessageHeld>;
+  readonly held: ReadonlyMap<string, readonly PreviewId[]>;
   readonly items: ReadonlyMap<PreviewId, ItemHeld>;
   readonly pressed: ReadonlySet<string>;
   readonly tick: number;
+  readonly reading: number;
   readonly following: boolean;
 }
 
-/** Nothing shown, nothing held, nothing pressed, and the stream not followed. */
+/** Nothing shown, read, held, or pressed, and the stream not followed. */
 export const initialPreviews: Previews = {
   following: false,
+  held: new Map(),
   items: new Map(),
   messages: new Map(),
   pressed: new Set(),
+  reading: 0,
   tick: 0,
 };
+
+/**
+ * A held read of a window's Messages: their Timeline, and the stream's count when it
+ * began, which orders what it read against a change.
+ */
+export interface HeldRead {
+  readonly timeline: TimelineId;
+  readonly since: number;
+}
+
+/**
+ * A held read of a Timeline's Messages, at the stream's count now.
+ * @param state - The state.
+ * @param timeline - The Timeline.
+ * @returns The read.
+ */
+export const heldReadOf = (state: Previews, timeline: TimelineId): HeldRead => ({
+  since: state.tick,
+  timeline,
+});
 
 /**
  * An ask to make: of which Message, under its key, at which count of the stream, and under
@@ -129,6 +157,9 @@ export interface PreviewsPress {
  * - `Followed`: the stream is followed, from now.
  * - `Changed`: the stream gave an item as it is now.
  * - `Lost`: the stream is no longer followed, and every ask in flight was let go of.
+ * - `Reading`: the runtime began a held read of a window's Messages.
+ * - `Read`: the Daemon answered a held read with what it holds of each Message.
+ * - `ReadDropped`: a held read ended with no answer, which is let go of.
  * - `Forgotten`: the page signed out.
  */
 export type PreviewsEvent =
@@ -153,6 +184,13 @@ export type PreviewsEvent =
   | { readonly _tag: "Followed" }
   | { readonly _tag: "Changed"; readonly item: PreviewItem }
   | { readonly _tag: "Lost" }
+  | { readonly _tag: "Reading"; readonly read: HeldRead }
+  | {
+      readonly _tag: "Read";
+      readonly read: HeldRead;
+      readonly messages: HeldPreviews["messages"];
+    }
+  | { readonly _tag: "ReadDropped"; readonly read: HeldRead }
   | { readonly _tag: "Forgotten" };
 
 /**
@@ -278,24 +316,52 @@ const pressable = (held: MessageHeld, items: ReadonlyMap<PreviewId, ItemHeld>): 
   held.ids?.some((id) => items.get(id)?.item.state._tag === "WaitingForPress") === true;
 
 /**
- * Only the items some answered Message names, unless an ask is in flight, whose answer may
- * name any.
+ * Whether an answer in flight, of an ask or a held read, may name any item, so every
+ * change the stream gives is held meanwhile.
+ * @param state - The state.
+ * @returns Whether one is.
+ */
+const inFlight = (state: Previews): boolean =>
+  state.reading > 0 || [...state.messages.values()].some((held) => held.asking === "Asking");
+
+/**
+ * Only the items some answered Message names, or a held read named, unless an answer is in
+ * flight, which may name any.
  * @param state - The state.
  * @returns It, holding no item no Message shows.
  */
 const pruned = (state: Previews): Previews => {
-  const messages = [...state.messages.values()];
-
-  if (messages.some((held) => held.asking === "Asking")) {
+  if (inFlight(state)) {
     return state;
   }
 
-  const named = new Set(messages.flatMap((held) => held.ids ?? []));
+  const named = new Set([
+    ...[...state.messages.values()].flatMap((held) => held.ids ?? []),
+    ...[...state.held.values()].flat(),
+  ]);
 
   return {
     ...state,
     items: new Map([...state.items].filter(([id]) => named.has(id))),
   };
+};
+
+/**
+ * A map without one key.
+ * @param map - The map.
+ * @param key - The key.
+ * @returns The map, without it.
+ */
+const without = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<string, V> => {
+  if (!map.has(key)) {
+    return map;
+  }
+
+  const left = new Map(map);
+
+  left.delete(key);
+
+  return left;
 };
 
 /**
@@ -361,9 +427,9 @@ const wantedAgain = (state: Previews, key: string): Previews => {
 
 /**
  * An answer's items folded in: each in place of the one held, unless the stream changed
- * that one after the ask began, which is then newer than the answer.
+ * that one after the ask or the read began, which is then newer than the answer.
  * @param state - The state.
- * @param since - The stream's count when the ask began.
+ * @param since - The stream's count when the ask or the read began.
  * @param previews - The items.
  * @returns The items held now.
  */
@@ -383,6 +449,47 @@ const answeredItems = (
   }
 
   return items;
+};
+
+/**
+ * A held read answered: each Message's ids kept, unless an ask already answered it, and
+ * each item the Daemon holds folded in as an answer's are. A link nothing is held of folds
+ * in no item, so it is drawn as whatever the stream later gives.
+ * @param state - The state.
+ * @param read - The read.
+ * @param messages - What the Daemon holds of each Message.
+ * @returns The state.
+ */
+const heldAnswered = (
+  state: Previews,
+  read: HeldRead,
+  messages: HeldPreviews["messages"]
+): Previews => {
+  const held = new Map(state.held);
+
+  for (const { position, previews } of messages) {
+    const key = messageKey(read.timeline, position);
+
+    if (previews.length > 0 && state.messages.get(key)?.ids === undefined) {
+      held.set(
+        key,
+        previews.map((item) => item.id)
+      );
+    }
+  }
+
+  const items = messages
+    .flatMap((message) => message.previews)
+    .flatMap((item): PreviewItem[] =>
+      item.state._tag === "NotHeld" ? [] : [{ ...item, state: item.state }]
+    );
+
+  return {
+    ...state,
+    held,
+    items: answeredItems(state, read.since, items),
+    reading: Math.max(0, state.reading - 1),
+  };
 };
 
 /**
@@ -430,12 +537,33 @@ const shown = (
 };
 
 /**
+ * A change the stream gave, held only for an item some Message names, or while an answer
+ * is in flight, which may name any.
+ * @param state - The state.
+ * @param item - The item, as it is now.
+ * @returns The state.
+ */
+const changed = (state: Previews, item: PreviewItem): Previews => {
+  const tick = state.tick + 1;
+
+  const named =
+    state.items.has(item.id) ||
+    inFlight(state) ||
+    [...state.held.values()].some((ids) => ids.includes(item.id));
+
+  return named
+    ? { ...state, items: new Map(state.items).set(item.id, { item, tick }), tick }
+    : { ...state, tick };
+};
+
+/**
  * Folds one event in. A Message is wanted once, when first shown, and asked for only while
  * the stream is followed. An answer is taken only by the ask in flight, though its items
  * are folded in whenever it lands, each unless the stream changed it since. A change is
- * held only for an item a Message names, or while an ask is in flight. When the stream is
- * lost, every Message still waiting on a Preview, or on its answer, is wanted again, to
- * be asked once it is followed again.
+ * held only for an item a Message or a held read names, or while an ask or a held read is
+ * in flight. A held read's items are folded in as an answer's are. When the stream is lost,
+ * every Message still waiting on a Preview, or on its answer, is wanted again, to be asked
+ * once it is followed again.
  * @param state - The state.
  * @param event - What happened.
  * @returns The state now.
@@ -457,11 +585,15 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
       const answered =
         held === undefined
           ? { ...state, items }
-          : withMessage({ ...state, items }, event.ask.key, {
-              ...held,
-              asking: "Answered",
-              ids: event.previews.map((item) => item.id),
-            });
+          : withMessage(
+              { ...state, held: without(state.held, event.ask.key), items },
+              event.ask.key,
+              {
+                ...held,
+                asking: "Answered",
+                ids: event.previews.map((item) => item.id),
+              }
+            );
 
       return pruned(answered);
     }
@@ -505,16 +637,7 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
     }
 
     case "Changed": {
-      const { item } = event;
-      const tick = state.tick + 1;
-
-      const named =
-        state.items.has(item.id) ||
-        [...state.messages.values()].some((held) => held.asking === "Asking");
-
-      return named
-        ? { ...state, items: new Map(state.items).set(item.id, { item, tick }), tick }
-        : { ...state, tick };
+      return changed(state, event.item);
     }
 
     case "Lost": {
@@ -528,6 +651,18 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
       );
 
       return pruned({ ...state, following: false, messages });
+    }
+
+    case "Reading": {
+      return { ...state, reading: state.reading + 1 };
+    }
+
+    case "Read": {
+      return pruned(heldAnswered(state, event.read, event.messages));
+    }
+
+    case "ReadDropped": {
+      return pruned({ ...state, reading: Math.max(0, state.reading - 1) });
     }
 
     case "Forgotten": {
@@ -564,6 +699,15 @@ const waitsIn = (direct: boolean, chosen: PreviewsShown | undefined): boolean =>
   direct && chosen === undefined;
 
 /**
+ * A Message's ids, in its order: as an ask answered, or else as a held read gave them.
+ * @param state - The state.
+ * @param key - Its key.
+ * @returns Its ids, or none before either.
+ */
+const idsOf = (state: Previews, key: string): readonly PreviewId[] | undefined =>
+  state.messages.get(key)?.ids ?? state.held.get(key);
+
+/**
  * Whether a link's item, as the Daemon last gave it, waits for a press.
  * @param state - The state.
  * @param key - Its Message's key.
@@ -571,7 +715,7 @@ const waitsIn = (direct: boolean, chosen: PreviewsShown | undefined): boolean =>
  * @returns Whether it waits.
  */
 const waitingAt = (state: Previews, key: string, index: number): boolean => {
-  const id = state.messages.get(key)?.ids?.[index];
+  const id = idsOf(state, key)?.[index];
 
   return id !== undefined && state.items.get(id)?.item.state._tag === "WaitingForPress";
 };
@@ -699,7 +843,7 @@ export const pressOf = (
  */
 export const pressesWanted = (state: Previews, toggles: Toggles): readonly PreviewsPress[] =>
   [...state.messages].flatMap(([key, held]) =>
-    (held.ids ?? []).flatMap((_, index) =>
+    (idsOf(state, key) ?? []).flatMap((_, index) =>
       toggles.get(linkKey(key, index)) === true &&
       waitingAt(state, key, index) &&
       !state.pressed.has(linkKey(key, index))
@@ -1203,7 +1347,8 @@ export const previewsOf = (
     return [];
   }
 
-  const held = state.messages.get(messageKey(timeline, position));
+  const key = messageKey(timeline, position);
+  const held = state.messages.get(key);
 
   if (held?.asking === "Refused") {
     return [];
@@ -1234,11 +1379,29 @@ export const previewsOf = (
     });
   }
 
-  return found.map((link, index) => ({
-    _tag: "Pending",
-    key: String(index),
-    link: linkShown(link.href),
-  }));
+  // Before an answer, what a held read gave, and a placeholder for a link it held nothing of.
+  const read = state.held.get(key);
+
+  return found.flatMap((link, index): PreviewShown[] => {
+    const id = read?.[index];
+    const item = id === undefined ? undefined : state.items.get(id);
+
+    if (item === undefined) {
+      return [{ _tag: "Pending", key: String(index), link: linkShown(link.href) }];
+    }
+
+    const shown = itemShown(
+      item.item,
+      link.href,
+      index,
+      mode === "on",
+      players,
+      timeline,
+      position
+    );
+
+    return shown === undefined ? [] : [shown];
+  });
 };
 
 /**

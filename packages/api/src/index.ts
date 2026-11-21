@@ -271,6 +271,11 @@ export {
 export { TailDaemon, TailEvent, TailLevel, TailLine, TailNumber, TailRead } from "./tail.ts";
 
 export {
+  HeldItem,
+  HeldPreviews,
+  HeldRequest,
+  HeldState,
+  heldLimit,
   ImageDimensions,
   ImageHash,
   ImageType,
