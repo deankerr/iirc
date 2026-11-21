@@ -522,7 +522,6 @@ describe("Previews over a real server", () => {
       {
         "https://short.example/p": new LinkWrongType({
           link: "https://cdn.example/cat.png",
-          status: 200,
           type: "image/png",
         }),
       },
@@ -617,7 +616,6 @@ describe("Previews over a real server", () => {
     const answers = {
       "https://audio.example/": new LinkWrongType({
         link: "https://audio.example/",
-        status: 200,
         type: "audio/ogg",
       }),
       "https://bare.example/": page("<style></style>"),
@@ -625,14 +623,12 @@ describe("Previews over a real server", () => {
       "https://image.example/cat.png": { body: "not read", type: "image/png" },
       "https://plain.example/": new LinkWrongType({
         link: "https://plain.example/",
-        status: 200,
         type: "text/plain",
       }),
       "https://private.example/": new LinkRefused({ reason: "a private address" }),
       "https://slow.example/": new LinkTimedOut(),
       "https://video.example/": new LinkWrongType({
         link: "https://video.example/",
-        status: 200,
         type: "video/mp4",
       }),
     } satisfies Record<string, Answer>;
@@ -3144,7 +3140,7 @@ describe("a link that is itself video or sound, streamed over a real server", ()
 
     it.each([
       [new LinkRefused({ reason: "private" }), "Refused"],
-      [new LinkWrongType({ link: read, status: 200, type: "text/html" }), "NothingToShow"],
+      [new LinkWrongType({ link: read, type: "text/html" }), "NothingToShow"],
       [{ status: 500, type: "video/mp4" }, "NothingToShow"],
     ] as const)("for %j: %s", async (answer, reason) => {
       const [status, error] = await failing(answer);

@@ -181,7 +181,6 @@ describe(logged, () => {
           {
             "https://evil.example/": new LinkWrongType({
               link: `https://evil.example/${forged}`,
-              status: 200,
               type: `text/plain${forged}`,
             }),
           },

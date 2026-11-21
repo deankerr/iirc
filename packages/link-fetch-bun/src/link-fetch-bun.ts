@@ -478,17 +478,26 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
       const answer = Effect.gen(function* () {
         const { response, target } = yield* follow;
         const header = essence(response.headers.get("content-type"));
+
+        // An error answers with nothing of use but its status, so its type is not checked and
+        // no byte of its body is read. A stream's is answered as the host gave it.
+        if (purpose.kind !== "stream" && (response.status < 200 || response.status > 299)) {
+          return {
+            body: Stream.empty,
+            headers: Object.fromEntries(response.headers),
+            link: target.href,
+            status: response.status,
+            type: header,
+          } satisfies Fetched;
+        }
+
         // A stream's 416 says only that its range is past the end, so its type is never media,
         // and only its status and `Content-Range` are of use.
         const unsatisfied = purpose.kind === "stream" && response.status === 416;
         const type = unsatisfied ? header : declared(purpose, header);
 
         if (type === undefined) {
-          return yield* new LinkWrongType({
-            link: target.href,
-            status: response.status,
-            type: header,
-          });
+          return yield* new LinkWrongType({ link: target.href, type: header });
         }
 
         const cap = capOf(purpose, type);
@@ -513,11 +522,7 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         // Only the first bytes are looked at, however many the first chunks held, so the type
         // never depends on how the body was split.
         if (purpose.kind === "image" && sniff(first.subarray(0, sniffed)) !== type) {
-          return yield* new LinkWrongType({
-            link: target.href,
-            status: response.status,
-            type: header,
-          });
+          return yield* new LinkWrongType({ link: target.href, type: header });
         }
 
         return {

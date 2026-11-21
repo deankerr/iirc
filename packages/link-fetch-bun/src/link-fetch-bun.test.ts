@@ -727,10 +727,17 @@ const answered = async (handler: Handler, purpose: Purpose) =>
     })
   );
 
-const missingPng: Handler = (_request, response) => {
-  response.writeHead(404, { "content-type": "image/png" });
-  response.end(png);
-};
+/**
+ * A host answering 404 with a type, whose body never comes.
+ * @param type - The type.
+ * @returns The handler.
+ */
+const errorWithheld =
+  (type: string): Handler =>
+  (_request, response) => {
+    response.writeHead(404, { "content-type": type });
+    response.flushHeaders();
+  };
 
 const gif = encoder.encode("GIF89a\u0001\u0000\u0001\u0000");
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
@@ -851,9 +858,16 @@ describe("types", () => {
     });
   });
 
-  it("names the status it answered with", async () => {
-    await expect(answered(missingPng, page)).resolves.toMatchObject({
-      failed: { _tag: "LinkWrongType", status: 404 },
+  // The body never comes, so a fetch that waited for any of it would time out.
+  it.each([
+    ["a page", "text/html", page],
+    ["a page answered as an image", "image/png", page],
+    ["an image", "image/png", image],
+    ["an image answered as a page", "text/html", image],
+    ["an oEmbed answered as a page", "text/html", { kind: "oembed" }],
+  ] as const)("%s that answers with an error is its status alone", async (_, type, purpose) => {
+    await expect(answered(errorWithheld(type), purpose)).resolves.toMatchObject({
+      answer: { body: new Uint8Array(), status: 404, type },
     });
   });
 });

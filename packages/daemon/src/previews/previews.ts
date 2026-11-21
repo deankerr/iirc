@@ -310,19 +310,14 @@ const reasonOf = (failure: LinkFetchFailure): PreviewFailure => {
 
 /**
  * What a fetch that failed shows: the reason, or for an answer of another type than a page,
- * an error when its status is one, or else a text Preview of it when it is media.
+ * a text Preview of it when it is media.
  * @param failure - Why the fetch gave no page.
  * @returns What it came to.
  */
-const failedFetch = (failure: LinkFetchFailure): Read => {
-  if (failure._tag !== "LinkWrongType") {
-    return failedRead(reasonOf(failure));
-  }
-
-  return succeeded(failure.status)
+const failedFetch = (failure: LinkFetchFailure): Read =>
+  failure._tag === "LinkWrongType"
     ? mediaPreview(failure.link, failure.type)
-    : failedRead("AnsweredError");
-};
+    : failedRead(reasonOf(failure));
 
 /**
  * Bytes, one after another.

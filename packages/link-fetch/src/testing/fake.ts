@@ -149,14 +149,26 @@ const caps: Record<Purpose["kind"], (type: string) => number> = {
 };
 
 /**
- * A recorded response refused for its type, as the guard refuses it.
- * @param link - The link it answered as.
+ * A recorded response with a status outside 200 to 299, for any purpose but a stream, as the
+ * guard answers it: its status, its declared type unchecked, and no body.
+ * @param link - The link asked, normalised.
+ * @param purpose - What it is fetched for.
  * @param recorded - The response.
- * @param type - Its declared type.
- * @returns The failure.
+ * @returns The answer, or nothing for any other response.
  */
-const wrongType = (link: string, recorded: Recorded, type: string) =>
-  new LinkWrongType({ link, status: recorded.status ?? 200, type });
+const erred = (link: string, purpose: Purpose, recorded: Recorded) => {
+  const { status = 200 } = recorded;
+
+  return purpose.kind === "stream" || (status >= 200 && status <= 299)
+    ? undefined
+    : Effect.succeed({
+        body: Stream.empty,
+        headers: { "content-type": recorded.type, ...recorded.headers },
+        link: recorded.link === undefined ? link : normalised(recorded.link),
+        status,
+        type: recorded.type.split(";")[0]?.trim().toLowerCase() ?? "",
+      } satisfies Fetched);
+};
 
 /**
  * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
@@ -180,7 +192,7 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
     purpose.kind === "stream" && recorded.status === 416 ? declared : takes[purpose.kind](declared);
 
   if (type === undefined) {
-    return Effect.fail(wrongType(answeredAs, recorded, declared));
+    return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));
   }
 
   const limit = caps[purpose.kind](type);
@@ -274,7 +286,7 @@ export const makeFakeLinkFetch = (
             return yield* answer;
           }
 
-          return yield* answered(key, purpose, answer);
+          return yield* erred(key, purpose, answer) ?? answered(key, purpose, answer);
         }),
     };
 
