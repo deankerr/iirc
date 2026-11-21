@@ -1,3 +1,4 @@
+import { uiDefaults } from "@iirc/api";
 import { Input, Instant } from "@iirc/client";
 import { Journal, NetworkId } from "@iirc/runtime/journal";
 import type { Change, JournalRecord } from "@iirc/runtime/journal";
@@ -71,7 +72,6 @@ describe("folding the ui options", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
-        "previews.style": "thumbnail",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
@@ -124,7 +124,6 @@ describe("folding the ui options", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
-        "previews.style": "thumbnail",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
@@ -144,6 +143,22 @@ describe("folding the ui options", () => {
         "unread.muted": [],
         "unread.quietBots": false,
       },
+      sequence: 4,
+    });
+  });
+});
+
+describe("a Change of ui.previews.style, which is gone", () => {
+  it("changes no option and fails nothing, set or unset, and every option keeps its own Change", () => {
+    const { options, sequence } = fold([
+      set("previews.style", "card"),
+      set("previews.mediaHeight", "large"),
+      unset("previews.style"),
+      set("previews.style", "line"),
+    ]);
+
+    expect({ options, sequence }).toStrictEqual({
+      options: { ...uiDefaults, "previews.mediaHeight": "large" },
       sequence: 4,
     });
   });
@@ -230,7 +245,6 @@ describe("the ui options, kept", () => {
             "open.spotify.com",
             "player.twitch.tv",
           ],
-          "previews.style": "thumbnail",
           "previews.timelines": {},
           "sidebar.networks": [],
           "sidebar.order": [],
@@ -274,7 +288,6 @@ describe("the ui options, kept", () => {
               "open.spotify.com",
               "player.twitch.tv",
             ],
-            "previews.style": "thumbnail",
             "previews.timelines": {},
             "sidebar.networks": [],
             "sidebar.order": [],

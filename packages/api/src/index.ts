@@ -192,7 +192,6 @@ export {
   PreviewsFolded,
   PreviewsMediaHeight,
   PreviewsPlayers,
-  PreviewsStyle,
   PlayerHost,
   PreviewsShown,
   ReadRule,

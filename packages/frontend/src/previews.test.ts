@@ -6,7 +6,7 @@ import {
   UiInForce,
   uiDefaults,
 } from "@iirc/api";
-import type { Preview, PreviewsShown, PreviewsStyle } from "@iirc/api";
+import type { Preview, PreviewsShown } from "@iirc/api";
 import { cursorOf } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Schema } from "effect";
@@ -17,6 +17,7 @@ import {
   asksWanted,
   choosing,
   foldedOf,
+  hostNamed,
   initialPreviews,
   mayPreview,
   messageKey,
@@ -29,7 +30,6 @@ import {
   previewsOf,
   reasonWords,
   reducePreviews,
-  summaryOf,
 } from "./previews.ts";
 import type {
   Motion,
@@ -109,8 +109,8 @@ const item = (
 /** The hosts `ui.previews.players` lists by default. */
 const listed = uiDefaults["previews.players"];
 
-/** The hosts listed by default, and the default style. */
-const drawing = { players: listed, style: "thumbnail" } as const;
+/** The hosts listed by default, as a Message's Previews are drawn with them. */
+const drawing = listed;
 
 const pending = { _tag: "Pending" } as const;
 const waitingForPress = { _tag: "WaitingForPress" } as const;
@@ -537,18 +537,19 @@ describe("what a Message shows", () => {
     expect(previewsOf(answered, "on", timeline, at(1), links, drawing)).toStrictEqual([
       {
         _tag: "Ready",
-        description: { drawn: "Pressed", text: "A page about cats." },
+        description: "A page about cats.",
+        host: "example.com",
         image: undefined,
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
         media: undefined,
+        name: "Cats",
         player: undefined,
-        summary: "example.com · Cats",
+        title: "Cats",
       },
       {
-        _tag: "Plain",
+        _tag: "Failed",
         key: "1",
-        link: { href: "https://b.example/", text: "https://b.example/" },
         reason: "No preview: the Daemon never fetches this address.",
       },
       {
@@ -598,27 +599,14 @@ describe("what a Message shows", () => {
 
     const shown = previewsOf(answered, "on", timeline, at(1), message, drawing);
 
-    expect(shown.map((one) => [one._tag, one.link.href, one.key])).toStrictEqual([
+    expect(
+      shown.map((one) => [one._tag, one._tag === "Ready" ? one.link.href : undefined, one.key])
+    ).toStrictEqual([
       ["Ready", "https://a.example/#one", "0"],
       ["Ready", "https://a.example/#two", "1"],
     ]);
   });
 });
-
-/**
- * The summary of a page's Preview, with some fields other than the page's.
- * @param fields - Those fields, as the wire carries them.
- * @returns Its summary.
- */
-const summary = (fields: Partial<typeof Preview.Encoded>) => {
-  const decoded = Schema.decodeSync(PreviewItem)({
-    id: idOf("a"),
-    link: page.link,
-    state: { _tag: "Ready", preview: { ...page, ...fields } },
-  });
-
-  return decoded.state._tag === "Ready" ? summaryOf(decoded.state.preview) : undefined;
-};
 
 const hash = "ab".repeat(32);
 
@@ -627,14 +615,12 @@ const hash = "ab".repeat(32);
  * @param fields - Those fields, as the wire carries them.
  * @param mode - `ui.previews`, `on` unless given.
  * @param players - The hosts `ui.previews.players` lists, its default unless given.
- * @param style - `ui.previews.style`, `thumbnail` unless given.
  * @returns What it shows, or none.
  */
 const shownReady = (
   fields: Partial<typeof Preview.Encoded>,
   mode: "on" | "text" = "on",
-  players: readonly string[] = listed,
-  style: PreviewsStyle = "thumbnail"
+  players: readonly string[] = listed
 ) => {
   const { ask, state } = asking(1);
 
@@ -650,10 +636,7 @@ const shownReady = (
     ],
   });
 
-  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), {
-    players,
-    style,
-  });
+  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), players);
 
   return only?._tag === "Ready" ? only : undefined;
 };
@@ -689,7 +672,7 @@ describe("a Preview's image", () => {
     ]).toStrictEqual([{ height: 48, width: 64 }, undefined]);
   });
 
-  it("is a poster for a video, and a thumbnail for a sound", () => {
+  it("is a poster for a page's video, and whole for a page", () => {
     const image = {
       animated: false,
       dimensions: null,
@@ -700,8 +683,8 @@ describe("a Preview's image", () => {
 
     expect([
       shownReady({ image, kind: "video", stream: "https://example.com/cats.mp4" })?.image?.drawn,
-      shownReady({ image, kind: "audio", stream: "https://example.com/cats.ogg" })?.image?.drawn,
-    ]).toStrictEqual(["Poster", "Thumbnail"]);
+      shownReady({ image, kind: "page" })?.image?.drawn,
+    ]).toStrictEqual(["Poster", "Whole"]);
   });
 });
 
@@ -773,14 +756,14 @@ describe("a Preview's player", () => {
     ).toStrictEqual([undefined, undefined, undefined, undefined]);
   });
 
-  it("is a page with its thumbnail once the list no longer names its host, as the Daemon would answer it", () => {
+  it("is a page with its image once the list no longer names its host, as the Daemon would answer it", () => {
     const shown = shownReady(playing, "on", ["player.vimeo.com"]);
 
     expect([
       shown?.player,
       shown?.image?.drawn,
       shownReady(playing, "on", [])?.player,
-    ]).toStrictEqual([undefined, "Thumbnail", undefined]);
+    ]).toStrictEqual([undefined, "Whole", undefined]);
   });
 
   it("matches its host exactly, never by a suffix or a look-alike", () => {
@@ -810,61 +793,165 @@ describe("a Preview's player", () => {
   it("is text alone under text: no image, no player", () => {
     const shown = shownReady(playing, "text");
 
-    expect([shown?.image, shown?.player, shown?.media, shown?.summary]).toStrictEqual([
+    expect([shown?.image, shown?.player, shown?.media, shown?.title]).toStrictEqual([
       undefined,
       undefined,
       undefined,
-      "example.com · A song",
+      "A song",
     ]);
   });
 });
 
 const image = { animated: false, dimensions: null, hash, size: 10, type: "image/png" } as const;
 
-describe("ui.previews.style", () => {
-  it("draws a page as its site and title alone on a line: no image, no description", () => {
-    const shown = shownReady({ image }, "on", listed, "line");
+/**
+ * What a card holds, in its order, as a row of a table: its title, its description, how
+ * its image is drawn, its media's kind, and the host its player plays from, each `-` where
+ * it has none, or `nothing` for no card at all.
+ * @param fields - The Preview's fields other than the page's.
+ * @param mode - `ui.previews`.
+ * @returns The row.
+ */
+const holds = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "text") => {
+  const shown = shownReady(fields, mode);
 
-    expect([shown?.summary, shown?.description, shown?.image]).toStrictEqual([
-      "example.com · Cats",
+  return shown === undefined
+    ? "nothing"
+    : [
+        shown.title ?? "-",
+        shown.description ?? "-",
+        shown.image?.drawn ?? "-",
+        shown.media?.kind ?? "-",
+        shown.player?.host ?? "-",
+      ].join(" | ");
+};
+
+/** A page that names a video file, which streams from elsewhere than its own link. */
+const pageVideo = {
+  image,
+  kind: "video",
+  stream: "https://example.com/cats.mp4",
+  type: "video/mp4",
+} as const;
+
+/** A link that is itself a video: its stream is itself, and the Daemon gives it no words. */
+const videoItself = {
+  description: null,
+  kind: "video",
+  stream: page.link,
+  title: null,
+  type: "video/mp4",
+} as const;
+
+describe("what a card holds", () => {
+  it.each([
+    ["a page", { image }, "on", "Cats | A page about cats. | Whole | - | -"],
+    ["a page", { image }, "text", "Cats | A page about cats. | - | - | -"],
+    [
+      "a page with no title",
+      { image, title: null },
+      "on",
+      "- | A page about cats. | Whole | - | -",
+    ],
+    ["a page with no image", {}, "on", "Cats | A page about cats. | - | - | -"],
+    ["a page with only blank words", { description: " ", title: "" }, "on", "nothing"],
+    [
+      "a page that names a video file",
+      pageVideo,
+      "on",
+      "Cats | A page about cats. | Poster | video | -",
+    ],
+    ["a page that names a video file", pageVideo, "text", "Cats | A page about cats. | - | - | -"],
+    [
+      "a page that names a listed player",
+      playing,
+      "on",
+      "A song | A page about cats. | Poster | - | www.youtube-nocookie.com",
+    ],
+    [
+      "a page that names a listed player",
+      playing,
+      "text",
+      "A song | A page about cats. | - | - | -",
+    ],
+    [
+      "a link that is itself an image",
+      { description: null, image, kind: "image", title: null },
+      "on",
+      "- | - | Whole | - | -",
+    ],
+    [
+      "a link that is itself an image",
+      { description: null, image, kind: "image", title: null },
+      "text",
+      "nothing",
+    ],
+    [
+      "a page whose video file is its own link",
+      { ...pageVideo, stream: page.link },
+      "text",
+      "Cats | A page about cats. | - | - | -",
+    ],
+    ["a link that is itself a video", videoItself, "on", "- | - | - | video | -"],
+    ["a link that is itself a video", videoItself, "text", "nothing"],
+    [
+      "a link that is itself a sound",
+      { description: null, kind: "audio", stream: page.link, title: null },
+      "on",
+      "- | - | - | audio | -",
+    ],
+    [
+      "a link that is itself a sound",
+      { description: null, kind: "audio", stream: page.link, title: null },
+      "text",
+      "nothing",
+    ],
+  ] as const)("%s, under %s", (_name, fields, mode, expected) => {
+    expect(holds(fields, mode)).toBe(expected);
+  });
+
+  it("is named for its title, or else its link, and contains what a stranger wrote", () => {
+    expect([
+      shownReady({})?.name,
+      shownReady({ title: null })?.name,
+      shownReady({ description: "a\u0007b", title: "evil\u202E" })?.title,
+      shownReady({ description: "a\u0007b", title: "evil\u202E" })?.description,
+    ]).toStrictEqual(["Cats", "https://a.example/", "evil\u202E\u202C", "a␇b"]);
+  });
+});
+
+describe("the host a card names", () => {
+  it.each([
+    ["the same host", "https://example.com/a", "https://example.com/b", undefined],
+    [
+      "the same host, but for www.",
+      "https://example.com/a",
+      "https://www.example.com/a",
       undefined,
-      undefined,
-    ]);
+    ],
+    ["the same host in another case", "https://EXAMPLE.com/a", "https://example.com/a", undefined],
+    [
+      "a shortened link that led elsewhere",
+      "https://t.co/abc",
+      "https://www.example.com/cats",
+      "example.com",
+    ],
+    [
+      "another host under the same name",
+      "https://example.com/",
+      "https://cdn.example.com/",
+      "cdn.example.com",
+    ],
+    ["a link that cannot be read", "not a link", "https://example.com/", undefined],
+  ] as const)("is %s", (_name, address, read, expected) => {
+    expect(hostNamed(address, read)).toBe(expected);
   });
 
-  it("draws a page's description behind a press and its image beside it as a thumbnail", () => {
-    const shown = shownReady({ image }, "on", listed, "thumbnail");
-
-    expect([shown?.description, shown?.image?.drawn]).toStrictEqual([
-      { drawn: "Pressed", text: "A page about cats." },
-      "Thumbnail",
-    ]);
-  });
-
-  it("draws a page's description below its summary and its image under it as a card", () => {
-    const shown = shownReady({ image }, "on", listed, "card");
-
-    expect([shown?.description, shown?.image?.drawn]).toStrictEqual([
-      { drawn: "Below", text: "A page about cats." },
-      "Card",
-    ]);
-  });
-
-  it("draws an image link, a video's poster, and a player whole in every style", () => {
-    const styles = ["line", "thumbnail", "card"] as const;
-
-    expect(
-      styles.map((style) => [
-        shownReady({ image, kind: "image", title: null }, "on", listed, style)?.image?.drawn,
-        shownReady(
-          { image, kind: "video", stream: "https://example.com/cats.mp4" },
-          "on",
-          listed,
-          style
-        )?.image?.drawn,
-        shownReady(playing, "on", listed, style)?.player?.host,
-      ])
-    ).toStrictEqual(styles.map(() => ["Whole", "Poster", "www.youtube-nocookie.com"]));
+  it("is said on a card read from another host than its Message's link", () => {
+    expect([
+      shownReady({ link: "https://www.example.com/cats" })?.host,
+      shownReady({ link: "https://a.example/" })?.host,
+    ]).toStrictEqual(["example.com", undefined]);
   });
 });
 
@@ -877,9 +964,8 @@ const pendingRow: PreviewShown = {
 };
 
 const failedRow: PreviewShown = {
-  _tag: "Plain",
+  _tag: "Failed",
   key: "1",
-  link: { href: "https://b.example/", text: "https://b.example/" },
   reason: "No preview: this link had nothing to show.",
 };
 
@@ -894,15 +980,10 @@ const waitingRow: PreviewShown = {
  * A ready row, under a key, as drawn with some fields of the page's.
  * @param rowKey - Its key.
  * @param fields - Those fields.
- * @param style - `ui.previews.style`.
  * @returns The row.
  */
-const readyRow = (
-  rowKey: string,
-  fields: Partial<typeof Preview.Encoded>,
-  style: PreviewsStyle = "thumbnail"
-): PreviewShown => {
-  const shown = shownReady(fields, "on", listed, style);
+const readyRow = (rowKey: string, fields: Partial<typeof Preview.Encoded>): PreviewShown => {
+  const shown = shownReady(fields);
 
   if (shown === undefined) {
     throw new Error("not ready");
@@ -923,7 +1004,7 @@ describe("ui.previews.folded", () => {
     });
   });
 
-  it("folds under summary only a ready Preview that shows more than its summary line", () => {
+  it("folds under summary only a card that shows more than its title", () => {
     expect(foldedOf("summary", new Set(), key, rows)).toStrictEqual({
       _tag: "Rows",
       rows: [
@@ -936,14 +1017,11 @@ describe("ui.previews.folded", () => {
     });
   });
 
-  it("folds a page with a description under summary, but not on a line, which draws none", () => {
-    expect([
-      foldedOf("summary", new Set(), key, [readyRow("0", {}, "thumbnail")]),
-      foldedOf("summary", new Set(), key, [readyRow("0", { image }, "line")]),
-    ]).toStrictEqual([
-      { _tag: "Rows", rows: [{ fold: "Folded", shown: readyRow("0", {}, "thumbnail") }] },
-      { _tag: "Rows", rows: [{ fold: "Open", shown: readyRow("0", { image }, "line") }] },
-    ]);
+  it("folds a card with a description alone under summary, to its title", () => {
+    expect(foldedOf("summary", new Set(), key, [readyRow("0", {})])).toStrictEqual({
+      _tag: "Rows",
+      rows: [{ fold: "Folded", shown: readyRow("0", {}) }],
+    });
   });
 
   it("opens under summary only the Preview pressed, and keeps it open", () => {
@@ -953,7 +1031,7 @@ describe("ui.previews.folded", () => {
     expect(foldedOf("summary", opened, key, [withImage, other])).toStrictEqual({
       _tag: "Rows",
       rows: [
-        { fold: "Opened", shown: withImage },
+        { fold: "Open", shown: withImage },
         { fold: "Folded", shown: other },
       ],
     });
@@ -978,8 +1056,8 @@ describe("ui.previews.folded", () => {
     ]);
   });
 
-  it("opens every Preview of a Message once its chip is pressed, a description shown at once", () => {
-    const described = readyRow("6", {}, "thumbnail");
+  it("opens every Preview of a Message once its chip is pressed", () => {
+    const described = readyRow("6", {});
     const all = [...rows, described];
 
     expect(foldedOf("chip", opening(new Set(), key, all), key, all)).toStrictEqual({
@@ -989,8 +1067,8 @@ describe("ui.previews.folded", () => {
         { fold: "Open", shown: failedRow },
         { fold: "Open", shown: waitingRow },
         { fold: "Open", shown: plainPage },
-        { fold: "Opened", shown: withImage },
-        { fold: "Opened", shown: described },
+        { fold: "Open", shown: withImage },
+        { fold: "Open", shown: described },
       ],
     });
   });
@@ -1019,25 +1097,6 @@ describe("a Preview's media", () => {
     expect(streamed({ kind: "page" })).toBeUndefined();
     expect(streamed({ kind: "image", type: "image/png" })).toBeUndefined();
     expect(streamed({ kind: "player" })).toBeUndefined();
-  });
-});
-
-describe("the summary line", () => {
-  it("says the site alone for a page with no title", () => {
-    expect(summary({ title: null })).toBe("example.com");
-  });
-
-  it("says what a link to media itself is, its type, and its site", () => {
-    expect(summary({ kind: "image", title: null, type: "image/png" })).toBe(
-      "image · image/png · example.com"
-    );
-    expect(summary({ kind: "audio", title: null, type: "audio/ogg" })).toBe(
-      "sound · audio/ogg · example.com"
-    );
-  });
-
-  it("contains what a stranger wrote", () => {
-    expect(summary({ site: "evil‮", title: "a\u0007b" })).toBe("evil‮‬ · a␇b");
   });
 });
 

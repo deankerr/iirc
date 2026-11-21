@@ -505,21 +505,6 @@ export const PreviewsAnimate = Schema.Boolean.annotate({
 export type PreviewsAnimate = typeof PreviewsAnimate.Type;
 
 /**
- * How rich a page's Preview looks: `line`, its site and title alone; `thumbnail`, its text
- * with its image small on the right; or `card`, its text with its image below. A link that
- * is itself an image or a video, a poster, and a player are drawn whole in every style. It
- * is a device's own to choose, since a device draws it.
- */
-export const PreviewsStyle = Schema.Literals(["line", "thumbnail", "card"]).annotate({
-  default: "thumbnail",
-  description:
-    "How a page's Preview looks: line shows its site and title, thumbnail adds its image, small, on the right, and card adds its description, with its image below. Images, videos, and players look the same in every style.",
-});
-
-/** The decoded form of {@link PreviewsStyle}. */
-export type PreviewsStyle = typeof PreviewsStyle.Type;
-
-/**
  * Whether a Message's Previews start folded: `open`, each drawn whole; `summary`, each with
  * more to show folded to its one line until pressed; or `chip`, all of them one `[+n]`,
  * which a press opens. A device chooses its own.
@@ -802,7 +787,6 @@ export const UiOptions = Schema.Struct({
   "previews.folded": PreviewsFolded,
   "previews.mediaHeight": PreviewsMediaHeight,
   "previews.players": PreviewsPlayers,
-  "previews.style": PreviewsStyle,
   "previews.timelines": PreviewsByTimeline,
   "sidebar.networks": SidebarNetworks,
   "sidebar.order": SidebarOrder,

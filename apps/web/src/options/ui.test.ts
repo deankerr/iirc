@@ -154,6 +154,42 @@ describe("the options under ui", () => {
   });
 });
 
+describe("an override of ui.previews.style a device kept, which is gone", () => {
+  it("is dropped, while its other overrides hold, the options are listed, and /set names no such option", async () => {
+    const fake = signedIn();
+
+    writeChoice(deviceUiKey, '{"previews.style":"card","previews.mediaHeight":"large"}');
+
+    const { notice, registry, type } = await page(fake);
+    const ui = await until(registry, optionsState, (state) => state.ui !== undefined);
+
+    await type("/set ui.previews.style card");
+    const refused = notice();
+
+    await type("/set -device ui.previews.mediaHeight small");
+
+    expect({
+      changes: fake.daemon.uiChanges,
+      inEffect: await until(registry, uiInEffect, (one) => one["previews.mediaHeight"] === "small"),
+      kept: readChoice(deviceUiKey),
+      listed: registry
+        .get(optionGroups)
+        .flatMap((group) => group.options)
+        .some((option) => option.name === "ui.previews.style"),
+      read: ui.ui?.options,
+      refused: refused?.startsWith("There is no option ui.previews.style."),
+    }).toStrictEqual({
+      changes: [],
+      inEffect: { ...uiDefaults, "previews.mediaHeight": "small" },
+      kept: '{"previews.mediaHeight":"small"}',
+      listed: false,
+      read: uiDefaults,
+      // The rest of the words, how options are named, are the core's.
+      refused: true,
+    });
+  });
+});
+
 describe("a change of ui.unread.markRead on its way", () => {
   it("marks nothing by it until the Daemon has taken it", () => {
     const fake = signedIn();

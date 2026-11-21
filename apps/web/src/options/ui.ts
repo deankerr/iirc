@@ -71,9 +71,6 @@ export const spellcheckShown = Atom.make((get) => get(uiInEffect)["composer.spel
 /** Whether animated images play on their own on this device, alone, as `timeShown` is. */
 export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);
 
-/** How rich a Preview looks on this device, alone, as `timeShown` is. */
-export const previewsStyleShown = Atom.make((get) => get(uiInEffect)["previews.style"]);
-
 /** Whether Previews start folded on this device, alone, as `timeShown` is. */
 export const previewsFoldedShown = Atom.make((get) => get(uiInEffect)["previews.folded"]);
 
