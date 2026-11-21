@@ -3,6 +3,7 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { makePacer, pacing } from "./pacer.ts";
+import type { Precedence } from "./pacer.ts";
 
 const run = async <A, E>(test: Effect.Effect<A, E, Scope.Scope>) =>
   await Effect.runPromise(Effect.scoped(test).pipe(Effect.provide(TestClock.layer())));
@@ -49,7 +50,8 @@ describe("the pacer", () => {
       })
     );
 
-    expect(order).toStrictEqual({ first: [0, 1], second: [0, 1, 2], third: [0, 1, 2, 3] });
+    // The place given up goes to the latest ask.
+    expect(order).toStrictEqual({ first: [0, 1], second: [0, 1, 3], third: [0, 1, 3, 2] });
   });
 
   it("counts a name with and without its trailing dot as one, and another name apart", async () => {
@@ -174,5 +176,142 @@ describe("the pacer", () => {
     );
 
     expect(taken).toStrictEqual(["first", "second", "next"]);
+  });
+});
+
+/** A waiting fetch: what it is called, and its precedence. */
+type Waiter = readonly [label: string, precedence: Precedence];
+
+/** Which bound the waiters wait on: the minute's starts, or one name's places. */
+type Bound = "minute" | "name";
+
+/**
+ * The order waiting fetches are given their turns once a bound is full: the minute's starts
+ * freeing one a second, or one of a name's places given up, which each passes on.
+ * @param bound - Which bound they wait on.
+ * @param waiters - The fetches, in the order they asked.
+ * @returns Their labels, in the order their turns came.
+ */
+const turnsOf = async (bound: Bound, waiters: readonly Waiter[]) =>
+  await run(
+    Effect.gen(function* () {
+      const pacer = yield* makePacer;
+      const turns = yield* Ref.make<readonly string[]>([]);
+
+      // The minute fills one start a second, so it frees one a second once it turns.
+      const holders = yield* Effect.forEach(
+        Array.from({ length: bound === "minute" ? pacing.perMinute : pacing.perName }),
+        () =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.make();
+
+            if (bound === "minute") {
+              yield* pacer.start;
+              yield* TestClock.adjust(1000);
+            } else {
+              yield* Scope.provide(pacer.hop("a.test"), scope);
+            }
+
+            return scope;
+          })
+      );
+
+      for (const [label, precedence] of waiters) {
+        const turn = yield* pacer.ask(precedence);
+
+        const taken = Ref.update(turns, (all) => [...all, label]);
+
+        // A name's place is given up as soon as it is taken, so the next is given it then.
+        yield* Effect.forkChild(
+          bound === "minute"
+            ? Effect.andThen(turn.start, taken)
+            : Effect.scoped(Effect.andThen(turn.hop("a.test"), taken))
+        );
+        yield* settle;
+      }
+
+      if (bound === "minute") {
+        yield* TestClock.adjust(60_000 - pacing.perMinute * 1000);
+        yield* settle;
+      }
+
+      for (const scope of holders) {
+        yield* bound === "minute" ? TestClock.adjust(1000) : Scope.close(scope, Exit.void);
+        yield* settle;
+      }
+
+      return yield* Ref.get(turns);
+    })
+  );
+
+describe("the pacer's order", () => {
+  it("forgets a fetch that stopped waiting to start, ahead of the rest as it stood", async () => {
+    const turns = await run(
+      Effect.gen(function* () {
+        const pacer = yield* makePacer;
+        const started = yield* Ref.make<readonly string[]>([]);
+
+        yield* Effect.forEach(Array.from({ length: pacing.perMinute }), () => pacer.start);
+
+        const waiting = (label: string, precedence: Precedence) =>
+          Effect.flatMap(pacer.ask(precedence), (turn) =>
+            Effect.forkChild(
+              turn.start.pipe(Effect.andThen(Ref.update(started, (all) => [...all, label])))
+            )
+          );
+
+        const gaveUp = yield* waiting("gave up", "begun");
+
+        yield* waiting("next", "first");
+        yield* settle;
+        yield* Fiber.interrupt(gaveUp);
+        yield* TestClock.adjust(60_000);
+        yield* settle;
+
+        return yield* Ref.get(started);
+      })
+    );
+
+    expect(turns).toStrictEqual(["next"]);
+  });
+
+  const orders: readonly (readonly [string, readonly Waiter[], readonly string[]])[] = [
+    [
+      "gives the next turn to the latest ask",
+      [
+        ["a", "first"],
+        ["b", "first"],
+        ["c", "first"],
+      ],
+      ["c", "b", "a"],
+    ],
+    [
+      "gives a first fetch its turn ahead of a refresh, whenever either asked",
+      [
+        ["first a", "first"],
+        ["refresh", "refresh"],
+        ["first b", "first"],
+        ["refresh later", "refresh"],
+      ],
+      ["first b", "first a", "refresh later", "refresh"],
+    ],
+    [
+      "finishes what a fetch began before starting another, a page asked later included",
+      [
+        ["page a", "first"],
+        ["begun", "begun"],
+        ["page b", "first"],
+        ["refresh", "refresh"],
+      ],
+      ["begun", "page b", "page a", "refresh"],
+    ],
+  ];
+
+  const rows = (["minute", "name"] as const).flatMap((bound) =>
+    orders.map(([title, waiters, expected]) => ({ bound, expected, title, waiters }))
+  );
+
+  it.each(rows)("$title, waiting on the $bound", async ({ bound, expected, waiters }) => {
+    await expect(turnsOf(bound, waiters)).resolves.toStrictEqual(expected);
   });
 });

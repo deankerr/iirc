@@ -27,6 +27,7 @@ import type {
   LinkFetchService,
   LinkPolicy,
   Pacer,
+  Precedence,
   Purpose,
   Target,
 } from "@iirc/link-fetch";
@@ -361,8 +362,10 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
     url: pinned(target, address),
   });
 
-  const fetchLink = (link: string, purpose: Purpose) =>
+  const fetchLink = (link: string, purpose: Purpose, precedence: Precedence = "first") =>
     Effect.gen(function* () {
+      // Its place in line, asked now, which it keeps through every hop.
+      const turn = yield* pacer.ask(precedence);
       // The connection lives in a Scope of its own, which the caller's closes, so it can end
       // at a bound, at the time limit, or when the caller is done, whichever is first.
       const outer = yield* Scope.Scope;
@@ -425,14 +428,16 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         for (let hop = 0; ; hop += 1) {
           const target = yield* Effect.fromResult(parseLink(policy, next, base));
 
-          // Each hop waits its turn by the name it is made to, and holds its place until it
-          // is done: a redirect once it is read, and the last hop until its connection closes.
+          // The first hop waits to start. Each then waits its turn by the name it is made
+          // to, and holds its place until it is done: a redirect once it is read, and the last
+          // hop until its connection closes. Nothing holds a name's place while it waits to
+          // start, so a fetch that waits long for the minute never keeps a name from another.
           const held = yield* Scope.fork(scope);
 
           yield* waiting(
             Effect.andThen(
-              Scope.provide(pacer.hop(target.hostname), held),
-              hop === 0 ? pacer.start : Effect.void
+              hop === 0 ? turn.start : Effect.void,
+              Scope.provide(turn.hop(target.hostname), held)
             )
           );
 
@@ -535,8 +540,8 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
     });
 
   return {
-    fetch: (link, purpose): Effect.Effect<Fetched, LinkFetchFailure, Scope.Scope> =>
-      fetchLink(link, purpose),
+    fetch: (link, purpose, precedence): Effect.Effect<Fetched, LinkFetchFailure, Scope.Scope> =>
+      fetchLink(link, purpose, precedence),
   };
 };
 

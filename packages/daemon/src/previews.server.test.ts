@@ -457,7 +457,7 @@ describe("Previews over a real server", () => {
           },
         },
       ],
-      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      asked: [{ link: "https://cats.example/", precedence: "first", purpose: { kind: "page" } }],
       first: [{ _tag: "Pending" }],
     });
     expect(result.after[0]?.id).toMatch(/^[0-9a-f]{32}$/u);
@@ -835,8 +835,8 @@ describe("a page's oEmbed over a real server", () => {
     );
 
     expect(result.asked).toStrictEqual([
-      { link: "https://page.example/", purpose: asPage },
-      { link: OEMBED, purpose: asOembed },
+      { link: "https://page.example/", precedence: "first", purpose: asPage },
+      { link: OEMBED, precedence: "begun", purpose: asOembed },
     ]);
   });
 
@@ -866,8 +866,8 @@ describe("a page's oEmbed over a real server", () => {
     expect(result.state).toStrictEqual(ready({ title: "Tag title" }));
 
     expect(result.asked).toStrictEqual([
-      { link: "https://page.example/", purpose: asPage },
-      { link: address, purpose: asOembed },
+      { link: "https://page.example/", precedence: "first", purpose: asPage },
+      { link: address, precedence: "begun", purpose: asOembed },
     ]);
   });
 
@@ -915,9 +915,9 @@ const turning = (
       asked: Effect.map(Effect.all([first.asked, second.asked]), ([a, b]) => [...a, ...b]),
       release: (link) => Effect.andThen(first.release(link), second.release(link)),
       service: {
-        fetch: (link, purpose) =>
+        fetch: (link, purpose, precedence) =>
           Effect.flatMap(Ref.get(turned), (now) =>
-            (now ? second : first).service.fetch(link, purpose)
+            (now ? second : first).service.fetch(link, purpose, precedence)
           ),
       },
     };
@@ -1060,11 +1060,18 @@ describe("the Preview cache over a real server", () => {
           after: titles(yield* live(settled(served, place))),
           carried: stream.text().includes("Dog News"),
           old: titles(old),
+          precedences: (yield* served.asked).map(({ precedence }) => precedence),
         };
       })
     );
 
-    expect(result).toStrictEqual({ after: ["Dogs"], carried: true, old: ["Cats"] });
+    // Fetched again, it waits behind any link never fetched.
+    expect(result).toStrictEqual({
+      after: ["Dogs"],
+      carried: true,
+      old: ["Cats"],
+      precedences: ["first", "refresh"],
+    });
   });
 
   it("serves a Preview under a day old without fetching it again", async () => {
@@ -1340,8 +1347,8 @@ describe("a Preview's image over a real server", () => {
       },
     });
     expect(result.asked).toStrictEqual([
-      { link: CAT, purpose: asPageAgain },
-      { link: CAT_IMAGE, purpose: asImage },
+      { link: CAT, precedence: "first", purpose: asPageAgain },
+      { link: CAT_IMAGE, precedence: "begun", purpose: asImage },
     ]);
     expect({ body: result.body, media: result.media, status: result.status }).toStrictEqual({
       body: png,
@@ -1394,8 +1401,8 @@ describe("a Preview's image over a real server", () => {
       },
     });
     expect(result.asked).toStrictEqual([
-      { link, purpose: asPageAgain },
-      { link, purpose: asImage },
+      { link, precedence: "first", purpose: asPageAgain },
+      { link, precedence: "begun", purpose: asImage },
     ]);
   });
 
@@ -1639,7 +1646,7 @@ describe("a Preview's image over a real server", () => {
         type: null,
       },
     });
-    expect(result.asked).toContainEqual({ link: CAT_IMAGE, purpose: asImage });
+    expect(result.asked).toContainEqual({ link: CAT_IMAGE, precedence: "begun", purpose: asImage });
     expect(result.held).toBe(0);
     expect(result.logged.join("\n")).toContain("LinkTooLarge");
   });
@@ -1656,7 +1663,7 @@ describe("a Preview's image over a real server", () => {
     );
 
     expect(imageOf(result.state)).toBeNull();
-    expect(result.asked).toStrictEqual([{ link: CAT, purpose: asPageAgain }]);
+    expect(result.asked).toStrictEqual([{ link: CAT, precedence: "first", purpose: asPageAgain }]);
   });
 
   it("gives text only with no bucket set, and fetches no image", async () => {
@@ -1666,7 +1673,7 @@ describe("a Preview's image over a real server", () => {
     );
 
     expect(result.state).toMatchObject({ _tag: "Ready", preview: { image: null, title: "Cat" } });
-    expect(result.asked).toStrictEqual([{ link: CAT, purpose: asPageAgain }]);
+    expect(result.asked).toStrictEqual([{ link: CAT, precedence: "first", purpose: asPageAgain }]);
   });
 
   it("gives text only when the store is unreachable", async () => {
@@ -2313,7 +2320,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
     expect(result).toStrictEqual({
       again: [409, "NotWaiting"],
       answered: { _tag: "Pending" },
-      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      asked: [{ link: "https://cats.example/", precedence: "first", purpose: { kind: "page" } }],
       before: [{ _tag: "WaitingForPress" }],
       titles: ["Cats"],
     });
@@ -2400,7 +2407,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
     );
 
     expect(result).toStrictEqual({
-      asked: [{ link: "https://cats.example/", purpose: { kind: "page" } }],
+      asked: [{ link: "https://cats.example/", precedence: "first", purpose: { kind: "page" } }],
       titles: ["Cats"],
     });
   });
@@ -2652,7 +2659,7 @@ describe("bounds and the queue over a real server", () => {
     expect(result.changes.filter(([, tag]) => tag === "Failed")).toStrictEqual([]);
   });
 
-  it("fetches a name's waiting links in the order they were asked, as earlier ones finish", async () => {
+  it("fetches a name's waiting links latest first, as earlier ones finish", async () => {
     const links = ["a", "b", "c", "d"].map((one) => `https://one.example/${one}`);
 
     const result = await runClocked(
@@ -2671,7 +2678,7 @@ describe("bounds and the queue over a real server", () => {
       })
     );
 
-    expect(result).toStrictEqual(links);
+    expect(result).toStrictEqual(["a", "b", "d", "c"].map((one) => `https://one.example/${one}`));
   });
 });
 
@@ -2859,7 +2866,11 @@ describe("a link that is itself video or sound, streamed over a real server", ()
     expect(result.response.headers.get("content-range")).toBe("bytes 10-19/256");
     expect(result.body).toStrictEqual(clip.slice(10, 20));
     expect(streamsOf(result.asked)).toStrictEqual([
-      { link: VIDEO, purpose: { kind: "stream", range: { end: 20, start: 10 } } },
+      {
+        link: VIDEO,
+        precedence: "begun",
+        purpose: { kind: "stream", range: { end: 20, start: 10 } },
+      },
     ]);
   });
 
@@ -2869,7 +2880,9 @@ describe("a link that is itself video or sound, streamed over a real server", ()
     expect(result.response.status).toBe(200);
     expect(result.response.headers.get("content-range")).toBeNull();
     expect(result.body).toStrictEqual(clip);
-    expect(streamsOf(result.asked)).toStrictEqual([{ link: VIDEO, purpose: { kind: "stream" } }]);
+    expect(streamsOf(result.asked)).toStrictEqual([
+      { link: VIDEO, precedence: "begun", purpose: { kind: "stream" } },
+    ]);
   });
 
   it("takes a range with no end as ending at the limit", async () => {
@@ -2971,9 +2984,9 @@ describe("a link that is itself video or sound, streamed over a real server", ()
         const guarded: FakeLinkFetch = {
           ...fake,
           service: {
-            fetch: (link, purpose) =>
+            fetch: (link, purpose, precedence) =>
               Effect.gen(function* () {
-                const fetched = yield* fake.service.fetch(link, purpose);
+                const fetched = yield* fake.service.fetch(link, purpose, precedence);
 
                 if (purpose.kind !== "stream") {
                   return fetched;
@@ -3177,8 +3190,8 @@ describe("a player over a real server", () => {
       },
     });
     expect(result.asked).toStrictEqual([
-      { link: CLIP, purpose: asPageAgain },
-      { link: CAT_IMAGE, purpose: asImage },
+      { link: CLIP, precedence: "first", purpose: asPageAgain },
+      { link: CAT_IMAGE, precedence: "begun", purpose: asImage },
     ]);
   });
 
@@ -3401,8 +3414,8 @@ describe("a page that names a video file over a real server", () => {
       },
     });
     expect(result.asked).toStrictEqual([
-      { link: WATCH, purpose: asPageAgain },
-      { link: POSTER, purpose: asImage },
+      { link: WATCH, precedence: "first", purpose: asPageAgain },
+      { link: POSTER, precedence: "begun", purpose: asImage },
     ]);
     expect(result.poster).toStrictEqual(png);
     expect(result.held).toBe(png.length);

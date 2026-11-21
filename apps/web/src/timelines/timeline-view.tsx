@@ -15,11 +15,12 @@ import { dividerShown, olderUnasked, pageSize, rowsOf, targetKey } from "@iirc/f
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
+import { ScrollerProvider } from "../previews/near-view.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { TailView } from "../tail/tail-view.tsx";
 import { Button } from "../ui/button.tsx";
@@ -297,6 +298,17 @@ const Lines = ({
   }, [activity, divider, kind, self, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
+
+  // The scroller as state too, so the Previews in its rows, which watch against it, find it
+  // once it is in the page, and how tall its view is, which sets how many rows are drawn.
+  const [scrollerElement, setScrollerElement] = useState<HTMLDivElement | null>(null);
+  const [viewHeight, setViewHeight] = useState(0);
+
+  const attach = useCallback((element: HTMLDivElement | null) => {
+    scroller.current = element;
+    setScrollerElement(element);
+  }, []);
+
   const leave = useAtomSet(leaveTarget);
   const askOlder = useAtomSet(older);
   const askNewer = useAtomSet(newer);
@@ -401,7 +413,9 @@ const Lines = ({
     estimateSize: () => Math.ceil(size * leading),
     getItemKey: (index) => rows[index]?.key ?? index,
     getScrollElement: () => scroller.current,
-    overscan: 24,
+    // A screen of rows beyond the view each way, as a row is at least a line tall, for the
+    // Previews of rows a screen away to be asked for and loaded; never fewer than 24.
+    overscan: Math.max(24, Math.ceil(viewHeight / Math.ceil(size * leading))),
     // Its corrections, as rows above the view are measured, are the view's own scrolls.
     scrollToFn: (offset, options, instance) => {
       const element = instance.scrollElement;
@@ -751,10 +765,13 @@ const Lines = ({
   useLayoutEffect(() => {
     const element = scroller.current;
 
+    setViewHeight(element?.clientHeight ?? 0);
+
     const observer =
       element === null || typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => {
+            setViewHeight(element.clientHeight);
             restand.current(element);
           });
 
@@ -863,30 +880,32 @@ const Lines = ({
       }}
       onTouchMove={moved}
       onWheel={moved}
-      ref={scroller}
+      ref={attach}
       role="log"
       // The log scrolls by keyboard, as any page does.
       // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
     >
-      <div className={styles.rows} style={{ height: total }}>
-        {items.map((item) => {
-          const row = rows[item.index];
+      <ScrollerProvider value={scrollerElement}>
+        <div className={styles.rows} style={{ height: total }}>
+          {items.map((item) => {
+            const row = rows[item.index];
 
-          return row === undefined ? null : (
-            <div
-              className={row.key === target ? `${styles.row} ${styles.target}` : styles.row}
-              data-index={item.index}
-              data-target={row.key === target ? "" : undefined}
-              key={item.key}
-              ref={virtualizer.measureElement}
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              <ShownRow row={row} timeline={timeline} />
-            </div>
-          );
-        })}
-      </div>
+            return row === undefined ? null : (
+              <div
+                className={row.key === target ? `${styles.row} ${styles.target}` : styles.row}
+                data-index={item.index}
+                data-target={row.key === target ? "" : undefined}
+                key={item.key}
+                ref={virtualizer.measureElement}
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                <ShownRow row={row} timeline={timeline} />
+              </div>
+            );
+          })}
+        </div>
+      </ScrollerProvider>
     </div>
   );
 };

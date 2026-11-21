@@ -11,6 +11,7 @@ import type {
   Fetched,
   LinkFetchFailure,
   LinkFetchService,
+  Precedence,
   Purpose,
 } from "@iirc/link-fetch";
 import { Clock, Effect, Ref, Stream } from "effect";
@@ -153,12 +154,14 @@ const annotationsOf = (link: string, purpose: Purpose, known: Known, took: numbe
  * @param links - The link fetch.
  * @param link - The link.
  * @param purpose - What it is fetched as.
+ * @param precedence - Where it stands among fetches waiting for a turn.
  * @returns The fetch, and how a page's reading joins its line.
  */
 export const logged = (
   links: LinkFetchService,
   link: string,
-  purpose: Purpose
+  purpose: Purpose,
+  precedence?: Precedence
 ): Effect.Effect<Logged, LinkFetchFailure, Scope.Scope> =>
   Effect.gen(function* () {
     // The monotonic clock, so a correction to the wall clock never bends how long it took.
@@ -178,7 +181,7 @@ export const logged = (
     );
 
     const fetched = yield* links
-      .fetch(link, purpose)
+      .fetch(link, purpose, precedence)
       .pipe(Effect.tapError((failure) => failed(failure)));
 
     yield* Ref.update(known, (now) => ({ ...now, answer: fetched }));
@@ -202,5 +205,6 @@ export const logged = (
  * @returns It, logging.
  */
 export const logging = (links: LinkFetchService): LinkFetchService => ({
-  fetch: (link, purpose) => Effect.map(logged(links, link, purpose), ({ fetched }) => fetched),
+  fetch: (link, purpose, precedence) =>
+    Effect.map(logged(links, link, purpose, precedence), ({ fetched }) => fetched),
 });

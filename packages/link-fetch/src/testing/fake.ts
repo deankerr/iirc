@@ -9,6 +9,7 @@ import { Effect, Latch, Ref, Stream } from "effect";
 import { LinkTooLarge, LinkUnreachable, LinkWrongType, limits } from "../link-fetch.ts";
 import type { Fetched, LinkFetchFailure, LinkFetchService, Purpose } from "../link-fetch.ts";
 import { makePacer } from "../pacer.ts";
+import type { Precedence } from "../pacer.ts";
 
 /**
  * A response to answer, with the status 200 and no headers beyond its type unless given. Given
@@ -36,6 +37,7 @@ export type Answer = Recorded | LinkFetchFailure;
 export interface Asked {
   readonly link: string;
   readonly purpose: Purpose;
+  readonly precedence: Precedence;
 }
 
 /** The fake, and what it has fetched, in order. */
@@ -238,13 +240,14 @@ export const makeFakeLinkFetch = (
     }
 
     const service: LinkFetchService = {
-      fetch: (link, purpose) =>
+      fetch: (link, purpose, precedence = "first") =>
         Effect.gen(function* () {
           const key = normalised(link);
+          const turn = yield* pacer.ask(precedence);
 
-          yield* pacer.hop(URL.parse(key)?.hostname ?? key);
-          yield* pacer.start;
-          yield* Ref.update(asked, (all) => [...all, { link, purpose }]);
+          yield* turn.start;
+          yield* turn.hop(URL.parse(key)?.hostname ?? key);
+          yield* Ref.update(asked, (all) => [...all, { link, precedence, purpose }]);
 
           const hold = holds.get(key);
 

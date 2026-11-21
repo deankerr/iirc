@@ -1,7 +1,7 @@
 /**
- * An image a Preview shows, loaded only once it scrolls into view, in a box whose shape is
- * the image's own from before a byte of it loads, where the Daemon read its size, and a
- * placeholder until it has loaded where it did not. One that is not animated
+ * An image a Preview shows, loaded only once it is within a screen's height of the view, in
+ * a box whose shape is the image's own from before a byte of it loads, where the Daemon read
+ * its size, and a placeholder until it has loaded where it did not. One that is not animated
  * is drawn as it is, and opens large when pressed. An animated one is fetched from the
  * Daemon once, drawn as its first frame under a play badge, which a press plays in place,
  * and stops again, with a control beside it, while it plays, that opens it large. Where it
@@ -20,6 +20,7 @@ import { animateShown } from "../options/ui.ts";
 import { Icon } from "../ui/icon.tsx";
 import { OpensLarger } from "./larger-view.tsx";
 import type { Large } from "./larger-view.tsx";
+import { useScroller, watchNear } from "./near-view.ts";
 import { PlayButton } from "./play-button.tsx";
 import type { Play } from "./play-button.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -27,33 +28,22 @@ import { useReducedMotion } from "./reduced-motion.ts";
 import styles from "./preview-image.module.css";
 
 /**
- * Whether an element has come into view, once: from then on it stays so. Where no browser
- * observes, it never has.
+ * Whether an element has come within a screen's height of the view, once: from then on it
+ * stays so. Where no browser observes, it never has.
  * @param element - The element.
  * @returns Whether it has.
  */
 const useSeen = (element: Element | null): boolean => {
   const [seen, setSeen] = useState(false);
+  const scroller = useScroller();
 
-  useEffect(() => {
-    const observer =
-      element === null || seen || typeof IntersectionObserver === "undefined"
-        ? undefined
-        : new IntersectionObserver((entries, self) => {
-            if (entries.some((entry) => entry.isIntersecting)) {
-              self.disconnect();
-              setSeen(true);
-            }
-          });
-
-    if (element !== null) {
-      observer?.observe(element);
-    }
-
-    return () => {
-      observer?.disconnect();
-    };
-  }, [element, seen]);
+  useEffect(
+    () =>
+      watchNear(seen ? null : element, scroller, () => {
+        setSeen(true);
+      }),
+    [element, scroller, seen]
+  );
 
   return seen;
 };

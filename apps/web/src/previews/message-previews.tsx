@@ -52,6 +52,7 @@ import {
   previewsState,
   togglePreview,
 } from "./atoms.ts";
+import { useScroller, watchNear } from "./near-view.ts";
 import { PlayButton } from "./play-button.tsx";
 import {
   EnlargeControl,
@@ -606,6 +607,7 @@ export const MessagePreviews = ({
   const mediaHeight = useAtomValue(mediaHeightShown);
   const show = useAtomSet(previewsShown);
   const { content, position, timeline } = item;
+  const scroller = useScroller();
   const direct = useAtomValue(directIn(timeline));
   const mode = modeIn(modes, timeline);
   const players = modes?.players ?? noPlayers;
@@ -622,29 +624,15 @@ export const MessagePreviews = ({
   );
 
   // Seen once, and told then: the core asks for a Message once, however often it comes
-  // back into view, and only while one of its Previews is open. Where no browser
+  // back near the view, and only while one of its Previews is open. Where no browser
   // observes, nothing is asked for.
-  useEffect(() => {
-    const element = line.current;
-
-    const observer =
-      !watched || element === null || typeof IntersectionObserver === "undefined"
-        ? undefined
-        : new IntersectionObserver((entries, self) => {
-            if (entries.some((entry) => entry.isIntersecting)) {
-              self.disconnect();
-              show({ direct, links, position, timeline });
-            }
-          });
-
-    if (element !== null) {
-      observer?.observe(element);
-    }
-
-    return () => {
-      observer?.disconnect();
-    };
-  }, [direct, line, links, position, show, timeline, watched]);
+  useEffect(
+    () =>
+      watchNear(watched ? line.current : null, scroller, () => {
+        show({ direct, links, position, timeline });
+      }),
+    [direct, line, links, position, scroller, show, timeline, watched]
+  );
 
   if (drawn.length === 0) {
     return null;

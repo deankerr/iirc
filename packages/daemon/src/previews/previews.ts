@@ -36,6 +36,7 @@ import type {
   Fetched,
   LinkFetchFailure,
   LinkFetchService,
+  Precedence,
   StreamRange,
 } from "@iirc/link-fetch";
 import { sniff, sniffed } from "@iirc/link-fetch-bun";
@@ -343,7 +344,8 @@ const filled = (links: LinkFetchService, page: PageRead) => {
   return address === undefined
     ? Effect.succeed(page)
     : Effect.gen(function* () {
-        const answer = yield* links.fetch(address, { kind: "oembed" });
+        // It finishes a Preview already begun, so no page asked later goes ahead of it.
+        const answer = yield* links.fetch(address, { kind: "oembed" }, "begun");
 
         if (answer.status < 200 || answer.status > 299) {
           return page;
@@ -563,10 +565,13 @@ interface How {
   readonly waits: boolean;
 }
 
-/** A link's state when asked, and whether the ask started its fetch, and published it. */
+/**
+ * A link's state when asked, and whether the ask started its fetch, as a first fetch or a
+ * refresh of a ready Preview, and published it.
+ */
 interface Claimed {
   readonly state: PreviewState;
-  readonly started: boolean;
+  readonly started: Precedence | undefined;
   readonly publish: boolean;
 }
 
@@ -695,7 +700,8 @@ export const layerPreviews = Layer.effect(Previews)(
         // never counts as the host's time.
         const { bytes, type } = yield* Effect.scoped(
           Effect.gen(function* () {
-            const fetched = yield* links.fetch(address, { kind: "image" });
+            // It finishes a Preview already begun, so no page asked later goes ahead of it.
+            const fetched = yield* links.fetch(address, { kind: "image" }, "begun");
 
             if (fetched.status < 200 || fetched.status > 299) {
               return yield* new NoImage({ reason: `it answered ${fetched.status}` });
@@ -767,8 +773,10 @@ export const layerPreviews = Layer.effect(Previews)(
 
     // Every failure of the fetch is answered with its reason, and anything unforeseen with
     // `Unreachable`, so no Preview stays pending for ever.
-    const fetchOne = (key: string, link: string, shown: PreviewsShown) =>
-      Effect.scoped(Effect.flatMap(logged(fetcher, key, { kind: "page" }), answered)).pipe(
+    const fetchOne = (key: string, link: string, shown: PreviewsShown, precedence: Precedence) =>
+      Effect.scoped(
+        Effect.flatMap(logged(fetcher, key, { kind: "page" }, precedence), answered)
+      ).pipe(
         Effect.filterOrElse(
           (said): said is Read => "state" in said,
           (said) =>
@@ -812,7 +820,7 @@ export const layerPreviews = Layer.effect(Previews)(
               (held) => new Map([...held, [key, { ...flight, shown: now }]])
             );
 
-            return { publish: false, started: false, state: flight.state } satisfies Claimed;
+            return { publish: false, started: undefined, state: flight.state } satisfies Claimed;
           }
 
           const kept = yield* cache
@@ -820,11 +828,15 @@ export const layerPreviews = Layer.effect(Previews)(
             .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
 
           if (Option.isSome(kept) && !stale(kept.value, now, waits)) {
-            return { publish: false, started: false, state: kept.value.state } satisfies Claimed;
+            return {
+              publish: false,
+              started: undefined,
+              state: kept.value.state,
+            } satisfies Claimed;
           }
 
           if (Option.isNone(kept) && waits && !pressed) {
-            return { publish: false, started: false, state: waiting } satisfies Claimed;
+            return { publish: false, started: undefined, state: waiting } satisfies Claimed;
           }
 
           // A ready Preview is served as it is while it is fetched again, and the stream
@@ -835,7 +847,13 @@ export const layerPreviews = Layer.effect(Previews)(
 
           yield* Ref.update(flying, (held) => new Map([...held, [key, { shown, state }]]));
 
-          return { publish: !old, started: true, state } satisfies Claimed;
+          // Refreshing a ready Preview waits behind a link never fetched, which has nothing to
+          // show yet. A failure has nothing to show either, so its fetch is a first fetch.
+          return {
+            publish: !old,
+            started: old ? "refresh" : "first",
+            state,
+          } satisfies Claimed;
         })
       );
 
@@ -856,8 +874,8 @@ export const layerPreviews = Layer.effect(Previews)(
           yield* PubSub.publish(changed, { id: idOf(key), link, state });
         }
 
-        if (started) {
-          yield* Effect.forkIn(fetchOne(key, link, how.shown), scope);
+        if (started !== undefined) {
+          yield* Effect.forkIn(fetchOne(key, link, how.shown, started), scope);
         }
 
         const item: PreviewItem = {
@@ -866,7 +884,7 @@ export const layerPreviews = Layer.effect(Previews)(
           state: asShown(state, how.shown, how.players),
         };
 
-        return { item, started };
+        return { item, started: started !== undefined };
       });
 
     /**
@@ -1119,10 +1137,12 @@ export const layerPreviews = Layer.effect(Previews)(
               ? undefined
               : { end: Math.min(range.end ?? limits.stream, limits.stream), start: range.start };
 
+          // A stream plays a Preview already shown, so no page asked later goes ahead of it.
           const fetched = yield* links
             .fetch(
               preview.stream,
-              asking === undefined ? { kind: "stream" } : { kind: "stream", range: asking }
+              asking === undefined ? { kind: "stream" } : { kind: "stream", range: asking },
+              "begun"
             )
             .pipe(
               Effect.mapError((failure) => new StreamFailed({ id, reason: reasonOf(failure) }))
