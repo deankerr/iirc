@@ -516,6 +516,7 @@ describe("the contract", () => {
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
+        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
@@ -548,6 +549,7 @@ describe("the contract", () => {
         "sidebar.networks",
         "sidebar.order",
         "sidebar.pinned",
+        "tail",
         "theme",
         "theme.dark",
         "theme.imported",
@@ -875,12 +877,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
+        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
         event: "changed",
         id: "9",
       },

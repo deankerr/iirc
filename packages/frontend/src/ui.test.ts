@@ -33,6 +33,7 @@ const shared = {
     "sidebar.networks": [],
     "sidebar.order": [],
     "sidebar.pinned": [],
+    tail: "info",
     theme: "dark",
     "theme.dark": "dark",
     "theme.imported": [],
@@ -62,7 +63,9 @@ describe("a device's overrides", () => {
       habitsOut: deviceUiOf(
         '{"composer.enter":"shift","composer.spellcheck":"no","composer.nickSuffix":"\\u0003","font.size":20}'
       ),
-      habitsTooLong: deviceUiOf('{"composer.nickSuffix":"123456789","composer.enter":"newline"}'),
+      habitsTooLong: deviceUiOf(
+        '{"composer.nickSuffix":"123456789","tail":"info","composer.enter":"newline"}'
+      ),
       lineHeight: deviceUiOf('{"font.lineHeight":1.2}'),
       lineHeightFine: deviceUiOf('{"font.lineHeight":1.455,"font.size":20}'),
       lineHeights: deviceUiOf('{"font.lineHeight":3,"font.size":20}'),
@@ -202,6 +205,7 @@ describe("a device's overrides", () => {
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
+        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
@@ -360,6 +364,36 @@ describe("which items a Timeline shows", () => {
     }).toStrictEqual({
       known: [true, true, true, true, true, true, true, false, false, true],
       unknown: items.map(() => true),
+    });
+  });
+
+  it("treats a netsplit or a netjoin as the quits and joins it tells: quiet hides it, and spoke shows it when any of its members spoke", () => {
+    const split = (sequence: number, nicks: string[]) =>
+      happened(sequence, 5 * minute, {
+        _tag: "Netsplit",
+        channel: "#iirc",
+        nicks,
+        servers: ["a.net", "b.net"],
+      });
+
+    const items = [
+      said(1, 0, "alice"),
+      split(2, ["bob", "ALICE"]),
+      split(3, ["bob", "carol"]),
+      happened(4, 5 * minute, {
+        _tag: "Netjoin",
+        channel: "#iirc",
+        nicks: ["bob"],
+        servers: ["a.net", "b.net"],
+      }),
+    ];
+
+    expect({
+      quiet: items.map(showsIn("quiet", "Channel", items, "me")),
+      spoke: items.map(showsIn("spoke", "Channel", items, "me")),
+    }).toStrictEqual({
+      quiet: [true, false, false, false],
+      spoke: [true, true, false, false],
     });
   });
 

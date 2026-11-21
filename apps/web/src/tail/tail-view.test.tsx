@@ -10,6 +10,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { optionsState } from "../options/atoms.ts";
+import { uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { drawerState } from "../page/drawer.ts";
 import { check } from "../sign-in/atoms.ts";
@@ -106,6 +108,7 @@ const page = async (fake: ReturnType<typeof fakeDaemon>) => {
   registry.set(pageState, { compact: false, focused: true, visible: true });
   await run(registry, check, undefined);
   registry.mount(sync);
+  registry.mount(uiSync);
 
   const container = document.createElement("div");
 
@@ -260,6 +263,28 @@ const hintOf = (container: HTMLElement) => {
  */
 const tailShownNow = (registry: AtomRegistry.AtomRegistry) =>
   chosenOf(registry.get(timelinesState))._tag === "Tail";
+
+/**
+ * The words of the lines the view shows under a value of `ui.tail`, with one line at each level held.
+ * @param tail - The value.
+ * @returns The words.
+ */
+const shownAt = async (tail: "debug" | "info" | "warning" | "error") => {
+  const fake = daemonWith();
+
+  fake.daemon.ui = { options: { ...uiDefaults, tail }, sequence: 1 };
+  fake.log("Debug", "debug");
+  fake.log("Info", "info");
+  fake.log("Warn", "warn");
+  fake.log("Error", "error");
+  fake.log("Fatal", "fatal");
+
+  const { container, registry } = await page(fake);
+
+  await settled(() => registry.get(optionsState).ui?.sequence === 1 && words(container).length > 0);
+
+  return words(container);
+};
 
 describe("the iirc view", () => {
   afterEach(() => {
@@ -434,6 +459,56 @@ describe("the iirc view", () => {
         text: "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.",
       },
       some: undefined,
+    });
+  });
+
+  // Regression: `ui.tail` is not read, or a level it names is mapped to the wrong one.
+  it("shows the lines at the level ui.tail names and above, and no others", async () => {
+    expect({
+      debug: await shownAt("debug"),
+      error: await shownAt("error"),
+      info: await shownAt("info"),
+      warning: await shownAt("warning"),
+    }).toStrictEqual({
+      debug: ["Started", "debug", "info", "warn", "error", "fatal"],
+      error: ["error", "fatal"],
+      info: ["Started", "info", "warn", "error", "fatal"],
+      warning: ["warn", "error", "fatal"],
+    });
+  });
+
+  // Regression: a change on another device waits for a reload, or the Debug lines held are lost or out of order.
+  it("shows the Debug lines held, each in time order, once another device turns ui.tail down to debug, and hides them again once it is unset", async () => {
+    const fake = daemonWith();
+
+    fake.log("Debug", "Read a line");
+    fake.log("Info", "Dialling");
+    fake.log("Debug", "Sent a line");
+
+    const shown = await page(fake);
+    const other = await page(fake);
+
+    await settled(
+      () => words(shown.container).length === 2 && fake.daemon.uiFollowers.length === 2
+    );
+    const before = words(shown.container);
+
+    await composerDoes(other.container, "/set ui.tail debug", "Enter");
+    await settled(() => words(shown.container).length === 4);
+    const debug = lines(shown.container).map((line) => [line.message, line.time]);
+
+    await composerDoes(other.container, "/unset ui.tail", "Enter");
+    await settled(() => words(shown.container).length === 2);
+
+    expect({ after: words(shown.container), before, debug }).toStrictEqual({
+      after: ["Started", "Dialling"],
+      before: ["Started", "Dialling"],
+      debug: [
+        ["Started", timeOf(1_700_000_000_000)],
+        ["Read a line", timeOf(1_700_000_002_000)],
+        ["Dialling", timeOf(1_700_000_003_000)],
+        ["Sent a line", timeOf(1_700_000_004_000)],
+      ],
     });
   });
 

@@ -18,6 +18,7 @@ import type { ArrangeChange, ArrangeEdit } from "@iirc/frontend/arrangement";
 import type { Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions, uiShown } from "@iirc/frontend/options";
+import { leastShown } from "@iirc/frontend/tail";
 import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
 import { Effect, Schedule, Schema, Stream } from "effect";
 import { Atom } from "effect/reactivity";
@@ -48,6 +49,9 @@ export const dayShown = Atom.make((get) => get(uiInEffect)["timeline.dateFormat"
 
 /** Which Activity a Channel shows on this device, alone, as `timeShown` is. */
 export const activityShown = Atom.make((get) => get(uiInEffect)["timeline.activity"]);
+
+/** The least level of the Tail's lines the `iirc` view shows, alone, as `timeShown` is. */
+export const tailLeast = Atom.make((get) => leastShown(get(uiInEffect).tail));
 
 /** The text's size on this device, in pixels, alone, as `timeShown` is. */
 export const sizeShown = Atom.make((get) => get(uiInEffect)["font.size"]);

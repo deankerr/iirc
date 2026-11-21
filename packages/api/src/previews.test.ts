@@ -257,6 +257,7 @@ describe("ui.previews", () => {
         "sidebar.networks",
         "sidebar.order",
         "sidebar.pinned",
+        "tail",
         "unread.muted",
       ],
       taken: [true, true, true, false, false, false],

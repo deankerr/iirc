@@ -324,6 +324,12 @@ const activityTimelines = (
       return joinedChannel(run, activity.channel);
     }
 
+    // The core places a split where each quit or join in it was placed, as it shows it.
+    case "Netsplit":
+    case "Netjoin": {
+      return [channel(run, activity.channel)];
+    }
+
     // The core places a standard reply where what it answers belongs, and a CTCP by who
     // sent it, before either is routed.
     case "StandardReply":

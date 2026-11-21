@@ -99,7 +99,15 @@ const ctcp = (command: string, args: string, between: string): string =>
 type Movement = Extract<
   Activity,
   {
-    readonly _tag: "Joined" | "CameOnline" | "Parted" | "Quit" | "Kicked" | "WentOffline";
+    readonly _tag:
+      | "Joined"
+      | "CameOnline"
+      | "Parted"
+      | "Quit"
+      | "Kicked"
+      | "WentOffline"
+      | "Netsplit"
+      | "Netjoin";
   }
 >;
 
@@ -109,11 +117,16 @@ const isMovement = (activity: Activity): activity is Movement =>
   activity._tag === "Parted" ||
   activity._tag === "Quit" ||
   activity._tag === "Kicked" ||
-  activity._tag === "WentOffline";
+  activity._tag === "WentOffline" ||
+  activity._tag === "Netsplit" ||
+  activity._tag === "Netjoin";
+
+const servers = (split: { readonly servers: readonly [string, string] }): string =>
+  `${plain(split.servers[0])} <-> ${plain(split.servers[1])}`;
 
 /**
- * A User coming or going, marked `-->` for a join or a partner coming online, and `<--` for
- * a part, a quit, a kick, or a partner going offline.
+ * A User coming or going, marked `-->` for a join, a partner coming online, or a netjoin, and
+ * `<--` for a part, a quit, a kick, a partner going offline, or a netsplit.
  * @param activity - The Activity.
  * @returns Its marker and words.
  */
@@ -141,6 +154,14 @@ const movementText = (activity: Movement): string => {
 
     case "WentOffline": {
       return `<-- ${plain(activity.nick)} went offline`;
+    }
+
+    case "Netsplit": {
+      return `<-- netsplit ${servers(activity)}: ${activity.nicks.length} quit (${activity.nicks.map(plain).join(", ")})`;
+    }
+
+    case "Netjoin": {
+      return `--> netjoin ${servers(activity)}: ${activity.nicks.length} joined (${activity.nicks.map(plain).join(", ")})`;
     }
 
     default: {

@@ -651,6 +651,62 @@ const MotdLine = ({
 };
 
 /**
+ * A netsplit or a netjoin: one dim line that says which two servers and how many of the
+ * Channel's members, which a press, or Enter or Space, opens to their nicks under it, and
+ * closes again. Whether it is open is this view's alone.
+ * @param props - Its time, its line, and the Timeline it is in.
+ * @returns The line.
+ */
+const SplitLine = ({
+  line,
+  time,
+  timeline,
+}: {
+  readonly line: Extract<LineOfRow, { readonly _tag: "Split" }>;
+  readonly time: ReactNode;
+  readonly timeline: TimelineId;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={styles.motd}>
+      {time}{" "}
+      <span aria-hidden className={styles.marker}>
+        {line.marker}
+      </span>{" "}
+      <span className={styles.motdText}>
+        <AriaButton
+          aria-expanded={open}
+          className={`${styles.motdSummary} ${styles.foldSummary}`}
+          onPress={() => {
+            setOpen(!open);
+          }}
+        >
+          <Icon name={open ? "expanded" : "collapsed"} />{" "}
+          {line.summary.map((part, index) => (
+            // The words' pieces never move, so their order is their identity.
+            // oxlint-disable-next-line react/no-array-index-key
+            <Piece key={index} part={part} timeline={timeline} />
+          ))}
+        </AriaButton>
+        {open ? (
+          <span className={styles.splitNicks}>
+            {line.nicks.map((part, index) => (
+              // A batch's nicks never move, so their order is their identity.
+              // oxlint-disable-next-line react/no-array-index-key
+              <Fragment key={index}>
+                {index === 0 ? null : ", "}
+                <Piece part={part} timeline={timeline} />
+              </Fragment>
+            ))}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+};
+
+/**
  * A description of an item, in the columns every row shares: its time, its marker, and its
  * words, with how many times a failed Connection repeated when it did.
  * @param props - The item, its line, and how often it repeated, if it did.
@@ -782,6 +838,10 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 
   if (line._tag === "Motd") {
     return <MotdLine line={line} time={time} />;
+  }
+
+  if (line._tag === "Split") {
+    return <SplitLine line={line} time={time} timeline={row.item.timeline} />;
   }
 
   if (line._tag === "Description") {

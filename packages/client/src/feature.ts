@@ -128,7 +128,30 @@ export interface Arrival {
    * membership, nicks, topics, or modes.
    */
   readonly live: boolean;
+  /**
+   * Starts unknown. `batch` sets it on the Lines of a `netsplit` or `netjoin` batch it read
+   * whole: its `BATCH +`, each Line in it, and its `BATCH -`. The core shows the batch's
+   * quits or joins as one Activity in each Channel, unless a Line in it is not what its
+   * type says, so the batch is read as its Lines would be unbatched.
+   */
+  readonly split: SplitMark | undefined;
 }
+
+/** The kind of a split: of the Network (`Netsplit`), or of its healing (`Netjoin`). */
+export type SplitKind = "Netsplit" | "Netjoin";
+
+/** Where a Line stands in a `netsplit` or `netjoin` batch, by the batch's reference. */
+export type SplitMark =
+  | {
+      readonly _tag: "Opens";
+      readonly ref: string;
+      readonly kind: SplitKind;
+      /** The two servers the batch names. */
+      readonly servers: readonly [string, string];
+    }
+  | { readonly _tag: "In"; readonly ref: string }
+  /** `whole` is false for a `BATCH -` with more than its reference, which ends it malformed. */
+  | { readonly _tag: "Ends"; readonly ref: string; readonly whole: boolean };
 
 /**
  * What the core derived from a Line, before the model folds it in: News, and changes

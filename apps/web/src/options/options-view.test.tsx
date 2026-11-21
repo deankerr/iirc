@@ -1231,6 +1231,39 @@ describe("an option chosen from a menu", () => {
     });
   });
 
+  // Regression: `ui.tail` is not offered, or offers values the contract does not take.
+  it("offers ui.tail's levels, info in force, and /set and /unset change it for every device", async () => {
+    const fake = signedIn();
+    const { container, type } = await uiShown(fake);
+    const row = rowOf(container, "ui.tail");
+    const entries = entriesOf(await menuFor(container, "ui.tail"));
+
+    await press(document.activeElement ?? document.body, "Escape");
+    await type("/set ui.tail debug");
+    await settled(() => rowOf(container, "ui.tail")?.[1] === "debug");
+    const set = fake.daemon.ui.options.tail;
+
+    await type("/unset ui.tail");
+    await settled(() => rowOf(container, "ui.tail")?.[1] === "info");
+
+    expect({
+      changes: fake.daemon.uiChanges.map((one) => one.route),
+      entries,
+      row,
+      set,
+    }).toStrictEqual({
+      changes: ["PUT tail", "DELETE tail"],
+      entries: ["debug", "* info", "warning", "error"],
+      row: [
+        "ui.tail",
+        "info",
+        "default: info",
+        "The least level of what the Daemon logged that the iirc view shows, along with every level above it. It changes what is shown, never what the Daemon keeps. Every device shares it.",
+      ],
+      set: "debug",
+    });
+  });
+
   it("lets go on Escape, changing nothing, and gives its row the focus with the view still open", async () => {
     const fake = signedIn();
     const { container } = await uiShown(fake);

@@ -201,8 +201,8 @@ export const effectiveUi = (shared: UiInForce | undefined, device: DeviceUi): Ui
 export const readRuleOf = (shared: UiInForce | undefined, device: DeviceUi): ReadRule | undefined =>
   device["unread.markRead"] ?? shared?.options["unread.markRead"];
 
-/** The Activity `quiet` leaves out: a User coming or going. */
-const comings: ReadonlySet<string> = new Set(["Joined", "Parted", "Quit"]);
+/** The Activity `quiet` leaves out: a User coming or going, or a batch of them. */
+const comings: ReadonlySet<string> = new Set(["Joined", "Parted", "Quit", "Netsplit", "Netjoin"]);
 
 /** How long before a join, part, or quit a User must have spoken for `spoke` to show it: five minutes. */
 export const spokeSpan = 300_000;
@@ -229,6 +229,24 @@ const spokenComings = (
 
     if (content._tag === "Message") {
       spoke.set(foldNick(content.sender), item.position.at);
+
+      continue;
+    }
+
+    // A netsplit or a netjoin shows when any of its members spoke within the span.
+    if (
+      content._tag === "Activity" &&
+      (content.activity._tag === "Netsplit" || content.activity._tag === "Netjoin")
+    ) {
+      if (
+        content.activity.nicks.some((nick) => {
+          const last = spoke.get(foldNick(nick));
+
+          return last !== undefined && item.position.at - last <= spokeSpan;
+        })
+      ) {
+        shown.add(item);
+      }
 
       continue;
     }

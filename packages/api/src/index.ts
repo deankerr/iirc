@@ -197,6 +197,7 @@ export {
   PreviewsShown,
   ReadRule,
   SpellcheckShown,
+  TailShown,
   Theme,
   ThemeName,
   TextSize,

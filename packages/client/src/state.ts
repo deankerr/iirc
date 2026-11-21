@@ -9,6 +9,7 @@ import type { CredentialName } from "@iirc/protocol/line";
 
 import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
+import type { SplitKind } from "./feature.ts";
 import { Instant } from "./ids.ts";
 import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
@@ -18,6 +19,7 @@ import type {
   EndReason,
   MaskEntry,
   NamesEntry,
+  News,
   Notes,
   Profile,
   RefusedAction,
@@ -222,7 +224,45 @@ type LinkPhase =
       readonly monitoring: Monitoring;
       /** The message of the day this Connection is receiving, or `undefined` outside one. */
       readonly motd: MotdCollecting | undefined;
+      /** The `netsplit` and `netjoin` batches this Connection is reading, and what they hold. */
+      readonly splits: Splits;
     };
+
+/**
+ * The splits a Connection is reading, by reference, at most {@link maxSplits}, and the
+ * quits or joins they hold back until each ends, already placed, in the order they came,
+ * at most {@link maxHeld} together. One list for all keeps their order when several give
+ * back what they held at once.
+ */
+export interface Splits {
+  readonly open: ReadonlyMap<string, Splitting>;
+  readonly held: readonly Held[];
+}
+
+/** A `netsplit` or `netjoin` batch being read: its kind, the two servers it names, and when its `BATCH +` came. */
+export interface Splitting {
+  readonly kind: SplitKind;
+  readonly servers: readonly [string, string];
+  readonly at: Fact<Instant>;
+}
+
+/** A quit or join a split holds, by the split's reference. */
+export interface Held {
+  readonly ref: string;
+  readonly news: Extract<News, { readonly _tag: "Activity" }>;
+}
+
+/** No splits, and nothing held. */
+export const noSplits: Splits = { held: [], open: new Map() };
+
+/** How many splits are read at once. One opened past it is read unbatched. */
+export const maxSplits = 64;
+
+/**
+ * How many quits or joins the splits of a Connection hold, together. One past it makes its
+ * split give back what it held, and is read unbatched.
+ */
+export const maxHeld = 4096;
 
 /**
  * A message of the day between its `375` and its `376`: its lines so far, at most
