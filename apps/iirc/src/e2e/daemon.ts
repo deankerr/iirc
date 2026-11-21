@@ -146,12 +146,13 @@ const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
 /**
  * The first Network's row in the sidebar, once its connection is known.
  * @param page - The page.
- * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol.
+ * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol,
+ * which a connected Network has none of.
  */
 export const networkRow = async (page: Page) => {
   await page.getByRole("row", { name: standingWord }).first().waitFor();
 
-  // The button that opens the row's menu is not part of what the row says.
+  // The buttons that open the row's menu and pick the row up are not part of what it says.
   return await page
     .getByRole("row")
     .first()
@@ -162,7 +163,7 @@ export const networkRow = async (page: Page) => {
         return "";
       }
 
-      for (const button of copy.querySelectorAll('[aria-label^="More for"]')) {
+      for (const button of copy.querySelectorAll('[aria-label^="More for"], [slot="drag"]')) {
         button.remove();
       }
 
