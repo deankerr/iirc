@@ -53,7 +53,7 @@ export const Inlines = ({
   inlines,
   links = true,
 }: {
-  readonly after?: (index: number) => ReactNode;
+  readonly after?: ReadonlyMap<number, ReactNode>;
   readonly inlines: readonly Inline[];
   readonly links?: boolean;
 }) => {
@@ -75,7 +75,7 @@ export const Inlines = ({
         >
           {inline.text}
         </a>
-        {after?.(index)}
+        {after?.get(index)}
       </Fragment>
     ) : (
       // oxlint-disable-next-line react/no-array-index-key

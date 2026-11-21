@@ -522,8 +522,18 @@ const MessageLine = ({
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const delivery = line.delivered;
+
   // Each link that may be previewed has its Preview's toggle right after it.
-  const toggles = useMemo(() => togglesIn(line.text, item.content), [item.content, line.text]);
+  const toggles = useMemo(
+    () =>
+      new Map(
+        [...togglesIn(line.text, item.content)].map(([run, link]) => [
+          run,
+          <PreviewToggle item={item} key="toggle" link={link} text={line.text[run]?.text ?? ""} />,
+        ])
+      ),
+    [item, line.text]
+  );
 
   let tone = item.level === "Highlight" ? styles.highlight : styles.message;
 
@@ -558,17 +568,7 @@ const MessageLine = ({
     >
       <Said focusable={answering === undefined} item={item} line={line} place={place} />
       <bdi className={styles.text}>
-        <Inlines
-          after={(run) => {
-            const link = toggles.get(run);
-            const said = line.text[run];
-
-            return link === undefined || said === undefined ? null : (
-              <PreviewToggle item={item} link={link} text={said.text} />
-            );
-          }}
-          inlines={line.text}
-        />
+        <Inlines after={toggles} inlines={line.text} />
         {line.context === undefined ? null : (
           <>
             {" "}
