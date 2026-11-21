@@ -1,0 +1,40 @@
+[
+  {
+    "link": "H/files/quarterly-report.pdf",
+    "state": {
+      "_tag": "Failed",
+      "reason": "NothingToShow"
+    }
+  },
+  {
+    "link": "H/files/release-notes.txt",
+    "state": {
+      "_tag": "Failed",
+      "reason": "NothingToShow"
+    }
+  },
+  {
+    "link": "H/files/empty.txt",
+    "state": {
+      "_tag": "Failed",
+      "reason": "NothingToShow"
+    }
+  },
+  {
+    "link": "H/ok",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": "All about cats.",
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:44343/ok",
+        "player": null,
+        "site": "127.0.0.1:44343",
+        "stream": null,
+        "title": "Cats",
+        "type": null
+      }
+    }
+  }
+]

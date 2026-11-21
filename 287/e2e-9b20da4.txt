@@ -1,0 +1,156 @@
+$ bun run --filter @iirc/daemon e2e && bun run --filter @iirc/link-fetch-bun e2e && bun run --filter iirc e2e
+@iirc/daemon e2e: 
+@iirc/daemon e2e:  RUN  v5.0.5 /home/dean/.t3/worktrees/iirc/287-file-previews-c2dc336306b3d9ff/packages/daemon
+@iirc/daemon e2e: 
+@iirc/daemon e2e: 
+@iirc/daemon e2e:  Test Files  13 passed (13)
+@iirc/daemon e2e:       Tests  69 passed (69)
+@iirc/daemon e2e:    Start at  04:40:01
+@iirc/daemon e2e:    Duration  276.17s (tests 97%, import 2%, transform 1%)
+@iirc/daemon e2e: 
+@iirc/daemon e2e: Exited with code 0
+@iirc/link-fetch-bun e2e: 
+@iirc/link-fetch-bun e2e:  RUN  v5.0.5 /home/dean/.t3/worktrees/iirc/287-file-previews-c2dc336306b3d9ff/packages/link-fetch-bun
+@iirc/link-fetch-bun e2e: 
+@iirc/link-fetch-bun e2e: 
+@iirc/link-fetch-bun e2e:  Test Files  1 passed (1)
+@iirc/link-fetch-bun e2e:       Tests  6 passed (6)
+@iirc/link-fetch-bun e2e:    Start at  04:44:38
+@iirc/link-fetch-bun e2e:    Duration  22.71s (tests 97%, transform 2%, import 1%)
+@iirc/link-fetch-bun e2e: 
+@iirc/link-fetch-bun e2e: Exited with code 0
+iirc e2e: @iirc/web build: vite v8.3.6 building client environment for production...
+iirc e2e: @iirc/web build: transforming...
+iirc e2e: @iirc/web build: ✓ 1948 modules transformed.
+iirc e2e: @iirc/web build: rendering chunks...
+iirc e2e: @iirc/web build: computing gzip size...
+iirc e2e: @iirc/web build: dist/index.html                                                                  0.72 kB │ gzip:   0.38 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-greek-ext-wght-italic-CBZE9Ck6.woff2                 1.69 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-greek-wght-italic-C3x12fve.woff2                     1.87 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-cyrillic-ext-wght-italic-C0D9rnMt.woff2              1.95 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-cyrillic-ext-wght-normal-EocZY2iu.woff2               2.02 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-cyrillic-ext-wght-italic-BsXxL8dx.woff2               2.18 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-cyrillic-wght-italic-D9vnqjfk.woff2                  2.38 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-greek-ext-wght-normal-De6jIOMD.woff2                 3.09 kB
+iirc e2e: @iirc/web build: dist/licences/source-code-pro.txt                                                4.31 kB │ gzip:   1.93 kB
+iirc e2e: @iirc/web build: dist/licences/source-sans-3.txt                                                  4.31 kB │ gzip:   1.93 kB
+iirc e2e: @iirc/web build: dist/licences/commit-mono.txt                                                    4.38 kB │ gzip:   1.96 kB
+iirc e2e: @iirc/web build: dist/licences/ibm-plex-sans.txt                                                  4.42 kB │ gzip:   1.98 kB
+iirc e2e: @iirc/web build: dist/licences/inter.txt                                                          4.47 kB │ gzip:   1.99 kB
+iirc e2e: @iirc/web build: dist/licences/jetbrains-mono.txt                                                 4.52 kB │ gzip:   2.00 kB
+iirc e2e: @iirc/web build: dist/licences/atkinson-hyperlegible-next.txt                                     4.59 kB │ gzip:   2.03 kB
+iirc e2e: @iirc/web build: dist/licences/atkinson-hyperlegible-mono.txt                                     4.60 kB │ gzip:   2.03 kB
+iirc e2e: @iirc/web build: dist/licences/ibm-plex-mono.txt                                                  5.29 kB │ gzip:   2.02 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-vietnamese-400-normal-BulugwFq.woff2                   5.86 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-vietnamese-700-normal-apsD3J7v.woff2                   6.06 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-vietnamese-400-italic-DRuN92E5.woff2                   6.36 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-vietnamese-700-italic-D5yBhF4R.woff2                   6.48 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-ext-400-normal-xuaO2J-f.woff2                 6.91 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-ext-700-normal-BDQ-w_bc.woff2                 7.18 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-vietnamese-wght-normal-Bt-aOZkq.woff2                 7.50 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-ext-400-italic-CBjNughH.woff2                 7.86 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-ext-700-italic-15GVjEKw.woff2                 7.86 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-vietnamese-wght-italic-Dcombn6O.woff2                 8.05 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-vietnamese-wght-normal-B6x53GZG.woff2                8.17 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-vietnamese-wght-italic-0F4ewe6i.woff2                8.21 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-400-normal-BSMlKf0J.woff2                     8.35 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-700-normal-Bp80XfeI.woff2                     8.67 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-cyrillic-ext-wght-normal-BODHZjil.woff2              8.80 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-greek-wght-normal-Bw9x6K1M.woff2                      9.00 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-greek-wght-italic-Dmq-fBVQ.woff2                      9.54 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-greek-ext-wght-normal-BXZfsJY4.woff2                   9.74 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-greek-ext-wght-italic-DBLPjGyR.woff2                   9.80 kB
+iirc e2e: @iirc/web build: dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2                         10.25 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-vietnamese-wght-normal-BDs68eHQ.woff2                 10.36 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-400-italic-CBJ8pzag.woff2                    10.40 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-cyrillic-700-italic-PsvAtmvF.woff2                    10.52 kB
+iirc e2e: @iirc/web build: dist/assets/inter-vietnamese-wght-italic-K3WlGtc8.woff2                         10.59 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-greek-wght-normal-BvT6WsG1.woff2                    10.69 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-cyrillic-ext-wght-normal-c-5QAGAI.woff2               10.73 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-mono-latin-ext-wght-normal-CXgNM06D.woff2     10.74 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-vietnamese-wght-italic-Obd_lscc.woff2                 10.76 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-cyrillic-ext-wght-italic-F_qGh3gi.woff2               10.95 kB
+iirc e2e: @iirc/web build: dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2                          11.23 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-mono-latin-ext-wght-italic-CM_msFld.woff2     11.44 kB
+iirc e2e: @iirc/web build: dist/assets/inter-greek-ext-wght-italic-DcOpz6Lw.woff2                          12.09 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-cyrillic-wght-normal-D73BlboJ.woff2                  12.10 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-vietnamese-wght-normal-Dg1JeJN0.woff2                 13.16 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-ext-400-normal-BmRBH3aV.woff2                   13.34 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-cyrillic-wght-italic-CfQkWpeR.woff2                  13.35 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-ext-700-normal-Dhimjc7-.woff2                   13.38 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-cyrillic-wght-normal-aqTvhEeI.woff2                 14.18 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-ext-400-italic-B7_fu1kp.woff2                   14.52 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-greek-wght-normal-Cc-u-6OI.woff2                      14.52 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-ext-700-italic-Dxj0B7mx.woff2                   14.68 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2                       14.70 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-vietnamese-wght-italic-CKSJVnJa.woff2                 14.86 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-700-normal-7sUh57Bg.woff2                       14.90 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-greek-wght-italic-CXgqVJLg.woff2                      14.93 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-latin-ext-wght-normal-DBQx-q_a.woff2                 15.19 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-400-italic-BqAiT5Ww.woff2                       16.44 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-latin-ext-wght-italic-BrDczivE.woff2                 16.52 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-mono-latin-700-italic-J6kahdQd.woff2                       16.54 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-mono-latin-wght-normal-CoA7y8X5.woff2         17.75 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-cyrillic-wght-normal-BMDVbyM7.woff2                   18.49 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-cyrillic-wght-italic-BqzjwPnH.woff2                   18.72 kB
+iirc e2e: @iirc/web build: dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2                           18.74 kB
+iirc e2e: @iirc/web build: dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2                              18.99 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-mono-latin-wght-italic-BkGwxmNN.woff2         19.08 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-next-latin-ext-wght-normal-C6vrW8VD.woff2     19.09 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-greek-wght-normal-CmyJS8uq.woff2                      19.50 kB
+iirc e2e: @iirc/web build: dist/assets/inter-cyrillic-wght-italic-DzZdc28x.woff2                           19.98 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-next-latin-ext-wght-italic-Cigfgs4r.woff2     20.13 kB
+iirc e2e: @iirc/web build: dist/assets/inter-greek-wght-italic-CILZdfAp.woff2                              20.48 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-greek-wght-italic-BOZ1G-_q.woff2                      21.75 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-latin-wght-normal-BP8Zz55n.woff2                    22.04 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-latin-wght-italic-eALmlzX7.woff2                    22.44 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-cyrillic-ext-wght-normal-d45eAU9y.woff2               23.56 kB
+iirc e2e: @iirc/web build: dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2                       25.96 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-cyrillic-ext-wght-italic-O9KpBTMP.woff2               26.83 kB
+iirc e2e: @iirc/web build: dist/assets/inter-cyrillic-ext-wght-italic-B5xAaiFk.woff2                       27.38 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-latin-wght-italic-DLiStKT6.woff2                      28.46 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-latin-wght-normal-Bo_j9asI.woff2                      28.87 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-cyrillic-wght-normal-BAAhND-U.woff2                   29.51 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-latin-ext-wght-normal-CIII54If.woff2                  30.96 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-cyrillic-wght-italic-BC1D_hcE.woff2                   32.63 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-latin-ext-wght-normal-0UZNSh4u.woff2                33.56 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-latin-ext-wght-italic-QwKXLQRc.woff2                  33.90 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-next-latin-wght-normal-BcXVPD7q.woff2         33.99 kB
+iirc e2e: @iirc/web build: dist/assets/source-code-pro-latin-ext-wght-italic-DBUHC5DY.woff2                34.01 kB
+iirc e2e: @iirc/web build: dist/assets/atkinson-hyperlegible-next-latin-wght-italic-DC5MiAaX.woff2         37.64 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-latin-wght-normal-B9CIFXIH.woff2                     40.40 kB
+iirc e2e: @iirc/web build: dist/assets/jetbrains-mono-latin-wght-italic-B2M6KQje.woff2                     42.96 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-latin-wght-normal-IvpUvPa2.woff2                      45.71 kB
+iirc e2e: @iirc/web build: dist/assets/commit-mono-latin-700-normal-DU8mrtj2.woff2                         47.30 kB
+iirc e2e: @iirc/web build: dist/assets/commit-mono-latin-400-normal-wzhe4RuD.woff2                         48.12 kB
+iirc e2e: @iirc/web build: dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2                              48.25 kB
+iirc e2e: @iirc/web build: dist/assets/commit-mono-latin-700-italic-Do7m2tOi.woff2                         50.12 kB
+iirc e2e: @iirc/web build: dist/assets/ibm-plex-sans-latin-wght-italic-DKUSOBgV.woff2                      50.18 kB
+iirc e2e: @iirc/web build: dist/assets/commit-mono-latin-400-italic-DjSHLl2N.woff2                         51.11 kB
+iirc e2e: @iirc/web build: dist/assets/inter-latin-wght-italic-DpCbqKDY.woff2                              51.83 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-latin-ext-wght-italic-B1mMy0tD.woff2                  59.49 kB
+iirc e2e: @iirc/web build: dist/assets/source-sans-3-latin-ext-wght-normal-C8iNium2.woff2                  60.08 kB
+iirc e2e: @iirc/web build: dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2                          85.06 kB
+iirc e2e: @iirc/web build: dist/assets/inter-latin-ext-wght-italic-0pjOp8NU.woff2                          91.90 kB
+iirc e2e: @iirc/web build: dist/assets/import-worker-DMXcLrkF.js                                          202.25 kB
+iirc e2e: @iirc/web build: dist/assets/index-IO6jePRX.css                                                 100.61 kB │ gzip:  14.61 kB
+iirc e2e: @iirc/web build: dist/assets/gemoji-Bxp1rtNU.js                                                 267.89 kB │ gzip:  61.59 kB
+iirc e2e: @iirc/web build: dist/assets/index-BNng_VqI.js                                                1,509.42 kB │ gzip: 465.92 kB
+iirc e2e: @iirc/web build: 
+iirc e2e: @iirc/web build: [plugin builtin:vite-reporter] 
+iirc e2e: @iirc/web build: (!) Some chunks are larger than 500 kB after minification. Consider:
+iirc e2e: @iirc/web build: - Using dynamic import() to code-split the application
+iirc e2e: @iirc/web build: - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+iirc e2e: @iirc/web build: - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+iirc e2e: @iirc/web build: ✓ built in 1.62s
+iirc e2e: @iirc/web build: Exited with code 0
+iirc e2e: 
+iirc e2e:  RUN  v5.0.5 /home/dean/.t3/worktrees/iirc/287-file-previews-c2dc336306b3d9ff/apps/iirc
+iirc e2e: 
+iirc e2e: 
+iirc e2e:  Test Files  2 passed (2)
+iirc e2e:       Tests  12 passed (12)
+iirc e2e:    Start at  04:45:03
+iirc e2e:    Duration  52.45s (tests 97%, import 1%, transform 1%)
+iirc e2e: 
+iirc e2e: Exited with code 0

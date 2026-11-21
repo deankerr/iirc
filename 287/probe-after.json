@@ -1,0 +1,74 @@
+[
+  {
+    "link": "H/files/quarterly-report.pdf",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": null,
+        "image": null,
+        "kind": "file",
+        "link": "http://127.0.0.1:44653/files/quarterly-report.pdf",
+        "player": null,
+        "site": "127.0.0.1:44653",
+        "size": 48213,
+        "stream": null,
+        "title": null,
+        "type": "application/pdf"
+      }
+    }
+  },
+  {
+    "link": "H/files/release-notes.txt",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": "iirc 0.9 release notes\n\n- Previews of files: a PDF shows its type and size.\n- A text file shows its first lines, <b>never</b> as markup.\n    Indented lines keep their indent.",
+        "image": null,
+        "kind": "file",
+        "link": "http://127.0.0.1:44653/files/release-notes.txt",
+        "player": null,
+        "site": "127.0.0.1:44653",
+        "size": 180,
+        "stream": null,
+        "title": null,
+        "type": "text/plain"
+      }
+    }
+  },
+  {
+    "link": "H/files/empty.txt",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": null,
+        "image": null,
+        "kind": "file",
+        "link": "http://127.0.0.1:44653/files/empty.txt",
+        "player": null,
+        "site": "127.0.0.1:44653",
+        "size": 0,
+        "stream": null,
+        "title": null,
+        "type": "text/plain"
+      }
+    }
+  },
+  {
+    "link": "H/ok",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": "All about cats.",
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:44653/ok",
+        "player": null,
+        "site": "127.0.0.1:44653",
+        "size": null,
+        "stream": null,
+        "title": "Cats",
+        "type": null
+      }
+    }
+  }
+]
