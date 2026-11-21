@@ -51,7 +51,7 @@ export const previewsState = Atom.make<Previews>(initialPreviews).pipe(Atom.keep
  * rather than in a row, since a Timeline's rows are drawn again as they scroll back into
  * view, and forgotten when the page is loaded again.
  */
-export const previewsToggles = Atom.make<Toggles>(new Map<string, boolean>()).pipe(Atom.keepAlive);
+const previewsToggles = Atom.make<Toggles>(new Map<string, boolean>()).pipe(Atom.keepAlive);
 
 /** How this view opens Previews: `ui.previews.start` on this device, and what was toggled. */
 export const previewsOpening = Atom.make((get): Opening => ({
