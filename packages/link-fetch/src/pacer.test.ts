@@ -3,7 +3,7 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { makePacer, pacing } from "./pacer.ts";
-import type { Precedence } from "./pacer.ts";
+import type { Pacer, Precedence } from "./pacer.ts";
 
 const run = async <A, E>(test: Effect.Effect<A, E, Scope.Scope>) =>
   await Effect.runPromise(Effect.scoped(test).pipe(Effect.provide(TestClock.layer())));
@@ -294,6 +294,70 @@ describe("a fetch's first hop", () => {
       others: pacing.perMinute - pacing.perName,
       turned: true,
     });
+  });
+});
+
+/**
+ * Whether two hops asked now both take a place at a.test, which nothing should hold.
+ * @param pacer - The pacer.
+ * @returns How many took one.
+ */
+const placesLeft = (pacer: Pacer) =>
+  Effect.gen(function* () {
+    const taken = yield* Ref.make(0);
+
+    yield* Effect.forEach([0, 1], () =>
+      Effect.forkChild(
+        Effect.scoped(
+          pacer
+            .hop("a.test")
+            .pipe(
+              Effect.andThen(Ref.update(taken, (count) => count + 1)),
+              Effect.andThen(Effect.never)
+            )
+        )
+      )
+    );
+    yield* settle;
+
+    return yield* Ref.get(taken);
+  });
+
+describe("a name's places", () => {
+  it("are all given back once every Scope that held one closes", async () => {
+    const left = await run(
+      Effect.gen(function* () {
+        const pacer = yield* makePacer;
+        const first = yield* Scope.make();
+        const second = yield* Scope.make();
+        const queued = yield* Scope.make();
+
+        yield* Scope.provide(pacer.hop("a.test"), first);
+        yield* Scope.provide(pacer.hop("a.test"), second);
+        // It waits, and its Scope closes under it, its fiber still running.
+        yield* Effect.forkChild(Scope.provide(pacer.hop("a.test"), queued));
+        yield* settle;
+        yield* Scope.close(queued, Exit.void);
+        yield* Scope.close(first, Exit.void);
+        yield* settle;
+        yield* Scope.close(second, Exit.void);
+        yield* settle;
+
+        // One hop run twice in one Scope takes two places, and gives both back.
+        const twice = yield* Scope.make();
+        const hop = (yield* pacer.ask("first")).hop("a.test");
+
+        yield* Effect.forkChild(Scope.provide(hop, twice));
+        yield* Effect.forkChild(Scope.provide(hop, twice));
+        yield* settle;
+        yield* Scope.close(twice, Exit.void);
+        yield* settle;
+
+        return yield* placesLeft(pacer);
+      })
+    );
+
+    expect(left).toBe(pacing.perName);
   });
 });
 

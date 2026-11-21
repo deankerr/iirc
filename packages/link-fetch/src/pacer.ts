@@ -203,12 +203,18 @@ export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
       change();
 
       for (;;) {
+        // Forgotten while it slept, as when the Scope it would hold a place in closed, it
+        // never takes a turn.
+        if (!waiting.has(wait)) {
+          return yield* Effect.interrupt;
+        }
+
         const now = yield* Clock.currentTimeMillis;
         const wake = changed;
         const found = look(wait, now);
 
         if (found._tag === "Taken") {
-          return;
+          return yield* Effect.void;
         }
 
         yield* found.until === undefined
@@ -261,8 +267,9 @@ export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
     const place: Place = { asked: asks, rank: rankOf[precedence] };
 
     return {
-      begin: (name) => holding({ name: key(name), place, starts: true }),
-      hop: (name) => holding({ name: key(name), place, starts: false }),
+      // A wait of its own each time it runs.
+      begin: (name) => Effect.suspend(() => holding({ name: key(name), place, starts: true })),
+      hop: (name) => Effect.suspend(() => holding({ name: key(name), place, starts: false })),
       start: Effect.suspend(() => waitFor({ name: undefined, place, starts: true })),
     };
   };
