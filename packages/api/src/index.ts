@@ -272,6 +272,7 @@ export {
 export { TailDaemon, TailEvent, TailLevel, TailLine, TailNumber, TailRead } from "./tail.ts";
 
 export {
+  ImageDimensions,
   ImageHash,
   ImageType,
   MessagePreviews,
