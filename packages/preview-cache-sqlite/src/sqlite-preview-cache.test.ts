@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BunFileSystem } from "@effect/platform-bun";
-import type { Kept, PreviewCacheService } from "@iirc/preview-cache";
+import { Kept } from "@iirc/preview-cache";
+import type { PreviewCacheService } from "@iirc/preview-cache";
 import { previewCacheLaws } from "@iirc/preview-cache/testing";
 import { holds } from "@iirc/runtime/testing";
-import { Effect, Logger, Option } from "effect";
+import { Effect, Logger, Option, Schema } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -71,6 +72,48 @@ const kept: Kept = {
   state: { _tag: "Ready", preview: page },
 };
 
+const hash = Schema.decodeSync(Kept.fields.image.members[0])("ab".repeat(32));
+
+// A Preview with an image of a size the bytes state.
+const sized: Kept = {
+  ...kept,
+  image: hash,
+  state: {
+    _tag: "Ready",
+    preview: {
+      ...page,
+      image: {
+        animated: false,
+        dimensions: { height: 480, width: 640 },
+        hash,
+        size: 1234,
+        type: "image/png",
+      },
+      kind: "image",
+    },
+  },
+};
+
+// The record as a layout before the sizes wrote it, which a file of that layout holds.
+const unsized = (version: 4 | 5) =>
+  `UPDATE previews SET state = json_remove(state, '$.preview.image.dimensions');
+   ${version === 4 ? `UPDATE previews SET state = replace(state, '"stream":', '"media":');` : ""}
+   PRAGMA user_version = ${version}`;
+
+const withoutSize: Kept =
+  sized.state._tag === "Ready" && sized.state.preview.image !== null
+    ? {
+        ...sized,
+        state: {
+          ...sized.state,
+          preview: {
+            ...sized.state.preview,
+            image: { ...sized.state.preview.image, dimensions: null },
+          },
+        },
+      }
+    : sized;
+
 describe("the SQLite Preview cache", () => {
   it.each(previewCacheLaws)("$name", async (law) => {
     await expect(Effect.runPromise(holds(law, freshCache))).resolves.toBeUndefined();
@@ -117,6 +160,68 @@ describe("a file of the layout before", () => {
         );
 
         expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(streamed));
+      })
+    );
+  });
+
+  it("reads a Preview kept before sizes with none, and still refers to, lists, and evicts its image", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (cache) => cache.put(sized));
+        yield* using(file, (cache) => cache.put({ ...kept, link: "https://example.com/plain" }));
+        raw(file, unsized(5));
+
+        yield* using(file, (cache) =>
+          Effect.gen(function* () {
+            expect(yield* cache.get(link)).toStrictEqual(Option.some(withoutSize));
+            expect(yield* cache.get("https://example.com/plain")).toStrictEqual(
+              Option.some({ ...kept, link: "https://example.com/plain" })
+            );
+            expect(yield* cache.refers(hash)).toBeTruthy();
+            expect(yield* cache.images).toStrictEqual([{ hash, shown: 2000, size: 1234 }]);
+
+            yield* cache.evict(hash);
+            expect(yield* cache.refers(hash)).toBeFalsy();
+          })
+        );
+      })
+    );
+  });
+
+  it("reads a Preview kept two layouts before, with its media and its image, as it is now but for the size", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+        const video = "https://example.com/cat.mp4";
+
+        const streamed: Kept =
+          sized.state._tag === "Ready"
+            ? {
+                ...sized,
+                state: {
+                  ...sized.state,
+                  preview: { ...sized.state.preview, kind: "video", stream: video },
+                },
+              }
+            : sized;
+
+        yield* using(file, (cache) => cache.put(streamed));
+        raw(file, unsized(4));
+
+        const expected: Kept =
+          withoutSize.state._tag === "Ready"
+            ? {
+                ...withoutSize,
+                state: {
+                  ...withoutSize.state,
+                  preview: { ...withoutSize.state.preview, kind: "video", stream: video },
+                },
+              }
+            : withoutSize;
+
+        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(expected));
       })
     );
   });

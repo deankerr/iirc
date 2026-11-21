@@ -66,6 +66,7 @@ import { StoreBytes, hashOf } from "../store-bytes.ts";
 import { UiConfiguration } from "../ui.ts";
 import type { StartingRange } from "../uploads/wanted.ts";
 import { animated } from "./animated.ts";
+import { dimensionsOf } from "./dimensions.ts";
 import { playerOf, stillListed } from "./players.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
@@ -691,6 +692,7 @@ export const layerPreviews = Layer.effect(Previews)(
 
         return {
           animated: animated(bytes),
+          dimensions: dimensionsOf(bytes, type.value),
           hash: stored.hash,
           size: stored.size,
           type: type.value,

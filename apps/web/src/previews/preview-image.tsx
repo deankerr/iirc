@@ -1,5 +1,7 @@
 /**
- * An image a Preview shows, loaded only once it scrolls into view. One that is not animated
+ * An image a Preview shows, loaded only once it scrolls into view, in a box whose shape is
+ * the image's own from before a byte of it loads, where the Daemon read its size, and a
+ * placeholder until it has loaded where it did not. One that is not animated
  * is drawn as it is, and opens large when pressed. An animated one is fetched from the
  * Daemon once, drawn as its first frame under a play badge, which a press plays in place,
  * and stops again, with a control beside it, while it plays, that opens it large. Where it
@@ -9,8 +11,8 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import { motionOf, pressOn } from "@iirc/frontend/previews";
-import type { ImageShown, LinkShown, Motion, PlayerShown } from "@iirc/frontend/previews";
-import type { ReactElement, ReactNode, RefObject, VideoHTMLAttributes } from "react";
+import type { ImageShown, LinkShown, Motion, PlayerShown, Size } from "@iirc/frontend/previews";
+import type { CSSProperties, ReactElement, ReactNode, RefObject, VideoHTMLAttributes } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 
@@ -150,10 +152,32 @@ const FirstFrame = ({ frame }: { readonly frame: ImageBitmap }) => {
 };
 
 /**
+ * What a box of a shape is given, for the stylesheet to size it: the shape's proportions,
+ * and, for an image, no wider than the image itself, in CSS pixels. The box is the same
+ * before and after what it holds loads.
+ * @param box - Its shape.
+ * @param atMost - How wide it is at most, in CSS pixels, if there is a limit.
+ * @returns Its style.
+ */
+const boxStyle = ({ height, width }: Size, atMost?: number): CSSProperties => {
+  const style: Record<`--${string}`, string> = {
+    "--box-height": `${height}`,
+    "--box-width": `${width}`,
+  };
+
+  if (atMost !== undefined) {
+    style["--box-at-most"] = `${atMost}px`;
+  }
+
+  return style;
+};
+
+/**
  * What holds an image, as big as it will be drawn, so what is drawn and what stands in its
- * place until it loads share one box.
- * @param props - How it is drawn, whether there is anything in it, what is in it, and how
- *   it is found.
+ * place until it loads share one box. Given a `box`, it is reserved at once as that shape;
+ * without one, it is a placeholder until it is `loaded`.
+ * @param props - How it is drawn, its box if it has one, whether what is in it has
+ *   loaded, what is in it, and how it is found.
  * @returns The box.
  */
 const Holder = ({
@@ -161,20 +185,31 @@ const Holder = ({
   drawn,
   loaded,
   reference,
+  box,
 }: {
   readonly children: ReactNode;
   readonly drawn: ImageShown["drawn"];
   readonly loaded: boolean;
   readonly reference: (element: HTMLSpanElement | null) => void;
-}) => (
-  <span
-    className={drawn === "Thumbnail" ? styles.thumbnail : styles.whole}
-    data-loaded={loaded}
-    ref={reference}
-  >
-    {children}
-  </span>
-);
+  readonly box: Size | undefined;
+}) =>
+  drawn === "Thumbnail" ? (
+    <span className={styles.thumbnail} data-loaded={loaded} ref={reference}>
+      {children}
+    </span>
+  ) : (
+    <span
+      className={styles.whole}
+      data-loaded={loaded}
+      data-reserved={box !== undefined || undefined}
+      ref={reference}
+      style={
+        box === undefined ? undefined : boxStyle(box, drawn === "Poster" ? undefined : box.width)
+      }
+    >
+      {children}
+    </span>
+  );
 
 /**
  * The control in the corner of what is drawn, which opens it large.
@@ -217,13 +252,14 @@ const StillImage = ({
   const [element, setElement] = useState<HTMLSpanElement | null>(null);
   const seen = useSeen(element);
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   if (failed) {
     return without;
   }
 
   return (
-    <Holder drawn={image.drawn} loaded={seen} reference={setElement}>
+    <Holder drawn={image.drawn} loaded={loaded} reference={setElement} box={image.dimensions}>
       {seen ? (
         <OpensLarger alt={image.alt} large={{ _tag: "Image", src: image.src }} link={link}>
           <AriaButton aria-label={`Open ${image.alt} large`} className={styles.press}>
@@ -235,6 +271,9 @@ const StillImage = ({
               loading="lazy"
               onError={() => {
                 setFailed(true);
+              }}
+              onLoad={() => {
+                setLoaded(true);
               }}
               referrerPolicy="no-referrer"
               src={image.src}
@@ -275,7 +314,12 @@ const AnimatedImage = ({
   const moving = motion === "Moving";
 
   return (
-    <Holder drawn={image.drawn} loaded={fetched._tag === "Ready"} reference={setElement}>
+    <Holder
+      drawn={image.drawn}
+      loaded={fetched._tag === "Ready"}
+      reference={setElement}
+      box={image.dimensions}
+    >
       {fetched._tag === "Ready" ? (
         <>
           <AriaButton
@@ -318,24 +362,28 @@ const AnimatedImage = ({
 };
 
 /**
- * What a poster draws: the text, and the poster under it in a box of its own.
- * @param props - The text, the box's content, whether it is loaded, and how it is found.
+ * What a poster draws: the text, and the poster under it in the box its video or player
+ * plays in.
+ * @param props - The text, the box's content and shape, whether it is loaded, and how it
+ *   is found.
  * @returns The column.
  */
 const Stacked = ({
   children,
   loaded,
   reference,
+  box,
   text,
 }: {
   readonly children: ReactNode;
   readonly loaded: boolean;
   readonly reference: (element: HTMLSpanElement | null) => void;
+  readonly box: Size;
   readonly text: ReactElement;
 }) => (
   <div className={styles.stacked}>
     {text}
-    <Holder drawn="Poster" loaded={loaded} reference={reference}>
+    <Holder drawn="Poster" loaded={loaded} reference={reference} box={box}>
       {children}
     </Holder>
   </div>
@@ -351,25 +399,28 @@ const StillPoster = ({
   corner,
   image,
   play,
+  box,
   text,
   without,
 }: {
   readonly corner: ReactNode;
   readonly image: ImageShown;
   readonly play: Play;
+  readonly box: Size;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
   const [element, setElement] = useState<HTMLSpanElement | null>(null);
   const seen = useSeen(element);
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   if (failed) {
     return without;
   }
 
   return (
-    <Stacked loaded={seen} reference={setElement} text={text}>
+    <Stacked loaded={loaded} reference={setElement} box={box} text={text}>
       {seen ? (
         <>
           <img
@@ -380,6 +431,9 @@ const StillPoster = ({
             loading="lazy"
             onError={() => {
               setFailed(true);
+            }}
+            onLoad={() => {
+              setLoaded(true);
             }}
             referrerPolicy="no-referrer"
             src={image.src}
@@ -403,12 +457,14 @@ const FramePoster = ({
   corner,
   image,
   play,
+  box,
   text,
   without,
 }: {
   readonly corner: ReactNode;
   readonly image: ImageShown;
   readonly play: Play;
+  readonly box: Size;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
@@ -421,7 +477,7 @@ const FramePoster = ({
   }
 
   return (
-    <Stacked loaded={fetched._tag === "Ready"} reference={setElement} text={text}>
+    <Stacked loaded={fetched._tag === "Ready"} reference={setElement} box={box} text={text}>
       {fetched._tag === "Ready" ? (
         <>
           <FirstFrame frame={fetched.frame} />
@@ -438,21 +494,24 @@ const FramePoster = ({
  * under the text above it, and what else sits in its corner. It opens nothing when pressed
  * except the play button, which calls `play.onPlay`. Where it fails to load, or to be
  * fetched, what stands without it shows instead: the one given, or else the text with the
- * same play button beside it.
- * @param props - The poster, its play button, what else sits in its corner, the text above
- * it, and what stands without it, if not the text and the button.
+ * same play button beside it. It is drawn in `box`, the shape of the box its video or
+ * player plays in, whether it has loaded or not.
+ * @param props - The poster, its play button, what else sits in its corner, the shape of its
+ * box, the text above it, and what stands without it, if not the text and the button.
  * @returns The poster with its text, or what stands without it.
  */
 export const PreviewPoster = ({
   corner,
   image,
   play,
+  box,
   text,
   without: given,
 }: {
   readonly corner: ReactNode;
   readonly image: ImageShown;
   readonly play: Play;
+  readonly box: Size;
   readonly text: ReactElement;
   readonly without?: ReactElement | undefined;
 }) => {
@@ -464,65 +523,76 @@ export const PreviewPoster = ({
   );
 
   return image.animated ? (
-    <FramePoster corner={corner} image={image} play={play} text={text} without={without} />
+    <FramePoster
+      corner={corner}
+      image={image}
+      play={play}
+      box={box}
+      text={text}
+      without={without}
+    />
   ) : (
-    <StillPoster corner={corner} image={image} play={play} text={text} without={without} />
+    <StillPoster
+      corner={corner}
+      image={image}
+      play={play}
+      box={box}
+      text={text}
+      without={without}
+    />
   );
 };
 
 /**
- * A player playing: its frame under the text, in the shape its page gave, at most as tall
- * as a poster. The frame is sandboxed, so what plays there can run scripts and open a
+ * A player playing: its frame under the text, in the box its poster stood in, at most as
+ * tall as a poster. The frame is sandboxed, so what plays there can run scripts and open a
  * window of its own, but cannot navigate this page, submit a form, or reach anything else
  * of it, and is told its origin and no more of where it was embedded.
- * @param props - The player, as drawn, and the text above it.
+ * @param props - The player, as drawn, the shape of its box, and the text above it.
  * @returns The text with the frame under it.
  */
 export const PlayerFrame = ({
   player,
+  box,
   text,
 }: {
   readonly player: PlayerShown;
+  readonly box: Size;
   readonly text: ReactElement;
-}) => {
-  const { height, width } = player.size;
-
-  return (
-    <div className={styles.stacked}>
-      {text}
-      <iframe
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-        className={styles.frame}
-        referrerPolicy="strict-origin"
-        // oxlint-disable-next-line react/iframe-missing-sandbox -- the frame is another site's, which the page's frame-src limits to the Owner's player hosts, so its own origin gives it nothing of ours, and a player needs both to play
-        sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
-        src={player.src}
-        style={{
-          aspectRatio: `${width} / ${height}`,
-          width: `min(100%, calc(var(--frame-tallest) * ${width} / ${height}))`,
-        }}
-        title={`Player from ${player.host}`}
-      />
-    </div>
-  );
-};
+}) => (
+  <div className={styles.stacked}>
+    {text}
+    <iframe
+      allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+      className={styles.frame}
+      referrerPolicy="strict-origin"
+      // oxlint-disable-next-line react/iframe-missing-sandbox -- the frame is another site's, which the page's frame-src limits to the Owner's player hosts, so its own origin gives it nothing of ours, and a player needs both to play
+      sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+      src={player.src}
+      style={boxStyle(box)}
+      title={`Player from ${player.host}`}
+    />
+  </div>
+);
 
 /**
- * A video in a box of a fixed shape, as tall as a poster at most, so playing it moves
- * nothing below it, with what else sits in its corner.
- * @param props - What sits in the corner, which video element to ask for it, and the
- * video's own attributes.
+ * A video in a box of the shape its poster stood in, as tall as a poster at most, so
+ * playing it moves nothing below it, with what else sits in its corner.
+ * @param props - What sits in the corner, which video element to ask for it, the box's
+ * shape, and the video's own attributes.
  * @returns The box.
  */
 export const VideoBox = ({
   corner,
   reference,
+  box,
   ...video
 }: VideoHTMLAttributes<HTMLVideoElement> & {
   readonly corner: ReactNode;
   readonly reference: RefObject<HTMLVideoElement | null>;
+  readonly box: Size;
 }) => (
-  <span className={styles.boxed}>
+  <span className={styles.boxed} style={boxStyle(box)}>
     {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- a stranger's media carries no captions the Daemon could offer */}
     <video {...video} className={styles.video} controls ref={reference} />
     {corner}

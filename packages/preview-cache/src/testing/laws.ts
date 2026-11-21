@@ -73,7 +73,13 @@ const putThenGet: PreviewCacheLaw = {
           _tag: "Ready",
           preview: {
             description: "Ünïcode — 日本語 🙂\nand a second line",
-            image: { animated: true, hash, size: 1234, type: "image/gif" },
+            image: {
+              animated: true,
+              dimensions: { height: 480, width: 640 },
+              hash,
+              size: 1234,
+              type: "image/gif",
+            },
             kind: "player",
             link: "https://example.com/é/日本語?q=ключ#🙂",
             player: {
@@ -222,7 +228,7 @@ const imaged = (
     _tag: "Ready",
     preview: {
       description: null,
-      image: { animated: false, hash: image, size, type: "image/png" },
+      image: { animated: false, dimensions: null, hash: image, size, type: "image/png" },
       kind: "page",
       link,
       player: null,

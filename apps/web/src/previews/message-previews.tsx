@@ -27,6 +27,7 @@ import {
   messageKey,
   modeIn,
   opening,
+  playsIn,
   previewsOf,
 } from "@iirc/frontend/previews";
 import type {
@@ -36,6 +37,7 @@ import type {
   MediaShown,
   PlayerShown,
   PreviewShown,
+  Size,
 } from "@iirc/frontend/previews";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -108,7 +110,8 @@ const PlainLink = ({
  * A video as the browser's own player, with the control in its corner that opens it large
  * and pauses it. It streams nothing from the Daemon until the Owner presses play, or opens
  * it large, and plays in place only as the Owner asks.
- * @param props - The media, what to call it, the page's link, and what happens on failure.
+ * @param props - The media, what to call it, the page's link, what happens on failure, and
+ * the shape of its box.
  * @returns The video in its box.
  */
 const VideoPlayer = ({
@@ -118,6 +121,7 @@ const VideoPlayer = ({
   name,
   onError,
   poster,
+  box,
 }: {
   readonly autoPlay: boolean;
   readonly link: LinkShown;
@@ -125,6 +129,7 @@ const VideoPlayer = ({
   readonly name: string;
   readonly onError: () => void;
   readonly poster: string | undefined;
+  readonly box: Size;
 }) => {
   const video = useRef<HTMLVideoElement>(null);
 
@@ -147,6 +152,7 @@ const VideoPlayer = ({
       poster={poster}
       preload={autoPlay ? undefined : "none"}
       reference={video}
+      box={box}
       src={media.src}
     />
   );
@@ -186,6 +192,7 @@ const PreviewMedia = ({
           setFailed(true);
         }}
         poster={undefined}
+        box={playsIn({})}
       />
     );
   }
@@ -269,9 +276,10 @@ const PreviewPlayer = ({
   };
 
   const label = `Play from ${player.host}`;
+  const box = playsIn({ player, poster: image });
 
   if (playing) {
-    return <PlayerFrame player={player} text={text} />;
+    return <PlayerFrame player={player} box={box} text={text} />;
   }
 
   return image?.drawn === "Poster" ? (
@@ -280,6 +288,7 @@ const PreviewPlayer = ({
       image={image}
       key={image.src}
       play={{ label, onPlay: play, words: player.words }}
+      box={box}
       text={text}
     />
   ) : (
@@ -319,6 +328,9 @@ const PosterVideo = ({
   // A poster that moves is drawn as its first frame, and is no still for the video.
   const poster = image.animated ? undefined : image.src;
 
+  // The box the poster, the video, and the video without its poster all stand in.
+  const box = playsIn({ poster: image });
+
   if (failed) {
     return text;
   }
@@ -338,6 +350,7 @@ const PosterVideo = ({
             name={name}
             onError={fail}
             poster={poster}
+            box={box}
           />
         }
         text={text}
@@ -356,6 +369,7 @@ const PosterVideo = ({
           name={name}
           onError={fail}
           poster={undefined}
+          box={box}
         />
       }
       text={text}
@@ -377,6 +391,7 @@ const PosterVideo = ({
         },
         words: undefined,
       }}
+      box={box}
       text={text}
     />
   );

@@ -112,20 +112,31 @@ const ready = {
 
 const hash = "cd".repeat(32);
 
+/** An image's width and height in pixels, as the Daemon read them from its bytes. */
+interface Dimensions {
+  readonly height: number;
+  readonly width: number;
+}
+
 /**
  * A ready Preview of the link, with an image the Daemon kept.
  * @param kind - A page, or a link that is itself an image.
  * @param animated - Whether the image moves.
+ * @param dimensions - The image's size in pixels, if the Daemon read it.
  * @returns Its state.
  */
-const readyWithImage = (kind: "page" | "image", animated = false) => {
+const readyWithImage = (
+  kind: "page" | "image",
+  animated = false,
+  dimensions: Dimensions | null = null
+) => {
   const imageType = animated ? "image/gif" : "image/png";
 
   return {
     _tag: "Ready",
     preview: {
       ...ready.preview,
-      image: { animated, hash, size: 1234, type: imageType },
+      image: { animated, dimensions, hash, size: 1234, type: imageType },
       kind,
       type: kind === "image" ? imageType : null,
     },
@@ -156,9 +167,10 @@ const videoFile = "https://media.example.com/cat.mp4";
  * A ready Preview of the link, which is a page that names a video file, with its poster.
  * @param poster - Whether the Daemon kept the poster.
  * @param animated - Whether the poster moves.
+ * @param dimensions - The poster's size in pixels, if the Daemon read it.
  * @returns Its state.
  */
-const readyVideoPage = (poster = true, animated = false) =>
+const readyVideoPage = (poster = true, animated = false, dimensions: Dimensions | null = null) =>
   ({
     _tag: "Ready",
     preview: {
@@ -167,6 +179,7 @@ const readyVideoPage = (poster = true, animated = false) =>
       image: poster
         ? {
             animated,
+            dimensions,
             hash,
             size: 1234,
             type: animated ? ("image/gif" as const) : ("image/jpeg" as const),
@@ -187,9 +200,10 @@ const playerHost = "www.youtube-nocookie.com";
  * A ready Preview of the link, which is a player from a listed host.
  * @param poster - Whether the Daemon kept the poster.
  * @param animated - Whether the poster moves.
+ * @param dimensions - The poster's size in pixels, if the Daemon read it.
  * @returns Its state.
  */
-const readyPlayer = (poster: boolean, animated = false) =>
+const readyPlayer = (poster: boolean, animated = false, dimensions: Dimensions | null = null) =>
   ({
     _tag: "Ready",
     preview: {
@@ -198,6 +212,7 @@ const readyPlayer = (poster: boolean, animated = false) =>
       image: poster
         ? {
             animated,
+            dimensions,
             hash,
             size: 1234,
             type: animated ? ("image/gif" as const) : ("image/jpeg" as const),
@@ -546,10 +561,15 @@ const animated = () => ({
  * Opens the Message with the player's Preview ready, and its poster, if any, in view.
  * @param poster - Whether the Daemon kept a poster.
  * @param mode - `ui.previews`, on unless given.
+ * @param dimensions - The poster's size in pixels, if the Daemon read it.
  * @returns The fake Daemon, to send the stream more.
  */
-const withPlayer = async (poster: boolean, mode: "on" | "text" = "on") => {
-  const fake = await opened(mode, catsItem(readyPlayer(poster)));
+const withPlayer = async (
+  poster: boolean,
+  mode: "on" | "text" = "on",
+  dimensions: Dimensions | null = null
+) => {
+  const fake = await opened(mode, catsItem(readyPlayer(poster, false, dimensions)));
   const { daemon } = fake;
 
   await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -613,10 +633,16 @@ const frame = {
  * @param mode - `ui.previews`, on unless given.
  * @param poster - Whether the Daemon kept a poster.
  * @param animatedPoster - Whether the poster moves.
+ * @param dimensions - The poster's size in pixels, if the Daemon read it.
  * @returns The fake Daemon.
  */
-const withVideo = async (mode: "on" | "text" = "on", poster = true, animatedPoster = false) => {
-  const fake = await opened(mode, catsItem(readyVideoPage(poster, animatedPoster)));
+const withVideo = async (
+  mode: "on" | "text" = "on",
+  poster = true,
+  animatedPoster = false,
+  dimensions: Dimensions | null = null
+) => {
+  const fake = await opened(mode, catsItem(readyVideoPage(poster, animatedPoster, dimensions)));
 
   await settled(() => fake.daemon.previewFollowers.length === 1 && list() !== null);
   await scrolledIntoView();
@@ -628,6 +654,42 @@ const withVideo = async (mode: "on" | "text" = "on", poster = true, animatedPost
   }
 
   return fake;
+};
+
+/**
+ * What gives a box its shape and its limit, as the page sets it, for a holder, a video's
+ * box, or a frame. jsdom does no layout, so this is what the stylesheet is given.
+ * @param element - The box.
+ * @returns Its proportions, and how wide it is at most, as set.
+ */
+const boxOf = (element: Element | null | undefined) => {
+  const style = element instanceof HTMLElement ? element.style : undefined;
+
+  return {
+    atMost: style?.getPropertyValue("--box-at-most"),
+    height: style?.getPropertyValue("--box-height"),
+    width: style?.getPropertyValue("--box-width"),
+  };
+};
+
+/**
+ * Says the Message's first image has loaded, as a browser would.
+ */
+const imageLoaded = async () => {
+  await act(async () => {
+    list()?.querySelector("img")?.dispatchEvent(new Event("load"));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * The box the Message's image stands in, and whether it has loaded.
+ * @returns Its shape and width, and its `data-loaded`.
+ */
+const holder = () => {
+  const element = list()?.querySelector<HTMLElement>("[data-loaded]");
+
+  return { ...boxOf(element), loaded: element?.dataset.loaded };
 };
 
 describe("a Message's Previews", () => {
@@ -1287,6 +1349,97 @@ describe("a Message's Previews", () => {
     expect(daemon.previewAsks).toStrictEqual([{ position: cursor(2), timeline: iirc }]);
   });
 
+  describe("an image's box", () => {
+    it("is reserved from the image's size before it loads, and is the same box once it has", async () => {
+      await opened("on", catsItem(readyWithImage("image", false, { height: 48, width: 64 })));
+      await settled(() => list() !== null);
+      await scrolledIntoView();
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("img") !== null);
+
+      const before = holder();
+
+      await imageLoaded();
+
+      const after = holder();
+
+      expect({ after, before }).toStrictEqual({
+        after: { ...before, loaded: "true" },
+        before: {
+          atMost: "64px",
+          height: "48",
+          loaded: "false",
+          width: "64",
+        },
+      });
+    });
+
+    it("keeps its placeholder where the Daemon read no size, until the image has loaded, not until it is seen", async () => {
+      await opened("on", catsItem(readyWithImage("image")));
+      await settled(() => list() !== null);
+      await scrolledIntoView();
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("img") !== null);
+
+      const before = holder();
+
+      await imageLoaded();
+
+      expect({ after: holder().loaded, before: before.loaded }).toStrictEqual({
+        after: "true",
+        before: "false",
+      });
+    });
+
+    it("is the box a page's video plays in, before play and after it", async () => {
+      await withVideo("on", true, false, { height: 3, width: 4 });
+
+      const poster = boxOf(list()?.querySelector("[data-loaded]"));
+
+      await pressed(imageButton("Play video · video/mp4 · A cat · example.com"));
+
+      expect({ poster, video: boxOf(list()?.querySelector("video")?.parentElement) }).toStrictEqual(
+        {
+          poster: { atMost: "", height: "3", width: "4" },
+          video: { atMost: "", height: "3", width: "4" },
+        }
+      );
+    });
+
+    it("is the box a page's video is left in where its poster fails to load", async () => {
+      await withVideo("on", true, false, { height: 3, width: 4 });
+
+      const poster = boxOf(list()?.querySelector("[data-loaded]"));
+
+      await act(async () => {
+        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+        await Promise.resolve();
+      });
+
+      expect({ poster, video: boxOf(list()?.querySelector("video")?.parentElement) }).toStrictEqual(
+        {
+          poster: { atMost: "", height: "3", width: "4" },
+          video: { atMost: "", height: "3", width: "4" },
+        }
+      );
+    });
+
+    it("is the box a player plays in, the shape its page gave, whatever its poster's", async () => {
+      await withPlayer(true, "on", { height: 3, width: 4 });
+
+      const poster = boxOf(list()?.querySelector("[data-loaded]"));
+
+      await pressed(playButton());
+
+      expect({ frame: boxOf(document.body.querySelector("iframe")), poster }).toStrictEqual({
+        frame: { atMost: "", height: "360", width: "640" },
+        poster: { atMost: "", height: "360", width: "640" },
+      });
+    });
+  });
+
   it("draws no image, and gives none a source, until it scrolls into view", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("page")));
 
@@ -1575,11 +1728,11 @@ describe("a Message's Previews", () => {
 
       expect({
         drawn: list()?.querySelector("img")?.dataset.drawn,
-        last: row?.querySelector<HTMLElement>(":scope > :last-child")?.dataset.loaded,
+        last: row?.querySelector<HTMLElement>(":scope > :last-child")?.dataset.loaded !== undefined,
         text: row?.firstElementChild?.textContent,
       }).toStrictEqual({
         drawn: "card",
-        last: "true",
+        last: true,
         text: "example.com · CatsA page about cats.",
       });
     });
