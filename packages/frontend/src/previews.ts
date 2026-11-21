@@ -386,6 +386,50 @@ const answeredItems = (
 };
 
 /**
+ * A Message come into view: wanted, the first time. Seen again with as many links, it is as
+ * it was, but for whether its Timeline is a Direct Message.
+ * @param state - The state.
+ * @param event - What the view said.
+ * @returns The state.
+ */
+const shown = (
+  state: Previews,
+  event: Extract<PreviewsEvent, { readonly _tag: "Shown" }>
+): Previews => {
+  const key = messageKey(event.timeline, event.position);
+  const held = state.messages.get(key);
+
+  if (held === undefined) {
+    return withMessage(state, key, {
+      asking: "Wanted",
+      chosen: undefined,
+      direct: event.direct,
+      ids: undefined,
+      links: event.links,
+      position: event.position,
+      since: 0,
+      timeline: event.timeline,
+    });
+  }
+
+  if (held.links === event.links) {
+    return held.direct === event.direct
+      ? state
+      : withMessage(state, key, { ...held, direct: event.direct });
+  }
+
+  // Its links changed, so what was answered, or is being asked, was for other links:
+  // it is wanted again, unless the Daemon refused it for good.
+  return withMessage(state, key, {
+    ...held,
+    asking: held.asking === "Refused" ? "Refused" : "Wanted",
+    direct: event.direct,
+    ids: undefined,
+    links: event.links,
+  });
+};
+
+/**
  * Folds one event in. A Message is wanted once, when first shown, and asked for only while
  * the stream is followed. An answer is taken only by the ask in flight, though its items
  * are folded in whenever it lands, each unless the stream changed it since. A change is
@@ -399,25 +443,7 @@ const answeredItems = (
 export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews => {
   switch (event._tag) {
     case "Shown": {
-      const key = messageKey(event.timeline, event.position);
-      const held = state.messages.get(key);
-
-      if (held !== undefined) {
-        return held.links === event.links && held.direct === event.direct
-          ? state
-          : withMessage(state, key, { ...held, direct: event.direct, links: event.links });
-      }
-
-      return withMessage(state, key, {
-        asking: "Wanted",
-        chosen: undefined,
-        direct: event.direct,
-        ids: undefined,
-        links: event.links,
-        position: event.position,
-        since: 0,
-        timeline: event.timeline,
-      });
+      return shown(state, event);
     }
 
     case "Asked": {

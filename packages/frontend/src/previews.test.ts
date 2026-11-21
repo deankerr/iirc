@@ -697,6 +697,20 @@ describe("a Message shown again with more links", () => {
   });
 });
 
+describe("a Message answered, then shown with more links", () => {
+  it("is asked for again, and an answer for its old links settles nothing", () => {
+    const { ask, state } = asking(1);
+    const more = { _tag: "Shown", direct: false, links: 2, position: at(1), timeline } as const;
+    const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", ready)] }, more);
+    const raced = fold(state, more, { _tag: "Answered", ask, previews: [item("a", ready)] });
+
+    expect([
+      asksWanted(answered, choosingHere(), opening("closed", [[1, true]])).length,
+      asksWanted(raced, choosingHere(), opening("closed", [[1, true]])).length,
+    ]).toStrictEqual([1, 1]);
+  });
+});
+
 describe("where a toggle stands", () => {
   it.each([
     [
