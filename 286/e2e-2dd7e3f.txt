@@ -1,0 +1,7 @@
+@iirc/daemon e2e:  Test Files  13 passed (13)
+@iirc/daemon e2e:       Tests  69 passed (69)
+@iirc/link-fetch-bun e2e:  Test Files  1 passed (1)
+@iirc/link-fetch-bun e2e:       Tests  6 passed (6)
+iirc e2e:  Test Files  2 passed (2)
+iirc e2e:       Tests  12 passed (12)
+exit=0

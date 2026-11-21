@@ -1,0 +1,40 @@
+[
+  {
+    "link": "H/gone",
+    "state": {
+      "_tag": "Failed",
+      "reason": "AnsweredError"
+    }
+  },
+  {
+    "link": "H/challenge",
+    "state": {
+      "_tag": "Failed",
+      "reason": "AnsweredError"
+    }
+  },
+  {
+    "link": "H/gone.png",
+    "state": {
+      "_tag": "Failed",
+      "reason": "AnsweredError"
+    }
+  },
+  {
+    "link": "H/ok",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": "All about cats.",
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:33285/ok",
+        "player": null,
+        "site": "127.0.0.1:33285",
+        "stream": null,
+        "title": "Cats",
+        "type": null
+      }
+    }
+  }
+]

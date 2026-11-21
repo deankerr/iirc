@@ -1,0 +1,70 @@
+[
+  {
+    "link": "H/gone",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": null,
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:39501/gone",
+        "player": null,
+        "site": "127.0.0.1:39501",
+        "stream": null,
+        "title": "404 Not Found",
+        "type": null
+      }
+    }
+  },
+  {
+    "link": "H/challenge",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": null,
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:39501/challenge",
+        "player": null,
+        "site": "127.0.0.1:39501",
+        "stream": null,
+        "title": "Just a moment...",
+        "type": null
+      }
+    }
+  },
+  {
+    "link": "H/gone.png",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": null,
+        "image": null,
+        "kind": "image",
+        "link": "http://127.0.0.1:39501/gone.png",
+        "player": null,
+        "site": "127.0.0.1:39501",
+        "stream": null,
+        "title": null,
+        "type": "image/png"
+      }
+    }
+  },
+  {
+    "link": "H/ok",
+    "state": {
+      "_tag": "Ready",
+      "preview": {
+        "description": "All about cats.",
+        "image": null,
+        "kind": "page",
+        "link": "http://127.0.0.1:39501/ok",
+        "player": null,
+        "site": "127.0.0.1:39501",
+        "stream": null,
+        "title": "Cats",
+        "type": null
+      }
+    }
+  }
+]
