@@ -1014,6 +1014,104 @@ const wordsOf = (text: string | null): string | undefined =>
   text === null || text.trim() === "" ? undefined : contained(text);
 
 /**
+ * How many bytes a file is, in words a reader weighs at a glance: a count under a thousand
+ * as `0 bytes`, `1 byte`, or `999 bytes`, and above it kB, MB, GB, or TB in powers of a
+ * thousand, to one decimal below ten and whole from ten up. It rounds before it picks the
+ * unit, so 999,999 bytes is `1.0 MB` and never `1000 kB`. Plain arithmetic, the same in
+ * every locale.
+ * @param bytes - A length in bytes, a whole number from zero.
+ * @returns The words.
+ */
+const sizeWords = (bytes: number): string => {
+  if (bytes < 1000) {
+    return bytes === 1 ? "1 byte" : `${bytes} bytes`;
+  }
+
+  const units = ["kB", "MB", "GB", "TB"];
+  let index = 0;
+  let amount = bytes / 1000;
+
+  // A value that rounds up to a thousand is one of the next unit.
+  while (index < units.length - 1 && Math.round(amount) >= 1000) {
+    index += 1;
+    amount /= 1000;
+  }
+
+  const rounded = Math.round(amount * 10) / 10;
+
+  return `${rounded < 10 ? rounded.toFixed(1) : Math.round(amount)} ${units[index]}`;
+};
+
+/**
+ * A file's name as its link gives it: the last part of the path of the link the Preview
+ * was read from, percent-decoded where that decodes, and as written where it does not. A
+ * path with no last part, as `/` or a trailing slash, or one that is blank, is named by its
+ * host.
+ * @param link - The link the Preview was read from.
+ * @returns The name, as a stranger wrote it, or none when the link cannot be read.
+ */
+const fileNameOf = (link: string): string | undefined => {
+  const url = URL.parse(link);
+
+  if (url === null) {
+    return undefined;
+  }
+
+  const written = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+  let name = written;
+
+  try {
+    name = decodeURIComponent(written);
+  } catch {
+    // Not valid percent-encoding: it is as it was written.
+  }
+
+  return name.trim() === "" ? url.hostname : name;
+};
+
+/**
+ * A text file's first lines, each contained on its own so no embedding one opens reaches
+ * the next, and kept apart by line breaks. Blank lines before the first and after the last
+ * are dropped, and a tab is four spaces, as a control picture would hide the indentation
+ * it stands for.
+ * @param text - The lines, as the Daemon read them, with `\n` between.
+ * @returns Them, or none when they hold nothing.
+ */
+const linesOf = (text: string): string | undefined => {
+  if (text.trim() === "") {
+    return undefined;
+  }
+
+  return text
+    .replace(/^(?:[\t\r ]*\n)+/u, "")
+    .trimEnd()
+    .split(/\r?\n/u)
+    .map((line) => contained(line.replaceAll("\t", "    ")))
+    .join("\n");
+};
+
+/**
+ * A file's words: its name, and then its first lines when it has them, or else its type and
+ * size, each left out when the host did not give it.
+ * @param preview - A Preview of kind `file`.
+ * @returns Its title and description.
+ */
+const fileWordsOf = (preview: Preview) => {
+  const name = fileNameOf(preview.link);
+  const lines = preview.description === null ? undefined : linesOf(preview.description);
+
+  const about = [
+    wordsOf(preview.type),
+    preview.size === null ? undefined : sizeWords(preview.size),
+  ].filter((part) => part !== undefined);
+
+  return {
+    description: lines ?? (about.length === 0 ? undefined : about.join(" \u00B7 ")),
+    title: name === undefined ? undefined : wordsOf(name),
+  };
+};
+
+/**
  * A host as a card compares it: lower case, without a leading `www.`.
  * @param link - A link.
  * @returns Its host, or none when it cannot be read.
@@ -1167,8 +1265,9 @@ const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
  * host it was read from when another than its link's; its `title`; its `description`; and
  * its media, an image, a video or a sound, or a player. A page, and a page that names a
  * video file or a listed player, is its title and description, with its image, or its
- * poster, under them. A link that is itself an image, a video, or a sound is its media
- * alone. The site's name is never drawn, since the link stands right above. Under `text`, a
+ * poster, under them. A file is its file name, and its first lines when it is a text file
+ * that has some, or else its type and size, with no media. A link that is itself an image,
+ * a video, or a sound is its media alone. The site's name is never drawn, since the link stands right above. Under `text`, a
  * card is its words alone. `name` is what the card is called: its title, or else its link.
  */
 export interface CardShown {
@@ -1220,9 +1319,13 @@ const cardOf = (
   position: Position
 ): CardShown | undefined => {
   const link = linkShown(address);
-  // Only a page has words: the Daemon gives a link that is itself media neither.
-  const title = wordsOf(preview.title);
-  const description = wordsOf(preview.description);
+
+  // Only a page and a file have words: the Daemon gives a link that is itself media neither.
+  const { description, title } =
+    preview.kind === "file"
+      ? fileWordsOf(preview)
+      : { description: wordsOf(preview.description), title: wordsOf(preview.title) };
+
   const image = on ? imageOf(preview) : undefined;
   const media = on ? mediaOf(preview, id, timeline, position) : undefined;
   const player = on ? playerOf(preview) : undefined;

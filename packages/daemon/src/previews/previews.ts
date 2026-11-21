@@ -72,7 +72,7 @@ import { dimensionsOf } from "./dimensions.ts";
 import { logged, logging } from "./fetch-log.ts";
 import type { Logged } from "./fetch-log.ts";
 import { playerOf, stillListed } from "./players.ts";
-import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
+import { fillFromOembed, readMedia, readOembed, readPage, readText } from "./read.ts";
 import type { PageRead } from "./read.ts";
 import { makeRoom } from "./room.ts";
 import { previewStore } from "./store.ts";
@@ -266,6 +266,7 @@ const mediaPreview = (link: string, type: string): Read => {
             link,
             player: null,
             site: hostOf(link),
+            size: null,
             stream: kind === "image" ? null : link,
             title: null,
             type,
@@ -273,6 +274,38 @@ const mediaPreview = (link: string, type: string): Read => {
         },
       };
 };
+
+/**
+ * A Preview of a file: a link whose answer is neither a page nor media. It has no title, and
+ * no image, whatever it is.
+ * @param link - The link it answered as.
+ * @param type - Its media type, or empty when it declared none.
+ * @param size - Its length in bytes as its host declared it, or null.
+ * @param description - A plain-text file's first lines, or null.
+ * @returns What it came to.
+ */
+const filePreview = (
+  link: string,
+  type: string,
+  size: number | null,
+  description: string | null
+): Read => ({
+  state: {
+    _tag: "Ready",
+    preview: {
+      description,
+      image: null,
+      kind: "file",
+      link,
+      player: null,
+      site: hostOf(link),
+      size,
+      stream: null,
+      title: null,
+      type: type === "" ? null : type,
+    },
+  },
+});
 
 /**
  * Why a fetch gave nothing, as a Preview's failure. An answer of another type than the
@@ -310,14 +343,19 @@ const reasonOf = (failure: LinkFetchFailure): PreviewFailure => {
 
 /**
  * What a fetch that failed shows: the reason, or for an answer of another type than a page,
- * a text Preview of it when it is media.
+ * a text Preview of it when it is media, and else a file's, from its headers alone.
  * @param failure - Why the fetch gave no page.
  * @returns What it came to.
  */
-const failedFetch = (failure: LinkFetchFailure): Read =>
-  failure._tag === "LinkWrongType"
-    ? mediaPreview(failure.link, failure.type)
-    : failedRead(reasonOf(failure));
+const failedFetch = (failure: LinkFetchFailure): Read => {
+  if (failure._tag !== "LinkWrongType") {
+    return failedRead(reasonOf(failure));
+  }
+
+  return readMedia(failure.type) === undefined
+    ? filePreview(failure.link, failure.type, failure.length, null)
+    : mediaPreview(failure.link, failure.type);
+};
 
 /**
  * Bytes, one after another.
@@ -371,8 +409,8 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 
 /**
  * What a page's answer says: an error when its status is one, its body never read, a
- * Preview of media from its type alone, or what the page says of itself in its head, which
- * is read whole, and joins the fetch's line.
+ * Preview of media from its type alone, a plain-text file's first lines, or what the page
+ * says of itself in its head, which is read whole, and joins the fetch's line.
  * @param logged - The answer, and how what the page said joins its line.
  * @returns What it came to, or the page and the link it answered as.
  */
@@ -387,6 +425,16 @@ const answered = ({ fetched, said }: Logged) =>
     }
 
     const head = joined(yield* Stream.runCollect(fetched.body));
+
+    // A text file is read to its own bound, and no more.
+    if (fetched.type === "text/plain") {
+      return filePreview(
+        fetched.link,
+        fetched.type,
+        fetched.length,
+        readText(head, fetched.headers["content-type"]) ?? null
+      );
+    }
 
     const page = readPage({
       contentType: fetched.headers["content-type"],
@@ -451,6 +499,7 @@ const pageRead = (
           link,
           player: playing ?? null,
           site: page.site ?? hostOf(link),
+          size: null,
           stream: video?.link ?? null,
           title: page.title ?? null,
           type: video?.type ?? null,

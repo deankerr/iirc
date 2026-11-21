@@ -106,6 +106,7 @@ const ready = {
     link: "https://example.com/cats",
     player: null,
     site: "example.com",
+    size: null,
     stream: null,
     title: "Cats",
     type: null,
@@ -900,6 +901,57 @@ describe("a Message's Previews", () => {
       text: "CatsA page about cats.",
       words: ["Cats", "A page about cats."],
     });
+  });
+
+  it("draws a text file as its name and its lines, as literal text with their breaks, and never as markup", async () => {
+    const lines = "<b>x</b>\n<img src=x onerror=alert(1)>\n\nlast";
+
+    const { daemon } = await opened(
+      "text",
+      catsItem({
+        _tag: "Ready",
+        preview: {
+          ...ready.preview,
+          description: lines,
+          kind: "file",
+          size: 52,
+          title: null,
+          type: "text/plain",
+        },
+      })
+    );
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect({
+      elements: card()?.querySelectorAll("b, img").length,
+      words: words(),
+    }).toStrictEqual({ elements: 0, words: ["cats", lines] });
+  });
+
+  it("draws any other file as its name, its type, and its size", async () => {
+    const { daemon } = await opened(
+      "on",
+      catsItem({
+        _tag: "Ready",
+        preview: {
+          ...ready.preview,
+          description: null,
+          kind: "file",
+          size: 1_200_000,
+          title: null,
+          type: "application/pdf",
+        },
+      })
+    );
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect(words()).toStrictEqual(["cats", "application/pdf \u00B7 1.2 MB"]);
   });
 
   it("names the host a page was read from above its title, when another than its link's", async () => {

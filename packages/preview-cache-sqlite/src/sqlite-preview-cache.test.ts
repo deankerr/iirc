@@ -59,6 +59,7 @@ const page: Extract<Kept["state"], { readonly _tag: "Ready" }>["preview"] = {
   link,
   player: null,
   site: "example.com",
+  size: null,
   stream: null,
   title: "Ünïcode 🙂",
   type: null,
@@ -94,9 +95,13 @@ const sized: Kept = {
   },
 };
 
+// The record as a layout before files wrote it, which stated no Preview's size.
+const unfiled = `UPDATE previews SET state = json_remove(state, '$.preview.size')`;
+
 // The record as a layout before the sizes wrote it, which a file of that layout holds.
 const unsized = (version: 4 | 5) =>
-  `UPDATE previews SET state = json_remove(state, '$.preview.image.dimensions');
+  `${unfiled};
+   UPDATE previews SET state = json_remove(state, '$.preview.image.dimensions');
    ${version === 4 ? `UPDATE previews SET state = replace(state, '"stream":', '"media":');` : ""}
    PRAGMA user_version = ${version}`;
 
@@ -137,6 +142,31 @@ describe("the SQLite Preview cache", () => {
 });
 
 describe("a file of the layout before", () => {
+  it("reads a Preview kept before files with no size, and a failure as it was", async () => {
+    const failure: Kept = {
+      ...kept,
+      link: "https://example.com/gone",
+      state: { _tag: "Failed", reason: "Unreachable" },
+    };
+
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (cache) => cache.put(sized));
+        yield* using(file, (cache) => cache.put(failure));
+        raw(file, `${unfiled}; PRAGMA user_version = 6`);
+
+        yield* using(file, (cache) =>
+          Effect.gen(function* () {
+            expect(yield* cache.get(link)).toStrictEqual(Option.some(sized));
+            expect(yield* cache.get(failure.link)).toStrictEqual(Option.some(failure));
+          })
+        );
+      })
+    );
+  });
+
   it("reads a Preview kept with its stream as media, as it was", async () => {
     const video = "https://example.com/cat.mp4";
 
@@ -155,7 +185,8 @@ describe("a file of the layout before", () => {
         yield* using(file, (cache) => cache.put(streamed));
         raw(
           file,
-          `UPDATE previews SET state = replace(state, '"stream":', '"media":');
+          `${unfiled};
+           UPDATE previews SET state = replace(state, '"stream":', '"media":');
            PRAGMA user_version = 4`
         );
 

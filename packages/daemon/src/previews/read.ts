@@ -709,3 +709,31 @@ export const readMedia = (contentType: string): "image" | "video" | "audio" | un
 
   return undefined;
 };
+
+/**
+ * A plain-text file's first lines, as the card of its Preview holds them. The characters are
+ * those its byte order mark names, else its Content-Type's charset, else UTF-8, and no `<meta>`
+ * is looked for, since it is no HTML. Line breaks are kept, as LF however the file wrote them,
+ * and so is the indentation, but blank lines before the first line and whitespace after the
+ * last are dropped. It is cut to 500 code points, as a description is. Nothing in it is read
+ * as markup.
+ *
+ * @param bytes - the file's bytes, as far as they were read.
+ * @param contentType - the answer's Content-Type, if any.
+ * @returns the first lines, or undefined when there is nothing in it but whitespace.
+ */
+export const readText = (
+  bytes: Uint8Array,
+  contentType: string | undefined
+): string | undefined => {
+  const charset = bomCharset(bytes) ?? headerCharset(contentType) ?? "utf-8";
+
+  const lines = decoderFor(charset)
+    .decode(bytes)
+    .replaceAll(/\r\n?/gu, "\n")
+    .replace(/^(?:[^\S\n]*\n)+/u, "");
+
+  const first = cut(lines.trimEnd(), DESCRIPTION_LIMIT)?.trimEnd();
+
+  return first === undefined || first === "" ? undefined : first;
+};

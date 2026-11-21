@@ -148,9 +148,23 @@ const declaredLength = (response: Response) => {
   const encoding = essence(response.headers.get("content-encoding"));
   const length = Number(response.headers.get("content-length") ?? Number.NaN);
 
-  return (encoding === "" || encoding === "identity") && Number.isSafeInteger(length)
+  return (encoding === "" || encoding === "identity") && Number.isSafeInteger(length) && length >= 0
     ? length
     : undefined;
+};
+
+/**
+ * How a body ends past what it may give.
+ * @param purpose - What the link is fetched for.
+ * @param type - Its type.
+ * @returns A page's HTML at the end of its head, a page's text at its cap, anything else fails.
+ */
+const endingOf = (purpose: Purpose, type: string) => {
+  if (purpose.kind !== "page") {
+    return "fail";
+  }
+
+  return type === "text/plain" ? "cap" : "head";
 };
 
 /** A body's reader, as far as the guard reads it. */
@@ -226,7 +240,8 @@ const lead = (reader: Reader, purpose: Purpose, connection: Connection) =>
  * @param first - Its first bytes, already read.
  * @param cap - The most it may give.
  * @param length - The length it declared, when that is of the bytes it gives.
- * @param page - Whether it is a page, which ends cleanly at the end of its head or its cap.
+ * @param ending - How it ends past what it may give: a page cleanly at the end of its head or
+ * its cap, a text cleanly at its cap, and anything else fails.
  * @param connection - Its connection.
  * @returns The body, which runs once.
  */
@@ -235,10 +250,10 @@ const bounded = (
   first: Uint8Array,
   cap: number,
   length: number | undefined,
-  page: boolean,
+  ending: "head" | "cap" | "fail",
   connection: Connection
 ): Stream.Stream<Uint8Array, BodyFailure> => {
-  const ends = page ? headEnd() : undefined;
+  const ends = ending === "head" ? headEnd() : undefined;
   let pending = Option.some(first);
   let total = 0;
   let finished = reader === undefined;
@@ -269,6 +284,15 @@ const bounded = (
 
   // Each step takes one chunk, and gives what of it is within the bound, if anything.
   const step = (chunk: Uint8Array): Effect.Effect<Uint8Array, BodyFailure> => {
+    // A text ends cleanly at its cap. It is no HTML, so nothing in it ends it sooner.
+    if (ending === "cap") {
+      const end = Math.min(chunk.length, cap - total);
+
+      total += end;
+
+      return Effect.as(total >= cap ? stop : Effect.void, chunk.subarray(0, end));
+    }
+
     if (ends === undefined) {
       total += chunk.length;
 
@@ -485,6 +509,7 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
           return {
             body: Stream.empty,
             headers: Object.fromEntries(response.headers),
+            length: declaredLength(response) ?? null,
             link: target.href,
             status: response.status,
             type: header,
@@ -497,7 +522,11 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         const type = unsatisfied ? header : declared(purpose, header);
 
         if (type === undefined) {
-          return yield* new LinkWrongType({ link: target.href, type: header });
+          return yield* new LinkWrongType({
+            length: declaredLength(response) ?? null,
+            link: target.href,
+            type: header,
+          });
         }
 
         const cap = capOf(purpose, type);
@@ -522,12 +551,17 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         // Only the first bytes are looked at, however many the first chunks held, so the type
         // never depends on how the body was split.
         if (purpose.kind === "image" && sniff(first.subarray(0, sniffed)) !== type) {
-          return yield* new LinkWrongType({ link: target.href, type: header });
+          return yield* new LinkWrongType({
+            length: length ?? null,
+            link: target.href,
+            type: header,
+          });
         }
 
         return {
-          body: bounded(reader, first, cap, length, purpose.kind === "page", connection),
+          body: bounded(reader, first, cap, length, endingOf(purpose, type), connection),
           headers: Object.fromEntries(response.headers),
+          length: length ?? null,
           link: target.href,
           status: response.status,
           type,

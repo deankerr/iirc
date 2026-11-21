@@ -872,6 +872,107 @@ describe("types", () => {
   });
 });
 
+/**
+ * A host answering 200 with a type and a length, whose body never comes.
+ * @param type - The type.
+ * @param length - The length it declares.
+ * @returns The handler.
+ */
+const withheld =
+  (type: string, length: number): Handler =>
+  (_request, response) => {
+    response.writeHead(200, { "content-length": length, "content-type": type });
+    response.flushHeaders();
+  };
+
+describe("a plain-text file", () => {
+  const text = "line one\nline two\n";
+
+  it("within its bound is whole, with the length it declared", async () => {
+    const handler: Handler = (_request, response) => {
+      response.writeHead(200, {
+        "content-length": text.length,
+        "content-type": "text/plain; charset=utf-8",
+      });
+      response.end(text);
+    };
+
+    await expect(answered(handler, page)).resolves.toMatchObject({
+      answer: { body: encoder.encode(text), length: text.length, type: "text/plain" },
+    });
+  });
+
+  // One mebibyte, declared or streamed, and more than the host would ever stop sending.
+  it.each([
+    [
+      "declared whole",
+      ((_request, response) => {
+        response.writeHead(200, { "content-length": 1024 * 1024, "content-type": "text/plain" });
+        response.end("a".repeat(1024 * 1024));
+      }) satisfies Handler,
+    ],
+    [
+      "streamed",
+      ((_request, response) => {
+        response.writeHead(200, { "content-type": "text/plain" });
+        pour(response, encoder.encode("a".repeat(8 * 1024)), 128);
+      }) satisfies Handler,
+    ],
+  ] as const)("past its bound ends cleanly at it, %s", async (_, handler) => {
+    const result = await run(
+      Effect.gen(function* () {
+        const site = yield* serve(handler);
+
+        const outcome = yield* fetched(
+          { policy: loopbackPolicy(site.port) },
+          `http://127.0.0.1:${site.port}/`
+        );
+
+        return { closed: yield* closes(site), outcome };
+      })
+    );
+
+    expect(result.outcome).toMatchObject({ answer: { status: 200, type: "text/plain" } });
+    expect("answer" in result.outcome && result.outcome.answer.body.length).toBe(limits.text);
+    expect(result.closed).toBe(1);
+  });
+
+  it("asked for as anything but a page is a wrong type", async () => {
+    await expect(answered(plain("text/plain", text), image)).resolves.toMatchObject({
+      failed: { _tag: "LinkWrongType", type: "text/plain" },
+    });
+  });
+});
+
+describe("a type the purpose does not take", () => {
+  it.each([
+    ["declared", { "content-length": "5" }, 5],
+    ["declared and identity", { "content-encoding": "identity", "content-length": "5" }, 5],
+    ["compressed", { "content-encoding": "gzip" }, null],
+    ["not declared", {}, null],
+  ] as const)("is a wrong type that carries its length when %s", async (_, headers, length) => {
+    const handler: Handler = (_request, response) => {
+      response.writeHead(200, { ...headers, "content-type": "application/pdf" });
+      response.end(
+        "content-encoding" in headers && headers["content-encoding"] === "gzip"
+          ? gzipSync("%PDF-")
+          : "%PDF-"
+      );
+    };
+
+    await expect(answered(handler, page)).resolves.toMatchObject({
+      failed: { _tag: "LinkWrongType", length, type: "application/pdf" },
+    });
+  });
+
+  // Its body never comes, so a fetch that waited for any byte of it would time out.
+  it("is refused before any byte of its body is read", async () => {
+    await expect(answered(withheld("application/pdf", 10), page)).resolves.toMatchObject({
+      failed: { _tag: "LinkWrongType", length: 10, type: "application/pdf" },
+    });
+  });
+});
+
 const sent = async (purpose: Purpose, handler: Handler = html) =>
   await run(
     Effect.gen(function* () {
@@ -892,7 +993,7 @@ describe("what is sent", () => {
     const { headers } = await sent(page);
 
     expect(headers).toMatchObject({
-      accept: "text/html, application/xhtml+xml;q=0.9",
+      accept: "text/html, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1",
       "accept-language": "en, *;q=0.5",
       "user-agent": "iirc/1.2.3 (+https://github.com/deankerr/iirc) bot",
     });

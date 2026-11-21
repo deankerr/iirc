@@ -1,5 +1,7 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import * as Http from "node:http";
+import type * as Net from "node:net";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
 import {
@@ -20,8 +22,9 @@ import {
   LinkWrongType,
   limits,
 } from "@iirc/link-fetch";
+import { makeBunLinkFetch } from "@iirc/link-fetch-bun";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
-import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
+import { loopbackPolicy, makeFakeLinkFetch } from "@iirc/link-fetch/testing";
 import type { PreviewCacheService } from "@iirc/preview-cache";
 import { makeSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
 import type { JournalService } from "@iirc/runtime/journal";
@@ -397,6 +400,7 @@ const media = (link: string, kind: string, type: string) => ({
     link,
     player: null,
     site: new URL(link).host,
+    size: null,
     stream: kind === "image" ? null : link,
     title: null,
     type,
@@ -450,6 +454,7 @@ describe("Previews over a real server", () => {
               link: "https://cats.example/",
               player: null,
               site: "Cat News",
+              size: null,
               stream: null,
               title: "Cats",
               type: null,
@@ -521,6 +526,7 @@ describe("Previews over a real server", () => {
     const result = await run(
       {
         "https://short.example/p": new LinkWrongType({
+          length: null,
           link: "https://cdn.example/cat.png",
           type: "image/png",
         }),
@@ -612,22 +618,25 @@ describe("Previews over a real server", () => {
     });
   });
 
-  it("shows each failure as its reason, and a link to media as a text Preview from its type", async () => {
+  it("shows each failure as its reason, a link to media as a text Preview from its type, and any other file as one from its headers", async () => {
     const answers = {
       "https://audio.example/": new LinkWrongType({
+        length: null,
         link: "https://audio.example/",
         type: "audio/ogg",
       }),
       "https://bare.example/": page("<style></style>"),
       "https://big.example/": new LinkTooLarge({ limit: 1024 }),
-      "https://image.example/cat.png": { body: "not read", type: "image/png" },
-      "https://plain.example/": new LinkWrongType({
-        link: "https://plain.example/",
-        type: "text/plain",
+      "https://file.example/doc.pdf": new LinkWrongType({
+        length: 2048,
+        link: "https://file.example/doc.pdf",
+        type: "application/pdf",
       }),
+      "https://image.example/cat.png": { body: "not read", type: "image/png" },
       "https://private.example/": new LinkRefused({ reason: "a private address" }),
       "https://slow.example/": new LinkTimedOut(),
       "https://video.example/": new LinkWrongType({
+        length: null,
         link: "https://video.example/",
         type: "video/mp4",
       }),
@@ -635,7 +644,7 @@ describe("Previews over a real server", () => {
 
     const texts = [
       "https://private.example/ https://gone.example/ https://slow.example/",
-      "https://big.example/ https://bare.example/ https://plain.example/",
+      "https://big.example/ https://bare.example/ https://file.example/doc.pdf",
       "https://image.example/cat.png https://video.example/ https://audio.example/",
     ];
 
@@ -660,7 +669,24 @@ describe("Previews over a real server", () => {
       ["https://slow.example/", { _tag: "Failed", reason: "TimedOut" }],
       ["https://big.example/", { _tag: "Failed", reason: "TooLarge" }],
       ["https://bare.example/", { _tag: "Failed", reason: "NothingToShow" }],
-      ["https://plain.example/", { _tag: "Failed", reason: "NothingToShow" }],
+      [
+        "https://file.example/doc.pdf",
+        {
+          _tag: "Ready",
+          preview: {
+            description: null,
+            image: null,
+            kind: "file",
+            link: "https://file.example/doc.pdf",
+            player: null,
+            site: "file.example",
+            size: 2048,
+            stream: null,
+            title: null,
+            type: "application/pdf",
+          },
+        },
+      ],
       [
         "https://image.example/cat.png",
         media("https://image.example/cat.png", "image", "image/png"),
@@ -804,6 +830,7 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     link: "https://page.example/",
     player: null,
     site: "page.example",
+    size: null,
     stream: null,
     title: null,
     type: null,
@@ -1341,6 +1368,7 @@ describe("a Preview's image over a real server", () => {
         link: CAT,
         player: null,
         site: "cat.example",
+        size: null,
         stream: null,
         title: "Cat",
         type: null,
@@ -1395,6 +1423,7 @@ describe("a Preview's image over a real server", () => {
         link,
         player: null,
         site: "image.example",
+        size: null,
         stream: null,
         title: null,
         type: "image/gif",
@@ -1641,6 +1670,7 @@ describe("a Preview's image over a real server", () => {
         link: CAT,
         player: null,
         site: "cat.example",
+        size: null,
         stream: null,
         title: "Cat",
         type: null,
@@ -1893,6 +1923,337 @@ describe("a link that answers with an error over a real server", () => {
       after: [{ _tag: "Failed", reason: "AnsweredError" }],
       before: ["Cats"],
     });
+  });
+});
+
+/** What a listening server's address gives: its port, among other things. */
+const Listening = Schema.Struct({ port: Schema.Int });
+
+/** A host on loopback that answers as a test tells it, and the connections it has had. */
+interface Host {
+  readonly port: number;
+  readonly connections: { opened: number; closed: number };
+}
+
+/**
+ * Starts a host on loopback, whose every answer a handler writes, closed with the Scope and
+ * every connection it accepted.
+ * @param handler - Answers each request.
+ * @returns The host.
+ */
+const hosting = (handler: (response: Http.ServerResponse) => void) =>
+  Effect.acquireRelease(
+    Effect.callback<{ host: Host; server: Http.Server; sockets: Set<Net.Socket> }>((resume) => {
+      const connections = { closed: 0, opened: 0 };
+      const sockets = new Set<Net.Socket>();
+
+      const server = Http.createServer((_request, response) => {
+        response.on("error", () => null);
+        handler(response);
+      });
+
+      server.on("connection", (socket) => {
+        connections.opened += 1;
+        sockets.add(socket);
+        socket.on("error", () => null);
+        socket.on("close", () => {
+          connections.closed += 1;
+          sockets.delete(socket);
+        });
+      });
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = Schema.decodeUnknownSync(Listening)(server.address());
+
+        resume(
+          Effect.succeed({
+            host: { connections, port },
+            server,
+            sockets,
+          })
+        );
+      });
+    }),
+    ({ server, sockets }) =>
+      Effect.callback<Http.Server>((resume) => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+
+        server.close(() => {
+          resume(Effect.succeed(server));
+        });
+      })
+  ).pipe(Effect.map(({ host }) => host));
+
+/**
+ * What a link to a file on a loopback host comes to, through the real guard.
+ * @param handler - How the host answers.
+ * @param shown - What Previews are set to.
+ * @param after - Runs once the Preview is settled, to count what became of the host's connection.
+ * @returns The Preview, the link's host, and what `after` counted.
+ */
+const filed = async (
+  handler: (response: Http.ServerResponse) => void,
+  shown: "on" | "text",
+  after: (host: Host) => Effect.Effect<number> = () => Effect.succeed(0)
+) =>
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const host = yield* hosting(handler);
+
+        const guard = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(host.port),
+          version: "0.0.0",
+        });
+
+        const links: FakeLinkFetch = {
+          asked: Effect.succeed([]),
+          release: () => Effect.void,
+          service: guard,
+        };
+
+        const served = yield* serve({}, { links });
+        const link = `http://127.0.0.1:${host.port}/file`;
+
+        if (shown === "on") {
+          yield* setBucket(served);
+        }
+
+        yield* setPreviews(served, shown);
+        yield* talk(served, [link]);
+        const [place] = yield* messages(served, 1);
+        const items = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+        return {
+          after: yield* after(host),
+          items: items.map((one) => [one.link === link ? "the link" : one.link, one.state]),
+          site: `127.0.0.1:${host.port}`,
+        };
+      })
+    )
+  );
+
+/**
+ * Waits until the host's first connection has closed, for at most five seconds.
+ * @param host - The host.
+ * @returns How many of its connections have closed.
+ */
+const hungUp = (host: Host) =>
+  Effect.suspend(() => Effect.succeed(host.connections.closed)).pipe(
+    Effect.repeat({ schedule: Schedule.spaced("10 millis"), until: (closed) => closed >= 1 }),
+    Effect.timeoutOrElse({
+      duration: "5 seconds",
+      orElse: () => Effect.succeed(host.connections.closed),
+    })
+  );
+
+const withheld = (type: string, length: number) => (response: Http.ServerResponse) => {
+  response.writeHead(200, { "content-length": length, "content-type": type });
+  response.flushHeaders();
+};
+
+describe("a link to a file over a real server and the real guard", () => {
+  // The host sends its headers and then holds the body open for ever, so a read of any byte of
+  // it would wait out the fetch's whole time limit, and the Preview would not settle in time.
+  it.each(["text", "on"] as const)(
+    "is a Preview of a file from its headers alone, its body never read, under %s",
+    async (shown) => {
+      const result = await filed(withheld("application/pdf", 123_456), shown, hungUp);
+
+      expect(result).toStrictEqual({
+        after: 1,
+        items: [
+          [
+            "the link",
+            {
+              _tag: "Ready",
+              preview: {
+                description: null,
+                image: null,
+                kind: "file",
+                link: `http://${result.site}/file`,
+                player: null,
+                site: result.site,
+                size: 123_456,
+                stream: null,
+                title: null,
+                type: "application/pdf",
+              },
+            },
+          ],
+        ],
+        site: result.site,
+      });
+    }
+  );
+
+  it("has no size where its host declared no length, and no type where it declared none", async () => {
+    const result = await filed((response) => {
+      response.writeHead(200);
+      response.flushHeaders();
+    }, "text");
+
+    expect(result.items).toMatchObject([
+      ["the link", { _tag: "Ready", preview: { kind: "file", size: null, type: null } }],
+    ]);
+  });
+
+  it("has no size where its length is of bytes that are compressed", async () => {
+    const result = await filed((response) => {
+      response.writeHead(200, {
+        "content-encoding": "gzip",
+        "content-length": 99,
+        "content-type": "application/zip",
+      });
+      response.flushHeaders();
+    }, "text");
+
+    expect(result.items).toMatchObject([
+      [
+        "the link",
+        { _tag: "Ready", preview: { kind: "file", size: null, type: "application/zip" } },
+      ],
+    ]);
+  });
+
+  it.each(["text", "on"] as const)("gives a text file's first lines under %s", async (shown) => {
+    const body = "first line\r\n  indented\r\n\r\nlast\r\n\r\n";
+
+    const result = await filed((response) => {
+      response.writeHead(200, {
+        "content-length": Buffer.byteLength(body),
+        "content-type": "text/plain; charset=utf-8",
+      });
+      response.end(body);
+    }, shown);
+
+    expect(result.items).toMatchObject([
+      [
+        "the link",
+        {
+          _tag: "Ready",
+          preview: {
+            description: "first line\n  indented\n\nlast",
+            kind: "file",
+            size: Buffer.byteLength(body),
+            title: null,
+            type: "text/plain",
+          },
+        },
+      ],
+    ]);
+  });
+
+  // The host writes a mebibyte and keeps the body open, so reading to its end would wait for
+  // ever, and a Preview that settles has read no further than the bound.
+  it("gives the first lines of a text file past its bound, still the length it declared", async () => {
+    const lines = Array.from({ length: 100_000 }, (_, at) => `line ${at}`).join("\n");
+    const body = Buffer.from(lines.slice(0, 1024 * 1024));
+
+    const result = await filed(
+      (response) => {
+        response.writeHead(200, { "content-length": body.length, "content-type": "text/plain" });
+        response.write(body);
+      },
+      "text",
+      hungUp
+    );
+
+    expect(result.after).toBe(1);
+    expect(result.items).toMatchObject([
+      [
+        "the link",
+        {
+          _tag: "Ready",
+          preview: {
+            description: lines.slice(0, 500).trimEnd(),
+            kind: "file",
+            size: body.length,
+            type: "text/plain",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it.each([
+    [
+      "its header's charset",
+      "text/plain; charset=windows-1252",
+      Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x93, 0x68, 0x69, 0x94]),
+      "caf\u00E9 \u201Chi\u201D",
+    ],
+    [
+      "its byte order mark, over a header that says otherwise",
+      "text/plain; charset=windows-1252",
+      Buffer.from([0xff, 0xfe, 0x68, 0x00, 0xe9, 0x00]),
+      "h\u00E9",
+    ],
+    ["UTF-8 where it names none", "text/plain", Buffer.from("h\u00E9llo"), "h\u00E9llo"],
+  ])("reads a text file in %s", async (_, type, body, description) => {
+    const result = await filed((response) => {
+      response.writeHead(200, { "content-length": body.length, "content-type": type });
+      response.end(body);
+    }, "text");
+
+    expect(result.items).toMatchObject([
+      ["the link", { _tag: "Ready", preview: { description, kind: "file", type: "text/plain" } }],
+    ]);
+  });
+
+  it("is a file with no lines when its text is empty, and none when it is only whitespace", async () => {
+    const results = await Promise.all(
+      ["", " \r\n\t\n"].map(
+        async (body) =>
+          await filed((response) => {
+            response.writeHead(200, {
+              "content-length": body.length,
+              "content-type": "text/plain",
+            });
+            response.end(body);
+          }, "text")
+      )
+    );
+
+    expect(results.map((result) => result.items)).toMatchObject([
+      [
+        [
+          "the link",
+          {
+            _tag: "Ready",
+            preview: { description: null, kind: "file", size: 0, type: "text/plain" },
+          },
+        ],
+      ],
+      [
+        [
+          "the link",
+          {
+            _tag: "Ready",
+            preview: { description: null, kind: "file", size: 5, type: "text/plain" },
+          },
+        ],
+      ],
+    ]);
+  });
+
+  it("is still nothing to show for a page with no title, no description, and nothing to play", async () => {
+    const result = await filed((response) => {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<html><head><style></style></head><body></body></html>");
+    }, "text");
+
+    expect(result.items).toStrictEqual([["the link", { _tag: "Failed", reason: "NothingToShow" }]]);
+  });
+
+  it("is an error and no file when it answers one, whatever its type", async () => {
+    const result = await filed((response) => {
+      response.writeHead(404, { "content-length": 10, "content-type": "application/pdf" });
+      response.flushHeaders();
+    }, "text");
+
+    expect(result.items).toStrictEqual([["the link", { _tag: "Failed", reason: "AnsweredError" }]]);
   });
 });
 
@@ -3140,7 +3501,7 @@ describe("a link that is itself video or sound, streamed over a real server", ()
 
     it.each([
       [new LinkRefused({ reason: "private" }), "Refused"],
-      [new LinkWrongType({ link: read, type: "text/html" }), "NothingToShow"],
+      [new LinkWrongType({ length: null, link: read, type: "text/html" }), "NothingToShow"],
       [{ status: 500, type: "video/mp4" }, "NothingToShow"],
     ] as const)("for %j: %s", async (answer, reason) => {
       const [status, error] = await failing(answer);
@@ -3273,6 +3634,7 @@ describe("a player over a real server", () => {
         link: CLIP,
         player: { link: VIMEO, size: { height: 720, width: 1280 } },
         site: "clip.example",
+        size: null,
         stream: null,
         title: "Clip",
         type: null,
@@ -3497,6 +3859,7 @@ describe("a page that names a video file over a real server", () => {
         link: WATCH,
         player: null,
         site: "streamable.com",
+        size: null,
         stream: FILE,
         title: "A clip",
         type: "video/mp4",
