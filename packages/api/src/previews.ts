@@ -149,13 +149,16 @@ export type Preview = typeof Preview.Type;
 /**
  * Why a link has no Preview: `Refused`, its address is one the Daemon never fetches;
  * `Unreachable`, it could not be reached; `TimedOut`, it took too long; `TooLarge`, its
- * answer passed what the Daemon reads; or `NothingToShow`, its answer held nothing to show.
+ * answer passed what the Daemon reads; `AnsweredError`, its last answer, after any
+ * redirects, had a status outside 200 to 299; or `NothingToShow`, its answer held nothing
+ * to show.
  */
 export const PreviewFailure = Schema.Literals([
   "Refused",
   "Unreachable",
   "TimedOut",
   "TooLarge",
+  "AnsweredError",
   "NothingToShow",
 ]).annotate({ identifier: "PreviewFailure" });
 

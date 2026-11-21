@@ -236,6 +236,14 @@ interface Read {
 const failedRead = (reason: PreviewFailure): Read => ({ state: failed(reason) });
 
 /**
+ * Whether a status is a success, from 200 to 299. Anything else, after any redirects, is
+ * the host answering with an error, whatever its body says.
+ * @param status - The status of the last answer.
+ * @returns Whether it succeeded.
+ */
+const succeeded = (status: number): boolean => status >= 200 && status <= 299;
+
+/**
  * A text Preview of a link to media itself, from its type alone: its body is never read.
  * A link to an image names itself as the image.
  * @param link - The link it answered as.
@@ -347,7 +355,7 @@ const filled = (links: LinkFetchService, page: PageRead) => {
         // It finishes a Preview already begun, so no page asked later goes ahead of it.
         const answer = yield* links.fetch(address, { kind: "oembed" }, "begun");
 
-        if (answer.status < 200 || answer.status > 299) {
+        if (!succeeded(answer.status)) {
           return page;
         }
 
@@ -362,13 +370,18 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 };
 
 /**
- * What a page's answer says: a Preview of media from its type alone, or what the page says
- * of itself in its head, which is read whole, and joins the fetch's line.
+ * What a page's answer says: an error when its status is one, its body never read, a
+ * Preview of media from its type alone, or what the page says of itself in its head, which
+ * is read whole, and joins the fetch's line.
  * @param logged - The answer, and how what the page said joins its line.
  * @returns What it came to, or the page and the link it answered as.
  */
 const answered = ({ fetched, said }: Logged) =>
   Effect.gen(function* () {
+    if (!succeeded(fetched.status)) {
+      return failedRead("AnsweredError");
+    }
+
     if (readMedia(fetched.type) !== undefined) {
       return mediaPreview(fetched.link, fetched.type);
     }
@@ -703,7 +716,7 @@ export const layerPreviews = Layer.effect(Previews)(
             // It finishes a Preview already begun, so no page asked later goes ahead of it.
             const fetched = yield* links.fetch(address, { kind: "image" }, "begun");
 
-            if (fetched.status < 200 || fetched.status > 299) {
+            if (!succeeded(fetched.status)) {
               return yield* new NoImage({ reason: `it answered ${fetched.status}` });
             }
 

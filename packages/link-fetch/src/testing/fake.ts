@@ -149,6 +149,28 @@ const caps: Record<Purpose["kind"], (type: string) => number> = {
 };
 
 /**
+ * A recorded response with a status outside 200 to 299, for any purpose but a stream, as the
+ * guard answers it: its status, its declared type unchecked, and no body.
+ * @param link - The link asked, normalised.
+ * @param purpose - What it is fetched for.
+ * @param recorded - The response.
+ * @returns The answer, or nothing for any other response.
+ */
+const erred = (link: string, purpose: Purpose, recorded: Recorded) => {
+  const { status = 200 } = recorded;
+
+  return purpose.kind === "stream" || (status >= 200 && status <= 299)
+    ? undefined
+    : Effect.succeed({
+        body: Stream.empty,
+        headers: { "content-type": recorded.type, ...recorded.headers },
+        link: recorded.link === undefined ? link : normalised(recorded.link),
+        status,
+        type: recorded.type.split(";")[0]?.trim().toLowerCase() ?? "",
+      } satisfies Fetched);
+};
+
+/**
  * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
  * when the purpose does not take its type, a page cut cleanly at its limit, and any other
  * body over its limit giving its bytes up to the limit and then failing with `LinkTooLarge`
@@ -264,7 +286,7 @@ export const makeFakeLinkFetch = (
             return yield* answer;
           }
 
-          return yield* answered(key, purpose, answer);
+          return yield* erred(key, purpose, answer) ?? answered(key, purpose, answer);
         }),
     };
 

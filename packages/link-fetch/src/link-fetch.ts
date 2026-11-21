@@ -92,14 +92,16 @@ export interface Fetched {
   /**
    * The media type, checked against the purpose, lower-cased and without parameters. For an
    * image, it is the type its leading bytes show, which matched its header. A stream's `416`
-   * is answered whatever its type, which is then unchecked, since it carries no media.
+   * is answered whatever its type, which is then unchecked, since it carries no media, and so
+   * is any status outside 200 to 299 for any other purpose.
    */
   readonly type: string;
   /** Every header, by its lower-cased name. */
   readonly headers: Readonly<Record<string, string>>;
   /**
    * The body as it arrives, decompressed and bounded for the purpose. A page ends early,
-   * cleanly, at the end of its head or at its limit. Anything else over its limit fails.
+   * cleanly, at the end of its head or at its limit. Anything else over its limit fails. An
+   * answer outside 200 to 299, but a stream's, has none, and none of it is read.
    */
   readonly body: Stream.Stream<Uint8Array, BodyFailure>;
 }

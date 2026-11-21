@@ -875,6 +875,10 @@ export const reasonWords = (reason: PreviewFailure): string => {
       return "No preview: this link's answer was too large to read.";
     }
 
+    case "AnsweredError": {
+      return "No preview: this link answered with an error.";
+    }
+
     case "NothingToShow": {
       return "No preview: this link had nothing to show.";
     }
