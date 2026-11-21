@@ -433,20 +433,28 @@ const opening = (
   ),
 });
 
-/** The modes with `ui.previews` `on`, and this Timeline's own choice, if any. */
+/**
+ * The modes with `ui.previews` `on`, and this Timeline's own choice, if any.
+ * @param chosen - Its own choice.
+ * @returns The modes.
+ */
 const choosingHere = (chosen?: "off" | "text" | "on"): PreviewsModes => ({
   players: listed,
   shown: "on",
   timelines: chosen === undefined ? {} : { [timeline]: chosen },
 });
 
+/**
+ * A Message at 1 answered with a link waiting for a press.
+ * @returns The state.
+ */
+const waitingHere = () => {
+  const { ask, state } = asking(1);
+
+  return fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
+};
+
 describe("whether a Preview is open", () => {
-  const waitingHere = () => {
-    const { ask, state } = asking(1);
-
-    return fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
-  };
-
   it.each([
     ["as start says, open", initialPreviews, undefined, opening("open"), inChannel, true],
     ["as start says, closed", initialPreviews, undefined, opening("closed"), inChannel, false],
@@ -519,25 +527,25 @@ describe("whether a Preview is open", () => {
   });
 });
 
-describe("whether a Message is asked for", () => {
-  /**
-   * Whether a Message with two links, shown in a Timeline, is asked for.
-   * @param direct - Whether the Timeline is a Direct Message.
-   * @param modes - The modes.
-   * @param how - How the view opens Previews.
-   * @returns Whether it is asked for.
-   */
-  const askedFor = (direct: boolean, modes: PreviewsModes, how: Opening) =>
-    asksWanted(
-      fold(
-        initialPreviews,
-        { _tag: "Followed" },
-        { _tag: "Shown", direct, links: 2, position: at(1), timeline }
-      ),
-      modes,
-      how
-    ).length === 1;
+/**
+ * Whether a Message with two links, shown in a Timeline, is asked for.
+ * @param direct - Whether the Timeline is a Direct Message.
+ * @param modes - The modes.
+ * @param how - How the view opens Previews.
+ * @returns Whether it is asked for.
+ */
+const askedFor = (direct: boolean, modes: PreviewsModes, how: Opening) =>
+  asksWanted(
+    fold(
+      initialPreviews,
+      { _tag: "Followed" },
+      { _tag: "Shown", direct, links: 2, position: at(1), timeline }
+    ),
+    modes,
+    how
+  ).length === 1;
 
+describe("whether a Message is asked for", () => {
   it.each([
     ["while start is open", false, choosingHere(), opening("open"), true],
     ["not while start is closed", false, choosingHere(), opening("closed"), false],
@@ -616,20 +624,29 @@ describe("whether a Message is asked for", () => {
   });
 });
 
+/**
+ * A Message at 1 answered with a ready Preview, then a link waiting for a press.
+ * @returns The state.
+ */
+const answered = () => {
+  const { ask, state } = asking(1);
+
+  return fold(state, {
+    _tag: "Answered",
+    ask,
+    previews: [item("a", ready), item("b", waitingForPress)],
+  });
+};
+
+/**
+ * What was toggled, by each link's index in the Message at 1.
+ * @param pairs - Each link's index, and whether it was opened.
+ * @returns The toggles.
+ */
+const toggled = (pairs: readonly (readonly [number, boolean])[]) =>
+  opening("closed", pairs).toggles;
+
 describe("whether a link is pressed", () => {
-  const answered = () => {
-    const { ask, state } = asking(1);
-
-    return fold(state, {
-      _tag: "Answered",
-      ask,
-      previews: [item("a", ready), item("b", waitingForPress)],
-    });
-  };
-
-  const toggled = (pairs: readonly (readonly [number, boolean])[]) =>
-    opening("closed", pairs).toggles;
-
   it.each([
     ["not while the Owner has not opened it", answered(), toggled([]), []],
     ["once the Owner opens it", answered(), toggled([[1, true]]), [1]],
@@ -646,10 +663,15 @@ describe("whether a link is pressed", () => {
   });
 });
 
-describe("where a toggle stands", () => {
-  const runs = (...hrefs: readonly (string | undefined)[]) =>
-    hrefs.map((href) => (href === undefined ? { _tag: "Text" } : { _tag: "Link", href }));
+/**
+ * A text's runs as drawn, each a link's by its `href`, or other text.
+ * @param hrefs - Each run's `href`, or none.
+ * @returns The runs.
+ */
+const runs = (...hrefs: readonly (string | undefined)[]) =>
+  hrefs.map((href) => (href === undefined ? { _tag: "Text" } : { _tag: "Link", href }));
 
+describe("where a toggle stands", () => {
   it.each([
     [
       "after each link that may be previewed",
