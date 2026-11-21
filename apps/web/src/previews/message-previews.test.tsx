@@ -723,7 +723,7 @@ describe("a Message's Previews", () => {
     });
   });
 
-  it("shows a page's image as a thumbnail from the media route, beside its summary", async () => {
+  it("shows a page's image as a thumbnail from the images route, beside its summary", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("page")));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -849,7 +849,7 @@ describe("a Message's Previews", () => {
     const play = () => imageButton(`Play ${name}`);
     const enlarge = () => imageButton(`Open ${name} large`);
 
-    it("draws its poster from the media route with a play button, and no video, and asks the stream for nothing", async () => {
+    it("draws its poster from the images route with a play button, and no video, and asks the stream for nothing", async () => {
       const media = stubMedia();
 
       await withVideo();
@@ -1066,7 +1066,7 @@ describe("a Message's Previews", () => {
   });
 
   describe("a player", () => {
-    it("draws its poster from the media route, with a play button that says where it plays from", async () => {
+    it("draws its poster from the images route, with a play button that says where it plays from", async () => {
       await withPlayer(true);
 
       const image = list()?.querySelector("img");

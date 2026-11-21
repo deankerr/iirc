@@ -120,6 +120,29 @@ describe("a file of the layout before", () => {
       })
     );
   });
+
+  it("opens with a row that is not JSON, which fails only its own read", async () => {
+    const other = "https://example.com/other";
+
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (cache) => cache.put(kept));
+        yield* using(file, (cache) => cache.put({ ...kept, link: other }));
+        raw(
+          file,
+          `UPDATE previews SET state = 'not json' WHERE link = '${other}';
+           PRAGMA user_version = 4`
+        );
+
+        expect(yield* using(file, (cache) => cache.get(link))).toStrictEqual(Option.some(kept));
+        expect((yield* using(file, (cache) => cache.get(other)).pipe(Effect.flip))._tag).toBe(
+          "PreviewCacheFailed"
+        );
+      })
+    );
+  });
 });
 
 describe("a file it cannot use", () => {

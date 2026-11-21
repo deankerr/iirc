@@ -22,11 +22,12 @@ const layoutVersion = 5;
 const versionBefore = 4;
 
 // Brings a file of the version before up to this one: each Preview's `media` is its `stream`.
+// A row that is not JSON is left as it is, to fail its own read as it did before.
 const fromBefore = `UPDATE previews SET state = json_set(
   json_remove(state, '$.preview.media'),
   '$.preview.stream',
   json_extract(state, '$.preview.media')
-) WHERE json_type(state, '$.preview.media') IS NOT NULL`;
+) WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview.media') IS NOT NULL END`;
 
 const decodeCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }));
 
