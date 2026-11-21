@@ -114,12 +114,15 @@ export interface PreviewsPress {
  * What happened.
  *
  * - `Shown`: a Message came into view, with how many links it holds that may be previewed,
- *   and whether its Timeline is a Direct Message.
+ *   and whether its Timeline is a Direct Message. Shown again with another count, as an
+ *   Ircd's echo of one of ours may change its text, it holds that count.
  * - `Asked`: the runtime began an ask.
  * - `Answered`: the Daemon answered an ask with the Message's items.
  * - `Refused`: the Daemon refused an ask for good: no such Timeline or Message, or Previews
  *   are off.
  * - `Pressing`: the runtime began a press.
+ * - `PressDropped`: the runtime let go of a press before it was answered, as Previews
+ *   stopped being followed, so the link may be pressed again.
  * - `Pressed`: the Daemon answered a press with the link's item.
  * - `PressRefused`: the Daemon refused a press, as the link was not waiting for one, so
  *   its Message is asked for again, to draw what the Daemon holds.
@@ -146,6 +149,7 @@ export type PreviewsEvent =
   | { readonly _tag: "Pressing"; readonly press: PreviewsPress }
   | { readonly _tag: "Pressed"; readonly press: PreviewsPress; readonly item: PreviewItem }
   | { readonly _tag: "PressRefused"; readonly press: PreviewsPress }
+  | { readonly _tag: "PressDropped"; readonly press: PreviewsPress }
   | { readonly _tag: "Followed" }
   | { readonly _tag: "Changed"; readonly item: PreviewItem }
   | { readonly _tag: "Lost" }
@@ -396,19 +400,24 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
   switch (event._tag) {
     case "Shown": {
       const key = messageKey(event.timeline, event.position);
+      const held = state.messages.get(key);
 
-      return state.messages.has(key)
-        ? state
-        : withMessage(state, key, {
-            asking: "Wanted",
-            chosen: undefined,
-            direct: event.direct,
-            ids: undefined,
-            links: event.links,
-            position: event.position,
-            since: 0,
-            timeline: event.timeline,
-          });
+      if (held !== undefined) {
+        return held.links === event.links && held.direct === event.direct
+          ? state
+          : withMessage(state, key, { ...held, direct: event.direct, links: event.links });
+      }
+
+      return withMessage(state, key, {
+        asking: "Wanted",
+        chosen: undefined,
+        direct: event.direct,
+        ids: undefined,
+        links: event.links,
+        position: event.position,
+        since: 0,
+        timeline: event.timeline,
+      });
     }
 
     case "Asked": {
@@ -444,6 +453,14 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
         ...state,
         pressed: new Set(state.pressed).add(linkKey(event.press.key, event.press.link)),
       };
+    }
+
+    case "PressDropped": {
+      const pressed = new Set(state.pressed);
+
+      pressed.delete(linkKey(event.press.key, event.press.link));
+
+      return { ...state, pressed };
     }
 
     case "Pressed": {

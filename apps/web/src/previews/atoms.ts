@@ -158,7 +158,13 @@ const performPress = (registry: AtomRegistry.AtomRegistry, press: PreviewsPress)
           onSuccess: (item) => {
             happened(registry, { _tag: "Pressed", item, press });
           },
-        })
+        }),
+        // Let go of unanswered, as Previews stop being followed, it may be pressed again.
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            happened(registry, { _tag: "PressDropped", press });
+          })
+        )
       );
   });
 

@@ -671,6 +671,32 @@ describe("whether a link is pressed", () => {
 const runs = (...hrefs: readonly (string | undefined)[]) =>
   hrefs.map((href) => (href === undefined ? { _tag: "Text" } : { _tag: "Link", href }));
 
+describe("a press let go of before it was answered", () => {
+  it("is pressed again, as the link still waits", () => {
+    const press = pressOf(answered(), timeline, at(1), 1);
+
+    expect(
+      pressesWanted(
+        fold(answered(), { _tag: "Pressing", press }, { _tag: "PressDropped", press }),
+        toggled([[1, true]])
+      ).map((one) => one.link)
+    ).toStrictEqual([1]);
+  });
+});
+
+describe("a Message shown again with more links", () => {
+  it("is asked for once its new link is opened, as an Ircd's echo may add one", () => {
+    const state = fold(
+      initialPreviews,
+      { _tag: "Followed" },
+      { _tag: "Shown", direct: false, links: 1, position: at(1), timeline },
+      { _tag: "Shown", direct: false, links: 2, position: at(1), timeline }
+    );
+
+    expect(asksWanted(state, choosingHere(), opening("closed", [[1, true]]))).toHaveLength(1);
+  });
+});
+
 describe("where a toggle stands", () => {
   it.each([
     [
