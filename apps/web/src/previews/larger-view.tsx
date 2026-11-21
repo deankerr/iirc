@@ -1,14 +1,18 @@
 /**
  * The larger view of an image or a video: over the whole screen, as large as fits and no
  * larger than it, with a link to its page under it. A video plays there, already playing,
- * with its controls. Pressing outside it or Escape closes it, and focus returns to the
- * control that opened it.
+ * with its controls. A press anywhere on an image's view closes it, except on the link to its
+ * page. A press on a video is its player's, so its view has a close control in its corner,
+ * and a press on the dimmed screen around either closes it too. Escape closes either, and
+ * focus returns to the control that opened it.
  *
  * @packageDocumentation
  */
 import type { LinkShown } from "@iirc/frontend/previews";
 import type { ReactElement } from "react";
-import { Dialog, DialogTrigger, Modal, ModalOverlay } from "react-aria-components";
+import { Button, Dialog, DialogTrigger, Modal, ModalOverlay } from "react-aria-components";
+
+import { Icon } from "../ui/icon.tsx";
 
 import styles from "./larger-view.module.css";
 
@@ -51,16 +55,29 @@ export const OpensLarger = ({
       <Modal className={styles.modal}>
         <Dialog aria-label={alt} className={styles.dialog}>
           {large._tag === "Image" ? (
-            <img alt={alt} className={styles.large} referrerPolicy="no-referrer" src={large.src} />
+            // The image is the view's close control: a press on it closes, as its slot asks.
+            <Button aria-label="Close" className={styles.closes} slot="close">
+              <img
+                alt={alt}
+                className={styles.large}
+                referrerPolicy="no-referrer"
+                src={large.src}
+              />
+            </Button>
           ) : (
-            // oxlint-disable-next-line jsx-a11y/media-has-caption -- a stranger's media carries no captions the Daemon could offer
-            <video
-              autoPlay
-              className={styles.large}
-              controls
-              poster={large.poster}
-              src={large.src}
-            />
+            <span className={styles.player}>
+              {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- a stranger's media carries no captions the Daemon could offer */}
+              <video
+                autoPlay
+                className={styles.large}
+                controls
+                poster={large.poster}
+                src={large.src}
+              />
+              <Button aria-label="Close" className={styles.close} slot="close">
+                <Icon name="close" />
+              </Button>
+            </span>
           )}
           {link.href === undefined ? (
             <bdi className={styles.page}>{link.text}</bdi>
