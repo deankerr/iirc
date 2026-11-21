@@ -120,6 +120,7 @@ describe("the larger view", () => {
       await opened(image);
 
       const link = larger()?.querySelector("a");
+      const href = link?.getAttribute("href");
 
       // The link opens its page in a new tab, which this test has no browser to do.
       link?.addEventListener("click", (event) => {
@@ -127,7 +128,10 @@ describe("the larger view", () => {
       });
       await pressed(link);
 
-      expect(larger()).not.toBeNull();
+      expect({ href, open: larger() !== null }).toStrictEqual({
+        href: "https://example.com/cats",
+        open: true,
+      });
     });
   });
 

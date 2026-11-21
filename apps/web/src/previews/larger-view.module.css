@@ -42,9 +42,13 @@
   pointer-events: auto;
 }
 
-/* An image is its own close control, nothing but the image, which a press closes. */
+/*
+ * An image is its own close control, nothing but the image, which a press closes. It and a
+ * video's wrapper are columns, so what they hold shrinks with them where the view is short.
+ */
 .closes {
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   max-width: 100%;
   padding: 0;
@@ -64,7 +68,8 @@
 /* A video and its close control in its corner, as wide as the view gives it. */
 .player {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
   width: 100vw;
   min-height: 0;
   max-width: 100%;
