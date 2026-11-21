@@ -153,7 +153,9 @@ describe("the fake link fetch", () => {
       );
 
       expect(exit).toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/a.png", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ link: "https://example.com/a.png", status: 200, type: "text/html" })
+        )
       );
     });
 
@@ -163,12 +165,16 @@ describe("the fake link fetch", () => {
       await expect(
         fetching(answers, "https://example.com/", { kind: "oembed" })
       ).resolves.toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ link: "https://example.com/", status: 200, type: "text/html" })
+        )
       );
       await expect(
         fetching(answers, "https://example.com/", { kind: "stream" })
       ).resolves.toStrictEqual(
-        Exit.fail(new LinkWrongType({ link: "https://example.com/", type: "text/html" }))
+        Exit.fail(
+          new LinkWrongType({ link: "https://example.com/", status: 200, type: "text/html" })
+        )
       );
     });
 

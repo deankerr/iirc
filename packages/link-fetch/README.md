@@ -14,7 +14,7 @@ fetch(link, purpose, precedence?): Effect<Fetched, LinkFetchFailure, Scope>
 Fetched: { link, status, type, headers, body: Stream<Uint8Array, BodyFailure> }
 
 LinkRefused { reason } | LinkUnreachable { reason } | LinkTimedOut
-  | LinkTooLarge { limit } | LinkWrongType { link, type }
+  | LinkTooLarge { limit } | LinkWrongType { link, status, type }
 
 parseLink(policy, link, base?): Result<Target, LinkRefused>     // scheme, userinfo, port
 admit(policy, port, addresses): Result<Address, LinkRefused>    // every record, or none
@@ -31,7 +31,7 @@ Turn: { start: Effect<void>, hop(name): Effect<void, never, Scope>,
 
 - **A body is bounded for its purpose, after decompression.** A page ends cleanly before its `<body`, after its `</head>`, or at 1 MiB, and a `<body>` in a comment, script, style, or title ends nothing. A raster image may be 8 MiB, an SVG 1 MiB, an oEmbed 64 KiB, and a stream 200 MiB. A stream's `416` is answered whatever its type. A body that passes its bound fails with `LinkTooLarge`, and so does one that reaches it without ending, unless its declared length says it is whole. `limits` holds them.
 - **A fetch is held to 10 seconds,** body and all, except a stream, which is held to 10 seconds to its first byte.
-- **The type is the purpose's.** A page is `text/html` or `application/xhtml+xml`, an image is PNG, JPEG, GIF, WebP, AVIF, or SVG by its header and its leading bytes alike, an oEmbed is JSON, and a stream is `video/*` or `audio/*`. Anything else is `LinkWrongType`, which names the `link` that answered, after any redirects.
+- **The type is the purpose's.** A page is `text/html` or `application/xhtml+xml`, an image is PNG, JPEG, GIF, WebP, AVIF, or SVG by its header and its leading bytes alike, an oEmbed is JSON, and a stream is `video/*` or `audio/*`. Anything else is `LinkWrongType`, which names the `link` that answered, after any redirects, and its `status`.
 - **The connection lives in the Scope.** Closing it stops the fetch and its body, read or not, and a body that ends at a bound closes its connection.
 - **`link` is the last link fetched, by name,** as the URL parser normalised it, after any redirects.
 - **Fetches wait their turn, and never fail for waiting.** Every adapter builds in a pacer of its own. At most two hops run at once to one name, each counted by the name it is made to and held until it is done, and at most 30 fetches start in any rolling minute, read through `Clock`. A fetch beyond either bound waits, and its time limit does not run while it waits. Every purpose counts, a stream included.

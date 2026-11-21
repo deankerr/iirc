@@ -236,6 +236,14 @@ interface Read {
 const failedRead = (reason: PreviewFailure): Read => ({ state: failed(reason) });
 
 /**
+ * Whether a status is a success, from 200 to 299. Anything else, after any redirects, is
+ * the host answering with an error, whatever its body says.
+ * @param status - The status of the last answer.
+ * @returns Whether it succeeded.
+ */
+const succeeded = (status: number): boolean => status >= 200 && status <= 299;
+
+/**
  * A text Preview of a link to media itself, from its type alone: its body is never read.
  * A link to an image names itself as the image.
  * @param link - The link it answered as.
@@ -302,14 +310,19 @@ const reasonOf = (failure: LinkFetchFailure): PreviewFailure => {
 
 /**
  * What a fetch that failed shows: the reason, or for an answer of another type than a page,
- * a text Preview of it when it is media.
+ * an error when its status is one, or else a text Preview of it when it is media.
  * @param failure - Why the fetch gave no page.
  * @returns What it came to.
  */
-const failedFetch = (failure: LinkFetchFailure): Read =>
-  failure._tag === "LinkWrongType"
+const failedFetch = (failure: LinkFetchFailure): Read => {
+  if (failure._tag !== "LinkWrongType") {
+    return failedRead(reasonOf(failure));
+  }
+
+  return succeeded(failure.status)
     ? mediaPreview(failure.link, failure.type)
-    : failedRead(reasonOf(failure));
+    : failedRead("AnsweredError");
+};
 
 /**
  * Bytes, one after another.
@@ -347,7 +360,7 @@ const filled = (links: LinkFetchService, page: PageRead) => {
         // It finishes a Preview already begun, so no page asked later goes ahead of it.
         const answer = yield* links.fetch(address, { kind: "oembed" }, "begun");
 
-        if (answer.status < 200 || answer.status > 299) {
+        if (!succeeded(answer.status)) {
           return page;
         }
 
@@ -362,13 +375,18 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 };
 
 /**
- * What a page's answer says: a Preview of media from its type alone, or what the page says
- * of itself in its head, which is read whole, and joins the fetch's line.
+ * What a page's answer says: an error when its status is one, its body never read, a
+ * Preview of media from its type alone, or what the page says of itself in its head, which
+ * is read whole, and joins the fetch's line.
  * @param logged - The answer, and how what the page said joins its line.
  * @returns What it came to, or the page and the link it answered as.
  */
 const answered = ({ fetched, said }: Logged) =>
   Effect.gen(function* () {
+    if (!succeeded(fetched.status)) {
+      return failedRead("AnsweredError");
+    }
+
     if (readMedia(fetched.type) !== undefined) {
       return mediaPreview(fetched.link, fetched.type);
     }
@@ -703,7 +721,7 @@ export const layerPreviews = Layer.effect(Previews)(
             // It finishes a Preview already begun, so no page asked later goes ahead of it.
             const fetched = yield* links.fetch(address, { kind: "image" }, "begun");
 
-            if (fetched.status < 200 || fetched.status > 299) {
+            if (!succeeded(fetched.status)) {
               return yield* new NoImage({ reason: `it answered ${fetched.status}` });
             }
 

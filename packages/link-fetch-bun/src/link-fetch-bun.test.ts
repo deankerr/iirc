@@ -727,6 +727,11 @@ const answered = async (handler: Handler, purpose: Purpose) =>
     })
   );
 
+const missingPng: Handler = (_request, response) => {
+  response.writeHead(404, { "content-type": "image/png" });
+  response.end(png);
+};
+
 const gif = encoder.encode("GIF89a\u0001\u0000\u0001\u0000");
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
 const webp = encoder.encode("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ");
@@ -843,6 +848,12 @@ describe("types", () => {
 
     await expect(answered(handler, purpose)).resolves.toMatchObject({
       failed: { _tag: "LinkWrongType" },
+    });
+  });
+
+  it("names the status it answered with", async () => {
+    await expect(answered(missingPng, page)).resolves.toMatchObject({
+      failed: { _tag: "LinkWrongType", status: 404 },
     });
   });
 });

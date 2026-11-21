@@ -149,6 +149,16 @@ const caps: Record<Purpose["kind"], (type: string) => number> = {
 };
 
 /**
+ * A recorded response refused for its type, as the guard refuses it.
+ * @param link - The link it answered as.
+ * @param recorded - The response.
+ * @param type - Its declared type.
+ * @returns The failure.
+ */
+const wrongType = (link: string, recorded: Recorded, type: string) =>
+  new LinkWrongType({ link, status: recorded.status ?? 200, type });
+
+/**
  * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
  * when the purpose does not take its type, a page cut cleanly at its limit, and any other
  * body over its limit giving its bytes up to the limit and then failing with `LinkTooLarge`
@@ -170,7 +180,7 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
     purpose.kind === "stream" && recorded.status === 416 ? declared : takes[purpose.kind](declared);
 
   if (type === undefined) {
-    return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));
+    return Effect.fail(wrongType(answeredAs, recorded, declared));
   }
 
   const limit = caps[purpose.kind](type);

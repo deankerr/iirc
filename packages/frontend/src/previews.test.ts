@@ -1464,14 +1464,22 @@ describe("a Preview's media", () => {
 describe("a failure's words", () => {
   it("says each reason as itself", () => {
     expect(
-      (["Refused", "Unreachable", "TimedOut", "TooLarge", "NothingToShow"] as const).map((reason) =>
-        reasonWords(reason)
-      )
+      (
+        [
+          "Refused",
+          "Unreachable",
+          "TimedOut",
+          "TooLarge",
+          "AnsweredError",
+          "NothingToShow",
+        ] as const
+      ).map((reason) => reasonWords(reason))
     ).toStrictEqual([
       "No preview: the Daemon never fetches this address.",
       "No preview: the Daemon could not reach this link.",
       "No preview: this link took too long to answer.",
       "No preview: this link's answer was too large to read.",
+      "No preview: this link answered with an error.",
       "No preview: this link had nothing to show.",
     ]);
   });

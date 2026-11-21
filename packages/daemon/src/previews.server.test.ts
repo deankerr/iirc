@@ -522,6 +522,7 @@ describe("Previews over a real server", () => {
       {
         "https://short.example/p": new LinkWrongType({
           link: "https://cdn.example/cat.png",
+          status: 200,
           type: "image/png",
         }),
       },
@@ -616,6 +617,7 @@ describe("Previews over a real server", () => {
     const answers = {
       "https://audio.example/": new LinkWrongType({
         link: "https://audio.example/",
+        status: 200,
         type: "audio/ogg",
       }),
       "https://bare.example/": page("<style></style>"),
@@ -623,12 +625,14 @@ describe("Previews over a real server", () => {
       "https://image.example/cat.png": { body: "not read", type: "image/png" },
       "https://plain.example/": new LinkWrongType({
         link: "https://plain.example/",
+        status: 200,
         type: "text/plain",
       }),
       "https://private.example/": new LinkRefused({ reason: "a private address" }),
       "https://slow.example/": new LinkTimedOut(),
       "https://video.example/": new LinkWrongType({
         link: "https://video.example/",
+        status: 200,
         type: "video/mp4",
       }),
     } satisfies Record<string, Answer>;
@@ -1806,6 +1810,95 @@ const pictured = (images: Readonly<Record<string, Uint8Array>>) => {
 
   return answers;
 };
+
+describe("a link that answers with an error over a real server", () => {
+  it("fails a page and a link to an image that each answer with an error, whatever their type, fetching nothing more", async () => {
+    const gone = "https://gone.example/";
+    const challenge = "https://challenge.example/";
+    const image = "https://image.example/gone.png";
+    const plain = "https://image.example/missing.png";
+
+    const answers = {
+      [challenge]: {
+        ...page(`<title>Just a moment...</title><meta property="og:image" content="${CAT_IMAGE}">`),
+        status: 403,
+      },
+      [gone]: { ...page("<title>404 Not Found</title>"), status: 404 },
+      [image]: { body: png, status: 404, type: "image/png" },
+      [plain]: { body: "Not Found", status: 404, type: "text/plain" },
+    } satisfies Record<string, Answer>;
+
+    const result = await run(answers, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        yield* setPreviews(served, "on");
+        // A Message previews three links at most.
+        yield* talk(served, [`${gone} ${challenge}`, `${image} ${plain}`]);
+        const items: PreviewItem[] = [];
+
+        for (const place of yield* messages(served, 2)) {
+          items.push(...(yield* settled(served, place)));
+        }
+
+        return {
+          asked: (yield* served.asked)
+            .map(({ link, purpose }) => [link, purpose.kind])
+            .toSorted(([one = ""], [other = ""]) => one.localeCompare(other)),
+          states: items.map((one) => [one.link, one.state]),
+        };
+      })
+    );
+
+    const failure = { _tag: "Failed", reason: "AnsweredError" };
+
+    expect(result).toStrictEqual({
+      asked: [
+        [challenge, "page"],
+        [gone, "page"],
+        [image, "page"],
+        [plain, "page"],
+      ],
+      states: [
+        [gone, failure],
+        [challenge, failure],
+        [image, failure],
+        [plain, failure],
+      ],
+    });
+  });
+
+  it("fails a ready Preview whose refresh answers with an error", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { links, turn } = yield* turning(
+          { "https://cats.example/": cats },
+          { "https://cats.example/": { ...page("<title>404 Not Found</title>"), status: 404 } }
+        );
+
+        const served = yield* serve({}, { links });
+        const place = yield* said(served);
+        const before = titles(yield* live(settled(served, place)));
+
+        yield* turn;
+        yield* TestClock.adjust(day + 1);
+        const stream = yield* follow(served);
+
+        yield* asking(served, place);
+        yield* fetches(served, 2);
+        // The refresh settles once the stream carries what it came to.
+        yield* stream.until((read) => read.includes('"Failed"') || read.includes("404 Not"));
+        yield* stream.stop;
+
+        return { after: (yield* asking(served, place)).map(stateOf), before };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: [{ _tag: "Failed", reason: "AnsweredError" }],
+      before: ["Cats"],
+    });
+  });
+});
 
 const pageOf = (name: string) => `https://${name}.example/`;
 
@@ -3051,7 +3144,7 @@ describe("a link that is itself video or sound, streamed over a real server", ()
 
     it.each([
       [new LinkRefused({ reason: "private" }), "Refused"],
-      [new LinkWrongType({ link: read, type: "text/html" }), "NothingToShow"],
+      [new LinkWrongType({ link: read, status: 200, type: "text/html" }), "NothingToShow"],
       [{ status: 500, type: "video/mp4" }, "NothingToShow"],
     ] as const)("for %j: %s", async (answer, reason) => {
       const [status, error] = await failing(answer);
