@@ -428,17 +428,13 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         for (let hop = 0; ; hop += 1) {
           const target = yield* Effect.fromResult(parseLink(policy, next, base));
 
-          // The first hop waits to start. Each then waits its turn by the name it is made
-          // to, and holds its place until it is done: a redirect once it is read, and the last
-          // hop until its connection closes. Nothing holds a name's place while it waits to
-          // start, so a fetch that waits long for the minute never keeps a name from another.
+          // Each hop waits its turn by the name it is made to, the first starting as it takes
+          // its place, and holds its place until it is done: a redirect once it is read, and
+          // the last hop until its connection closes.
           const held = yield* Scope.fork(scope);
 
           yield* waiting(
-            Effect.andThen(
-              hop === 0 ? turn.start : Effect.void,
-              Scope.provide(turn.hop(target.hostname), held)
-            )
+            Scope.provide(hop === 0 ? turn.begin(target.hostname) : turn.hop(target.hostname), held)
           );
 
           const addresses =

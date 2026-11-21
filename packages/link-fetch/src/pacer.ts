@@ -30,34 +30,52 @@ export type Precedence = "begun" | "first" | "refresh";
 
 const rankOf: Record<Precedence, number> = { begun: 0, first: 1, refresh: 2 };
 
-/** One fetch's place in line, which it keeps through each hop it makes. */
+/**
+ * One fetch's place in line, which it keeps through each hop it makes. Each waits until the
+ * bounds allow it and no fetch that waits for the same bound, and that they allow, stands
+ * ahead of this one. A name is counted without a trailing dot, as the URL parser has already
+ * lower-cased it.
+ */
 export interface Turn {
   /**
-   * Waits until fewer than {@link pacing}'s `perMinute` fetches started in the minute before
-   * and no fetch waiting stands ahead of this one, then counts this one as started.
+   * Waits until fewer than {@link pacing}'s `perMinute` fetches started in the minute
+   * before, then counts this one as started.
    */
   readonly start: Effect.Effect<void>;
   /**
-   * Waits for one of a name's places, given to whichever fetch waiting for it stands
-   * furthest ahead, then holds it until the Scope closes. A name is counted without a
-   * trailing dot, as the URL parser has already lower-cased it.
+   * Waits for one of a name's places, then holds it until the Scope closes, as a redirect's
+   * hop does.
    */
   readonly hop: (name: string) => Effect.Effect<void, never, Scope.Scope>;
+  /**
+   * Waits until it may both start and take one of a name's places, then does both at once
+   * and holds the place until the Scope closes, as a fetch's first hop does. A fetch is
+   * counted as started only as it goes, so one waiting for a name never uses up the minute.
+   */
+  readonly begin: (name: string) => Effect.Effect<void, never, Scope.Scope>;
 }
 
-/** Paces fetches. An adapter asks it once for each fetch, then before it starts and each hop. */
+/** Paces fetches. An adapter asks it once for each fetch, then before each hop. */
 export interface Pacer extends Turn {
   /**
-   * A fetch's place in line, asked now.
+   * A fetch's place in line, asked now. Alone, each of the pacer's own waits is a first
+   * fetch of its own, asked as it waits.
    * @param precedence - Where it stands among those waiting.
    */
   readonly ask: (precedence: Precedence) => Effect.Effect<Turn>;
 }
 
-/** A fetch waiting for a turn: its rank, and when it asked, later asks counting higher. */
-interface Waiter {
+/** A fetch's place: its rank, and when it asked, later asks counting higher. */
+interface Place {
   readonly rank: number;
   readonly asked: number;
+}
+
+/** One wait for a turn: whose, the name it takes a place at, if any, and whether it starts. */
+interface Waiting {
+  readonly place: Place;
+  readonly name: string | undefined;
+  readonly starts: boolean;
 }
 
 /**
@@ -69,36 +87,41 @@ type Look = { readonly _tag: "Taken" } | { readonly _tag: "Wait"; readonly until
 const taken: Look = { _tag: "Taken" };
 const waitForChange: Look = { _tag: "Wait" };
 
-/** A name's places: how many are held, and who waits for one, so an idle name is forgotten. */
-interface Places {
-  held: number;
-  readonly waiting: Set<Waiter>;
-}
+/**
+ * A name as it is counted, without a trailing dot.
+ * @param name - The name.
+ * @returns It, counted.
+ */
+const key = (name: string) => name.replace(/\.$/u, "");
 
 /**
- * Whether a waiter stands ahead of every other waiting beside it.
- * @param waiter - The waiter.
- * @param waiting - Every waiter, itself included.
- * @returns Whether it is first in line.
+ * Whether one place stands ahead of another.
+ * @param one - The one.
+ * @param other - The other.
+ * @returns Whether it does.
  */
-const foremost = (waiter: Waiter, waiting: ReadonlySet<Waiter>): boolean => {
-  for (const other of waiting) {
-    if (other.rank < waiter.rank || (other.rank === waiter.rank && other.asked > waiter.asked)) {
-      return false;
-    }
-  }
+const ahead = (one: Place, other: Place): boolean =>
+  one.rank < other.rank || (one.rank === other.rank && one.asked > other.asked);
 
-  return true;
-};
+/**
+ * Whether two waits want the same bound: the same name, or both to start.
+ * @param one - The one.
+ * @param other - The other.
+ * @returns Whether they do.
+ */
+const contend = (one: Waiting, other: Waiting): boolean =>
+  (one.name !== undefined && one.name === other.name) || (one.starts && other.starts);
 
 /**
  * Makes a pacer, with nothing started and no place held.
  * @returns The pacer.
  */
 export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
-  const names = new Map<string, Places>();
-  // Fetches waiting to start.
-  const starting = new Set<Waiter>();
+  // How many places each name holds. A name holding none is forgotten.
+  const held = new Map<string, number>();
+  const waiting = new Set<Waiting>();
+  // The waits that hold a name's place, until their Scope closes.
+  const holders = new Set<Waiting>();
   // When each fetch in the last minute started, oldest first.
   let started: readonly number[] = [];
   let asks = 0;
@@ -114,17 +137,75 @@ export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
   };
 
   /**
-   * Waits until a waiter may go, deciding each time in one synchronous step, so nothing
-   * changes between looking and taking.
-   * @param look - Takes the turn if it may, and says what it found.
+   * Whether the bounds alone allow a wait to go now.
+   * @param wait - The wait.
+   * @returns Whether they do.
+   */
+  const allowed = (wait: Waiting): boolean =>
+    (wait.name === undefined || (held.get(wait.name) ?? 0) < pacing.perName) &&
+    (!wait.starts || started.length < pacing.perMinute);
+
+  /**
+   * Takes a wait's turn if the bounds allow it and no wait for the same bound that they
+   * allow stands ahead of it. Synchronous, so nothing changes between looking and taking,
+   * and a start and a name's place are taken together.
+   * @param wait - The wait.
+   * @param now - The time.
+   * @returns What it found.
+   */
+  const look = (wait: Waiting, now: number): Look => {
+    started = started.filter((at) => at > now - minute);
+
+    if (!allowed(wait)) {
+      const [oldest] = started;
+
+      return wait.starts && oldest !== undefined && started.length >= pacing.perMinute
+        ? { _tag: "Wait", until: oldest + minute }
+        : waitForChange;
+    }
+
+    for (const other of waiting) {
+      if (
+        other !== wait &&
+        contend(other, wait) &&
+        allowed(other) &&
+        ahead(other.place, wait.place)
+      ) {
+        return waitForChange;
+      }
+    }
+
+    waiting.delete(wait);
+
+    if (wait.name !== undefined) {
+      held.set(wait.name, (held.get(wait.name) ?? 0) + 1);
+      holders.add(wait);
+    }
+
+    if (wait.starts) {
+      started = [...started, now];
+    }
+
+    change();
+
+    return taken;
+  };
+
+  /**
+   * Waits for a turn, looking again at each change, and when the full minute frees a start.
+   * A wait that stops waiting is forgotten at once.
+   * @param wait - The wait.
    * @returns Once taken.
    */
-  const waitUntil = (look: (now: number) => Look) =>
+  const waitFor = (wait: Waiting) =>
     Effect.gen(function* () {
+      waiting.add(wait);
+      change();
+
       for (;;) {
         const now = yield* Clock.currentTimeMillis;
         const wake = changed;
-        const found = look(now);
+        const found = look(wait, now);
 
         if (found._tag === "Taken") {
           return;
@@ -133,108 +214,56 @@ export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
         yield* found.until === undefined
           ? Deferred.await(wake)
           : Deferred.await(wake).pipe(
-              Effect.timeoutOrElse({
-                duration: found.until - now,
-                orElse: () => Effect.void,
-              })
+              Effect.timeoutOrElse({ duration: found.until - now, orElse: () => Effect.void })
             );
       }
-    });
-
-  /**
-   * Waits for a place at a name, then holds it until the Scope closes. A waiter that stops
-   * waiting is forgotten, and a name with none held or waiting is forgotten too.
-   * @param waiter - The fetch.
-   * @param key - The name, without a trailing dot.
-   * @returns Once held.
-   */
-  const hopAs = (waiter: Waiter, key: string) => {
-    let holding = false;
-
-    const join = Effect.sync(() => {
-      const places = names.get(key) ?? { held: 0, waiting: new Set<Waiter>() };
-
-      places.waiting.add(waiter);
-      names.set(key, places);
-      change();
-
-      return places;
-    });
-
-    const leave = (places: Places) =>
-      Effect.sync(() => {
-        if (holding) {
-          places.held -= 1;
-        } else {
-          places.waiting.delete(waiter);
-        }
-
-        if (places.held === 0 && places.waiting.size === 0) {
-          names.delete(key);
-        }
-
-        change();
-      });
-
-    return Effect.acquireRelease(join, leave).pipe(
-      Effect.flatMap((places) =>
-        waitUntil(() => {
-          if (places.held >= pacing.perName || !foremost(waiter, places.waiting)) {
-            return waitForChange;
-          }
-
-          places.waiting.delete(waiter);
-          places.held += 1;
-          holding = true;
+    }).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          waiting.delete(wait);
           change();
-
-          return taken;
         })
       )
     );
-  };
 
-  const startAs = (waiter: Waiter) =>
-    Effect.suspend(() => {
-      starting.add(waiter);
-      change();
+  /**
+   * Waits for a turn that takes a name's place, then holds it until the Scope closes.
+   * @param wait - The wait.
+   * @returns Once held.
+   */
+  const holding = (wait: Waiting & { readonly name: string }) =>
+    Effect.gen(function* () {
+      // Added before the wait, so a place taken is always given back, once, and a wait
+      // still waiting is forgotten.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          waiting.delete(wait);
 
-      return waitUntil((now) => {
-        started = started.filter((at) => at > now - minute);
+          if (holders.delete(wait)) {
+            const left = (held.get(wait.name) ?? 1) - 1;
 
-        const [oldest] = started;
+            if (left === 0) {
+              held.delete(wait.name);
+            } else {
+              held.set(wait.name, left);
+            }
+          }
 
-        if (started.length >= pacing.perMinute && oldest !== undefined) {
-          return { _tag: "Wait", until: oldest + minute };
-        }
-
-        if (!foremost(waiter, starting)) {
-          return waitForChange;
-        }
-
-        starting.delete(waiter);
-        started = [...started, now];
-        change();
-
-        return taken;
-      }).pipe(
-        Effect.onInterrupt(() =>
-          Effect.sync(() => {
-            starting.delete(waiter);
-            change();
-          })
-        )
+          change();
+        })
       );
+      yield* waitFor(wait);
     });
 
   const turnOf = (precedence: Precedence): Turn => {
     asks += 1;
 
-    const waiter: Waiter = { asked: asks, rank: rankOf[precedence] };
+    const place: Place = { asked: asks, rank: rankOf[precedence] };
 
     return {
-      hop: (name) => hopAs(waiter, name.replace(/\.$/u, "")),
-      start: startAs(waiter),
+      begin: (name) => holding({ name: key(name), place, starts: true }),
+      hop: (name) => holding({ name: key(name), place, starts: false }),
+      start: Effect.suspend(() => waitFor({ name: undefined, place, starts: true })),
     };
   };
 
@@ -242,7 +271,7 @@ export const makePacer: Effect.Effect<Pacer> = Effect.sync(() => {
 
   return {
     ask,
-    // Alone, each is a first fetch of its own, asked as it waits.
+    begin: (name) => Effect.flatMap(ask("first"), (turn) => turn.begin(name)),
     hop: (name) => Effect.flatMap(ask("first"), (turn) => turn.hop(name)),
     start: Effect.flatMap(ask("first"), (turn) => turn.start),
   } satisfies Pacer;

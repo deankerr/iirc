@@ -245,8 +245,7 @@ export const makeFakeLinkFetch = (
           const key = normalised(link);
           const turn = yield* pacer.ask(precedence);
 
-          yield* turn.start;
-          yield* turn.hop(URL.parse(key)?.hostname ?? key);
+          yield* turn.begin(URL.parse(key)?.hostname ?? key);
           yield* Ref.update(asked, (all) => [...all, { link, precedence, purpose }]);
 
           const hold = holds.get(key);

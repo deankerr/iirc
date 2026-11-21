@@ -1048,6 +1048,51 @@ describe("fetches are paced", () => {
     expect(paths.after).toStrictEqual(["/held/b3"]);
   });
 
+  it("counts a fetch waiting for a name as started only once it goes", async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const site = holding();
+        const listening = yield* serve(site.handler);
+        const others = Array.from({ length: 28 }, (_, at) => `n${at}.test`);
+
+        const names = scripted(
+          Object.fromEntries(["a.test", ...others].map((name) => [name, [["127.0.0.1"]]]))
+        );
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(listening.port),
+          resolver: names.resolver,
+          version: "1.2.3",
+        });
+
+        const fetching = (name: string, path: string) =>
+          Effect.forkChild(
+            Effect.scoped(
+              Effect.flatMap(
+                service.fetch(`http://${name}:${listening.port}${path}`, page),
+                (answer) => Stream.runDrain(answer.body)
+              )
+            )
+          );
+
+        yield* fetching("a.test", "/held/a1");
+        yield* fetching("a.test", "/held/a2");
+        yield* seenPaths(listening, 2);
+        // It waits for a.test, which holds both its places, and has not started.
+        yield* fetching("a.test", "/held/a3");
+
+        for (const name of others) {
+          yield* fetching(name, `/held/${name}`);
+        }
+
+        return (yield* seenPaths(listening, 30)).length;
+      })
+    );
+
+    // The two at a.test and all 28 others start within the minute.
+    expect(seen).toBe(30);
+  });
+
   it("gives a name's freed place to a first fetch ahead of a refresh asked after it", async () => {
     const after = await run(
       Effect.gen(function* () {

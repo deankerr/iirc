@@ -244,7 +244,98 @@ const turnsOf = async (bound: Bound, waiters: readonly Waiter[]) =>
     })
   );
 
+describe("a fetch's first hop", () => {
+  it("counts as started only once it goes, and goes only once both bounds allow it", async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const pacer = yield* makePacer;
+        const gone = yield* Ref.make<readonly string[]>([]);
+        const held = yield* Scope.make();
+
+        const going = (label: string, name: string, scope?: Scope.Scope) =>
+          Effect.forkChild(
+            Scope.provide(
+              pacer.begin(name).pipe(Effect.andThen(Ref.update(gone, (all) => [...all, label]))),
+              scope ?? held
+            )
+          );
+
+        const first = yield* Scope.make();
+
+        yield* going("a1", "a.test", first);
+        yield* going("a2", "a.test");
+        yield* settle;
+        yield* going("waits for a.test", "a.test");
+        yield* settle;
+
+        for (const at of Array.from({ length: pacing.perMinute - pacing.perName }, (_, n) => n)) {
+          yield* going(`other ${at}`, `${at}.test`);
+        }
+
+        yield* settle;
+
+        const others = (yield* Ref.get(gone)).filter((label) => label.startsWith("other")).length;
+
+        // a.test frees a place, but the minute is full.
+        yield* Scope.close(first, Exit.void);
+        yield* settle;
+
+        const freed = (yield* Ref.get(gone)).includes("waits for a.test");
+
+        yield* TestClock.adjust(60_000);
+        yield* settle;
+
+        return { freed, others, turned: (yield* Ref.get(gone)).includes("waits for a.test") };
+      })
+    );
+
+    expect(seen).toStrictEqual({
+      freed: false,
+      others: pacing.perMinute - pacing.perName,
+      turned: true,
+    });
+  });
+});
+
 describe("the pacer's order", () => {
+  it("forgets a hop that stopped waiting while its Scope stays open", async () => {
+    const turns = await run(
+      Effect.gen(function* () {
+        const pacer = yield* makePacer;
+        const taken = yield* Ref.make<readonly string[]>([]);
+        const first = yield* Scope.make();
+        const open = yield* Scope.make();
+
+        yield* Scope.provide(pacer.hop("a.test"), first);
+        yield* Scope.provide(pacer.hop("a.test"), open);
+
+        const hop = (label: string, precedence: Precedence) =>
+          Effect.flatMap(pacer.ask(precedence), (turn) =>
+            Effect.forkChild(
+              Scope.provide(
+                turn
+                  .hop("a.test")
+                  .pipe(Effect.andThen(Ref.update(taken, (all) => [...all, label]))),
+                open
+              )
+            )
+          );
+
+        const gaveUp = yield* hop("gave up", "begun");
+
+        yield* hop("next", "first");
+        yield* settle;
+        yield* Fiber.interrupt(gaveUp);
+        yield* Scope.close(first, Exit.void);
+        yield* settle;
+
+        return yield* Ref.get(taken);
+      })
+    );
+
+    expect(turns).toStrictEqual(["next"]);
+  });
+
   it("forgets a fetch that stopped waiting to start, ahead of the rest as it stood", async () => {
     const turns = await run(
       Effect.gen(function* () {
