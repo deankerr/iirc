@@ -2,7 +2,7 @@
 import { uiDefaults } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import { reduceOptions } from "@iirc/frontend/options";
-import { deviceUiKey } from "@iirc/frontend/ui";
+import { deviceUiKey, deviceUiOf } from "@iirc/frontend/ui";
 import { describe, expect, it } from "vitest";
 
 import { edit, send } from "../composer/atoms.ts";
@@ -186,6 +186,34 @@ describe("an override of ui.previews.style a device kept, which is gone", () => 
       read: uiDefaults,
       // The rest of the words, how options are named, are the core's.
       refused: true,
+    });
+  });
+});
+
+describe("an override of ui.previews.folded a device kept, which is ui.previews.start now", () => {
+  it("is read as start, a chip or a summary as closed, and is kept under the new name once /set -device changes it", async () => {
+    const fake = signedIn();
+    const kept = '{"previews.folded":"chip","previews.mediaHeight":"large"}';
+
+    const { registry, type } = await page(fake);
+
+    // The page reads what a device kept once, as it starts.
+    registry.set(deviceUi, deviceUiOf(kept));
+    const read = registry.get(uiInEffect);
+
+    await type("/set -device ui.previews.start open");
+    const set = await until(registry, uiInEffect, (ui) => ui["previews.start"] === "open");
+
+    expect({
+      changes: fake.daemon.uiChanges,
+      kept: readChoice(deviceUiKey),
+      read: { height: read["previews.mediaHeight"], start: read["previews.start"] },
+      set: set["previews.start"],
+    }).toStrictEqual({
+      changes: [],
+      kept: '{"previews.mediaHeight":"large","previews.start":"open"}',
+      read: { height: "large", start: "closed" },
+      set: "open",
     });
   });
 });

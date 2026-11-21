@@ -33,7 +33,7 @@ const iirc = idOf(2);
 const listed = (
   id: string,
   name: string,
-  kind: "Network" | "Channel"
+  kind: "Network" | "Channel" | "Direct"
 ): typeof Timeline.Encoded => ({
   changed: 1,
   closed: false,
@@ -321,18 +321,19 @@ const layOut = () => {
   });
 };
 
-/** How a card is folded and how tall its media is: `ui.previews.folded` and `mediaHeight`. */
-type Look = Partial<Pick<UiOptions, "previews.start" | "previews.mediaHeight">>;
+/** How cards start, how tall their media is, and how a line is laid out. */
+type Look = Partial<Pick<UiOptions, "previews.start" | "previews.mediaHeight" | "timeline.layout">>;
 
 /**
- * The Frontend signed in, with `ui.previews` as given and `#iirc` open, holding a Message
- * with a link to a page, which the Daemon answers for with the item given.
+ * The Frontend signed in, with `ui.previews` as given and `#iirc` open, or a Direct Message
+ * with `peer` where `also.direct` is set, holding a Message with a link to a page, which the Daemon answers for with the item given.
  * @param previews - `ui.previews`.
  * @param answer - What the Daemon answers for the Message, as it stands then.
  * @param timelines - `ui.previews.timelines`, none unless given.
  * @param animate - `ui.previews.animate`, shared, off unless given.
- * @param also - How a card is folded and sized, shared, `open` unless given so each is
- *   drawn whole, and a second link's answer, which the Message then holds after the first.
+ * @param also - How cards start and are sized, shared, `open` unless given so each is drawn
+ *   whole, a second link's answer, which the Message then holds after the first, and
+ *   whether the Timeline is a Direct Message.
  * @returns The fake, the registry, and the page.
  */
 const opened = async (
@@ -340,7 +341,11 @@ const opened = async (
   answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" }),
   timelines: { readonly [timeline: string]: "off" | "text" | "on" } = {},
   animate = false,
-  also: { readonly look?: Look; readonly dogs?: typeof PreviewItem.Encoded | undefined } = {}
+  also: {
+    readonly look?: Look;
+    readonly dogs?: typeof PreviewItem.Encoded | undefined;
+    readonly direct?: boolean;
+  } = {}
 ) => {
   const fake = fakeDaemon();
 
@@ -371,7 +376,8 @@ const opened = async (
             : "look https://example.com/cats and https://example.com/dogs"
         ),
       ],
-      timeline: listed(iirc, "#iirc", "Channel"),
+      timeline:
+        also.direct === true ? listed(iirc, "peer", "Direct") : listed(iirc, "#iirc", "Channel"),
     },
   ]);
 
@@ -442,6 +448,14 @@ const mediaHeight = () => list()?.style.getPropertyValue("--preview-media-height
  * @returns It, or none.
  */
 const card = (index = 0) => list()?.querySelectorAll<HTMLElement>("[data-preview]")[index];
+
+/**
+ * The toggle after a link, as drawn.
+ * @param index - Which, the first unless given.
+ * @returns It, or none.
+ */
+const toggle = (index = 0) =>
+  document.querySelectorAll<HTMLButtonElement>("[data-preview-toggle]")[index] ?? null;
 
 /**
  * The press of a card's description that was cut, if it was.
@@ -1441,41 +1455,226 @@ describe("a Message's Previews", () => {
     });
   });
 
-  it("shows a link waiting for a press with a press, which fetches it, and its Preview arrives", async () => {
-    const { daemon, sendPreview } = await opened("text", catsItem({ _tag: "WaitingForPress" }));
+  describe("the toggle after a link", () => {
+    it("under start closed, asks for nothing as the Message scrolls into view and draws nothing, until its toggle is pressed, which asks once and draws a placeholder, then the card", async () => {
+      const { daemon, sendPreview } = await opened("on", catsItem({ _tag: "Pending" }), {}, false, {
+        look: { "previews.start": "closed" },
+      });
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+
+      const closed = {
+        asks: daemon.previewAsks.length,
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        list: list(),
+      };
+
+      await pressed(toggle());
+      await settled(() => daemon.previewAsks.length === 1 && drawn()[0]?.state === "pending");
+
+      const pending = drawn();
+
+      await act(async () => {
+        sendPreview(catsItem(ready));
+        await Promise.resolve();
+      });
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({
+        asks: daemon.previewAsks,
+        closed,
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        pending,
+        text: cardText(),
+      }).toStrictEqual({
+        asks: [{ position: cursor(2), timeline: iirc }],
+        closed: { asks: 0, expanded: "false", list: null },
+        expanded: "true",
+        pending: [{ state: "pending", text: "Previewing https://example.com/cats" }],
+        text: "CatsA page about cats.",
+      });
+    });
+
+    it("under start open, closes the card on its toggle and opens it again on another press, asking only once", async () => {
+      const { daemon } = await opened("on", catsItem(ready));
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await settled(() => drawn()[0]?.state === "ready");
+
+      const open = { expanded: toggle()?.getAttribute("aria-expanded"), shown: drawn().length };
+
+      await pressed(toggle());
+      await settled(() => list() === null);
+
+      const closed = { expanded: toggle()?.getAttribute("aria-expanded"), list: list() };
+
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({
+        asks: daemon.previewAsks.length,
+        closed,
+        open,
+        reopened: toggle()?.getAttribute("aria-expanded"),
+      }).toStrictEqual({
+        asks: 1,
+        closed: { expanded: "false", list: null },
+        open: { expanded: "true", shown: 1 },
+        reopened: "true",
+      });
+    });
+
+    it("keeps what was toggled when the Message's row is drawn again", async () => {
+      const { daemon, registry } = await opened("on", catsItem(ready), {}, false, {
+        look: { "previews.start": "closed" },
+      });
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "ready");
+
+      const before = toggle();
+
+      const switchTo = async (timeline: string) => {
+        await act(async () => {
+          registry.set(open, Schema.decodeSync(TimelineId)(timeline));
+          await Promise.resolve();
+        });
+      };
+
+      await switchTo(own);
+      await switchTo(iirc);
+
+      await settled(() => toggle() !== null);
+      await scrolledIntoView();
+
+      expect({
+        asks: daemon.previewAsks.length,
+        drawnAgain: toggle() !== before,
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        shown: drawn().length,
+      }).toStrictEqual({ asks: 1, drawnAgain: true, expanded: "true", shown: 1 });
+    });
+
+    it.each(["columns", "inline", "stacked"] as const)(
+      "stands right after its link, as a button the keyboard reaches, under layout %s",
+      async (layout) => {
+        const { daemon } = await opened("on", catsItem(ready), {}, false, {
+          look: { "timeline.layout": layout },
+        });
+
+        await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+
+        const link = document.querySelector('a[href="https://example.com/cats"]');
+        const button = toggle();
+
+        button?.focus();
+
+        expect({
+          after: link?.nextElementSibling === button,
+          button: button?.tagName,
+          focused: document.activeElement === button,
+          label: button?.getAttribute("aria-label"),
+          toggles: document.querySelectorAll("[data-preview-toggle]").length,
+        }).toStrictEqual({
+          after: true,
+          button: "BUTTON",
+          focused: true,
+          label: "Preview of https://example.com/cats",
+          toggles: 1,
+        });
+      }
+    );
+
+    it("draws no toggle under off", async () => {
+      await opened("off");
+      await settled(() => document.querySelector('[role="log"]')?.querySelector("a") !== null);
+
+      expect(toggle()).toBeNull();
+    });
+  });
+
+  describe("in a Direct Message with no mode of its own", () => {
+    const direct = { direct: true } as const;
+
+    it("asks for the Message on view and draws nothing, presses nothing until its toggle is pressed, which presses that link alone, and its Preview arrives", async () => {
+      const { daemon, sendPreview } = await opened(
+        "on",
+        catsItem({ _tag: "WaitingForPress" }),
+        {},
+        false,
+        direct
+      );
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await settled(() => daemon.previewAsks.length === 1);
+
+      const waiting = {
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        list: list(),
+        presses: [...daemon.presses],
+      };
+
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "pending");
+      await act(async () => {
+        sendPreview(catsItem(ready));
+        await Promise.resolve();
+      });
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({
+        asks: daemon.previewAsks.length,
+        presses: daemon.presses,
+        showPreview: document.body.textContent?.includes("show preview"),
+        text: cardText(),
+        waiting,
+      }).toStrictEqual({
+        asks: 1,
+        presses: [{ link: 0, position: cursor(2), timeline: iirc }],
+        showPreview: false,
+        text: "CatsA page about cats.",
+        waiting: { expanded: "false", list: null, presses: [] },
+      });
+    });
+
+    it("opens a link the Daemon already holds on its toggle, with no press", async () => {
+      const { daemon } = await opened("on", catsItem(ready), {}, false, direct);
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await settled(() => daemon.previewAsks.length === 1);
+
+      const before = list();
+
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({ before, presses: daemon.presses, text: cardText() }).toStrictEqual({
+        before: null,
+        presses: [],
+        text: "CatsA page about cats.",
+      });
+    });
+  });
+
+  it("starts a Direct Message set to on as start says, drawing its Preview open with no press", async () => {
+    const { daemon } = await opened("on", catsItem(ready), { [iirc]: "on" }, false, {
+      direct: true,
+    });
+
+    await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
     await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "waiting");
-
-    const waiting = { drawn: drawn(), presses: [...daemon.presses] };
-    const press = list()?.querySelector<HTMLButtonElement>("button");
-
-    await act(async () => {
-      press?.click();
-      await Promise.resolve();
-    });
-    await settled(() => drawn()[0]?.state === "pending");
-    await act(async () => {
-      sendPreview(catsItem(ready));
-      await Promise.resolve();
-    });
     await settled(() => drawn()[0]?.state === "ready");
 
     expect({
-      label: press?.getAttribute("aria-label"),
+      expanded: toggle()?.getAttribute("aria-expanded"),
       presses: daemon.presses,
-      text: cardText(),
-      waiting,
-    }).toStrictEqual({
-      label: "Show a preview of https://example.com/cats",
-      presses: [{ link: 0, position: cursor(2), timeline: iirc }],
-      text: "CatsA page about cats.",
-      waiting: {
-        drawn: [{ state: "waiting", text: "https://example.com/catsshow preview" }],
-        presses: [],
-      },
-    });
+    }).toStrictEqual({ expanded: "true", presses: [] });
   });
 
   it("follows a Timeline's own choice over ui.previews", async () => {
@@ -1829,12 +2028,11 @@ describe("a Message's Previews", () => {
     }).toStrictEqual({ image: 0, state: "ready", text: "CatsA page about cats." });
   });
 
-  describe("how cards are stacked, folded, and sized", () => {
+  describe("how cards are stacked and sized", () => {
     /**
-     * The Frontend with the Message's Preview answered as given and seen, folded and sized
-     * as given.
+     * The Frontend with the Message's Preview answered as given and seen, sized as given.
      * @param answer - The Preview's state.
-     * @param look - How cards are folded and sized, shared.
+     * @param look - How cards start and are sized, shared.
      * @param dogs - A second link's answer, if the Message holds one.
      * @returns The fake.
      */
@@ -1874,88 +2072,6 @@ describe("a Message's Previews", () => {
         lists: 1,
         rows: 2,
         texts: ["CatsA page about cats.", ""],
-      });
-    });
-
-    it("folds a ready Preview with more to show to its title, which a press opens", async () => {
-      await seenWith(readyWithImage("page"), { "previews.folded": "summary" });
-      await settled(() => drawn()[0]?.state === "folded");
-
-      const folded = { drawn: drawn(), image: list()?.querySelector("[data-loaded]") };
-
-      await pressed(list()?.querySelector("button") ?? null);
-      await settled(() => drawn()[0]?.state === "ready");
-
-      expect({
-        folded,
-        opened: {
-          description: list()?.textContent?.includes("A page about cats."),
-          image: list()?.querySelector("[data-loaded]") !== null,
-        },
-      }).toStrictEqual({
-        folded: { drawn: [{ state: "folded", text: "Cats" }], image: null },
-        opened: { description: true, image: true },
-      });
-    });
-
-    it("opens under summary only the Preview pressed", async () => {
-      await seenWith(readyWithImage("page"), { "previews.folded": "summary" }, dogsItem);
-      await settled(() => drawn().length === 2 && drawn().every((one) => one.state === "folded"));
-
-      await pressed(list()?.querySelector("button") ?? null);
-      await settled(() => drawn()[0]?.state === "ready");
-
-      expect(drawn().map((one) => one.state)).toStrictEqual(["ready", "folded"]);
-    });
-
-    it("folds a Message's Previews into one chip under chip, which a press opens, all of them", async () => {
-      await seenWith(readyWithImage("page"), { "previews.folded": "chip" }, dogsItem);
-      await settled(() => drawn()[0]?.state === "chip");
-
-      const chip = drawn();
-
-      await pressed(list()?.querySelector("button") ?? null);
-      await settled(() => drawn().length === 2);
-
-      expect({ chip, opened: drawn().map((one) => one.state) }).toStrictEqual({
-        chip: [{ state: "chip", text: "[+2]" }],
-        opened: ["ready", "ready"],
-      });
-    });
-
-    /**
-     * Whether a Message folded as given is asked for before and once it comes into view.
-     * @param folded - `ui.previews.folded`.
-     * @returns The asks made, and how its first Preview is drawn, before and after.
-     */
-    const asked = async (folded: "summary" | "chip") => {
-      const { daemon } = await opened("on", catsItem(readyWithImage("page")), {}, false, {
-        look: { "previews.folded": folded },
-      });
-
-      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-
-      const before = { asks: daemon.previewAsks.length, drawn: drawn()[0]?.state };
-
-      await scrolledIntoView();
-      await settled(() => daemon.previewAsks.length === 1);
-      await settled(() => drawn()[0]?.state !== "pending");
-
-      const after = { asks: daemon.previewAsks.length, drawn: drawn()[0]?.state };
-
-      for (const unmount of mounted.splice(0)) {
-        act(unmount);
-      }
-
-      observers.clear();
-
-      return { after, before };
-    };
-
-    it("asks for a folded or chipped Message only once it comes into view", async () => {
-      expect({ chip: await asked("chip"), summary: await asked("summary") }).toStrictEqual({
-        chip: { after: { asks: 1, drawn: "chip" }, before: { asks: 0, drawn: "chip" } },
-        summary: { after: { asks: 1, drawn: "folded" }, before: { asks: 0, drawn: "pending" } },
       });
     });
 
