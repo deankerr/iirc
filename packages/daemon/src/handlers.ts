@@ -1518,6 +1518,14 @@ const previews = HttpApiBuilder.group(
           })
         )
       )
+      .handle("held", ({ params, payload }) =>
+        held.held(params.timeline, payload.positions).pipe(
+          Effect.map((found) => ({ messages: found })),
+          Effect.catchTags({
+            TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)),
+          })
+        )
+      )
       .handle("press", ({ params, payload }) =>
         held.press(params.timeline, payload.position, payload.link).pipe(
           Effect.catchTags({

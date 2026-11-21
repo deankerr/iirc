@@ -21,6 +21,7 @@ import {
   UnknownTimeline,
 } from "@iirc/api";
 import type {
+  HeldItem,
   ImageHash,
   PreviewFailure,
   PreviewImage,
@@ -115,6 +116,20 @@ export class Previews extends Context.Service<
     ) => Effect.Effect<
       readonly PreviewItem[],
       UnknownTimeline | UnknownMessage | PreviewsOff | TimelineStoreFailed
+    >;
+    /**
+     * What the Daemon holds of the Previews of the Messages at many positions in a Timeline,
+     * in the order asked, and nothing for a position where no Message stands. It starts no
+     * fetch, writes nothing, and does not count as showing a Preview: a link kept is served
+     * as it is however old, one being fetched is as it is answered, and one nothing is held
+     * of is `NotHeld`, or waiting in a Timeline that waits for a press.
+     */
+    readonly held: (
+      timeline: TimelineId,
+      positions: readonly Position[]
+    ) => Effect.Effect<
+      readonly { readonly position: Position; readonly previews: readonly HeldItem[] }[],
+      UnknownTimeline | PreviewsOff | TimelineStoreFailed
     >;
     /**
      * Fetches one link of the Message at a position in a Timeline that waits for a press,
@@ -855,13 +870,13 @@ export const layerPreviews = Layer.effect(Previews)(
       });
 
     /**
-     * The links of the Message at a position in a Timeline that may be previewed, and how
-     * they are asked for there: whether the Timeline waits for a press, and under which mode.
+     * How the links of a Timeline are asked for: its mode, which is its own override or else
+     * the one for every Timeline, whether it waits for a press, and the hosts listed as
+     * players now. Refused when the Timeline is unknown or Previews are `off` there.
      * @param timeline - The Timeline.
-     * @param position - The Message's place in it.
-     * @returns The links as the URL parser wrote them, with the mode and whether it waits.
+     * @returns The mode, whether it waits, and the players.
      */
-    const locate = (timeline: TimelineId, position: Position) =>
+    const modeOf = (timeline: TimelineId) =>
       Effect.gen(function* () {
         const summary = yield* store.timeline(timeline);
 
@@ -879,24 +894,89 @@ export const layerPreviews = Layer.effect(Previews)(
           return yield* new PreviewsOff({ timeline });
         }
 
+        return {
+          players: options["previews.players"],
+          shown,
+          // Only a Direct Message the Owner has not chosen a mode for waits.
+          waits: summary.value.kind === "Direct" && override === undefined,
+        };
+      });
+
+    /**
+     * The links of the Message at a position in a Timeline that may be previewed.
+     * @param timeline - The Timeline.
+     * @param position - The Message's place in it.
+     * @returns The links as the URL parser wrote them, or none where no Message stands.
+     */
+    const linksAt = (timeline: TimelineId, position: Position) =>
+      Effect.gen(function* () {
         const window = yield* store.window(timeline, { _tag: "Around", position }, 1);
         const [item] = Option.isSome(window) ? window.value.items : [];
 
         if (item?.content._tag !== "Message" || comparePositions(item.position, position) !== 0) {
-          return yield* new UnknownMessage({ position, timeline });
+          return Option.none<readonly string[]>();
         }
 
         const { ours, text } = item.content;
         // What is shown is the echo's text once the Ircd confirmed it, which may differ from ours.
         const said = ours?.delivery._tag === "Confirmed" ? ours.delivery.text : text;
 
+        return Option.some(previewableLinksOf(said).map((found) => found.href));
+      });
+
+    /**
+     * The links of the Message at a position in a Timeline that may be previewed, and how
+     * they are asked for there.
+     * @param timeline - The Timeline.
+     * @param position - The Message's place in it.
+     * @returns The links as the URL parser wrote them, with the mode and whether it waits.
+     */
+    const locate = (timeline: TimelineId, position: Position) =>
+      Effect.gen(function* () {
+        const how = yield* modeOf(timeline);
+        const links = yield* linksAt(timeline, position);
+
+        if (Option.isNone(links)) {
+          return yield* new UnknownMessage({ position, timeline });
+        }
+
+        return { ...how, links: links.value };
+      });
+
+    /**
+     * What is held of a link, with no fetch and no claim: its flight, else its kept record
+     * however old, else waiting or not held. Neither the flight nor the cache is moved, so
+     * reading it is not showing it.
+     * @param link - The link, as the URL parser wrote it.
+     * @param how - Whether its Timeline waits for a press, the mode, and the players.
+     * @returns Its held item.
+     */
+    const heldItem = (link: string, how: Pick<How, "players" | "shown" | "waits">) =>
+      Effect.gen(function* () {
+        const key = keyOf(link);
+
+        // The flight is read before the cache: `settle` writes the cache before it leaves
+        // flight, so a link seen in neither was never fetched, and one fetched meanwhile is
+        // in one of them. The other order could miss a link settling between the two reads.
+        const flight = (yield* Ref.get(flying)).get(key);
+
+        const kept =
+          flight === undefined
+            ? yield* cache
+                .get(key)
+                .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())))
+            : Option.none<Kept>();
+
+        const absent: HeldItem["state"] = how.waits ? waiting : { _tag: "NotHeld" };
+
+        const state: HeldItem["state"] =
+          flight?.state ?? (Option.isSome(kept) ? kept.value.state : absent);
+
         return {
-          // Only a Direct Message the Owner has not chosen a mode for waits.
-          links: previewableLinksOf(said).map((found) => found.href),
-          players: options["previews.players"],
-          shown,
-          waits: summary.value.kind === "Direct" && override === undefined,
-        };
+          id: idOf(key),
+          link,
+          state: state._tag === "NotHeld" ? state : asShown(state, how.shown, how.players),
+        } satisfies HeldItem;
       });
 
     const refers = (hash: ImageHash) =>
@@ -931,6 +1011,24 @@ export const layerPreviews = Layer.effect(Previews)(
           )
         )
       ),
+      held: (timeline, positions) =>
+        Effect.gen(function* () {
+          const how = yield* modeOf(timeline);
+
+          // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
+          return yield* Effect.forEach(positions, (position) =>
+            Effect.gen(function* () {
+              const links = yield* linksAt(timeline, position);
+
+              const previews = Option.isSome(links)
+                ? // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
+                  yield* Effect.forEach(links.value, (link) => heldItem(link, how))
+                : [];
+
+              return { position, previews };
+            })
+          );
+        }),
       image: (hash) =>
         Effect.gen(function* () {
           if (!(yield* refers(hash))) {

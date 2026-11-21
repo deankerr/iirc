@@ -150,6 +150,7 @@ describe("the contract", () => {
       "POST /api/networks/{network}/say",
       "POST /api/sign-in",
       "POST /api/timelines/{timeline}/previews",
+      "POST /api/timelines/{timeline}/previews/held",
       "POST /api/timelines/{timeline}/previews/press",
       "POST /api/uploads",
       "PUT /api/credentials/{name}",

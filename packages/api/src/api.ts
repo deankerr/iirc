@@ -53,6 +53,8 @@ import {
 import { Unwell, Well } from "./health.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
 import {
+  HeldPreviews,
+  HeldRequest,
   ImageHash,
   MessagePreviews,
   PressRequest,
@@ -454,7 +456,8 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
 /**
  * Previews: a Message's, asked for by its place in its Timeline, which starts fetching any
  * of its links not yet fetched, and each change of a Preview's state, as Server-Sent
- * Events, live. It is beside News, not in it, since a Preview is never journaled. A press
+ * Events, live. It is beside News, not in it, since a Preview is never journaled. A held read
+ * answers what the Daemon already holds of many Messages' Previews, and starts no fetch. A press
  * fetches one link of a Direct Message that waits for it. Asking and pressing are each a
  * `POST`, so one carried by a cookie must come from the Daemon's own origin, and another
  * site cannot make the Daemon fetch.
@@ -466,6 +469,12 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
       params: { timeline: TimelineId },
       payload: PreviewsRequest,
       success: MessagePreviews,
+    }),
+    HttpApiEndpoint.post("held", "/timelines/:timeline/previews/held", {
+      error: [UnknownTimeline, PreviewsOff, TimelinesFailed],
+      params: { timeline: TimelineId },
+      payload: HeldRequest,
+      success: HeldPreviews,
     }),
     HttpApiEndpoint.post("press", "/timelines/:timeline/previews/press", {
       error: [UnknownTimeline, UnknownMessage, PreviewsOff, NotWaiting, TimelinesFailed],

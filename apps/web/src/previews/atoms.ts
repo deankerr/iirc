@@ -4,28 +4,25 @@
  * signed in and any Timeline's mode asks, follows their stream and makes each ask and press
  * the core calls for; and a Timeline's own choice over `ui.previews`, made for every
  * device. A Message is shown to the core only by the view, as it scrolls into sight, so
- * nothing is asked for ahead of it, and a closed Preview is asked for not at all.
+ * nothing is asked for ahead of it, and a closed Preview is asked for not at all. What the
+ * Daemon holds of a window's is read with the window, by the Timelines' `sync`.
  *
  * @packageDocumentation
  */
 import { PreviewsByTimeline } from "@iirc/api";
 import type { TimelineId, TimelineItem } from "@iirc/api";
 import type { Intent } from "@iirc/frontend/commands";
-import { uiShown } from "@iirc/frontend/options";
 import {
   asksAnywhere,
   asksWanted,
   choosing,
-  initialPreviews,
   linkKey,
   messageKey,
   pressesWanted,
-  previewsModesOf,
   reducePreviews,
 } from "@iirc/frontend/previews";
 import type {
   Opening,
-  Previews,
   PreviewsAsk,
   PreviewsEvent,
   PreviewsPress,
@@ -37,14 +34,14 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
-import { optionsState, signedOut } from "../options/atoms.ts";
+import { signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { previewsStartShown, readShared, uiFailed } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, timelinesState, Waits } from "../timelines/atoms.ts";
+import { previewsModes, previewsState } from "./state.ts";
 
-/** What the core holds of Previews. */
-export const previewsState = Atom.make<Previews>(initialPreviews).pipe(Atom.keepAlive);
+export { previewsModes, previewsState } from "./state.ts";
 
 /**
  * What the Owner opened or closed with each link's toggle, by its `linkKey`, held here
@@ -67,9 +64,6 @@ export const directIn = Atom.family((timeline: TimelineId) =>
     )
   )
 );
-
-/** `ui.previews` and each Timeline's own choice over it, as they show with the changes on their way, once read. */
-export const previewsModes = Atom.make((get) => previewsModesOf(uiShown(get(optionsState))));
 
 /** Whether Previews are followed now: while any Timeline's mode asks. */
 const previewsAsked = Atom.make((get) => asksAnywhere(get(previewsModes)));

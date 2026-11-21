@@ -9,7 +9,7 @@
 import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
-import { Cursor, Untrusted } from "./schemas.ts";
+import { Cursor, Untrusted, windowLimit } from "./schemas.ts";
 
 /**
  * A Preview's id: 32 lower-case hex digits, the same for one link wherever it is posted
@@ -245,3 +245,56 @@ export const StreamQuery = Schema.Struct({ position: Cursor, timeline: TimelineI
 
 /** The decoded form of {@link StreamQuery}. */
 export type StreamQuery = typeof StreamQuery.Type;
+
+/**
+ * Where a link's Preview stands as the Daemon holds it, read with no fetch: as an ask
+ * answers, `Pending`, `Ready`, `WaitingForPress`, or `Failed`, a ready one however long ago
+ * it was fetched; or `NotHeld`, nothing held of it, which stays unfetched until it is asked
+ * for.
+ */
+export const HeldState = Schema.TaggedUnion({
+  Failed: { reason: PreviewFailure },
+  NotHeld: {},
+  Pending: {},
+  Ready: { preview: Preview },
+  WaitingForPress: {},
+}).annotate({ identifier: "HeldState" });
+
+/** The decoded form of {@link HeldState}. */
+export type HeldState = typeof HeldState.Type;
+
+/** One link of a Message and what the Daemon holds of its Preview, as an item is. */
+export const HeldItem = Schema.Struct({
+  id: PreviewId,
+  link: Untrusted,
+  state: HeldState,
+}).annotate({ identifier: "HeldItem" });
+
+/** The decoded form of {@link HeldItem}. */
+export type HeldItem = typeof HeldItem.Type;
+
+/** The most places one held read names, as many as a window holds. */
+export const heldLimit = windowLimit.maximum;
+
+/**
+ * Which Messages' held Previews are read: their places in one Timeline, as a window gave
+ * them, from `1` to {@link heldLimit}.
+ */
+export const HeldRequest = Schema.Struct({
+  positions: Schema.Array(Cursor).check(Schema.isMinLength(1), Schema.isMaxLength(heldLimit)),
+});
+
+/** The decoded form of {@link HeldRequest}. */
+export type HeldRequest = typeof HeldRequest.Type;
+
+/**
+ * What the Daemon holds of many Messages' Previews: one entry for each place asked, in the
+ * order asked, with the Message's held items in its order, and none for a place where no
+ * Message stands.
+ */
+export const HeldPreviews = Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ position: Cursor, previews: Schema.Array(HeldItem) })),
+}).annotate({ identifier: "HeldPreviews" });
+
+/** The decoded form of {@link HeldPreviews}. */
+export type HeldPreviews = typeof HeldPreviews.Type;

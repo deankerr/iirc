@@ -1,4 +1,5 @@
 import {
+  HeldItem,
   ItemContent,
   PreviewItem,
   PreviewsRequest,
@@ -16,6 +17,7 @@ import {
   asksAnywhere,
   asksWanted,
   choosing,
+  heldReadOf,
   hostNamed,
   initialPreviews,
   isOpen,
@@ -107,6 +109,15 @@ const item = (
   state: typeof PreviewItem.Encoded.state,
   link = `https://${letter}.example/`
 ) => Schema.decodeSync(PreviewItem)({ id: idOf(letter), link, state });
+
+/**
+ * A held item, by a letter that makes its id, as decoded.
+ * @param letter - The letter.
+ * @param state - Its state, as the wire carries it.
+ * @returns The item.
+ */
+const heldItem = (letter: string, state: typeof HeldItem.Encoded.state) =>
+  Schema.decodeSync(HeldItem)({ id: idOf(letter), link: `https://${letter}.example/`, state });
 
 /** The hosts `ui.previews.players` lists by default. */
 const listed = uiDefaults["previews.players"];
@@ -832,6 +843,120 @@ describe("folding a change", () => {
     expect(
       fold(state, { _tag: "Answered", ask, previews: [item("a", ready)] }, { _tag: "Forgotten" })
     ).toStrictEqual(initialPreviews);
+  });
+});
+
+const notHeld = { _tag: "NotHeld" } as const;
+
+/**
+ * A held read of the Message at one, begun and answered with its items.
+ * @param state - The state it begins in.
+ * @param previews - What the Daemon holds of its links.
+ * @returns The state, once read.
+ */
+const heldIn = (state: Previews, previews: readonly HeldItem[]) => {
+  const read = heldReadOf(state, timeline);
+
+  return fold(
+    state,
+    { _tag: "Reading", read },
+    { _tag: "Read", messages: [{ position: at(1), previews }], read }
+  );
+};
+
+describe("a held read", () => {
+  it("draws a row held before it is drawn, with no placeholder, while other Messages are answered", () => {
+    const held = heldIn(initialPreviews, [
+      heldItem("a", ready),
+      heldItem("b", { _tag: "Failed", reason: "Refused" }),
+    ]);
+
+    const shown = fold(
+      held,
+      { _tag: "Followed" },
+      { _tag: "Shown", direct: false, links: 1, position: at(2), timeline }
+    );
+
+    const [ask] = asksWanted(shown, everywhere("on"), opened);
+
+    if (ask === undefined) {
+      throw new Error("nothing to ask");
+    }
+
+    const answered = fold(
+      shown,
+      { _tag: "Asked", ask },
+      { _tag: "Answered", ask, previews: [item("c", ready)] }
+    );
+
+    expect(
+      [held, answered].map((state) =>
+        previewsOf(state, "on", timeline, at(1), links, drawing).map((one) => one._tag)
+      )
+    ).toStrictEqual([
+      ["Ready", "Failed"],
+      ["Ready", "Failed"],
+    ]);
+  });
+
+  it("keeps a change the stream gave while it was in flight over what it read", () => {
+    const read = heldReadOf(initialPreviews, timeline);
+
+    const raced = fold(
+      initialPreviews,
+      { _tag: "Followed" },
+      { _tag: "Reading", read },
+      { _tag: "Changed", item: item("a", ready) },
+      { _tag: "Read", messages: [{ position: at(1), previews: [heldItem("a", pending)] }], read }
+    );
+
+    expect(
+      previewsOf(raced, "on", timeline, at(1), said("https://a.example/"), drawing).map(
+        (one) => one._tag
+      )
+    ).toStrictEqual(["Ready"]);
+  });
+
+  it("draws a link not held as a placeholder, and still asks for its Message once shown", () => {
+    const held = fold(heldIn(initialPreviews, [heldItem("a", ready), heldItem("b", notHeld)]), {
+      _tag: "Followed",
+    });
+
+    const shown = fold(held, {
+      _tag: "Shown",
+      direct: false,
+      links: 2,
+      position: at(1),
+      timeline,
+    });
+
+    expect(
+      previewsOf(held, "on", timeline, at(1), links, drawing).map((one) => one._tag)
+    ).toStrictEqual(["Ready", "Pending"]);
+    expect(asksWanted(shown, everywhere("on"), opened).map((one) => one.key)).toStrictEqual([
+      messageKey(timeline, at(1)),
+    ]);
+  });
+
+  it("draws a placeholder, not another link's card, when the Message's links changed since the read", () => {
+    const held = heldIn(initialPreviews, [heldItem("a", ready)]);
+
+    expect(
+      previewsOf(held, "on", timeline, at(1), said("https://z.example/"), drawing).map(
+        (one) => one._tag
+      )
+    ).toStrictEqual(["Pending"]);
+  });
+
+  it("draws a link not held once the stream says another Frontend's ask fetched it", () => {
+    const held = heldIn(fold(initialPreviews, { _tag: "Followed" }), [heldItem("a", notHeld)]);
+    const changed = fold(held, { _tag: "Changed", item: item("a", ready) });
+
+    expect(
+      previewsOf(changed, "on", timeline, at(1), said("https://a.example/"), drawing).map(
+        (one) => one._tag
+      )
+    ).toStrictEqual(["Ready"]);
   });
 });
 

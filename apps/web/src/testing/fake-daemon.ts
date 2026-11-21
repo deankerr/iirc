@@ -392,6 +392,8 @@ const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String })
 
 const PreviewsBody = Schema.fromJsonString(Schema.Struct({ position: Schema.String }));
 
+const HeldBody = Schema.fromJsonString(Schema.Struct({ positions: Schema.Array(Schema.String) }));
+
 const PressBody = Schema.fromJsonString(
   Schema.Struct({ link: Schema.Int, position: Schema.String })
 );
@@ -630,6 +632,7 @@ export const fakeDaemon = () => {
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
+  const heldReadsHeld: (() => void)[] = [];
   const uiFollowsHeld: (() => void)[] = [];
   const statusesHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
@@ -650,6 +653,7 @@ export const fakeDaemon = () => {
 
   const uploadEditRefusals: { readonly status: number; readonly body: object }[] = [];
   const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
+  const heldReads: { readonly timeline: string; readonly positions: readonly string[] }[] = [];
   const previewFollowers: Follower[] = [];
   const projectionFollowers: Follower[] = [];
   const tailFollowers: Follower[] = [];
@@ -712,12 +716,18 @@ export const fakeDaemon = () => {
       members: membersHeld,
       says: saysHeld,
     },
+    /** Each held read of many Messages' Previews, by its Timeline and their places, refused or not. */
+    heldReads,
+    /** Releases each held read of Previews held, in the order they came. */
+    heldReadsHeld,
     /** Whether each `act` waits, once taken, until released or given up. */
     holdActs: false,
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
     /** Whether each `close`, once stepped, waits until released before it is answered. */
     holdCloses: false,
+    /** Whether each held read of Previews waits until released, then answers as `heldReads` recorded it. */
+    holdHeldReads: false,
     /** Whether each read of `known` waits until released. */
     holdKnown: false,
     /** Whether each read of a Network's Timelines waits until released. */
@@ -816,8 +826,9 @@ export const fakeDaemon = () => {
     /** Each follower of the stream of Previews. */
     previewFollowers,
     /**
-     * Each Message's Previews, by its place, which an ask answers with while `ui.previews`
-     * is not `off`; a Message with none is unknown.
+     * Each Message's Previews, by its place, which an ask or a held read answers with
+     * while `ui.previews` is not `off`; a Message with none is unknown, and a held read
+     * answers it with none.
      */
     previews: new Map<string, (typeof PreviewItem.Encoded)[]>(),
     /** Whether the Timelines are folded, as the projection's stream says it as it opens. */
@@ -2153,8 +2164,36 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * A Message's Previews asked for, refused while `ui.previews` is `off`, and their stream,
-   * or nothing for any other route.
+   * What the fake holds of many Messages' Previews, read with no ask, refused while
+   * `ui.previews` is `off`.
+   * @param timeline - Their Timeline.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const heldRoute = async (timeline: string, init: RequestInit): Promise<Response> => {
+    const { positions } = Schema.decodeSync(HeldBody)(await new Response(init.body).text());
+
+    daemon.heldReads.push({ positions, timeline });
+
+    if (daemon.holdHeldReads) {
+      await heldUntilReleased(heldReadsHeld, init);
+    }
+
+    if (daemon.ui.options.previews === "off") {
+      return Response.json({ _tag: "PreviewsOff", timeline }, { status: 409 });
+    }
+
+    return Response.json({
+      messages: positions.map((position) => ({
+        position,
+        previews: daemon.previews.get(position) ?? [],
+      })),
+    });
+  };
+
+  /**
+   * A Message's Previews asked for, or held, refused while `ui.previews` is `off`, and their
+   * stream, or nothing for any other route.
    * @param url - The request's URL.
    * @param init - The request.
    * @returns The answer, or nothing.
@@ -2166,9 +2205,19 @@ export const fakeDaemon = () => {
       url.pathname
     )?.groups;
 
+    const held = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/previews\/held$/u.exec(
+      url.pathname
+    )?.groups;
+
     if (init.method === "POST" && pressed?.timeline !== undefined) {
       return daemon.signedIn
         ? await pressRoute(pressed.timeline, init)
+        : json(401, { _tag: "Unauthorized" });
+    }
+
+    if (init.method === "POST" && held?.timeline !== undefined) {
+      return daemon.signedIn
+        ? await heldRoute(held.timeline, init)
         : json(401, { _tag: "Unauthorized" });
     }
 
@@ -2536,6 +2585,7 @@ export const registryFor = (
           Layer.succeed(Waits, {
             complete: "10 millis",
             debounce: "30 millis",
+            held: "2 seconds",
             idle: "2 seconds",
             interval: "100 millis",
             longest: "50 millis",

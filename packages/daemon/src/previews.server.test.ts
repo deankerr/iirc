@@ -2,7 +2,14 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
-import { MessagePreviews, PreviewItem, PreviewsEvent, TailRead, TimelineList } from "@iirc/api";
+import {
+  HeldPreviews,
+  MessagePreviews,
+  PreviewItem,
+  PreviewsEvent,
+  TailRead,
+  TimelineList,
+} from "@iirc/api";
 import { Sha256 } from "@iirc/byte-store";
 import { configured } from "@iirc/client/testing";
 import {
@@ -3516,5 +3523,282 @@ describe("what each fetch for a Preview came to, in the Tail as a Frontend reads
       link: CAT_IMAGE,
       status: "200",
     });
+  });
+});
+
+const decodeHeld = Schema.decodeUnknownSync(Schema.fromJsonString(HeldPreviews));
+
+// A held read's positions as they went over the wire, not as a Frontend decodes them.
+const decodeCursors = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ messages: Schema.Array(Schema.Struct({ position: Schema.String })) })
+  )
+);
+
+/**
+ * Reads what is held of Messages' Previews.
+ * @param served - The server.
+ * @param timeline - The Timeline.
+ * @param positions - The Messages' places in it, as a window gave them.
+ * @returns The response.
+ */
+const heldRead = (served: Served, timeline: string, positions: readonly string[]) =>
+  served.request(`/api/timelines/${timeline}/previews/held`, {
+    method: "POST",
+    ...json({ positions: [...positions] }),
+  });
+
+/**
+ * What is held of Messages' Previews, as each Message's items in the order asked.
+ * @param served - The server.
+ * @param places - The Messages' places, in one Timeline.
+ * @returns Each place's items.
+ */
+const holds = (served: Served, places: readonly Pick<Place, "position" | "timeline">[]) =>
+  Effect.gen(function* () {
+    const response = yield* expecting(
+      heldRead(
+        served,
+        places[0]?.timeline ?? "",
+        places.map((place) => place.position)
+      ),
+      200
+    );
+
+    return decodeHeld(yield* bodyOf(response)).messages;
+  });
+
+/**
+ * What each held item shows: its title, or its state's tag when it has none.
+ * @param each - What was held of each Message.
+ * @returns What each item shows.
+ */
+const heldTitles = (each: Awaited<ReturnType<typeof decodeHeld>>["messages"]) =>
+  each.map(({ previews }) =>
+    previews.map((one) => (one.state._tag === "Ready" ? one.state.preview.title : one.state._tag))
+  );
+
+/**
+ * What is held of a Message's Previews, once its one item shows a title.
+ * @param served - The server.
+ * @param place - The Message's place.
+ * @param title - The title.
+ * @returns What each item shows.
+ */
+const heldAs = (served: Served, place: Place, title: string) =>
+  Effect.gen(function* () {
+    const shown = heldTitles(yield* holds(served, [place]));
+
+    return shown[0]?.[0] === title ? shown : yield* new NotYet();
+  }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie);
+
+const CATS = "https://cats.example/";
+const DOGS = "https://dogs.example/";
+
+describe("what is held of Previews, over a real server", () => {
+  it("starts no fetch for a link nothing is held of, and leaves it to an ask", async () => {
+    const result = await run({ [CATS]: cats, [DOGS]: dogs }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "text");
+        yield* talk(served, [`see ${CATS}`, `see ${DOGS}`]);
+        const places = yield* messages(served, 2);
+        const [one] = places;
+
+        if (one === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        const before = heldTitles(yield* holds(served, places));
+        const again = heldTitles(yield* holds(served, places));
+        const askedByHeld = yield* served.asked;
+
+        yield* settled(served, one);
+
+        return {
+          after: heldTitles(yield* holds(served, places)),
+          again,
+          askedByAsk: (yield* served.asked).map((fetched) => fetched.link),
+          askedByHeld,
+          before,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: [["Cats"], ["NotHeld"]],
+      again: [["NotHeld"], ["NotHeld"]],
+      askedByAsk: [CATS],
+      askedByHeld: [],
+      before: [["NotHeld"], ["NotHeld"]],
+    });
+  });
+
+  it("answers a Preview as it is held, fresh or over a day old, and an ask of the old one refreshes it", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { links, turn } = yield* turning({ [CATS]: cats }, { [CATS]: dogs });
+        const served = yield* serve({}, { links });
+        const place = yield* said(served);
+
+        yield* TestClock.setTime(day);
+        yield* live(settled(served, place));
+        const fresh = heldTitles(yield* holds(served, [place]));
+
+        yield* turn;
+        yield* TestClock.adjust(day + 1);
+        const old = heldTitles(yield* holds(served, [place]));
+        const askedByHeld = (yield* served.asked).length;
+
+        yield* asking(served, place);
+        yield* fetches(served, 2);
+
+        return {
+          askedByHeld,
+          fresh,
+          old,
+          refreshed: yield* live(heldAs(served, place, "Dogs")),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      askedByHeld: 1,
+      fresh: [["Cats"]],
+      old: [["Cats"]],
+      refreshed: [["Dogs"]],
+    });
+  });
+
+  it("answers a link being fetched now as pending, beside one nothing is held of", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { fake, served } = yield* holding([CATS, DOGS], [CATS]);
+
+          yield* setPreviews(served, "text");
+          yield* talk(served, [`see ${CATS}`, `see ${DOGS}`]);
+          const places = yield* messages(served, 2);
+          const [one] = places;
+
+          if (one === undefined) {
+            return yield* Effect.die(new Error("a Message is missing"));
+          }
+
+          yield* asking(served, one);
+          const held = heldTitles(yield* holds(served, places));
+          const asked = yield* linksAsked(served);
+
+          yield* fake.release(CATS);
+
+          return { asked, held };
+        })
+      )
+    );
+
+    expect(result).toStrictEqual({ asked: [CATS], held: [["Pending"], ["NotHeld"]] });
+  });
+
+  it("does not count as showing a Preview, so it never keeps an image from being evicted", async () => {
+    const images = { aa: tinted(1), bb: tinted(2), cc: tinted(3) };
+
+    // Three Previews' images under room for two, the oldest's read once more by `reading`
+    // before the third is kept: which images stay in the store.
+    const kept = async (
+      reading: (served: Served, place: Place) => Effect.Effect<unknown, never, Scope.Scope>
+    ) =>
+      await runClocked(
+        Effect.gen(function* () {
+          const served = yield* serve(pictured(images));
+
+          yield* TestClock.setTime(first);
+          const [a, b, c] = yield* pictures(served, ["aa", "bb", "cc"], 2 * tintedSize);
+
+          if (a === undefined || b === undefined || c === undefined) {
+            return yield* Effect.die(new Error("a Message is missing"));
+          }
+
+          yield* live(settled(served, a));
+          yield* TestClock.adjust(1000);
+          yield* live(settled(served, b));
+          yield* TestClock.adjust(1000);
+          yield* reading(served, a);
+          yield* TestClock.adjust(1000);
+          yield* live(settled(served, c));
+
+          return [
+            yield* inStore(served, images.aa),
+            yield* inStore(served, images.bb),
+            yield* inStore(served, images.cc),
+          ];
+        })
+      );
+
+    expect({
+      asked: await kept(asking),
+      held: await kept((served, place) => holds(served, [place])),
+    }).toStrictEqual({ asked: [true, false, true], held: [false, true, true] });
+  });
+
+  it("is refused as an ask is, and answers no items for a place where no Message stands, failing none of the others", async () => {
+    const result = await run({ [CATS]: cats, [DOGS]: dogs }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "text");
+        yield* talk(served, [`see ${CATS}`, `see ${DOGS}`]);
+        const places = yield* messages(served, 2);
+        const [one, other] = places;
+
+        if (one === undefined || other === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        const nowhere = one.position.replace(/-[0-9a-f]{8}$/u, "-0000ffff");
+        const asked = [other.position, nowhere, one.position];
+
+        const read = yield* expecting(heldRead(served, one.timeline, asked), 200);
+        const text = yield* bodyOf(read);
+        const { messages: each } = decodeHeld(text);
+
+        const unknown = yield* refusal(
+          yield* heldRead(served, "00000000000999-00000000-00000000", asked)
+        );
+
+        yield* setPreviews(served, "off");
+        const off = yield* refusal(yield* heldRead(served, one.timeline, asked));
+
+        return {
+          asked,
+          counts: each.map(({ previews }) => previews.length),
+          fetched: yield* served.asked,
+          off,
+          order: decodeCursors(text).messages.map(({ position }) => position),
+          unknown,
+        };
+      })
+    );
+
+    expect(result.order).toStrictEqual(result.asked);
+    expect(result).toMatchObject({
+      counts: [1, 0, 1],
+      fetched: [],
+      off: [409, "PreviewsOff"],
+      unknown: [404, "UnknownTimeline"],
+    });
+  });
+
+  it("answers a link not held in a Direct Message with no mode of its own as waiting for a press", async () => {
+    const result = await run({ [CATS]: cats }, (served) =>
+      Effect.gen(function* () {
+        yield* setPreviews(served, "on");
+        yield* talk(served, [CATS], ["iirc"]);
+        const place = yield* only(served, "Direct");
+
+        return {
+          asked: yield* served.asked,
+          held: heldTitles(yield* holds(served, [place])),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ asked: [], held: [["WaitingForPress"]] });
   });
 });
