@@ -75,7 +75,13 @@ export const Inlines = ({
         >
           {inline.text}
         </a>
-        {after?.get(index)}
+        {after?.has(index) === true ? (
+          // A word joiner, so what follows a link never wraps away from it.
+          <>
+            {"\u2060"}
+            {after.get(index)}
+          </>
+        ) : null}
       </Fragment>
     ) : (
       // oxlint-disable-next-line react/no-array-index-key

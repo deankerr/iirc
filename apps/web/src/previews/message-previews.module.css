@@ -216,5 +216,6 @@
   .toggle {
     min-width: 2.2em;
     margin-left: 0.4em;
+    padding-block: 0.2em;
   }
 }
