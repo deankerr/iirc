@@ -245,24 +245,67 @@ const bomCharset = (head: Uint8Array): string | undefined => {
   return undefined;
 };
 
-// The `charset` parameter of a Content-Type, by its exact name, so `x-charset` is not it. A
-// quoted value is taken between its quotes.
-const headerCharset = (contentType: string | undefined): string | undefined => {
-  for (const parameter of (contentType ?? "").split(";").slice(1)) {
-    const [name = "", ...value] = parameter.split("=");
+/**
+ * A Content-Type's parameters, by lower-cased name, as RFC 9110 writes them: after the type,
+ * each `name=value` follows a `;`, and a value is a token or a quoted string, whose `\`
+ * escapes the next character. A `;` inside quotes ends nothing, so no parameter hides in
+ * another's value. The first of a name is kept.
+ * @param contentType - The header, if any.
+ * @returns The parameters.
+ */
+const parametersOf = (contentType: string): ReadonlyMap<string, string> => {
+  const parameters = new Map<string, string>();
+  let at = contentType.indexOf(";");
 
-    if (name.trim().toLowerCase() === "charset") {
-      return resolveLabel(
-        value
-          .join("=")
-          .trim()
-          .replace(/^(?<quote>["'])(?<label>.*)\k<quote>$/u, "$<label>")
-      );
+  while (at !== -1 && at < contentType.length) {
+    const equals = contentType.indexOf("=", at + 1);
+    const next = contentType.indexOf(";", at + 1);
+
+    if (equals === -1 || (next !== -1 && next < equals)) {
+      at = next;
+      continue;
+    }
+
+    const name = contentType
+      .slice(at + 1, equals)
+      .trim()
+      .toLowerCase();
+
+    let i = equals + 1;
+
+    while (contentType.charAt(i) === " " || contentType.charAt(i) === "\t") {
+      i += 1;
+    }
+
+    let value = "";
+
+    if (contentType.charAt(i) === '"') {
+      i += 1;
+
+      while (i < contentType.length && contentType.charAt(i) !== '"') {
+        i += contentType.charAt(i) === "\\" ? 1 : 0;
+        value += contentType.charAt(i);
+        i += 1;
+      }
+
+      at = contentType.indexOf(";", i);
+    } else {
+      const end = contentType.indexOf(";", i);
+
+      value = contentType.slice(i, end === -1 ? undefined : end).trim();
+      at = end;
+    }
+
+    if (!parameters.has(name)) {
+      parameters.set(name, value);
     }
   }
 
-  return undefined;
+  return parameters;
 };
+
+const headerCharset = (contentType: string | undefined): string | undefined =>
+  resolveLabel(parametersOf(contentType ?? "").get("charset"));
 
 const metaCharset = (head: Uint8Array): string | undefined => {
   const text = new TextDecoder("latin1").decode(head.subarray(0, PRESCAN_BYTES));

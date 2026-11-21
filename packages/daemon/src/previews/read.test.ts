@@ -732,6 +732,12 @@ describe(readText, () => {
       "café",
     ],
     [
+      "the charset parameter, not one quoted inside another's value",
+      utf8("caf\u00E9"),
+      'text/plain; note="a; charset=windows-1252; \\" b"; charset=utf-8',
+      "café",
+    ],
+    [
       "an unknown charset label, as UTF-8",
       utf8("héllo"),
       "text/plain; charset=nonsense-9",
