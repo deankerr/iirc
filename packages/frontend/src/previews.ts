@@ -1321,6 +1321,17 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
 };
 
 /**
+ * A link without its fragment, as an id is made of it.
+ * @param href - The link.
+ * @returns It, without a fragment.
+ */
+const withoutFragment = (href: string): string => {
+  const at = href.indexOf("#");
+
+  return at === -1 ? href : href.slice(0, at);
+};
+
+/**
  * What a Message shows below it: nothing while its Timeline's mode does not ask, or for a Message
  * with no link that may be previewed, or one the Daemon refused; the items the Daemon
  * answered with, as each is now, but a card that would hold nothing; and before then, a
@@ -1386,7 +1397,9 @@ export const previewsOf = (
     const id = read?.[index];
     const item = id === undefined ? undefined : state.items.get(id);
 
-    if (item === undefined) {
+    // The read was of the Message as it was, so an item is drawn only under its own link: an
+    // Ircd's echo may have changed the text since, and an id leaves out a fragment.
+    if (item === undefined || withoutFragment(item.item.link) !== withoutFragment(link.href)) {
       return [{ _tag: "Pending", key: String(index), link: linkShown(link.href) }];
     }
 

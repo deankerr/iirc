@@ -632,6 +632,7 @@ export const fakeDaemon = () => {
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
+  const heldReadsHeld: (() => void)[] = [];
   const uiFollowsHeld: (() => void)[] = [];
   const statusesHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
@@ -717,12 +718,16 @@ export const fakeDaemon = () => {
     },
     /** Each held read of many Messages' Previews, by its Timeline and their places, refused or not. */
     heldReads,
+    /** Releases each held read of Previews held, in the order they came. */
+    heldReadsHeld,
     /** Whether each `act` waits, once taken, until released or given up. */
     holdActs: false,
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
     /** Whether each `close`, once stepped, waits until released before it is answered. */
     holdCloses: false,
+    /** Whether each held read of Previews waits until released, then answers as `heldReads` recorded it. */
+    holdHeldReads: false,
     /** Whether each read of `known` waits until released. */
     holdKnown: false,
     /** Whether each read of a Network's Timelines waits until released. */
@@ -2170,6 +2175,10 @@ export const fakeDaemon = () => {
 
     daemon.heldReads.push({ positions, timeline });
 
+    if (daemon.holdHeldReads) {
+      await heldUntilReleased(heldReadsHeld, init);
+    }
+
     if (daemon.ui.options.previews === "off") {
       return Response.json({ _tag: "PreviewsOff", timeline }, { status: 409 });
     }
@@ -2576,6 +2585,7 @@ export const registryFor = (
           Layer.succeed(Waits, {
             complete: "10 millis",
             debounce: "30 millis",
+            held: "2 seconds",
             idle: "2 seconds",
             interval: "100 millis",
             longest: "50 millis",

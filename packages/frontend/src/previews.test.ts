@@ -938,6 +938,16 @@ describe("a held read", () => {
     ]);
   });
 
+  it("draws a placeholder, not another link's card, when the Message's links changed since the read", () => {
+    const held = heldIn(initialPreviews, [heldItem("a", ready)]);
+
+    expect(
+      previewsOf(held, "on", timeline, at(1), said("https://z.example/"), drawing).map(
+        (one) => one._tag
+      )
+    ).toStrictEqual(["Pending"]);
+  });
+
   it("draws a link not held once the stream says another Frontend's ask fetched it", () => {
     const held = heldIn(fold(initialPreviews, { _tag: "Followed" }), [heldItem("a", notHeld)]);
     const changed = fold(held, { _tag: "Changed", item: item("a", ready) });

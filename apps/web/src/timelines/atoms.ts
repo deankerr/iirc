@@ -6,7 +6,6 @@
  *
  * @packageDocumentation
  */
-import { heldLimit } from "@iirc/api";
 import type {
   NetworkId,
   SearchQuery,
@@ -20,7 +19,13 @@ import type { Closing } from "@iirc/frontend/closing";
 import { notificationsOf } from "@iirc/frontend/notifications";
 import type { Muted } from "@iirc/frontend/notifications";
 import { uiShown } from "@iirc/frontend/options";
-import { heldReadOf, mayPreview, modeIn, reducePreviews } from "@iirc/frontend/previews";
+import {
+  asksFor,
+  heldReadOf,
+  modeIn,
+  previewableCount,
+  reducePreviews,
+} from "@iirc/frontend/previews";
 import type { PreviewsEvent } from "@iirc/frontend/previews";
 import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
@@ -192,6 +197,11 @@ export interface WaitTimes {
   readonly lookup: Duration.Input;
   /** How long one request of a Lookup waits for its answer, within its deadline. */
   readonly lookRequest: Duration.Input;
+  /**
+   * How long a window waits for the Daemon's answer to the read of its held Previews, after
+   * which that read is let go of and the window is drawn without them.
+   */
+  readonly held: Duration.Input;
 }
 
 /** How long the runtime waits: a test makes these short. */
@@ -199,6 +209,7 @@ export class Waits extends Context.Reference<WaitTimes>("@iirc/web/Waits", {
   defaultValue: () => ({
     complete: "60 millis",
     debounce: "250 millis",
+    held: "5 seconds",
     idle: "45 seconds",
     interval: "1 second",
     longest: "15 seconds",
@@ -295,9 +306,11 @@ const previewsHappened = (registry: AtomRegistry.AtomRegistry, event: PreviewsEv
 /**
  * Reads what the Daemon already holds of a window's Previews, which fetches nothing, and
  * folds it in, so a row whose Previews are held is drawn whole the first time. Only the
- * Messages that may have Previews are read, and only while their Timeline's mode asks. It
- * never fails: a held read refused or lost is let go of, and each Message is still asked
- * for as it comes into view.
+ * Messages that may have Previews are read, and not while their Timeline's mode is known
+ * not to ask. The mode may not be known yet, as the shared options may be read after the
+ * window, so the Daemon, which decides the mode itself, refuses a read under `off`, which
+ * is let go of. It never fails and waits only as long as `Waits.held`: a held read refused,
+ * lost, or late is let go of, and each Message is still asked for as it comes into view.
  * @param registry - The registry.
  * @param window - The window read.
  * @returns The held read, which never fails.
@@ -307,22 +320,27 @@ const readHeld = (registry: AtomRegistry.AtomRegistry, window: TimelineWindow) =
     const { timeline } = window;
     const mode = modeIn(registry.get(previewsModes), timeline);
 
+    if (mode !== undefined && !asksFor(mode)) {
+      return;
+    }
+
     const positions = window.items
-      .filter((item) => item.timeline === timeline && mayPreview(mode, item.content))
-      .map((item) => item.position)
-      .slice(-heldLimit);
+      .filter((item) => item.timeline === timeline && previewableCount(item.content) > 0)
+      .map((item) => item.position);
 
     if (positions.length === 0) {
       return;
     }
 
     const client = yield* DaemonClient;
+    const { held } = yield* Waits;
     const read = heldReadOf(registry.get(previewsState), timeline);
 
     previewsHappened(registry, { _tag: "Reading", read });
 
     // Every end of the read settles it, however it ends, so no read stays in flight.
     yield* client.previews.held({ params: { timeline }, payload: { positions } }).pipe(
+      Effect.timeout(held),
       Effect.onExit((exit) =>
         Effect.sync(() => {
           previewsHappened(

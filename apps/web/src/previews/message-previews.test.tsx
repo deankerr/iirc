@@ -14,6 +14,7 @@ import { uiSync } from "../options/ui.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, sync } from "../timelines/atoms.ts";
+import type { WaitTimes } from "../timelines/atoms.ts";
 import { previewsSync } from "./atoms.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -346,9 +347,18 @@ const opened = async (
     readonly look?: Look;
     readonly dogs?: typeof PreviewItem.Encoded | undefined;
     readonly direct?: boolean;
+    /** Each held read of Previews waits until released. */
+    readonly held?: boolean;
+    /** The shared options are read only once the test releases them, after the window. */
+    readonly optionsLate?: boolean;
+    /** Waits other than a test's defaults. */
+    readonly waits?: Partial<WaitTimes>;
   } = {}
 ) => {
   const fake = fakeDaemon();
+
+  fake.daemon.holdUiFollows = also.optionsLate === true;
+  fake.daemon.holdHeldReads = also.held === true;
 
   fake.daemon.signedIn = true;
   fake.daemon.ui = {
@@ -382,7 +392,7 @@ const opened = async (
     },
   ]);
 
-  const registry = registryFor(fake.fetch);
+  const registry = registryFor(fake.fetch, also.waits);
 
   await run(registry, check, undefined);
   registry.mount(sync);
@@ -410,15 +420,21 @@ const opened = async (
 
   // The shared options read, so a window read knows whether its Timeline's Previews are.
   await settled(
-    () => fake.daemon.followers.length === 1 && registry.get(optionsState).ui !== undefined
+    () =>
+      fake.daemon.followers.length === 1 &&
+      (also.optionsLate === true || registry.get(optionsState).ui !== undefined)
   );
 
   await act(async () => {
     registry.set(open, Schema.decodeSync(TimelineId)(iirc));
     await Promise.resolve();
   });
+
+  // The page draws a wait until the options are read, so no row is drawn before them.
   await settled(
-    () => container.querySelector('[role="log"]')?.textContent?.includes("look") ?? false
+    () =>
+      also.optionsLate === true ||
+      (container.querySelector('[role="log"]')?.textContent?.includes("look") ?? false)
   );
 
   return { ...fake, container, registry };
@@ -1809,6 +1825,60 @@ describe("a Message's Previews", () => {
       held: [{ positions: [cursor(2)], timeline: iirc }],
       states: ["ready"],
     });
+  });
+
+  it("reads held Previews with the window even when the shared options are read after it", async () => {
+    const states = new Set<string | undefined>();
+
+    const watcher = new MutationObserver(() => {
+      for (const one of document.querySelectorAll<HTMLElement>("[data-preview]")) {
+        states.add(one.dataset.preview);
+      }
+    });
+
+    watcher.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+    const { daemon } = await opened("on", catsItem(ready), {}, false, { optionsLate: true });
+
+    // The window is read first, as on a page loaded again, and only then the options.
+    await settled(() => daemon.uiFollowsHeld.length > 0 && daemon.heldReads.length === 1);
+
+    await act(async () => {
+      daemon.holdUiFollows = false;
+
+      for (const release of daemon.uiFollowsHeld) {
+        release();
+      }
+
+      await Promise.resolve();
+    });
+    await settled(() => drawn()[0]?.state === "ready");
+
+    watcher.disconnect();
+
+    expect({
+      asks: daemon.previewAsks,
+      held: daemon.heldReads,
+      states: [...states],
+    }).toStrictEqual({
+      asks: [],
+      held: [{ positions: [cursor(2)], timeline: iirc }],
+      states: ["ready"],
+    });
+  });
+
+  it("draws the window though a held read stalls, with a placeholder for each link", async () => {
+    const { daemon } = await opened("on", catsItem(ready), {}, false, {
+      held: true,
+      waits: { held: "30 millis" },
+    });
+
+    await settled(() => drawn().length > 0);
+
+    expect({
+      held: daemon.heldReads.length,
+      shown: drawn().map((one) => one.state),
+    }).toStrictEqual({ held: 1, shown: ["pending"] });
   });
 
   it("draws no image, and gives none a source, until it scrolls into view", async () => {
