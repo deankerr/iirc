@@ -24,10 +24,10 @@ const shared = {
     "font.lineHeight": 1.45,
     "font.size": 16,
     previews: "off",
-    "previews.animate": false,
-    "previews.folded": "summary",
+    "previews.animate": true,
     "previews.mediaHeight": "medium",
     "previews.players": ["player.vimeo.com"],
+    "previews.start": "open",
     "previews.timelines": {},
     "sidebar.networks": [],
     "sidebar.order": [],
@@ -119,6 +119,21 @@ describe("a device's overrides", () => {
     });
   });
 
+  it("read one kept under ui.previews.folded as ui.previews.start, open as open and summary or chip as closed", () => {
+    expect(
+      ["open", "summary", "chip", "nope"].map((folded) => {
+        const device = deviceUiOf(`{"previews.folded":"${folded}","previews.mediaHeight":"large"}`);
+
+        return { device, start: effectiveUi(shared, device)["previews.start"] };
+      })
+    ).toStrictEqual([
+      { device: { "previews.mediaHeight": "large", "previews.start": "open" }, start: "open" },
+      { device: { "previews.mediaHeight": "large", "previews.start": "closed" }, start: "closed" },
+      { device: { "previews.mediaHeight": "large", "previews.start": "closed" }, start: "closed" },
+      { device: { "previews.mediaHeight": "large" }, start: "open" },
+    ]);
+  });
+
   it("override one option, or stop, and never keep a value its Schema refuses", () => {
     const light = overridden(noOverrides, "theme", "light");
 
@@ -197,8 +212,7 @@ describe("a device's overrides", () => {
         "font.lineHeight": 1.45,
         "font.size": 14,
         previews: "off",
-        "previews.animate": false,
-        "previews.folded": "summary",
+        "previews.animate": true,
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -208,6 +222,7 @@ describe("a device's overrides", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
+        "previews.start": "open",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],

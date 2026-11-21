@@ -1,8 +1,7 @@
 /*
  * A Message's Previews: under its text, in the text's column, as wide as its text may run,
  * marked by one rule at their start, each a card stacked under the last, far enough apart
- * that two cards never read as one. A row pending is one line, so a Preview that arrives
- * folded moves nothing below it. Nothing in it scrolls sideways. Its media is as tall as
+ * that two cards never read as one. A row pending is one line. Nothing in it scrolls sideways. Its media is as tall as
  * `--preview-media-height` at most, which the view sets from the option.
  */
 .previews {
@@ -22,17 +21,13 @@
 }
 
 /*
- * One Preview, but a link waiting for a press, which runs as its link does, never wider
- * than a card is. 34em of the Previews' own text is about seventy
+ * One Preview, never wider than a card is. 34em of the Previews' own text is about seventy
  * characters, the far end of a comfortable line to read a description in, and a 16 by 9
  * poster that wide is about as tall as `ui.previews.mediaHeight`'s middle size, so a card's
  * words and its media end near each other. In a narrower Pane it is the Pane's width.
  */
 .row {
   min-width: 0;
-}
-
-.row:not(:has(> [data-preview="waiting"])) {
   max-width: min(34em, 100%);
 }
 
@@ -170,105 +165,33 @@
   white-space: nowrap;
 }
 
-/* Folded, a card is its name on one line, cut to it, which a press opens. */
-.folded {
-  min-width: 0;
-}
-
-.name {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  text-align: start;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.name[data-hovered] {
-  text-decoration: underline dotted var(--color-muted);
-}
-
-.name[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--border-width);
-}
-
-/* A Message's Previews folded to one chip, quiet until hovered, which a press opens. */
-.chip {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-muted);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  cursor: default;
-}
-
-.chip[data-hovered] {
-  color: var(--color-text);
-}
-
-.chip[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--border-width);
-}
-
-/* A link the Daemon holds for a press: the plain link, cut to its line. */
-.plain {
-  display: block;
-  overflow: hidden;
-  color: var(--color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-a.plain {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-a.plain:focus-visible {
-  outline: var(--border-width) solid var(--color-focus);
-}
-
 /*
- * A link the Daemon holds for a press: the plain link, cut to the room left, and the press
- * after it, quiet until hovered, on the same line.
+ * The toggle after a link that may be previewed: one quiet glyph in the Message's text,
+ * brighter while hovered or open, which opens or closes the Preview under the Message.
  */
-.waiting {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.waiting > .plain {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.press {
-  flex: none;
-  padding: 0;
-  border: 0;
+.toggle {
+  display: inline-block;
+  min-width: 1.4em;
+  margin: 0 0 0 0.15em;
+  padding: 0 0.2em;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-muted);
   font: inherit;
+  font-size: 0.85em;
+  line-height: 1.2;
+  text-align: center;
+  vertical-align: baseline;
   cursor: default;
 }
 
-.press[data-hovered] {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.toggle[aria-expanded="true"],
+.toggle[data-hovered] {
+  color: var(--color-text);
 }
 
-.press[data-focus-visible] {
+.toggle[data-focus-visible] {
   outline: var(--border-width) solid var(--color-focus);
   outline-offset: var(--border-width);
 }
@@ -288,10 +211,11 @@ a.plain:focus-visible {
   max-width: 100%;
 }
 
+/* On a touch screen, the toggle is wide enough to press without catching its link. */
 @media (pointer: coarse) {
-  .name,
-  .chip,
-  .press {
-    min-height: var(--target-size);
+  .toggle {
+    min-width: 2.2em;
+    margin-left: 0.4em;
+    padding-block: 0.2em;
   }
 }

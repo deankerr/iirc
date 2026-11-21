@@ -189,7 +189,7 @@ export {
   Palette,
   PreviewsByTimeline,
   PreviewsAnimate,
-  PreviewsFolded,
+  PreviewsStart,
   PreviewsMediaHeight,
   PreviewsPlayers,
   PlayerHost,
