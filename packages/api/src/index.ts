@@ -219,6 +219,7 @@ export {
   sharedOnly,
   textSizeBounds,
   uiDefaults,
+  uiNameKept,
   uiOptionNames,
   uiSharedOnly,
   uiValueKept,

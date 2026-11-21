@@ -107,13 +107,17 @@ describe("the Tail, through a Daemon", () => {
           Stream.takeUntil((event) => {
             seen.push(event);
 
-            return changed(lineOf(event), "time");
+            return changed(lineOf(event), "timeline.timeFormat");
           }),
           // The start line is held, so the stream is open once it is seen, and this
           // line is logged after, so it can only arrive as it is logged.
           Stream.tap((event) =>
             lineOf(event)?.n === 1
-              ? api.ui.set({ params: { option: "time" }, payload: { value: "none" }, query: {} })
+              ? api.ui.set({
+                  params: { option: "timeline.timeFormat" },
+                  payload: { value: "none" },
+                  query: {},
+                })
               : Effect.void
           ),
           Stream.runDrain
@@ -144,7 +148,11 @@ describe("the Tail, through a Daemon", () => {
 
         // Two lines logged after the last the Frontend saw, one before it follows, and
         // one as it follows.
-        yield* api.ui.set({ params: { option: "time" }, payload: { value: "none" }, query: {} });
+        yield* api.ui.set({
+          params: { option: "timeline.timeFormat" },
+          payload: { value: "none" },
+          query: {},
+        });
 
         const follow = (resume: {
           readonly headers: { readonly "last-event-id"?: number };

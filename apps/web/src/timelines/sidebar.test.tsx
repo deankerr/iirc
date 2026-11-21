@@ -1095,7 +1095,7 @@ describe("bots quieted in the Sidebar", () => {
       act(unmount);
     }
 
-    await arrangedWith({ quietBots: true }, withBotInPeer(0));
+    await arrangedWith({ "unread.quietBots": true }, withBotInPeer(0));
 
     expect({ off, on: row("peer").getAttribute("aria-label") }).toStrictEqual({
       off: "peer, 5 unread",
@@ -1105,9 +1105,69 @@ describe("bots quieted in the Sidebar", () => {
 
   // Catches a Highlight dropped with a bot's other Messages.
   it("still counts a Highlight, whoever it is from, beside what else is unread", async () => {
-    await arrangedWith({ quietBots: true }, withBotInPeer(1));
+    await arrangedWith({ "unread.quietBots": true }, withBotInPeer(1));
 
     expect(row("peer").getAttribute("aria-label")).toBe("peer, 4 unread, 1 highlight");
+  });
+});
+
+/**
+ * The question a dialog asks, while one does.
+ * @returns Its dialog, or none.
+ */
+const question = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+
+describe("removing a Network from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("asks to remove a Network from its row's menu, one with no Timeline of its own too, and to drop the Timelines of one removed", async () => {
+    const fake = fakeDaemon();
+
+    // A Network that never connected has no Timeline of its own, and its row has a menu too.
+    fake.daemon.timelines.set("oftc", []);
+    await signedIn({ listed: 1, timelines: [] }, fake);
+
+    await pressButton("More for oftc");
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    const bare = [...document.querySelectorAll('[role^="menuitem"]')].map((one) => one.textContent);
+
+    await chooseFromMenu("Remove Network…");
+    await settled(() => question() !== null);
+    const asked = question()?.querySelector("h2")?.textContent;
+
+    await pressButton("Cancel");
+    await settled(() => question() === null);
+
+    await pressButton("More for libera");
+    await chooseFromMenu("Remove Network…");
+    await settled(() => question() !== null);
+    await pressButton("Remove");
+    await settled(
+      () => question() === null && row("libera").getAttribute("aria-label") === "libera, removed"
+    );
+
+    await pressButton("More for libera");
+    await chooseFromMenu("Drop Timelines…");
+    await settled(() => question() !== null);
+
+    expect({
+      asked,
+      bare,
+      drop: question()?.querySelector("h2")?.textContent,
+      removals: fake.daemon.removals,
+    }).toStrictEqual({
+      asked: "Remove oftc?",
+      bare: ["Remove Network…"],
+      drop: "Drop libera's Timelines?",
+      removals: [{ keep: true, network: "libera" }],
+    });
   });
 });
 
@@ -1137,7 +1197,7 @@ describe("muting a Timeline from the Sidebar", () => {
 
     const muted = {
       label: row("peer").getAttribute("aria-label"),
-      list: fake.daemon.ui.options.muted,
+      list: fake.daemon.ui.options["unread.muted"],
       text: row("peer").textContent,
     };
 
@@ -1150,7 +1210,7 @@ describe("muting a Timeline from the Sidebar", () => {
     await settled(() => row("peer").getAttribute("aria-label") === before.label);
 
     expect({
-      after: { list: fake.daemon.ui.options.muted, text: row("peer").textContent },
+      after: { list: fake.daemon.ui.options["unread.muted"], text: row("peer").textContent },
       before,
       changes: fake.daemon.uiChanges,
       muted,
@@ -1158,8 +1218,8 @@ describe("muting a Timeline from the Sidebar", () => {
       after: { list: [], text: before.text },
       before: { label: "peer, 3 unread", text: "peer3…↕" },
       changes: [
-        { ifSequence: "4", route: "PUT muted" },
-        { ifSequence: sequence, route: "PUT muted" },
+        { ifSequence: "4", route: "PUT unread.muted" },
+        { ifSequence: sequence, route: "PUT unread.muted" },
       ],
       muted: { label: "peer, muted", list: [peer], text: "peer∅…↕" },
     });
@@ -1167,7 +1227,7 @@ describe("muting a Timeline from the Sidebar", () => {
 
   // Catches a muted row that hides a Highlight, or marks it differently from an unmuted one.
   it("still marks a muted Timeline's Highlight, as an unmuted one's, and counts none of what else is unread", async () => {
-    await arrangedWith({ muted: [peer] }, withUnreadPeer(1));
+    await arrangedWith({ "unread.muted": [peer] }, withUnreadPeer(1));
     await settled(() => row("peer").getAttribute("aria-label")?.endsWith("muted") === true);
 
     expect({
@@ -1343,7 +1403,7 @@ describe("the views of iirc's own, from the sidebar", () => {
       moved,
       opened: shownNow(registry),
     }).toStrictEqual({
-      keys: ["Ctrl+Shift+F", null, "Ctrl+,"],
+      keys: ["Ctrl+Shift+F", null, "Alt+O"],
       moved: true,
       opened: "Options",
     });
@@ -1625,12 +1685,6 @@ const footerSignOut = () =>
   [...document.querySelectorAll<HTMLElement>("nav footer button")].find(
     (one) => one.textContent === "Sign out"
   );
-
-/**
- * The question asked before signing out.
- * @returns It, while it is asked.
- */
-const question = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
 
 /**
  * Presses one of the question's answers.

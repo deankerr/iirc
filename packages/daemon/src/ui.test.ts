@@ -23,7 +23,11 @@ const set = (option: string, value: string) => ({ _tag: "UiSet", option, value }
 
 const unset = (option: string) => ({ _tag: "UiUnset", option }) as const;
 
-const themes = (value: Schema.Json): Change => ({ _tag: "UiSet", option: "themes", value });
+const themes = (value: Schema.Json): Change => ({
+  _tag: "UiSet",
+  option: "theme.imported",
+  value,
+});
 
 const fold = (changes: readonly Change[]) => {
   let held = nothingHeld;
@@ -39,25 +43,22 @@ describe("folding the ui options", () => {
   it("takes the latest Change of each option, and an unset back to its default", () => {
     expect(
       fold([
-        set("time", "HH:mm:ss"),
+        set("timeline.timeFormat", "HH:mm:ss"),
         set("theme", "dark"),
-        set("time", "none"),
+        set("timeline.timeFormat", "none"),
+        // Journaled under the name the option had before, which is the option's still.
         set("activity", "quiet"),
         unset("theme"),
       ])
     ).toStrictEqual({
       options: {
-        activity: "quiet",
         aliases: [],
-        colours: "theme",
-        dark: "dark",
-        day: "full",
-        enter: "send",
+        "composer.enter": "send",
+        "composer.nickSuffix": ": ",
+        "composer.spellcheck": true,
         font: "system",
-        leading: 1.45,
-        light: "light",
-        line: "columns",
-        muted: [],
+        "font.lineHeight": 1.45,
+        "font.size": 14,
         previews: "off",
         "previews.animate": false,
         "previews.folded": "summary",
@@ -72,18 +73,22 @@ describe("folding the ui options", () => {
         ],
         "previews.style": "thumbnail",
         "previews.timelines": {},
-        quietBots: false,
-        read: "latest",
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        size: 14,
-        spellcheck: true,
-        suffix: ": ",
         theme: "system",
-        themes: [],
-        time: "none",
-        width: "none",
+        "theme.dark": "dark",
+        "theme.imported": [],
+        "theme.light": "light",
+        "timeline.activity": "quiet",
+        "timeline.colours": "theme",
+        "timeline.dateFormat": "full",
+        "timeline.layout": "columns",
+        "timeline.maxWidth": "none",
+        "timeline.timeFormat": "none",
+        "unread.markRead": "latest",
+        "unread.muted": [],
+        "unread.quietBots": false,
       },
       sequence: 5,
     });
@@ -91,20 +96,21 @@ describe("folding the ui options", () => {
 
   it("changes no option for a Change it cannot read, though its sequence is the last", () => {
     expect(
-      fold([set("time", "HH:mm:ss"), set("time", "noon"), set("palette", "dusk"), unset("nope")])
+      fold([
+        set("timeline.timeFormat", "HH:mm:ss"),
+        set("timeline.timeFormat", "noon"),
+        set("palette", "dusk"),
+        unset("nope"),
+      ])
     ).toStrictEqual({
       options: {
-        activity: "all",
         aliases: [],
-        colours: "theme",
-        dark: "dark",
-        day: "full",
-        enter: "send",
+        "composer.enter": "send",
+        "composer.nickSuffix": ": ",
+        "composer.spellcheck": true,
         font: "system",
-        leading: 1.45,
-        light: "light",
-        line: "columns",
-        muted: [],
+        "font.lineHeight": 1.45,
+        "font.size": 14,
         previews: "off",
         "previews.animate": false,
         "previews.folded": "summary",
@@ -119,18 +125,22 @@ describe("folding the ui options", () => {
         ],
         "previews.style": "thumbnail",
         "previews.timelines": {},
-        quietBots: false,
-        read: "latest",
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        size: 14,
-        spellcheck: true,
-        suffix: ": ",
         theme: "system",
-        themes: [],
-        time: "HH:mm:ss",
-        width: "none",
+        "theme.dark": "dark",
+        "theme.imported": [],
+        "theme.light": "light",
+        "timeline.activity": "all",
+        "timeline.colours": "theme",
+        "timeline.dateFormat": "full",
+        "timeline.layout": "columns",
+        "timeline.maxWidth": "none",
+        "timeline.timeFormat": "HH:mm:ss",
+        "unread.markRead": "latest",
+        "unread.muted": [],
+        "unread.quietBots": false,
       },
       sequence: 4,
     });
@@ -153,8 +163,10 @@ describe("folding the themes imported", () => {
           { name: "mine", palette: { ...palette, background: "#111111" } },
           { name: "bad", palette: { ...palette, ansi: [] } },
         ]),
-      ]).options.themes,
-      notAList: fold([themes([{ name: "mine", palette }]), themes("dusk")]).options.themes,
+      ]).options["theme.imported"],
+      notAList: fold([themes([{ name: "mine", palette }]), themes("dusk")]).options[
+        "theme.imported"
+      ],
     }).toStrictEqual({
       kept: [{ name: "mine", palette }],
       notAList: [{ name: "mine", palette }],
@@ -178,10 +190,10 @@ describe("the ui options, kept", () => {
         const first = yield* Effect.gen(function* () {
           const options = yield* UiConfiguration;
 
-          yield* options.change(set("time", "HH:mm:ss"), 0);
+          yield* options.change(set("timeline.timeFormat", "HH:mm:ss"), 0);
           yield* journal.append(retry);
           yield* options.change(set("theme", "light"), undefined);
-          const stale = yield* options.change(unset("time"), 1).pipe(Effect.flip);
+          const stale = yield* options.change(unset("timeline.timeFormat"), 1).pipe(Effect.flip);
 
           return { inForce: yield* options.inForce, stale };
         }).pipe(Effect.provide(layer));
@@ -197,17 +209,13 @@ describe("the ui options, kept", () => {
     expect(result).toStrictEqual({
       again: {
         options: {
-          activity: "all",
           aliases: [],
-          colours: "theme",
-          dark: "dark",
-          day: "full",
-          enter: "send",
+          "composer.enter": "send",
+          "composer.nickSuffix": ": ",
+          "composer.spellcheck": true,
           font: "system",
-          leading: 1.45,
-          light: "light",
-          line: "columns",
-          muted: [],
+          "font.lineHeight": 1.45,
+          "font.size": 14,
           previews: "off",
           "previews.animate": false,
           "previews.folded": "summary",
@@ -222,35 +230,35 @@ describe("the ui options, kept", () => {
           ],
           "previews.style": "thumbnail",
           "previews.timelines": {},
-          quietBots: false,
-          read: "latest",
           "sidebar.networks": [],
           "sidebar.order": [],
           "sidebar.pinned": [],
-          size: 14,
-          spellcheck: true,
-          suffix: ": ",
           theme: "light",
-          themes: [],
-          time: "HH:mm:ss",
-          width: "none",
+          "theme.dark": "dark",
+          "theme.imported": [],
+          "theme.light": "light",
+          "timeline.activity": "all",
+          "timeline.colours": "theme",
+          "timeline.dateFormat": "full",
+          "timeline.layout": "columns",
+          "timeline.maxWidth": "none",
+          "timeline.timeFormat": "HH:mm:ss",
+          "unread.markRead": "latest",
+          "unread.muted": [],
+          "unread.quietBots": false,
         },
         sequence: 3,
       },
       first: {
         inForce: {
           options: {
-            activity: "all",
             aliases: [],
-            colours: "theme",
-            dark: "dark",
-            day: "full",
-            enter: "send",
+            "composer.enter": "send",
+            "composer.nickSuffix": ": ",
+            "composer.spellcheck": true,
             font: "system",
-            leading: 1.45,
-            light: "light",
-            line: "columns",
-            muted: [],
+            "font.lineHeight": 1.45,
+            "font.size": 14,
             previews: "off",
             "previews.animate": false,
             "previews.folded": "summary",
@@ -265,18 +273,22 @@ describe("the ui options, kept", () => {
             ],
             "previews.style": "thumbnail",
             "previews.timelines": {},
-            quietBots: false,
-            read: "latest",
             "sidebar.networks": [],
             "sidebar.order": [],
             "sidebar.pinned": [],
-            size: 14,
-            spellcheck: true,
-            suffix: ": ",
             theme: "light",
-            themes: [],
-            time: "HH:mm:ss",
-            width: "none",
+            "theme.dark": "dark",
+            "theme.imported": [],
+            "theme.light": "light",
+            "timeline.activity": "all",
+            "timeline.colours": "theme",
+            "timeline.dateFormat": "full",
+            "timeline.layout": "columns",
+            "timeline.maxWidth": "none",
+            "timeline.timeFormat": "HH:mm:ss",
+            "unread.markRead": "latest",
+            "unread.muted": [],
+            "unread.quietBots": false,
           },
           sequence: 3,
         },
@@ -312,7 +324,10 @@ describe("the ui options, kept", () => {
 
         return yield* Effect.gen(function* () {
           const options = yield* UiConfiguration;
-          const first = yield* Effect.forkChild(options.change(set("time", "HH:mm:ss"), 0));
+
+          const first = yield* Effect.forkChild(
+            options.change(set("timeline.timeFormat", "HH:mm:ss"), 0)
+          );
 
           yield* Deferred.await(appending);
           const second = yield* Effect.forkChild(options.change(set("theme", "dark"), 0));
@@ -334,7 +349,7 @@ describe("the ui options, kept", () => {
     );
 
     expect(result).toStrictEqual({
-      changes: ["UiSet time"],
+      changes: ["UiSet timeline.timeFormat"],
       first: Exit.succeed(1),
       second: Exit.fail(new UiChangedSince({ sequence: 1 })),
     });
@@ -350,7 +365,7 @@ describe("a ui option's value, parsed as it is set", () => {
     };
 
     expect({
-      themes: parseUiValue("themes", [{ extra: true, name: "mine", palette }]),
+      themes: parseUiValue("theme.imported", [{ extra: true, name: "mine", palette }]),
       timelines: Option.isNone(parseUiValue("previews.timelines", { "#iirc": "on" })),
     }).toStrictEqual({
       themes: Option.some([{ name: "mine", palette }]),

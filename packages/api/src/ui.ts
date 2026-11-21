@@ -114,7 +114,7 @@ export const themesCap = 32;
 const ThemeShown = ThemeName.annotate({
   default: "system",
   description:
-    "The theme to draw in: system, which draws ui.light or ui.dark as the device is light or dark, a built-in such as dark, light, or nord, or one imported. /theme lists them.",
+    "The theme. system follows the device, and draws ui.theme.light or ui.theme.dark. Any other is a built-in or imported theme, by name. /theme lists them.",
 });
 
 /**
@@ -135,7 +135,7 @@ const themeForScheme = (scheme: "light" | "dark", example: ThemeName) =>
     )
   ).annotate({
     default: scheme,
-    description: `The theme drawn while ui.theme is system and the device is ${scheme}: a built-in such as ${scheme} or ${example}, or one imported. /theme -${scheme} sets it.`,
+    description: `The theme drawn while ui.theme is system and the device is ${scheme}: a built-in theme, such as ${scheme} or ${example}, or an imported one. /theme -${scheme} sets it.`,
   });
 
 /** The themes the Owner imported, each named once, at most {@link themesCap}. */
@@ -150,7 +150,7 @@ export const Themes = Schema.Array(Theme)
   .annotate({
     default: [],
     description:
-      "The themes imported, by name, for every device: /theme import adds one, and /theme remove takes one away.",
+      "The imported themes, by name. /theme import adds one, and /theme remove removes one.",
   });
 
 /**
@@ -195,7 +195,7 @@ const themesKept = keptByName(Theme, themesCap);
 export const ColoursShown = Schema.Literals(["theme", "raw"]).annotate({
   default: "theme",
   description:
-    "How colours a Message asks for are drawn: theme, mapped onto the theme's palette, or raw, as mIRC gives them. Either is kept readable.",
+    "How the colours in a Message are drawn: theme maps them onto the theme's palette, and raw draws mIRC's own. Both stay readable against the background.",
 });
 
 /** The decoded form of {@link ColoursShown}. */
@@ -215,7 +215,7 @@ export const TimeShown = Schema.Literals([
 ]).annotate({
   default: "HH:mm",
   description:
-    "How a line's time shows: HH:mm or HH:mm:ss on a 24-hour clock, h:mm a or h:mm:ss a on a 12-hour one, or none.",
+    "How a line's time is written: HH:mm or HH:mm:ss on a 24-hour clock, h:mm a or h:mm:ss a on a 12-hour clock, or none to hide it.",
 });
 
 /** The decoded form of {@link TimeShown}. */
@@ -229,7 +229,7 @@ export type TimeShown = typeof TimeShown.Type;
 export const DayShown = Schema.Literals(["full", "long", "medium", "short", "iso"]).annotate({
   default: "full",
   description:
-    "How a day is written where the day changes: full, long, medium, or short, as the device's language writes a date, or iso, as 2026-11-15.",
+    "How the date is written where the day changes: full, long, medium, or short, in the device's language, or iso, such as 2026-11-15.",
 });
 
 /** The decoded form of {@link DayShown}. */
@@ -244,7 +244,7 @@ export type DayShown = typeof DayShown.Type;
 export const ActivityShown = Schema.Literals(["all", "spoke", "quiet", "none"]).annotate({
   default: "all",
   description:
-    "Which Activity a Channel shows: all, spoke to hide the joins, parts, and quits of Users who did not speak there in the five minutes before, quiet to hide all joins, parts, and quits, or none. Unread counts are unchanged.",
+    "Which Activity a Channel shows. spoke hides the joins, parts, and quits of Users who did not speak there in the five minutes before, quiet hides all joins, parts, and quits, and none hides all Activity. Unread counts do not change.",
 });
 
 /** The decoded form of {@link ActivityShown}. */
@@ -259,7 +259,7 @@ export const textSizeBounds = { maximum: 24, minimum: 10 } as const;
  */
 export const TextSize = Schema.Int.check(Schema.isBetween(textSizeBounds)).annotate({
   default: 14,
-  description: `The text's size, in pixels, from ${textSizeBounds.minimum} to ${textSizeBounds.maximum}. A field's text on a touch screen is never under 16.`,
+  description: `The text size, in pixels, from ${textSizeBounds.minimum} to ${textSizeBounds.maximum}. A text field on a touch screen is never smaller than 16.`,
 });
 
 /** The decoded form of {@link TextSize}. */
@@ -281,7 +281,7 @@ export const Leading = Schema.Finite.check(
   Schema.isMultipleOf(leadingStep)
 ).annotate({
   default: 1.45,
-  description: `The line height: how tall a line of text is, as a multiple of the text's size, from ${leadingBounds.minimum} to ${leadingBounds.maximum}.`,
+  description: `The height of a line of text, as a multiple of the text size, from ${leadingBounds.minimum} to ${leadingBounds.maximum}.`,
 });
 
 /** The decoded form of {@link Leading}. */
@@ -305,7 +305,7 @@ export const WidestLine = Schema.Union([
   Schema.Int.check(Schema.isBetween(widestLineBounds)),
 ]).annotate({
   default: "none",
-  description: `The widest a line of a Timeline's text runs, in characters, from ${widestLineBounds.minimum} to ${widestLineBounds.maximum}, or none to run the width of its Pane. A character is as wide as the font's 0, so the bound grows with the text's size.`,
+  description: `The most characters a line of a Timeline runs before it wraps, from ${widestLineBounds.minimum} to ${widestLineBounds.maximum}, or none to run the width of its Pane. A character is as wide as the font's 0.`,
 });
 
 /** The decoded form of {@link WidestLine}. */
@@ -380,7 +380,7 @@ export type FontFamily = typeof FontFamily.Type;
 export const FontShown = Schema.Union([Schema.Literals(fontNames), FontFamily]).annotate({
   default: "system",
   description:
-    "The font text is drawn in. Monospace: system, the device's own, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono. Sans: system-sans, the device's own, or ibm-plex-sans, atkinson-hyperlegible-next, source-sans-3, or inter. Or any family the device has, by its name, such as Fira Code, up to 64 characters with no \", \\, or control character. A glyph a font lacks is drawn in the device's own font of the same kind, and a family the device lacks in its own monospace font.",
+    "The font. system and system-sans are the device's own monospace and sans fonts, and the other choices are served with iirc. Any font family the device has can be given by name, such as Fira Code. A family the device lacks is drawn in its monospace font.",
 });
 
 /** The decoded form of {@link FontShown}. */
@@ -401,7 +401,7 @@ export const isFontName = (font: FontShown): font is FontName => fontNamesFolded
 export const EnterKey = Schema.Literals(["send", "newline"]).annotate({
   default: "send",
   description:
-    "What Enter does in the Composer: send, with Shift+Enter for a new line, or newline, with Ctrl+Enter, or ⌘Enter on a Mac, to send.",
+    "What Enter does in the Composer. send sends, and Shift+Enter starts a new line. newline starts a new line, and Ctrl+Enter, or ⌘Enter on a Mac, sends.",
 });
 
 /** The decoded form of {@link EnterKey}. */
@@ -410,7 +410,7 @@ export type EnterKey = typeof EnterKey.Type;
 /** Whether the Composer checks spelling, as the device's own checker does. */
 export const SpellcheckShown = Schema.Boolean.annotate({
   default: true,
-  description: "Whether the Composer checks spelling, with the device's own checker.",
+  description: "Whether the Composer checks spelling, with the device's spell checker.",
 });
 
 /** The most UTF-16 code units the text after a completed nick may take. */
@@ -429,7 +429,7 @@ export const NickSuffix = Schema.String.check(
   Schema.isPattern(/^[^\p{Cc}\p{Cs}]*$/u, { message: "must hold no control character" })
 ).annotate({
   default: ": ",
-  description: `The text after a nick Tab completes at the start of a line, up to ${nickSuffixMaxLength} characters, kept exactly, a trailing space included, or nothing. A nick completed anywhere else is followed by a space.`,
+  description: `The text added after a nick that Tab completes at the start of a line, up to ${nickSuffixMaxLength} characters. Its spaces are kept, and it may be empty. A nick completed anywhere else is followed by a space.`,
 });
 
 /** The decoded form of {@link NickSuffix}. */
@@ -444,7 +444,7 @@ export type NickSuffix = typeof NickSuffix.Type;
 export const ReadRule = Schema.Literals(["shown", "latest", "asked"]).annotate({
   default: "latest",
   description:
-    "When a Timeline is marked read: shown, up to the last line on screen, even scrolled up; latest, once a Pane is at its latest; or asked, only by /read.",
+    "When a Timeline is marked read: shown, up to the last line that was on screen, even scrolled up; latest, once a Pane shows its latest line; or asked, only by /read.",
 });
 
 /** The decoded form of {@link ReadRule}. */
@@ -468,7 +468,7 @@ export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annota
   ...sharedOnly,
   default: "off",
   description:
-    "Whether the Daemon previews links in Messages, fetching them itself, never the browser: off, links only for a page's title, description, and site, or on, which adds images, kept in the store when a bucket is set. Every device shares it.",
+    "Whether links in Messages are previewed: off, links only for a page's title, description, and site, or on, which adds images, kept in the store when a bucket is set. The Daemon fetches each link, never the browser. Every device shares it.",
 });
 
 /** The decoded form of {@link PreviewsShown}. */
@@ -482,7 +482,7 @@ export type PreviewsShown = typeof PreviewsShown.Type;
 export const PreviewsAnimate = Schema.Boolean.annotate({
   default: false,
   description:
-    "Whether an animated image in a Preview plays on its own: off, it shows its first frame until pressed. A device set to reduce motion keeps them still either way.",
+    "Whether an animated image in a Preview plays by itself. Off, it shows its first frame until pressed. A device set to reduce motion keeps it still either way.",
 });
 
 /** The decoded form of {@link PreviewsAnimate}. */
@@ -497,7 +497,7 @@ export type PreviewsAnimate = typeof PreviewsAnimate.Type;
 export const PreviewsStyle = Schema.Literals(["line", "thumbnail", "card"]).annotate({
   default: "thumbnail",
   description:
-    "How a page's Preview looks: line, its site and title alone; thumbnail, with its image small on the right; or card, with its description and its image below. Images, videos and players show in every style.",
+    "How a page's Preview looks: line shows its site and title, thumbnail adds its image, small, on the right, and card adds its description, with its image below. Images, videos, and players look the same in every style.",
 });
 
 /** The decoded form of {@link PreviewsStyle}. */
@@ -511,7 +511,7 @@ export type PreviewsStyle = typeof PreviewsStyle.Type;
 export const PreviewsFolded = Schema.Literals(["open", "summary", "chip"]).annotate({
   default: "summary",
   description:
-    "Whether Previews start folded: open, drawn whole; summary, each folded to its site and title until pressed; or chip, a Message's Previews as one [+n] until pressed.",
+    "How Previews start: open, shown whole; summary, each folded to its site and title until pressed; or chip, all of a Message's Previews folded into one [+n] until pressed.",
 });
 
 /** The decoded form of {@link PreviewsFolded}. */
@@ -524,7 +524,7 @@ export type PreviewsFolded = typeof PreviewsFolded.Type;
 export const PreviewsMediaHeight = Schema.Literals(["small", "medium", "large"]).annotate({
   default: "medium",
   description:
-    "How tall a Preview's image, video or player is at most: small, 160 pixels; medium, 260; or large, 400.",
+    "The most height a Preview's image, video, or player takes: small, 160 pixels; medium, 260; or large, 400.",
 });
 
 /** The decoded form of {@link PreviewsMediaHeight}. */
@@ -544,7 +544,7 @@ export const PreviewsByTimeline = Schema.Record(
   ...sharedOnly,
   default: {},
   description:
-    "Each Timeline's own choice over ui.previews, by its id: off, links only, or on. A Timeline it does not name follows ui.previews, and a Direct Message named links only or on is previewed without a press. /previews off|links|on|default sets the focused Timeline's. Every device shares it.",
+    "Each Timeline's own choice in place of ui.previews, by its id: off, links only, or on. A Timeline not listed follows ui.previews, and a Direct Message set to links only or on is previewed without a press. /previews off|links|on|default sets the focused Timeline's. Every device shares it.",
 });
 
 /** The decoded form of {@link PreviewsByTimeline}. */
@@ -584,7 +584,7 @@ export const PreviewsPlayers = Schema.Array(PlayerHost).annotate({
     "player.twitch.tv",
   ],
   description:
-    "The hosts a link's player may play from, each matched exactly, so a player from any other host shows as a page. YouTube's players always play from www.youtube-nocookie.com. Every device shares it. A change applies to the web frontend on its next load.",
+    "The hosts a link's player may load from, each matched exactly. A player from any other host shows as a page's Preview instead. YouTube's players always load from www.youtube-nocookie.com. Every device shares it, and a change reaches the web frontend the next time it loads.",
 });
 
 /** The decoded form of {@link PreviewsPlayers}. */
@@ -600,7 +600,7 @@ export type PreviewsPlayers = typeof PreviewsPlayers.Type;
 export const LineLayout = Schema.Literals(["columns", "inline", "stacked"]).annotate({
   default: "columns",
   description:
-    "How a line is laid out: columns, with the time and the nick each in a column; inline, the time, the nick, then what was said as one run of text that wraps under itself; or stacked, the nick and the time on a line above a run of Messages from one User, each on its own line. A Pane too narrow for columns draws columns as inline, and inline and stacked as they are.",
+    "How a line is laid out: columns puts the time and the nick each in a column; inline runs the time, the nick, and what was said together, wrapping under itself; and stacked puts the nick and the time above a run of Messages from one User, each on its own line. A Pane too narrow for columns draws them as inline.",
 });
 
 /** The decoded form of {@link LineLayout}. */
@@ -625,7 +625,7 @@ export const SidebarNetworks = Schema.Array(NetworkId)
     ...sharedOnly,
     default: [],
     description:
-      "The Networks in the Owner's order in the Sidebar, by id. A Network not named keeps the place the fixed order gives it, and an id of one that has gone does nothing. Moving a Network in the Sidebar sets it. Every device shares it.",
+      "The order of the Networks in the Sidebar, by id. A Network not listed keeps its usual place. Moving a Network in the Sidebar sets it. Every device shares it.",
   });
 
 /** The decoded form of {@link SidebarNetworks}. */
@@ -642,7 +642,7 @@ export const SidebarOrder = Schema.Array(TimelineId)
     ...sharedOnly,
     default: [],
     description:
-      "The Timelines in the Owner's order in the Sidebar, by id; only the order among one Network's Timelines matters. A Timeline not named takes the place the fixed order gives it, and an id of one that has gone does nothing. Moving a Timeline in the Sidebar sets it. Every device shares it.",
+      "The order of each Network's Timelines in the Sidebar, by id. A Timeline not listed keeps its usual place. Moving a Timeline in the Sidebar sets it. Every device shares it.",
   });
 
 /** The decoded form of {@link SidebarOrder}. */
@@ -659,7 +659,7 @@ export const SidebarPinned = Schema.Array(TimelineId)
     ...sharedOnly,
     default: [],
     description:
-      "The Timelines pinned above the Networks in the Sidebar, by id, in order. An id of a Timeline that has gone does nothing. /pin pins or unpins the focused Timeline. Every device shares it.",
+      "The Timelines pinned above the Networks in the Sidebar, by id, in order. /pin pins or unpins the focused Timeline. Every device shares it.",
   });
 
 /** The decoded form of {@link SidebarPinned}. */
@@ -672,7 +672,7 @@ export type SidebarPinned = typeof SidebarPinned.Type;
 export const QuietBots = Schema.Boolean.annotate({
   default: false,
   description:
-    "Whether what bots say is left out of unread counts and notifications. A Highlight from a bot still counts and notifies.",
+    "Whether Messages from bots are left out of unread counts and notifications. A Highlight from a bot still counts and notifies.",
 });
 
 /** How many Timelines the Owner may mute, so the options stay small enough to send whole. */
@@ -689,7 +689,7 @@ export const TimelinesMuted = Schema.Array(TimelineId)
     ...sharedOnly,
     default: [],
     description:
-      "The Timelines muted, by id, which show no unread count and notify of nothing but a Highlight. An id of a Timeline that has gone does nothing. /mute and /unmute set the focused Timeline's. Every device shares it.",
+      "The muted Timelines, by id. A muted Timeline shows no unread count and notifies only of a Highlight. /mute and /unmute set the focused Timeline's. Every device shares it.",
   });
 
 /** The decoded form of {@link TimelinesMuted}. */
@@ -764,7 +764,7 @@ export const Aliases = Schema.Array(Alias)
     ...sharedOnly,
     default: [],
     description:
-      "The aliases made, by name, for every device: each a command line run as /name, which may name $1 to $9 for the words typed after it, and $* for all of them. /alias lists them, /alias add adds or replaces one, and /alias remove takes one away.",
+      "The aliases, by name. Each is a command line run as /name, in which $1 to $9 stand for the words typed after it, and $* for all of them. /alias lists them, /alias add adds or replaces one, and /alias remove removes one. Every device shares them.",
   });
 
 /** The decoded form of {@link Aliases}. */
@@ -774,17 +774,13 @@ const aliasesKept = keptByName(Alias, aliasesCap);
 
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
-  activity: ActivityShown,
   aliases: Aliases,
-  colours: ColoursShown,
-  dark: themeForScheme("dark", "solarized-dark"),
-  day: DayShown,
-  enter: EnterKey,
+  "composer.enter": EnterKey,
+  "composer.nickSuffix": NickSuffix,
+  "composer.spellcheck": SpellcheckShown,
   font: FontShown,
-  leading: Leading,
-  light: themeForScheme("light", "solarized-light"),
-  line: LineLayout,
-  muted: TimelinesMuted,
+  "font.lineHeight": Leading,
+  "font.size": TextSize,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
   "previews.folded": PreviewsFolded,
@@ -792,26 +788,30 @@ export const UiOptions = Schema.Struct({
   "previews.players": PreviewsPlayers,
   "previews.style": PreviewsStyle,
   "previews.timelines": PreviewsByTimeline,
-  quietBots: QuietBots,
-  read: ReadRule,
   "sidebar.networks": SidebarNetworks,
   "sidebar.order": SidebarOrder,
   "sidebar.pinned": SidebarPinned,
-  size: TextSize,
-  spellcheck: SpellcheckShown,
-  suffix: NickSuffix,
   theme: ThemeShown,
-  themes: Themes,
-  time: TimeShown,
-  width: WidestLine,
+  "theme.dark": themeForScheme("dark", "solarized-dark"),
+  "theme.imported": Themes,
+  "theme.light": themeForScheme("light", "solarized-light"),
+  "timeline.activity": ActivityShown,
+  "timeline.colours": ColoursShown,
+  "timeline.dateFormat": DayShown,
+  "timeline.layout": LineLayout,
+  "timeline.maxWidth": WidestLine,
+  "timeline.timeFormat": TimeShown,
+  "unread.markRead": ReadRule,
+  "unread.muted": TimelinesMuted,
+  "unread.quietBots": QuietBots,
 });
 
 /** The decoded form of {@link UiOptions}. */
 export type UiOptions = typeof UiOptions.Type;
 
-/** An option's name under `ui`, such as `time`: one of {@link UiOptions}' fields. */
+/** An option's name under `ui`, such as `font.size`: one of {@link UiOptions}' fields. */
 export const UiOptionName = Schema.Literals(Struct.keys(UiOptions.fields)).annotate({
-  description: "An option under ui, such as time.",
+  description: "An option under ui, such as font.size.",
   identifier: "UiOptionName",
 });
 
@@ -852,8 +852,47 @@ export type UiInForce = typeof UiInForce.Type;
 export type UiOptionValue = UiOptions[UiOptionName];
 
 /**
+ * The names options under `ui` had before, each with the name it has now, so a Change
+ * journaled, or an override a device kept, under the name before is still that option's.
+ */
+const namedBefore: ReadonlyMap<string, UiOptionName> = new Map([
+  ["activity", "timeline.activity"],
+  ["colours", "timeline.colours"],
+  ["dark", "theme.dark"],
+  ["day", "timeline.dateFormat"],
+  ["enter", "composer.enter"],
+  ["leading", "font.lineHeight"],
+  ["light", "theme.light"],
+  ["line", "timeline.layout"],
+  ["muted", "unread.muted"],
+  ["quietBots", "unread.quietBots"],
+  ["read", "unread.markRead"],
+  ["size", "font.size"],
+  ["spellcheck", "composer.spellcheck"],
+  ["suffix", "composer.nickSuffix"],
+  ["themes", "theme.imported"],
+  ["time", "timeline.timeFormat"],
+  ["width", "timeline.maxWidth"],
+]);
+
+const decodeUiOptionName = Schema.decodeUnknownOption(UiOptionName);
+
+/**
+ * A `ui` option's name read from one kept before, as a journaled Change or a device's
+ * override names it: a name `ui` has, or one an option had before, as the name it has now.
+ * Any other is none.
+ * @param name - The name kept.
+ * @returns The option's name now, or none.
+ */
+export const uiNameKept = (name: string): UiOptionName | undefined => {
+  const now = decodeUiOptionName(name);
+
+  return now._tag === "Some" ? now.value : namedBefore.get(name);
+};
+
+/**
  * A `ui` option's value read from JSON kept before, as a journaled Change or a device's
- * override: by its Schema, or, for `themes`, entry by entry when its Schema refuses the
+ * override: by its Schema, or, for `theme.imported`, entry by entry when its Schema refuses the
  * whole, so one bad theme drops only itself. Anything else that its Schema refuses is none.
  * @param option - The option.
  * @param value - Its value, as JSON.
@@ -869,7 +908,7 @@ export const uiValueKept = (
     return decoded.value;
   }
 
-  if (option === "themes") {
+  if (option === "theme.imported") {
     return themesKept(value);
   }
 

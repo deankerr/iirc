@@ -332,7 +332,7 @@ export interface Divider {
   readonly read: Timeline["read"];
   /**
    * Everything said that was unread when it opened was said by bots, so it marks nothing
-   * while `ui.quietBots` leaves them out.
+   * while `ui.unread.quietBots` leaves them out.
    */
   readonly bots: boolean;
 }
@@ -341,7 +341,7 @@ export interface Divider {
  * The divider a view draws: the Timeline's own, except that one for what bots alone said
  * is not drawn while bots are quieted.
  * @param divider - The Timeline's divider, if it opened with something unread.
- * @param quietBots - Whether what bots say is left out, as `ui.quietBots` says.
+ * @param quietBots - Whether what bots say is left out, as `ui.unread.quietBots` says.
  * @returns The divider to draw, or none.
  */
 export const dividerShown = (
@@ -4250,11 +4250,11 @@ export interface SidebarNetwork {
   /** It was removed with its Timelines kept, so they are only read. */
   readonly removed: boolean;
   /**
-   * The Timelines the Owner muted, by id, as `ui.muted` says, passed through whole. An id of
+   * The Timelines the Owner muted, by id, as `ui.unread.muted` says, passed through whole. An id of
    * a Timeline this Network does not list, or that has gone, does nothing.
    */
   readonly muted: ReadonlySet<TimelineId>;
-  /** Whether what bots say is left out of its Timelines' counts, as `ui.quietBots` says. */
+  /** Whether what bots say is left out of its Timelines' counts, as `ui.unread.quietBots` says. */
   readonly quietBots: boolean;
 }
 

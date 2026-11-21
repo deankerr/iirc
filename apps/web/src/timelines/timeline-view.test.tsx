@@ -135,7 +135,7 @@ const joined = (sequence: number): typeof TimelineItem.Encoded => ({
 });
 
 /**
- * A kick in `#iirc`, which `ui.activity none` hides, and which joins no run of joins, parts,
+ * A kick in `#iirc`, which `ui.timeline.activity none` hides, and which joins no run of joins, parts,
  * quits, and changes of nick, so each stands as a row of its own.
  * @param sequence - Its sequence.
  * @returns The item.
@@ -519,8 +519,8 @@ const press = async (name: string) => {
  * `#iirc` holding ten Messages, read up to the first, opened while the page is unfocused,
  * then scrolled up to its top, five rows tall, before the page takes the focus: the start,
  * the first Message, the "new" divider, and the second and third Messages are in view.
- * @param shared - `ui.read` for every device.
- * @param device - `ui.read` on this device, if it overrides it.
+ * @param shared - `ui.unread.markRead` for every device.
+ * @param device - `ui.unread.markRead` on this device, if it overrides it.
  * @returns What the Daemon was first asked to mark read.
  */
 const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
@@ -528,8 +528,8 @@ const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
   const { daemon, registry } = await signedIn([], items, { read: 1000 });
 
   await act(async () => {
-    uiRead(registry, { options: { ...uiDefaults, read: shared }, sequence: 1 });
-    registry.set(deviceUi, device === undefined ? {} : { read: device });
+    uiRead(registry, { options: { ...uiDefaults, "unread.markRead": shared }, sequence: 1 });
+    registry.set(deviceUi, device === undefined ? {} : { "unread.markRead": device });
     registry.set(pageState, { compact: false, focused: false, visible: true });
     await Promise.resolve();
   });
@@ -610,19 +610,19 @@ describe("what the view says it shows", () => {
     expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
-  it("takes this device's ui.read shown over asked, which every device shares", async () => {
+  it("takes this device's ui.unread.markRead shown over asked, which every device shares", async () => {
     await expect(readScrolledUp("asked", "shown")).resolves.toStrictEqual([
       { read: 3000, target: "#iirc" },
     ]);
   });
 
-  it("reads older pages without scrolling while ui.activity hides every row of the latest, and marks read up to the row drawn", async () => {
+  it("reads older pages without scrolling while ui.timeline.activity hides every row of the latest, and marks read up to the row drawn", async () => {
     // One Message, then 250 joins: the latest two pages hold only joins.
     const items = [message(1), ...Array.from({ length: 250 }, (_, index) => joined(index + 2))];
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { activity: "quiet" });
+      registry.set(deviceUi, { "timeline.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();
@@ -639,7 +639,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("keeps the line read where it was when ui.activity hides or shows rows above it", async () => {
+  it("keeps the line read where it was when ui.timeline.activity hides or shows rows above it", async () => {
     // Messages at odd steps, joins at even ones, 60 in all: the start of the Timeline is
     // the first row, then the day, so step `n` is row `n + 1`.
     const items = Array.from({ length: 60 }, (_, index) =>
@@ -671,7 +671,7 @@ describe("what the view says it shows", () => {
 
     await act(async () => {
       await act(async () => {
-        registry.set(deviceUi, { activity: "quiet" });
+        registry.set(deviceUi, { "timeline.activity": "quiet" });
         await Promise.resolve();
       });
       await Promise.resolve();
@@ -700,7 +700,7 @@ describe("what the view says it shows", () => {
     const { daemon, registry } = fake;
 
     await act(async () => {
-      registry.set(deviceUi, { activity: "quiet" });
+      registry.set(deviceUi, { "timeline.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();
@@ -767,7 +767,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("keeps a row in view when ui.activity hides every row before it, anchoring to the next that shows", async () => {
+  it("keeps a row in view when ui.timeline.activity hides every row before it, anchoring to the next that shows", async () => {
     // A Message long ago, kicks 2 to 60, then Messages 61 to 120: the latest page begins
     // with 40 kicks, with more before it, read up to its latest so no divider shows.
     const items = Array.from({ length: 120 }, (_, index) =>
@@ -806,7 +806,7 @@ describe("what the view says it shows", () => {
 
     await act(async () => {
       await act(async () => {
-        registry.set(deviceUi, { activity: "none" });
+        registry.set(deviceUi, { "timeline.activity": "none" });
         await Promise.resolve();
       });
       await Promise.resolve();
@@ -835,7 +835,7 @@ describe("what the view says it shows", () => {
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { activity: "quiet" });
+      registry.set(deviceUi, { "timeline.activity": "quiet" });
       await Promise.resolve();
     });
     layout.view = 0;
@@ -888,7 +888,7 @@ describe("what the view says it shows", () => {
       const { daemon, registry } = await signedIn([], items);
 
       await act(async () => {
-        registry.set(deviceUi, { activity: "quiet" });
+        registry.set(deviceUi, { "timeline.activity": "quiet" });
         await Promise.resolve();
       });
       layout.view = 0;
@@ -1255,7 +1255,7 @@ describe("what the view says it shows", () => {
     const inline = linesOf();
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
       await Promise.resolve();
     });
 
@@ -1280,7 +1280,7 @@ describe("what the view says it shows", () => {
     const loud = dividedNow();
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, quietBots: true }, sequence: 1 });
+      uiRead(registry, { options: { ...uiDefaults, "unread.quietBots": true }, sequence: 1 });
       await Promise.resolve();
     });
 
@@ -1301,7 +1301,7 @@ describe("what the view says it shows", () => {
     expect(row?.textContent).toMatch(/^\S+ <\S+> line 2$/u);
   });
 
-  it("says a line's date and time on hover as ui.time says, and no time under none", async () => {
+  it("says a line's date and time on hover as ui.timeline.timeFormat says, and no time under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const said = new Date(2026, 10, 15, 15, 7, 9);
 
@@ -1318,7 +1318,7 @@ describe("what the view says it shows", () => {
 
     const drawn = async (time: TimeShown) => {
       await act(async () => {
-        registry.set(deviceUi, { time });
+        registry.set(deviceUi, { "timeline.timeFormat": time });
         await Promise.resolve();
       });
 
@@ -1350,7 +1350,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("draws a run under one nick under ui.line stacked, each later Message its text with its time kept, until Activity ends it", async () => {
+  it("draws a run under one nick under ui.timeline.layout stacked, each later Message its text with its time kept, until Activity ends it", async () => {
     const { registry } = await signedIn([], [message(1), message(2), joined(3), message(4)]);
 
     await openFromPalette();
@@ -1358,7 +1358,7 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 4"));
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
       await Promise.resolve();
     });
 
@@ -1386,7 +1386,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("puts what a run's head answers under its nick under ui.line stacked, and a later Message's above its text", async () => {
+  it("puts what a run's head answers under its nick under ui.timeline.layout stacked, and a later Message's above its text", async () => {
     const answered = {
       kind: "Privmsg",
       position: message(1).position,
@@ -1406,7 +1406,7 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 3"));
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, line: "stacked" }, sequence: 1 });
+      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
       await Promise.resolve();
     });
 
@@ -1476,11 +1476,11 @@ describe("what the view says it shows", () => {
       ]);
     });
 
-    it("is written as ui.day says", async () => {
+    it("is written as ui.timeline.dateFormat says", async () => {
       const { registry } = await opened();
 
       await act(async () => {
-        registry.set(deviceUi, { day: "iso" });
+        registry.set(deviceUi, { "timeline.dateFormat": "iso" });
         await Promise.resolve();
       });
 
@@ -2330,13 +2330,13 @@ describe("going to a date", () => {
     expect({ day, first }).toStrictEqual({ day: { both: true, read: [["around"]] }, first: true });
   });
 
-  it("reads newer without scrolling from a date before the start while ui.activity hides every row there", async () => {
+  it("reads newer without scrolling from a date before the start while ui.timeline.activity hides every row there", async () => {
     // 300 joins, then one Message: a jump before the start lands on more joins than a read gives.
     const items = [...Array.from({ length: 300 }, (_, index) => joined(index + 1)), message(301)];
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { activity: "quiet" });
+      registry.set(deviceUi, { "timeline.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();

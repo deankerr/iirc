@@ -502,7 +502,7 @@ describe("the search view", () => {
     });
   });
 
-  it("draws each result's time as ui.time says, and HH:mm under none", async () => {
+  it("draws each result's time as ui.timeline.timeFormat says, and HH:mm under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const said = new Date(2026, 10, 15, 15, 7, 9);
     const { container, registry } = await signedIn(0, () => said.getTime());
@@ -513,7 +513,7 @@ describe("the search view", () => {
 
     const drawn = async (time: TimeShown | undefined) => {
       await act(async () => {
-        registry.set(deviceUi, time === undefined ? {} : { time });
+        registry.set(deviceUi, time === undefined ? {} : { "timeline.timeFormat": time });
         await Promise.resolve();
       });
 

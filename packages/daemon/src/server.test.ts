@@ -769,40 +769,42 @@ describe("the API over a real server", () => {
           readEvents(response, (events) => events.some((event) => event.event === "changed"))
         );
 
-        const set = yield* served.request("/api/ui/time?ifSequence=0", {
+        const set = yield* served.request("/api/ui/timeline.timeFormat?ifSequence=0", {
           method: "PUT",
           ...json('{"value":"HH:mm:ss"}'),
         });
 
-        const stale = yield* served.request("/api/ui/time?ifSequence=0", { method: "DELETE" });
+        const stale = yield* served.request("/api/ui/timeline.timeFormat?ifSequence=0", {
+          method: "DELETE",
+        });
 
         const unknown = yield* served.request("/api/ui/palette", {
           method: "PUT",
           ...json('{"value":"dusk"}'),
         });
 
-        const badValue = yield* served.request("/api/ui/activity", {
+        const badValue = yield* served.request("/api/ui/timeline.activity", {
           method: "PUT",
           ...json('{"value":"loud"}'),
         });
 
-        const tooTall = yield* served.request("/api/ui/leading", {
+        const tooTall = yield* served.request("/api/ui/font.lineHeight", {
           method: "PUT",
           ...json('{"value":2.5}'),
         });
 
-        const tooShort = yield* served.request("/api/ui/leading", {
+        const tooShort = yield* served.request("/api/ui/font.lineHeight", {
           method: "PUT",
           ...json('{"value":0.9}'),
         });
 
         // A value no step of a hundredth makes is refused, as a sum in binary makes one.
-        const offStep = yield* served.request("/api/ui/leading", {
+        const offStep = yield* served.request("/api/ui/font.lineHeight", {
           method: "PUT",
           ...json(`{"value":${1.1 + 0.05}}`),
         });
 
-        const finer = yield* served.request("/api/ui/leading", {
+        const finer = yield* served.request("/api/ui/font.lineHeight", {
           method: "PUT",
           ...json('{"value":1.455}'),
         });
@@ -814,7 +816,7 @@ describe("the API over a real server", () => {
           foreground: "#ffffff",
         });
 
-        const reserved = yield* served.request("/api/ui/themes", {
+        const reserved = yield* served.request("/api/ui/theme.imported", {
           method: "PUT",
           ...json(`{"value":[{"name":"nord","palette":${palette}}]}`),
         });
@@ -847,30 +849,30 @@ describe("the API over a real server", () => {
     expect(result).toStrictEqual({
       badValue: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.activity","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.timeline.activity","path":["payload","value"]}]}',
       ],
       finer: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.font.lineHeight","path":["payload","value"]}]}',
       ],
       first: [
         {
-          data: '{"options":{"activity":"all","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","muted":[],"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"quietBots":false,"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+          data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
           event: "changed",
           id: "0",
         },
       ],
       offStep: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.font.lineHeight","path":["payload","value"]}]}',
       ],
       reserved: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.themes","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.theme.imported","path":["payload","value"]}]}',
       ],
       resumed: [
         {
-          data: '{"options":{"activity":"all","aliases":[],"colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","line":"columns","muted":[],"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"quietBots":false,"read":"latest","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":1}',
+          data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"previews":"off","previews.animate":false,"previews.folded":"summary","previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.style":"thumbnail","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":1}',
           event: "changed",
           id: "1",
         },
@@ -879,11 +881,11 @@ describe("the API over a real server", () => {
       stale: [409, '{"_tag":"UiChanged","sequence":1}'],
       tooShort: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.font.lineHeight","path":["payload","value"]}]}',
       ],
       tooTall: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.font.lineHeight","path":["payload","value"]}]}',
       ],
       unknown: [400, true],
     });
@@ -916,7 +918,7 @@ describe("the API over a real server", () => {
           ...json('{"value":"blue"}'),
         });
 
-        const uiByName = yield* served.request("/api/options/ui.time", {
+        const uiByName = yield* served.request("/api/options/ui.timeline.timeFormat", {
           method: "PUT",
           ...json('{"value":"none"}'),
         });

@@ -152,7 +152,7 @@ describe("themes", () => {
     const closed = first.registry.get(importDraft).open;
     const after = first.background();
 
-    await until(second.registry, uiInEffect, (ui) => ui.themes.length === 1);
+    await until(second.registry, uiInEffect, (ui) => ui["theme.imported"].length === 1);
     await second.type("/theme nord-mine");
     await until(second.registry, uiInEffect, (ui) => ui.theme === "nord-mine");
     await until(first.registry, uiInEffect, (ui) => ui.theme === "nord-mine");
@@ -167,7 +167,7 @@ describe("themes", () => {
       opened,
       previewing,
       refused: refused.text,
-      shared: fake.daemon.ui.options.themes.map((one) => one.name),
+      shared: fake.daemon.ui.options["theme.imported"].map((one) => one.name),
       unnamed,
     }).toStrictEqual({
       after: before,
@@ -175,7 +175,7 @@ describe("themes", () => {
         "Nord Mine is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
       before: "#111314",
       changes: [
-        { ifSequence: "0", route: "PUT themes" },
+        { ifSequence: "0", route: "PUT theme.imported" },
         { ifSequence: "10", route: "PUT theme" },
       ],
       closed: false,
@@ -278,7 +278,7 @@ describe("themes", () => {
     const stop = watchTheme(registry);
 
     await type("/theme -dark nord");
-    await until(registry, uiInEffect, (ui) => ui.dark === "nord");
+    await until(registry, uiInEffect, (ui) => ui["theme.dark"] === "nord");
     const dark = drawnNow();
 
     device.prefer(false);
@@ -317,11 +317,11 @@ describe("themes", () => {
 
     const before = read();
 
-    await type("/set ui.size 18");
-    await until(registry, uiInEffect, (ui) => ui.size === 18);
+    await type("/set ui.font.size 18");
+    await until(registry, uiInEffect, (ui) => ui["font.size"] === 18);
     const sized = read();
 
-    await type("/set ui.size 30");
+    await type("/set ui.font.size 30");
     const refused = notice();
 
     await type("/set -device ui.font jetbrains-mono");
@@ -354,7 +354,7 @@ describe("themes", () => {
         '"JetBrains Mono Variable", var(--font-device)',
       ],
       kept: '{"font":"commit-mono"}',
-      refused: 'ui.size: Give a whole number from 10 to 24, not "30".',
+      refused: 'ui.font.size: Give a whole number from 10 to 24, not "30".',
       sans: ["18px", '"Inter Variable", var(--font-device-sans)', "var(--font-device)"],
       shared: "system",
       sized: ["18px", "var(--font-device)", "var(--font-device)"],
@@ -399,8 +399,8 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = widestLine();
 
-    await type("/set ui.width 72");
-    await until(registry, uiInEffect, (ui) => ui.width === 72);
+    await type("/set ui.timeline.maxWidth 72");
+    await until(registry, uiInEffect, (ui) => ui["timeline.maxWidth"] === 72);
     const shared = widestLine();
 
     stop();
@@ -413,8 +413,8 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = lineHeight();
 
-    await type("/set ui.leading 1.8");
-    await until(registry, uiInEffect, (ui) => ui.leading === 1.8);
+    await type("/set ui.font.lineHeight 1.8");
+    await until(registry, uiInEffect, (ui) => ui["font.lineHeight"] === 1.8);
     const shared = lineHeight();
 
     stop();

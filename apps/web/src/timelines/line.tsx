@@ -2,7 +2,7 @@
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
- * one's words starting where a Message's text does. Under `ui.line` `inline`, and in a
+ * one's words starting where a Message's text does. Under `ui.timeline.layout` `inline`, and in a
  * Timeline too narrow for those columns, a row is one run of text that wraps under itself.
  * Under `stacked`, a run of plain speech from one User has its nick and time on a line above
  * the first Message's text, and each later Message is its text alone, its time shown while
@@ -47,7 +47,7 @@ import { Inlines } from "./inlines.tsx";
 import styles from "./line.module.css";
 
 /**
- * A time as the line shows it, as `ui.time` says, or nothing for `none`.
+ * A time as the line shows it, as `ui.timeline.timeFormat` says, or nothing for `none`.
  * @param props - The instant.
  * @returns The time, with the full date and time on hover.
  */
@@ -286,7 +286,7 @@ const dayCommanded = (at: number): string => {
 };
 
 /**
- * Where the day changes: the day's words, as `ui.day` says, after a rule. Its time column is
+ * Where the day changes: the day's words, as `ui.timeline.dateFormat` says, after a rule. Its time column is
  * there and empty, so the line shows and lines up whether or not any line's time does. The
  * words offer to go to another day: pressed, they start `/date` with this day in the
  * composer, to change and send, so the line keeps its height.
@@ -410,7 +410,7 @@ const MessageMenu = ({
 };
 
 /**
- * Where a Message stands: on a line of its own, or under `ui.line` stacked, a run's head or
+ * Where a Message stands: on a line of its own, or under `ui.timeline.layout` stacked, a run's head or
  * a later Message of one.
  */
 type Place = "Line" | "Head" | "Later";

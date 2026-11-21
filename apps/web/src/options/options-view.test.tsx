@@ -217,32 +217,32 @@ describe("the options view, under store, uploads, and previews", () => {
       [
         "uploads.expireAfter",
         "unset",
-        "default unset",
-        "How many days an Upload is kept before it is deleted, from 1 to 36500. Unset, Uploads are kept until deleted.",
+        "default: unset",
+        "How many days an Upload is kept before it is deleted, from 1 to 36500. Unset, an Upload is kept until the Owner deletes it.",
       ],
       [
         "uploads.listen",
         "unset",
-        "default unset",
-        "Where the listener that serves Uploads' links listens, as host:port, such as 127.0.0.1:7668.",
+        "default: unset",
+        "The address the Link listener listens on, as host:port, such as 127.0.0.1:7668.",
       ],
       [
         "uploads.maxSize",
         "104857600",
-        "default 104857600",
-        "The largest an Upload may be, in bytes. 104857600, 100 MiB, unless set.",
+        "default: 104857600",
+        "The largest an Upload may be, in bytes. The default is 100 MiB.",
       ],
       [
         "uploads.maxTotal",
         "unset",
-        "default unset",
-        "The most bytes the store may hold for live Uploads, each distinct file counted once; an upload that would pass it is refused, and nothing is evicted. Unset, there is no limit.",
+        "default: unset",
+        "The most bytes of Uploads the store may hold, each distinct file counted once. An upload that would pass it is refused, and nothing is deleted to make room. Unset, there is no limit.",
       ],
       [
         "uploads.publicUrl",
         "unset",
-        "default unset",
-        "The base of every Upload's link, an http or https URL, such as https://files.example.com, kept without a trailing /.",
+        "default: unset",
+        "The address every Upload's link starts with, an http or https URL, such as https://files.example.com.",
       ],
     ]);
   });
@@ -414,7 +414,7 @@ describe("the options view, under store, uploads, and previews", () => {
     expect(rowOf(first.container, "store.s3.region")).toStrictEqual([
       "store.s3.region",
       "us-east-1",
-      "default unset",
+      "default: unset",
       "The bucket's region, such as us-east-1, or auto.",
     ]);
   });
@@ -509,8 +509,8 @@ describe("the options view, under store, uploads, and previews", () => {
       before: [
         "store.s3.secretAccessKey",
         "unset",
-        "default unset",
-        "The Credential holding the secret access key of the bucket that keeps Uploads.",
+        "default: unset",
+        "The Credential that holds the bucket's secret access key.",
       ],
       changes: [{ ifSequence: "0", route: "PUT store.s3.secretAccessKey" }],
       held: { "Owner.store.s3.secretAccessKey": secret },
@@ -520,8 +520,8 @@ describe("the options view, under store, uploads, and previews", () => {
       row: [
         "store.s3.secretAccessKey",
         "Owner.store.s3.secretAccessKey held",
-        "default unset",
-        "The Credential holding the secret access key of the bucket that keeps Uploads.",
+        "default: unset",
+        "The Credential that holds the bucket's secret access key.",
       ],
     });
   });
@@ -577,7 +577,7 @@ const held = async () => {
     () =>
       shown.registry.get(optionsState).ui !== undefined &&
       shown.registry.get(optionsState).owner !== undefined &&
-      rowOf(shown.container, "ui.time")?.[1] === "HH:mm"
+      rowOf(shown.container, "ui.timeline.timeFormat")?.[1] === "HH:mm"
   );
   state.holding = true;
 
@@ -659,16 +659,16 @@ describe("an option's change, while it is on its way", () => {
     const { container, state, type, writes } = await held();
 
     state.refusing = true;
-    await type("/set ui.time HH:mm:ss");
+    await type("/set ui.timeline.timeFormat HH:mm:ss");
     await settled(() => writes.length === 1);
-    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm:ss");
-    const whileHeld = rowOf(container, "ui.time")?.[1];
+    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm:ss");
+    const whileHeld = rowOf(container, "ui.timeline.timeFormat")?.[1];
 
     for (const release of writes.splice(0)) {
       release();
     }
 
-    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm");
+    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm");
 
     expect({
       notice: container.querySelector('[role="alert"]')?.firstChild?.textContent,
@@ -1088,7 +1088,7 @@ describe("an option edited in place", () => {
     expect(rowOf(shown.container, "network.libera.highlights")?.slice(0, 3)).toStrictEqual([
       "network.libera.highlights",
       "empty",
-      "default empty",
+      "default: empty",
     ]);
   });
 });
@@ -1103,7 +1103,7 @@ const uiShown = async (fake: ReturnType<typeof fakeDaemon>) => {
 
   shown.registry.mount(uiSync);
   await shown.type("/set ui.");
-  await settled(() => rowOf(shown.container, "ui.time")?.[1] === "HH:mm");
+  await settled(() => rowOf(shown.container, "ui.timeline.timeFormat")?.[1] === "HH:mm");
 
   return shown;
 };
@@ -1197,7 +1197,7 @@ describe("an option chosen from a menu", () => {
   it("opens on Enter with the value in force marked and focused, and Enter on another sets what /set sets", async () => {
     const chosen = signedIn();
     const { container } = await uiShown(chosen);
-    const menu = await menuFor(container, "ui.time");
+    const menu = await menuFor(container, "ui.timeline.timeFormat");
     const entries = entriesOf(menu);
     const focusedFirst = document.activeElement?.textContent;
 
@@ -1205,13 +1205,13 @@ describe("an option chosen from a menu", () => {
     const focusedNext = document.activeElement?.textContent;
 
     await enter(document.activeElement ?? document.body);
-    await settled(() => rowOf(container, "ui.time")?.[1] === "HH:mm:ss");
-    await settled(() => document.activeElement === rowElement(container, "ui.time"));
+    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm:ss");
+    await settled(() => document.activeElement === rowElement(container, "ui.timeline.timeFormat"));
 
     const typed = signedIn();
     const other = await uiShown(typed);
 
-    await other.type("/set ui.time HH:mm:ss");
+    await other.type("/set ui.timeline.timeFormat HH:mm:ss");
     await settled(() => typed.daemon.uiChanges.length === 1);
 
     expect({
@@ -1235,15 +1235,15 @@ describe("an option chosen from a menu", () => {
     const fake = signedIn();
     const { container } = await uiShown(fake);
 
-    await menuFor(container, "ui.time");
+    await menuFor(container, "ui.timeline.timeFormat");
     await press(document.activeElement ?? document.body, "Escape");
     await settled(() => document.querySelector('[role="menu"]') === null);
-    await settled(() => document.activeElement === rowElement(container, "ui.time"));
+    await settled(() => document.activeElement === rowElement(container, "ui.timeline.timeFormat"));
 
     // Escape once more, on the row, is the view's own: it closes.
     const before = container.querySelector('section[aria-label="Options"]') !== null;
 
-    await press(rowElement(container, "ui.time"), "Escape");
+    await press(rowElement(container, "ui.timeline.timeFormat"), "Escape");
 
     expect({
       after: container.querySelector('section[aria-label="Options"]') !== null,
@@ -1328,7 +1328,7 @@ describe("an option chosen from a menu", () => {
       custom.focus();
     });
 
-    const other = rowElement(container, "ui.time");
+    const other = rowElement(container, "ui.timeline.timeFormat");
 
     // Custom…, and then, within the same frame, Enter on another row.
     await doing(() => {
@@ -1351,17 +1351,20 @@ describe("an option chosen from a menu", () => {
     expect({
       editing: registry.get(optionsState).editing,
       field: container.querySelector('input[aria-label="Value of ui.font"]') !== null,
-    }).toStrictEqual({ editing: "ui.time", field: false });
+    }).toStrictEqual({ editing: "ui.timeline.timeFormat", field: false });
   });
 
   it("opens a value that is none of the choices as Custom…", async () => {
     const fake = signedIn();
     const { container, type } = await uiShown(fake);
 
-    await type("/set ui.width 120");
-    await settled(() => rowOf(container, "ui.width")?.[1] === "120");
+    await type("/set ui.timeline.maxWidth 120");
+    await settled(() => rowOf(container, "ui.timeline.maxWidth")?.[1] === "120");
 
-    expect(entriesOf(await menuFor(container, "ui.width"))).toStrictEqual(["none", "* Custom…"]);
+    expect(entriesOf(await menuFor(container, "ui.timeline.maxWidth"))).toStrictEqual([
+      "none",
+      "* Custom…",
+    ]);
   });
 });
 
@@ -1379,7 +1382,7 @@ describe("the options under headings", () => {
     }
   });
 
-  it("heads ui, each Network, store, uploads, and previews, and drops a heading the filter empties", async () => {
+  it("heads ui, each Network, and each of the Daemon's roots in the order of their names, and drops a heading the filter empties", async () => {
     const shown = await uiShown(signedIn());
 
     await shown.type("/set");
@@ -1387,11 +1390,11 @@ describe("the options under headings", () => {
     const all = headingsOf(shown.container);
 
     await shown.type("/set *maxTotal");
-    await settled(() => rowOf(shown.container, "ui.time") === undefined);
+    await settled(() => rowOf(shown.container, "ui.timeline.timeFormat") === undefined);
 
     expect({ all, filtered: headingsOf(shown.container) }).toStrictEqual({
-      all: ["ui", "network.libera", "store", "uploads", "previews", "away"],
-      filtered: ["uploads", "previews"],
+      all: ["away", "network.libera", "previews", "store", "ui", "uploads"],
+      filtered: ["previews", "uploads"],
     });
   });
 
@@ -1419,18 +1422,18 @@ describe("the options under headings", () => {
     await readAt(shown.registry, 0);
 
     await doing(() => {
-      rowElement(shown.container, "ui.width").focus();
+      rowElement(shown.container, "ui.unread.quietBots").focus();
     });
-    await press(rowElement(shown.container, "ui.width"), "ArrowDown");
+    await press(rowElement(shown.container, "ui.unread.quietBots"), "ArrowDown");
     const down = focused();
 
     await press(document.activeElement ?? document.body, "ArrowUp");
     const up = focused();
 
     await doing(() => {
-      rowElement(shown.container, "uploads.publicUrl").focus();
+      rowElement(shown.container, "network.libera.whoOnJoin").focus();
     });
-    await press(rowElement(shown.container, "uploads.publicUrl"), "ArrowDown");
+    await press(rowElement(shown.container, "network.libera.whoOnJoin"), "ArrowDown");
     const intoPreviews = focused();
 
     await enter(document.activeElement ?? document.body);
@@ -1448,21 +1451,23 @@ describe("the options under headings", () => {
       up,
     }).toStrictEqual({
       asked: "Unset previews.maxTotal, back to 1073741824?",
-      down: "network.libera.answerCtcp",
+      down: "uploads.expireAfter",
       intoPreviews: "previews.maxTotal",
-      up: "ui.width",
+      up: "ui.unread.quietBots",
     });
   });
 
   it("gives an option two lines, and says beside a value this device overrides the one every device shares", async () => {
     const shown = await uiShown(signedIn());
 
-    await shown.type("/set -device ui.time HH:mm:ss");
-    await settled(() => rowOf(shown.container, "ui.time")?.[1]?.startsWith("HH:mm:ss") === true);
+    await shown.type("/set -device ui.timeline.timeFormat HH:mm:ss");
+    await settled(
+      () => rowOf(shown.container, "ui.timeline.timeFormat")?.[1]?.startsWith("HH:mm:ss") === true
+    );
 
-    expect(linesOf(shown.container, "ui.time")).toStrictEqual([
-      "ui.timeHH:mm:ss on this device, over HH:mm",
-      expect.stringMatching(/^How .*default HH:mm$/u),
+    expect(linesOf(shown.container, "ui.timeline.timeFormat")).toStrictEqual([
+      "ui.timeline.timeFormatHH:mm:ss on this device, over HH:mm",
+      expect.stringMatching(/^How .*default: HH:mm$/u),
     ]);
   });
 
@@ -1484,12 +1489,12 @@ describe("the options under headings", () => {
 
     shown.registry.mount(uiSync);
     await shown.type("/set ui.aliases");
-    await settled(() => rowOf(shown.container, "ui.aliases")?.[1] === "j,w");
+    await settled(() => rowOf(shown.container, "ui.aliases")?.[1] === "j, w");
 
     expect(rowOf(shown.container, "ui.aliases")?.slice(0, 3)).toStrictEqual([
       "ui.aliases",
-      "j,w",
-      "default empty",
+      "j, w",
+      "default: empty",
     ]);
   });
 });

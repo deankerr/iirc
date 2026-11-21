@@ -157,7 +157,7 @@
 }
 
 /*
- * With no columns, a page's image is smaller: in a narrow Timeline, and under `ui.line`
+ * With no columns, a page's image is smaller: in a narrow Timeline, and under `ui.timeline.layout`
  * inline or stacked, as the Timeline's `data-line` says. The two rules must stay alike.
  */
 @container (max-width: 36em) {

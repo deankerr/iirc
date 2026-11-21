@@ -6,11 +6,12 @@
  *
  * @packageDocumentation
  */
-import { UiOptionName, UiOptions, uiDefaults, uiValueKept } from "@iirc/api";
-import type { UiInForce } from "@iirc/api";
+import { UiOptions, uiDefaults, uiNameKept, uiValueKept } from "@iirc/api";
+import type { UiInForce, UiOptionName } from "@iirc/api";
 import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
-import { Context, Effect, Layer, Option, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Context, Effect, Layer, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
+import type { Option } from "effect";
 
 /** A Change of an option under `ui`, the only kind this fold journals. */
 type UiChange = Extract<Change, { readonly _tag: "UiSet" | "UiUnset" }>;
@@ -29,8 +30,6 @@ export interface Held {
 
 /** No Change yet: every option at its default. */
 export const nothingHeld: Held = { sequence: 0, set: new Map() };
-
-const optionName = Schema.decodeUnknownOption(UiOptionName);
 
 /**
  * A `ui` option's value parsed from JSON by its Schema, or none when it is not one.
@@ -57,9 +56,10 @@ export const uiValueJson = (option: UiOptionName, value: UiValue): Schema.Json =
 
 /**
  * Folds one Change of an option under `ui`, and passes over any other. The whole value of one option wins over what it held, and an unset
- * returns it to its default. A Change of an option this Daemon does not have, or of a value
- * its Schema does not take, changes no option, though its sequence is the last, but for
- * `themes`, whose entries are read one by one, so a theme it cannot take is dropped alone.
+ * returns it to its default. A Change journaled under a name an option had before is that
+ * option's. A Change of an option this Daemon does not have, or of a value its Schema does
+ * not take, changes no option, though its sequence is the last, but for `theme.imported`,
+ * whose entries are read one by one, so a theme it cannot take is dropped alone.
  * @param held - What was held.
  * @param change - The Change.
  * @param sequence - Its sequence.
@@ -71,21 +71,21 @@ export const foldChange = (held: Held, change: Change, sequence: number): Held =
     return held;
   }
 
-  const option = optionName(change.option);
+  const option = uiNameKept(change.option);
 
-  if (Option.isNone(option)) {
+  if (option === undefined) {
     return { ...held, sequence };
   }
 
   const set = new Map(held.set);
 
   if (change._tag === "UiUnset") {
-    set.delete(option.value);
+    set.delete(option);
   } else {
-    const value = uiValueKept(option.value, change.value);
+    const value = uiValueKept(option, change.value);
 
     if (value !== undefined) {
-      set.set(option.value, value);
+      set.set(option, value);
     }
   }
 

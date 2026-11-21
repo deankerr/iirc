@@ -29,6 +29,7 @@ import {
   ownerOptionsOf,
   parseOwnerText,
   parseText,
+  partsOf,
   reduceOptions,
   resolve,
   resolveOwner,
@@ -192,7 +193,7 @@ describe("the options, derived from the Schema", () => {
     expect(shown).toStrictEqual({
       answerCtcp: { starts: "on", value: { _tag: "Shown", text: "on" } },
       bot: { starts: "off", value: { _tag: "Shown", text: "off" } },
-      channels: { starts: "", value: { _tag: "Shown", text: "#secret,#iirc" } },
+      channels: { starts: "", value: { _tag: "Shown", text: "#secret, #iirc" } },
       "channels.#iirc.key": { starts: "unset", value: { _tag: "Unset" } },
       "channels.#secret.key": {
         starts: "unset",
@@ -217,7 +218,7 @@ describe("the options, derived from the Schema", () => {
       "login.required": { starts: "off", value: { _tag: "Shown", text: "on" } },
       "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
       "login.wait": { starts: "5", value: { _tag: "Unset" } },
-      nicks: { starts: undefined, value: { _tag: "Shown", text: "dean,dean_" } },
+      nicks: { starts: undefined, value: { _tag: "Shown", text: "dean, dean_" } },
       oper: { starts: "none", value: { _tag: "Shown", text: "none" } },
       "oper.credential": { starts: "libera.oper.credential", value: { _tag: "Unset" } },
       "oper.name": { starts: "the first nick", value: { _tag: "Unset" } },
@@ -282,7 +283,7 @@ describe("names", () => {
       dotted: [dotted, "nicks"],
       member: [dotted, "login", "account"],
       noNetwork:
-        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       none: "There is no option network.libera.nope.",
       uppercase: "There is no option network.Libera.nicks.",
     });
@@ -389,8 +390,11 @@ describe("the text syntax", () => {
   });
 
   it("reads back a whole number or a word, for every value the Schema takes, and refuses the rest", () => {
-    const kind = uiFields.find((field) => field.key === "width")?.kind ?? { _tag: "Text" };
-    const taken = Schema.decodeUnknownOption(UiOptions.fields.width);
+    const kind = uiFields.find((field) => field.key === "timeline.maxWidth")?.kind ?? {
+      _tag: "Text",
+    };
+
+    const taken = Schema.decodeUnknownOption(UiOptions.fields["timeline.maxWidth"]);
     const made = fc.oneof(fc.constant("none"), fc.integer({ max: 450, min: 0 }));
 
     fc.assert(
@@ -433,8 +437,11 @@ describe("the text syntax", () => {
   });
 
   it("reads back every value the Schema takes for a decimal, whatever sum made it, and refuses the rest", () => {
-    const kind = uiFields.find((field) => field.key === "leading")?.kind ?? { _tag: "Text" };
-    const taken = Schema.decodeUnknownOption(UiOptions.fields.leading);
+    const kind = uiFields.find((field) => field.key === "font.lineHeight")?.kind ?? {
+      _tag: "Text",
+    };
+
+    const taken = Schema.decodeUnknownOption(UiOptions.fields["font.lineHeight"]);
 
     // Values made by sums and products, as arithmetic in binary leaves them, as well as
     // those written in hundredths, and whatever the Schema takes of them.
@@ -584,9 +591,9 @@ describe("a list's syntax", () => {
       read: parseText(nicks, " a\\ , b\\,c ,, d"),
       wrong: parseText(nicks, "a\\b"),
     }).toStrictEqual({
-      edges: "\\ a\\ ,b",
+      edges: "\\ a\\ , b",
       empty: { _tag: "Invalid", message: "Give at least one, comma-separated." },
-      escaped: "a\\,b,c\\\\d",
+      escaped: "a\\,b, c\\\\d",
       lone: [" ", { _tag: "Parsed", value: [""] }],
       quotes: ['""', { _tag: "Parsed", value: ['""'] }],
       read: { _tag: "Parsed", value: ["a ", "b,c", "", "d"] },
@@ -594,6 +601,20 @@ describe("a list's syntax", () => {
         _tag: "Invalid",
         message: "In a list, \\ comes before a comma, a backslash, or a space, and nothing else.",
       },
+    });
+  });
+
+  it("gives a list's text in its elements, each with its comma, and any other value whole", () => {
+    const nicks = kindOf("nicks");
+
+    expect({
+      escaped: partsOf(nicks, showText(nicks, ["a,b", " c", "d"])),
+      one: partsOf(nicks, "dean"),
+      text: partsOf(kindOf("realname"), "Dean, of iirc"),
+    }).toStrictEqual({
+      escaped: ["a\\,b,", "\\ c,", "d"],
+      one: ["dean"],
+      text: ["Dean, of iirc"],
     });
   });
 
@@ -1350,15 +1371,15 @@ const fontRow = (...args: Parameters<typeof uiOptionsOf>) =>
 const fontRefused = (text: string) => `ui.font cannot be "${text}".`;
 
 const leadingRefused = (text: string) =>
-  `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
+  `ui.font.lineHeight: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
-const suffixRefused = (why: string) => `ui.suffix must ${why}.`;
+const suffixRefused = (why: string) => `ui.composer.nickSuffix must ${why}.`;
 
 const widthRefused = (text: string) =>
-  `ui.width: Give a whole number from 40 to 400, or none, not "${text}".`;
+  `ui.timeline.maxWidth: Give a whole number from 40 to 400, or none, not "${text}".`;
 
 const defaultPlayers =
-  "www.youtube-nocookie.com,player.vimeo.com,w.soundcloud.com,bandcamp.com,open.spotify.com,player.twitch.tv";
+  "www.youtube-nocookie.com, player.vimeo.com, w.soundcloud.com, bandcamp.com, open.spotify.com, player.twitch.tv";
 
 /**
  * What the options view lists of a few ui options: each one's name, the value in effect,
@@ -1368,23 +1389,19 @@ const defaultPlayers =
  */
 const uiRows = (options: ReturnType<typeof uiOptionsOf>) =>
   options
-    .filter((one) => ["ui.activity", "ui.size", "ui.theme"].includes(one.name))
+    .filter((one) => ["ui.timeline.activity", "ui.font.size", "ui.theme"].includes(one.name))
     .map((one) => [one.name, one.value, one.shared, one.device, one.starts]);
 
 describe("the options under ui", () => {
   const shared = {
     options: {
-      activity: "quiet",
       aliases: [],
-      colours: "theme",
-      dark: "dark",
-      day: "full",
-      enter: "send",
+      "composer.enter": "send",
+      "composer.nickSuffix": ", ",
+      "composer.spellcheck": false,
       font: "system",
-      leading: 1.45,
-      light: "light",
-      line: "columns",
-      muted: [],
+      "font.lineHeight": 1.45,
+      "font.size": 14,
       previews: "off",
       "previews.animate": false,
       "previews.folded": "summary",
@@ -1392,18 +1409,22 @@ describe("the options under ui", () => {
       "previews.players": ["player.vimeo.com", "w.soundcloud.com"],
       "previews.style": "thumbnail",
       "previews.timelines": {},
-      quietBots: false,
-      read: "latest",
       "sidebar.networks": [],
       "sidebar.order": [],
       "sidebar.pinned": [],
-      size: 14,
-      spellcheck: false,
-      suffix: ", ",
       theme: "dark",
-      themes: [],
-      time: "HH:mm",
-      width: "none",
+      "theme.dark": "dark",
+      "theme.imported": [],
+      "theme.light": "light",
+      "timeline.activity": "quiet",
+      "timeline.colours": "theme",
+      "timeline.dateFormat": "full",
+      "timeline.layout": "columns",
+      "timeline.maxWidth": "none",
+      "timeline.timeFormat": "HH:mm",
+      "unread.markRead": "latest",
+      "unread.muted": [],
+      "unread.quietBots": false,
     },
     sequence: 7,
   } as const;
@@ -1421,23 +1442,22 @@ describe("the options under ui", () => {
   it("lists each with the value in effect, the shared one, and this device's override", () => {
     expect({
       before: uiRows(uiOptionsOf(undefined, {})),
-      options: uiRows(uiOptionsOf(shared, { size: 18, theme: "light" })),
+      options: uiRows(uiOptionsOf(shared, { "font.size": 18, theme: "light" })),
     }).toStrictEqual({
       before: [
-        ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined, "all"],
-        ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined, "14"],
+        ["ui.font.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined, "14"],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined, "system"],
-      ],
-      options: [
         [
-          "ui.activity",
-          { _tag: "Shown", text: "quiet" },
-          { _tag: "Shown", text: "quiet" },
+          "ui.timeline.activity",
+          { _tag: "Shown", text: "all" },
+          { _tag: "Unset" },
           undefined,
           "all",
         ],
+      ],
+      options: [
         [
-          "ui.size",
+          "ui.font.size",
           { _tag: "Shown", text: "18" },
           { _tag: "Shown", text: "14" },
           { _tag: "Shown", text: "18" },
@@ -1449,6 +1469,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "dark" },
           { _tag: "Shown", text: "light" },
           "system",
+        ],
+        [
+          "ui.timeline.activity",
+          { _tag: "Shown", text: "quiet" },
+          { _tag: "Shown", text: "quiet" },
+          undefined,
+          "all",
         ],
       ],
     });
@@ -1467,7 +1494,7 @@ describe("the options under ui", () => {
     }).toStrictEqual({ after: shared, forgotten: undefined });
   });
 
-  it("lists them first, filtered, and keeps the newest read of them", () => {
+  it("lists them in the order of their names, filtered, and keeps the newest read of them", () => {
     let state = initialOptions;
 
     for (const event of [
@@ -1476,31 +1503,32 @@ describe("the options under ui", () => {
       { _tag: "UiRead", ui: shared },
       {
         _tag: "UiRead",
-        ui: { ...shared, options: { ...shared.options, time: "none" }, sequence: 3 },
+        ui: {
+          ...shared,
+          options: { ...shared.options, "timeline.timeFormat": "none" },
+          sequence: 3,
+        },
       },
     ] satisfies readonly OptionsEvent[]) {
       state = reduceOptions(state, event);
     }
 
     expect({
-      first: listed(state, "")
-        .map((option) => option.name)
-        .slice(0, 29),
       kept: state.ui,
-      time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
+      named: listed(state, "ui.*").map((option) => option.name),
+      time: listed(state, "*timeFormat", { "timeline.timeFormat": "HH:mm:ss" }).map(
+        (option) => option.value
+      ),
     }).toStrictEqual({
-      first: [
-        "ui.activity",
+      kept: shared,
+      named: [
         "ui.aliases",
-        "ui.colours",
-        "ui.dark",
-        "ui.day",
-        "ui.enter",
+        "ui.composer.enter",
+        "ui.composer.nickSuffix",
+        "ui.composer.spellcheck",
         "ui.font",
-        "ui.leading",
-        "ui.light",
-        "ui.line",
-        "ui.muted",
+        "ui.font.lineHeight",
+        "ui.font.size",
         "ui.previews",
         "ui.previews.animate",
         "ui.previews.folded",
@@ -1508,19 +1536,23 @@ describe("the options under ui", () => {
         "ui.previews.players",
         "ui.previews.style",
         "ui.previews.timelines",
-        "ui.quietBots",
-        "ui.read",
         "ui.sidebar.networks",
         "ui.sidebar.order",
         "ui.sidebar.pinned",
-        "ui.size",
-        "ui.spellcheck",
-        "ui.suffix",
         "ui.theme",
-        "ui.themes",
-        "ui.time",
+        "ui.theme.dark",
+        "ui.theme.imported",
+        "ui.theme.light",
+        "ui.timeline.activity",
+        "ui.timeline.colours",
+        "ui.timeline.dateFormat",
+        "ui.timeline.layout",
+        "ui.timeline.maxWidth",
+        "ui.timeline.timeFormat",
+        "ui.unread.markRead",
+        "ui.unread.muted",
+        "ui.unread.quietBots",
       ],
-      kept: shared,
       time: [{ _tag: "Shown", text: "HH:mm:ss" }],
     });
   });
@@ -1616,7 +1648,7 @@ describe("the options under ui", () => {
       kind: { _tag: "Texts", nonEmpty: false },
       notAHost: "Invalid",
       shown: [
-        { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
+        { _tag: "Shown", text: "player.vimeo.com, w.soundcloud.com" },
         undefined,
         defaultPlayers,
       ],
@@ -1707,43 +1739,43 @@ describe("the options under ui", () => {
       },
     });
     expect(showText(kind, { [one]: "links only", [two]: "on" })).toBe(
-      `${one}=links only,${two}=on`
+      `${one}=links only, ${two}=on`
     );
   });
 
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {
     expect({
-      alone: read("/set ui.time"),
-      anyCase: read("/set ui.time hh:mm:ss"),
+      alone: read("/set ui.timeline.timeFormat"),
+      anyCase: read("/set ui.timeline.timeFormat hh:mm:ss"),
       device: read("/set -device ui.theme light"),
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
-      empty: read("/set ui.time "),
+      empty: read("/set ui.timeline.timeFormat "),
       font: read("/set ui.font IBM-Plex-Mono"),
       fontFamily: read("/set ui.font  Fira Code "),
       fontFamilyQuoted: read('/set ui.font Fira" Code'),
-      fractional: read("/set ui.size 14.5"),
-      leading: read("/set ui.leading 1.6"),
-      leadingTooFine: read("/set ui.leading 1.555"),
-      size: read("/set -device ui.size 20"),
-      spellcheck: read("/set ui.spellcheck off"),
-      suffix: read("/set ui.suffix , "),
-      suffixAlone: read("/set -device ui.suffix"),
-      suffixControl: read("/set ui.suffix :\u0003 "),
-      suffixDevice: read("/set -device ui.suffix  -> "),
-      suffixNone: read("/set ui.suffix "),
-      suffixSpace: read("/set ui.suffix  "),
-      tooBig: read("/set ui.size 25"),
-      twelveHourAnyCase: read("/set ui.time H:MM A"),
+      fractional: read("/set ui.font.size 14.5"),
+      leading: read("/set ui.font.lineHeight 1.6"),
+      leadingTooFine: read("/set ui.font.lineHeight 1.555"),
+      size: read("/set -device ui.font.size 20"),
+      spellcheck: read("/set ui.composer.spellcheck off"),
+      suffix: read("/set ui.composer.nickSuffix , "),
+      suffixAlone: read("/set -device ui.composer.nickSuffix"),
+      suffixControl: read("/set ui.composer.nickSuffix :\u0003 "),
+      suffixDevice: read("/set -device ui.composer.nickSuffix  -> "),
+      suffixNone: read("/set ui.composer.nickSuffix "),
+      suffixSpace: read("/set ui.composer.nickSuffix  "),
+      tooBig: read("/set ui.font.size 25"),
+      twelveHourAnyCase: read("/set ui.timeline.timeFormat H:MM A"),
       unknown: read("/set ui.palette dusk"),
-      unset: read("/unset ui.activity"),
+      unset: read("/unset ui.timeline.activity"),
       unsetDevice: read("/unset -device ui.theme"),
-      width: read("/set ui.width 80"),
-      widthFractional: read("/set ui.width 80.5"),
-      wrongTime: read("/set ui.time noon"),
+      width: read("/set ui.timeline.maxWidth 80"),
+      widthFractional: read("/set ui.timeline.maxWidth 80.5"),
+      wrongTime: read("/set ui.timeline.timeFormat noon"),
     }).toStrictEqual({
-      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
-      anyCase: change("time", "HH:mm:ss", false),
+      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.timeline.timeFormat" }] },
+      anyCase: change("timeline.timeFormat", "HH:mm:ss", false),
       device: change("theme", "light", true),
       deviceAlone: {
         _tag: "Invalid",
@@ -1755,43 +1787,51 @@ describe("the options under ui", () => {
         message:
           "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
       },
-      empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
+      empty: {
+        _tag: "Invalid",
+        message: "Give ui.timeline.timeFormat a value, or use /unset ui.timeline.timeFormat.",
+      },
       font: change("font", "ibm-plex-mono", false),
       fontFamily: change("font", "Fira Code", false),
       fontFamilyQuoted: { _tag: "Invalid", message: fontRefused('Fira" Code') },
       fractional: {
         _tag: "Invalid",
-        message: 'ui.size: Give a whole number from 10 to 24, not "14.5".',
+        message: 'ui.font.size: Give a whole number from 10 to 24, not "14.5".',
       },
-      leading: change("leading", 1.6, false),
+      leading: change("font.lineHeight", 1.6, false),
       leadingTooFine: { _tag: "Invalid", message: leadingRefused("1.555") },
-      size: change("size", 20, true),
-      spellcheck: change("spellcheck", false, false),
+      size: change("font.size", 20, true),
+      spellcheck: change("composer.spellcheck", false, false),
       // The rest of the line after the name's space, exactly: a trailing space is kept.
-      suffix: change("suffix", ", ", false),
+      suffix: change("composer.nickSuffix", ", ", false),
       suffixAlone: {
         _tag: "Invalid",
-        message: "Give ui.suffix a value, or use /unset -device ui.suffix.",
+        message:
+          "Give ui.composer.nickSuffix a value, or use /unset -device ui.composer.nickSuffix.",
       },
       suffixControl: { _tag: "Invalid", message: suffixRefused("hold no control character") },
-      suffixDevice: change("suffix", " -> ", true),
-      suffixNone: change("suffix", "", false),
-      suffixSpace: change("suffix", " ", false),
-      tooBig: { _tag: "Invalid", message: 'ui.size: Give a whole number from 10 to 24, not "25".' },
-      twelveHourAnyCase: change("time", "h:mm a", false),
+      suffixDevice: change("composer.nickSuffix", " -> ", true),
+      suffixNone: change("composer.nickSuffix", "", false),
+      suffixSpace: change("composer.nickSuffix", " ", false),
+      tooBig: {
+        _tag: "Invalid",
+        message: 'ui.font.size: Give a whole number from 10 to 24, not "25".',
+      },
+      twelveHourAnyCase: change("timeline.timeFormat", "h:mm a", false),
       unknown: {
         _tag: "Invalid",
         message:
-          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
-      unset: change("activity", undefined, false),
+      unset: change("timeline.activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
-      width: change("width", 80, false),
+      width: change("timeline.maxWidth", 80, false),
       widthFractional: { _tag: "Invalid", message: widthRefused("80.5") },
       // The choices as written, so HH:mm is never read as a 12-hour hh:mm.
       wrongTime: {
         _tag: "Invalid",
-        message: 'ui.time: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
+        message:
+          'ui.timeline.timeFormat: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
       },
     });
   });
@@ -1915,12 +1955,12 @@ describe("the options under store, uploads, and previews", () => {
       root: {
         _tag: "Invalid",
         message:
-          "There is no option store. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option store. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
       typo: {
         _tag: "Invalid",
         message:
-          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
     });
   });
@@ -2058,7 +2098,11 @@ describe("the options under store, uploads, and previews", () => {
   });
 });
 
-const time = (value: Json | undefined): Wanted => ({ _tag: "Ui", option: "time", value });
+const time = (value: Json | undefined): Wanted => ({
+  _tag: "Ui",
+  option: "timeline.timeFormat",
+  value,
+});
 
 const bucket = (value: Json | undefined): Wanted => ({
   _tag: "Owner",
@@ -2118,21 +2162,21 @@ describe("the options view's headings", () => {
     {
       filter: "",
       shown: [
-        ["ui", Object.keys(uiDefaults).length, true],
-        ["network.my.net", optionsOf(dotted, plain, undefined).length, true],
-        ["network.libera", optionsOf(libera, plain, undefined).length, true],
-        ["store", 5, true],
-        ["uploads", 5, true],
-        ["previews", 1, true],
         ["away", 2, true],
+        ["network.libera", optionsOf(libera, plain, undefined).length, true],
+        ["network.my.net", optionsOf(dotted, plain, undefined).length, true],
+        ["previews", 1, true],
+        ["store", 5, true],
+        ["ui", Object.keys(uiDefaults).length, true],
+        ["uploads", 5, true],
       ],
-      why: "ui, then each Network read in the order listed, then store, uploads, previews, and the rest",
+      why: "every heading in the order of its name, whatever order the Networks were listed in",
     },
     {
       filter: "*maxTotal",
       shown: [
-        ["uploads", 1, true],
         ["previews", 1, true],
+        ["uploads", 1, true],
       ],
       why: "a group the filter leaves empty has no heading",
     },
@@ -2169,19 +2213,22 @@ describe("a change on its way", () => {
 
     const unset = folded([
       ...read,
-      { _tag: "UiRead", ui: { ...inForce, options: { ...uiDefaults, time: "none" }, sequence: 2 } },
+      {
+        _tag: "UiRead",
+        ui: { ...inForce, options: { ...uiDefaults, "timeline.timeFormat": "none" }, sequence: 2 },
+      },
       { _tag: "Asked", change: time(undefined) },
     ]);
 
     const toggled = folded([
       ...read,
-      { _tag: "Asked", change: { _tag: "Ui", option: "spellcheck", value: false } },
+      { _tag: "Asked", change: { _tag: "Ui", option: "composer.spellcheck", value: false } },
     ]);
 
     expect({
-      set: shownOf(set, "ui.time"),
-      toggled: shownOf(toggled, "ui.spellcheck"),
-      unset: shownOf(unset, "ui.time"),
+      set: shownOf(set, "ui.timeline.timeFormat"),
+      toggled: shownOf(toggled, "ui.composer.spellcheck"),
+      unset: shownOf(unset, "ui.timeline.timeFormat"),
     }).toStrictEqual({
       set: text("HH:mm:ss"),
       toggled: text("off"),
@@ -2259,14 +2306,18 @@ describe("a change on its way", () => {
     // An answer comes with the options as the Daemon now holds them, which win.
     state = reduceOptions(state, {
       _tag: "UiRead",
-      ui: { ...inForce, options: { ...uiDefaults, time: "HH:mm:ss" }, sequence: 2 },
+      ui: {
+        ...inForce,
+        options: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" },
+        sequence: 2,
+      },
     });
     const answered = reduceOptions(state, { _tag: "Answered", id });
 
     expect({
-      answered: [shownOf(answered, "ui.time"), answered.onItsWay],
-      onTheWay: shownOf(state, "ui.time"),
-      refused: [shownOf(refused, "ui.time"), refused.onItsWay],
+      answered: [shownOf(answered, "ui.timeline.timeFormat"), answered.onItsWay],
+      onTheWay: shownOf(state, "ui.timeline.timeFormat"),
+      refused: [shownOf(refused, "ui.timeline.timeFormat"), refused.onItsWay],
     }).toStrictEqual({
       answered: [text("HH:mm:ss"), []],
       onTheWay: text("HH:mm:ss"),
@@ -2280,14 +2331,14 @@ describe("a change on its way", () => {
       { _tag: "Asked", change: time("HH:mm:ss") },
       {
         _tag: "UiRead",
-        ui: { ...inForce, options: { ...uiDefaults, day: "iso" }, sequence: 2 },
+        ui: { ...inForce, options: { ...uiDefaults, "timeline.dateFormat": "iso" }, sequence: 2 },
       },
     ]);
 
-    expect([shownOf(meanwhile, "ui.time"), shownOf(meanwhile, "ui.day")]).toStrictEqual([
-      text("HH:mm:ss"),
-      text("iso"),
-    ]);
+    expect([
+      shownOf(meanwhile, "ui.timeline.timeFormat"),
+      shownOf(meanwhile, "ui.timeline.dateFormat"),
+    ]).toStrictEqual([text("HH:mm:ss"), text("iso")]);
   });
 
   it("shows the later of two changes of one option on their way, each answered on its own", () => {
@@ -2302,8 +2353,8 @@ describe("a change on its way", () => {
 
     expect({
       ids: two.onItsWay.map((way) => way.id),
-      later: shownOf(later, "ui.time"),
-      two: shownOf(two, "ui.time"),
+      later: shownOf(later, "ui.timeline.timeFormat"),
+      two: shownOf(two, "ui.timeline.timeFormat"),
     }).toStrictEqual({ ids: [0, 1], later: text("none"), two: text("none") });
   });
 
@@ -2318,7 +2369,7 @@ describe("a change on its way", () => {
     expect({
       bucket: shownOf(unread, "store.s3.bucket"),
       network: listed(unread, "network.libera").length,
-      time: shownOf(unread, "ui.time"),
+      time: shownOf(unread, "ui.timeline.timeFormat"),
     }).toStrictEqual({
       bucket: [{ _tag: "Reading" }],
       network: 0,

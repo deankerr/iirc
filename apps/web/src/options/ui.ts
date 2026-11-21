@@ -41,28 +41,28 @@ export const uiInEffect = Atom.make((get) =>
 );
 
 /** How a line's time shows on this device, alone, so a line draws again only when it changes. */
-export const timeShown = Atom.make((get) => get(uiInEffect).time);
+export const timeShown = Atom.make((get) => get(uiInEffect)["timeline.timeFormat"]);
 
 /** How a day is written where the day changes on this device, alone, as `timeShown` is. */
-export const dayShown = Atom.make((get) => get(uiInEffect).day);
+export const dayShown = Atom.make((get) => get(uiInEffect)["timeline.dateFormat"]);
 
 /** Which Activity a Channel shows on this device, alone, as `timeShown` is. */
-export const activityShown = Atom.make((get) => get(uiInEffect).activity);
+export const activityShown = Atom.make((get) => get(uiInEffect)["timeline.activity"]);
 
 /** The text's size on this device, in pixels, alone, as `timeShown` is. */
-export const sizeShown = Atom.make((get) => get(uiInEffect).size);
+export const sizeShown = Atom.make((get) => get(uiInEffect)["font.size"]);
 
 /** The line height on this device, as a multiple of the text's size, alone, as `timeShown` is. */
-export const leadingShown = Atom.make((get) => get(uiInEffect).leading);
+export const leadingShown = Atom.make((get) => get(uiInEffect)["font.lineHeight"]);
 
 /** How a line is laid out on this device, alone, as `timeShown` is. */
-export const lineShown = Atom.make((get) => get(uiInEffect).line);
+export const lineShown = Atom.make((get) => get(uiInEffect)["timeline.layout"]);
 
 /** What Enter does in the Composer on this device, alone, as `timeShown` is. */
-export const enterShown = Atom.make((get) => get(uiInEffect).enter);
+export const enterShown = Atom.make((get) => get(uiInEffect)["composer.enter"]);
 
 /** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
-export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
+export const spellcheckShown = Atom.make((get) => get(uiInEffect)["composer.spellcheck"]);
 
 /** Whether animated images play on their own on this device, alone, as `timeShown` is. */
 export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);
@@ -544,8 +544,8 @@ export const mute = (
   registry: AtomRegistry.AtomRegistry,
   intent: { readonly timeline: TimelineId; readonly muted: boolean }
 ) => {
-  const work = changeWhole(registry, "muted", (read) => {
-    const made = muting(read.options.muted, intent.timeline, intent.muted);
+  const work = changeWhole(registry, "unread.muted", (read) => {
+    const made = muting(read.options["unread.muted"], intent.timeline, intent.muted);
 
     return made._tag === "Invalid"
       ? made
@@ -555,9 +555,11 @@ export const mute = (
   const held = uiShown(registry.get(optionsState));
 
   const shown =
-    held === undefined ? undefined : muting(held.options.muted, intent.timeline, intent.muted);
+    held === undefined
+      ? undefined
+      : muting(held.options["unread.muted"], intent.timeline, intent.muted);
 
   return shown?._tag === "Parsed" && shown.value !== undefined
-    ? onItsWay(registry, { _tag: "Ui", option: "muted", value: [...shown.value] }, work)
+    ? onItsWay(registry, { _tag: "Ui", option: "unread.muted", value: [...shown.value] }, work)
     : work;
 };

@@ -74,7 +74,8 @@ type Record = Schema.JsonObject;
  * - `Decimal`: a number from `minimum` to `maximum` that need not be whole, in decimal
  *   digits, and a multiple of `step`, so it is exact however it is written.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
- * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`.
+ * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`. A list
+ *   is shown with a space after each comma, which reading one never needs.
  * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by the word
  *   `plain`. A port left out is 6697 with TLS and 6667 without.
  * - `Names`: a list of records keyed by their `name`, such as Channels, comma-separated by
@@ -201,7 +202,7 @@ export interface NetworkOption {
  */
 export interface UiOption {
   readonly _tag: "Ui";
-  /** Its dotted name, such as `ui.time`. */
+  /** Its dotted name, such as `ui.timeline.timeFormat`. */
   readonly name: string;
   readonly option: UiOptionName;
   readonly kind: Kind;
@@ -713,13 +714,18 @@ const escapeElement = (element: string): string => {
   return `${"\\ ".repeat(leading)}${inner.slice(leading, inner.length - trailing)}${"\\ ".repeat(trailing)}`;
 };
 
+/** What a list's text has between its elements: a comma, then a space a line may wrap at. */
+const listSeparator = ", ";
+
 /**
  * A list's text, which `parseList` reads back as the same elements.
  * @param elements - The elements.
  * @returns The text.
  */
 const showList = (elements: readonly string[]): string =>
-  elements.length === 1 && elements[0] === "" ? " " : elements.map(escapeElement).join(",");
+  elements.length === 1 && elements[0] === ""
+    ? " "
+    : elements.map(escapeElement).join(listSeparator);
 
 /** One Ircd, as typed and shown: JSON, as the Configuration holds it. */
 type Ircd = Readonly<{ host: string; port: number; tls: boolean }>;
@@ -1096,6 +1102,36 @@ export const showText = (kind: Kind, value: Json): string => {
 };
 
 /**
+ * A value's text in the parts a view keeps whole where a line wraps: each element of a
+ * list, with the comma after it, and any other value as one part. With a space between
+ * them, the parts are the text.
+ * @param kind - The value's kind.
+ * @param text - The value, in its text syntax.
+ * @returns The parts, in order.
+ */
+export const partsOf = (kind: Kind, text: string): readonly string[] => {
+  if (
+    kind._tag !== "Texts" &&
+    kind._tag !== "Ircds" &&
+    kind._tag !== "Names" &&
+    kind._tag !== "ChoiceByKey"
+  ) {
+    return [text];
+  }
+
+  const elements = parseList(text);
+
+  // Text that is no list, or that `showList` did not write, is shown as it is.
+  if (elements._tag === "Invalid" || showList(elements.value) !== text) {
+    return [text];
+  }
+
+  return elements.value.map(
+    (element, index) => `${escapeElement(element)}${index === elements.value.length - 1 ? "" : ","}`
+  );
+};
+
+/**
  * The menu an option is chosen from: its choices in their text syntax, whether it ends in
  * "Custom…" for text of the Owner's own, and which entry is in force: a choice by its
  * place, `Custom` for a value that is none of them, or none while the value is not known
@@ -1170,7 +1206,7 @@ export const menuOf = (kind: Kind, value: Value): Menu | undefined => {
 
 /** What a name that names no option is told, of how options are named. */
 const optionsAreNamed =
-  "Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.";
+  "Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.";
 
 const networkIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
@@ -1324,7 +1360,7 @@ export const resolveUi = (name: string): Parsed<ResolvedUi> => {
 /**
  * A `ui` option's name.
  * @param option - The option.
- * @returns Its dotted name, such as `ui.time`.
+ * @returns Its dotted name, such as `ui.timeline.timeFormat`.
  */
 export const uiOptionName = (option: UiOptionName): string => `${uiPrefix}${option}`;
 
@@ -2947,13 +2983,10 @@ export const configurationShown = (
 
 /** Options under one heading of the options view, which every one of their names starts with. */
 export interface OptionGroup {
-  /** What their names start with: `ui`, a Network's, such as `network.libera`, `store`, `uploads`, or `previews`. */
+  /** What their names start with: `ui`, a Network's, such as `network.libera`, or a root such as `store`. */
   readonly heading: string;
   readonly options: readonly Option[];
 }
-
-/** The order the Owner's options are headed in, any other after them in the Schema's. */
-const ownerHeadings = ["store", "uploads", "previews"];
 
 /**
  * The heading an option under `store`, `uploads`, or `previews` is under: the first part of its name.
@@ -2963,10 +2996,26 @@ const ownerHeadings = ["store", "uploads", "previews"];
 const headingOf = (option: OwnerOption) => option.option.split(".")[0] ?? option.option;
 
 /**
- * The options the view lists, that the filter matches, under a heading each: those under
- * `ui`, as they take effect on this device, then every Network's read, in the order listed,
- * then those under `store`, `uploads`, and `previews`, the Daemon's own, each as it shows
- * with the changes on its way. A heading the filter leaves nothing under is left out.
+ * Orders two names as their code units do, so the order is the same on every device
+ * whatever its language.
+ * @param one - A name.
+ * @param other - Another.
+ * @returns Which comes first, as a sort asks.
+ */
+const byName = (one: string, other: string): number => {
+  if (one === other) {
+    return 0;
+  }
+
+  return one < other ? -1 : 1;
+};
+
+/**
+ * The options the view lists, that the filter matches, under a heading each, the headings
+ * in the order of their names: those under `ui`, as they take effect on this device, every
+ * Network's read, and those under each of the Daemon's own roots, such as `store`, each as
+ * it shows with the changes on its way. A heading the filter leaves nothing under is left
+ * out.
  * @param state - The view.
  * @param filter - What the Owner typed to filter them.
  * @param device - This device's overrides of the options under `ui`.
@@ -2991,15 +3040,17 @@ export const grouped = (
         options: configuration === undefined ? [] : optionsOf(network, configuration, state.held),
       };
     }),
-    ...[...new Set([...ownerHeadings, ...owner.map(headingOf)])].map((heading) => ({
+    ...[...new Set(owner.map(headingOf))].map((heading) => ({
       heading,
       options: owner.filter((option) => headingOf(option) === heading),
     })),
-  ].flatMap(({ heading, options }) => {
-    const shown = options.filter((option) => matches(filter, option.name));
+  ]
+    .toSorted((one, other) => byName(one.heading, other.heading))
+    .flatMap(({ heading, options }) => {
+      const shown = options.filter((option) => matches(filter, option.name));
 
-    return shown.length === 0 ? [] : [{ heading, options: shown }];
-  });
+      return shown.length === 0 ? [] : [{ heading, options: shown }];
+    });
 };
 
 /**

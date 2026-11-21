@@ -9,35 +9,26 @@
   min-height: 0;
 }
 
-/* The filter, under the Pane's status bar, and removing each Network beside it. */
+/* The filter, under the Pane's status bar. */
 .header {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--color-border);
 }
 
-.networks {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
+/* As wide as its placeholder and a name to filter by need, and never wider than the view. */
 .filter {
   display: flex;
+  flex: 0 1 48ch;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
 
 .filterInput {
-  width: 28ch;
+  flex: 1;
   min-width: 0;
-  max-width: 100%;
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius);
@@ -95,19 +86,25 @@
   outline: none;
 }
 
-/* What the options under it are named for, broken anywhere only when wider than the view. */
+/* What the options under it are named for, broken anywhere only when wider than the view.
+   It stays at the top while its options scroll under it, so a long list says where it is. */
 .heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3) var(--space-1);
   border-bottom: var(--border-width) solid var(--color-border);
-  color: var(--color-muted);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-weight: 600;
 }
 
-/* Two lines: the name and the value, then what it is and what it starts as. */
+/* Two lines: the name and the value, then, dimmer, what it is and its default. */
 .row {
   display: flex;
   flex-direction: column;
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
   outline: none;
   cursor: default;
 }
@@ -122,8 +119,20 @@
   min-width: 0;
 }
 
+/* What an option is and its default, dimmer than its name and value, which are what the
+   Owner came for, and no wider than reads easily. */
 .about {
   display: block;
+  max-width: 100ch;
+  color: var(--color-muted);
+}
+
+/* One element of a list, with its comma: whole on a line wherever it fits one, so a line
+   never ends inside it at a hyphen, and broken only when wider than the value's box. */
+.part {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
 }
 
 .row[data-hovered] {
@@ -154,7 +163,6 @@
   min-width: 0;
 }
 
-.starts,
 .muted {
   color: var(--color-muted);
 }
@@ -209,19 +217,6 @@
   font-family: inherit;
   font-size: var(--font-size-input);
   line-height: calc(var(--font-size) * var(--line-height));
-}
-
-/* Too narrow for the filter beside the Networks: the filter as wide as the view. */
-@container (max-width: 72ch) {
-  .filter {
-    flex: 1 1 100%;
-  }
-
-  .filterInput {
-    flex: 1;
-    width: auto;
-    min-width: 0;
-  }
 }
 
 @media (pointer: coarse) {

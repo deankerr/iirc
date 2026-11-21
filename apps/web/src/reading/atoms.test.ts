@@ -308,7 +308,7 @@ describe("marking read", () => {
     expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
-  it("marks once the shared ui.read is known to be latest", async () => {
+  it("marks once the shared ui.unread.markRead is known to be latest", async () => {
     const { daemon, opening, registry } = await reading(seeing, false);
 
     await opening(iirc);
@@ -319,7 +319,7 @@ describe("marking read", () => {
     expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
   });
 
-  it("forgets the shared ui.read on signing out, and takes the one in force on signing in again", async () => {
+  it("forgets the shared ui.unread.markRead on signing out, and takes the one in force on signing in again", async () => {
     const { daemon, registry } = await reading();
     const before = registry.get(readRule);
 
@@ -329,7 +329,7 @@ describe("marking read", () => {
     const out = registry.get(readRule);
 
     // Changed on another device while this page was signed out.
-    daemon.ui = { options: { ...uiDefaults, read: "asked" }, sequence: 1 };
+    daemon.ui = { options: { ...uiDefaults, "unread.markRead": "asked" }, sequence: 1 };
     await run(registry, signInWithKey, Redacted.make(theKey));
     const again = await until(registry, readRule, (rule) => rule !== undefined);
 
@@ -348,7 +348,7 @@ describe("marking read", () => {
 
     const changing = run(registry, changeUiOption, {
       device: false,
-      option: "time",
+      option: "timeline.timeFormat",
       value: "HH:mm:ss",
     });
 
@@ -357,7 +357,7 @@ describe("marking read", () => {
     // Signed out, the rule is changed on another device, and the page signs in again while
     // the options' stream has not yet answered.
     await run(registry, signOut, undefined);
-    daemon.ui = { options: { ...daemon.ui.options, read: "asked" }, sequence: 2 };
+    daemon.ui = { options: { ...daemon.ui.options, "unread.markRead": "asked" }, sequence: 2 };
     daemon.hangUiChanges = true;
     await run(registry, signInWithKey, Redacted.make(theKey));
 
@@ -516,7 +516,10 @@ describe("notifications", () => {
 
     await opening(iirc);
     await type(timelineId(iirc), "/notify on");
-    uiRead(registry, { options: { ...uiDefaults, muted: [timelineId(peer)] }, sequence: 9 });
+    uiRead(registry, {
+      options: { ...uiDefaults, "unread.muted": [timelineId(peer)] },
+      sequence: 9,
+    });
 
     // The Direct Message comes first, so what shows after it shows it was passed over.
     send(
@@ -532,14 +535,14 @@ describe("notifications", () => {
     expect(notifier.shown.map((one) => one.body)).toStrictEqual(["<⁨peer⁩> ⁨iirc: ping 4⁩"]);
   });
 
-  // Catches `ui.quietBots` never reaching the core's notifications, so a bot's Direct
+  // Catches `ui.unread.quietBots` never reaching the core's notifications, so a bot's Direct
   // Message still notifies, or a bot's Highlight is silenced with the rest of what it says.
   it("notifies of a bot's Highlight and none of its Direct Messages once bots are quieted", async () => {
     const { notifier, opening, registry, send, type } = await reading();
 
     await opening(iirc);
     await type(timelineId(iirc), "/notify on");
-    uiRead(registry, { options: { ...uiDefaults, quietBots: true }, sequence: 9 });
+    uiRead(registry, { options: { ...uiDefaults, "unread.quietBots": true }, sequence: 9 });
 
     // The bot's Direct Message comes first, so what shows after it shows it was passed over.
     send(

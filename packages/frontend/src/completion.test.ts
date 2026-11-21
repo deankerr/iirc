@@ -54,7 +54,11 @@ const sources: Sources = {
   aliases: [],
   channels: ["#iirc", "#other", "&local"],
   chantypes: undefined,
-  chosen: { dark: uiDefaults.dark, light: uiDefaults.light, theme: uiDefaults.theme },
+  chosen: {
+    theme: uiDefaults.theme,
+    "theme.dark": uiDefaults["theme.dark"],
+    "theme.light": uiDefaults["theme.light"],
+  },
   commands: listing("me", "members", "msg", "set"),
   emoji: undefined,
   font: uiDefaults.font,
@@ -1214,7 +1218,7 @@ describe("everything the Composer's list ranks", () => {
   it("lists the themes after /theme, each built in or imported and whether it is in effect", () => {
     const themed: Sources = {
       ...everywhere,
-      chosen: { dark: "nord", light: "solarized-light", theme: "dark" },
+      chosen: { theme: "dark", "theme.dark": "nord", "theme.light": "solarized-light" },
       themes: [
         ...listedThemes([]).slice(0, 3),
         { builtIn: false, name: Schema.decodeSync(ThemeName)("nord") },
@@ -1253,7 +1257,7 @@ describe("everything the Composer's list ranks", () => {
       "/theme -light  light",
       {
         _tag: "Parsed",
-        value: [{ _tag: "UseTheme", device: false, name: "light", option: "light" }],
+        value: [{ _tag: "UseTheme", device: false, name: "light", option: "theme.light" }],
       },
     ]);
   });

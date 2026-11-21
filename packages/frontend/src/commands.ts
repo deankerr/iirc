@@ -287,7 +287,7 @@ export interface Act {
  * - `MarkRead`: mark a Timeline read, above.
  * - `CloseTimeline`: close a Timeline, above.
  * - `Mute`: mute a Timeline, or unmute it, for every device, which the runtime writes as
- *   `ui.muted`, the whole list, as `muting` gives it.
+ *   `ui.unread.muted`, the whole list, as `muting` gives it.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
  *   to turn them on.
  * - `ShowMembers`: show or hide the open Channel's members on this device, or turn them
@@ -1173,9 +1173,18 @@ const themeUsage =
 
 /** The flags `/theme` reads before a theme's name, each naming the option it sets. */
 const schemeFlags: ReadonlyMap<string, ThemeOption> = new Map([
-  ["-dark", "dark"],
-  ["-light", "light"],
+  ["-dark", "theme.dark"],
+  ["-light", "theme.light"],
 ]);
+
+/**
+ * Whether the device is light or dark where an option names the theme `system` draws, in
+ * the word its flag is written with.
+ * @param option - The option, never `theme` itself.
+ * @returns The word.
+ */
+const schemeOf = (option: Exclude<ThemeOption, "theme">): "dark" | "light" =>
+  option === "theme.dark" ? "dark" : "light";
 
 /**
  * What `/theme` was given before a theme's name: `-device`, and `-light` or `-dark`, in
@@ -1263,7 +1272,7 @@ const themeArguments = (args: string): Parsed<Intent> => {
   if (one === undefined) {
     return flags.option === "theme" || flags.device
       ? invalid(`Usage: ${themeUsage}`)
-      : parsed({ _tag: "StartCommand", text: `/theme -${flags.option} ` });
+      : parsed({ _tag: "StartCommand", text: `/theme -${schemeOf(flags.option)} ` });
   }
 
   const name = parseThemeName(one);
@@ -1273,8 +1282,10 @@ const themeArguments = (args: string): Parsed<Intent> => {
   }
 
   if (flags.option !== "theme" && name.value === systemTheme) {
+    const scheme = schemeOf(flags.option);
+
     return invalid(
-      `system follows the device, so it is never the theme drawn while the device is ${flags.option}. Name a theme, such as ${flags.option}.`
+      `system follows the device, so it is never the theme drawn while the device is ${scheme}. Name a theme, such as ${scheme}.`
     );
   }
 

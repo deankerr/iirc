@@ -84,11 +84,11 @@ describe("the themes listed", () => {
     { name: "mine", palette: paletteNamed("dracula", uiDefaults, true) },
   ]);
 
-  const chosen = { dark: "mine", light: "light", theme: "nord" };
+  const chosen = { theme: "nord", "theme.dark": "mine", "theme.light": "light" };
 
   it("lists every theme, the one the option names said, and none called system for the schemes", () => {
     const forTheme = themeEntries(themes, chosen, "theme");
-    const forDark = themeEntries(themes, chosen, "dark");
+    const forDark = themeEntries(themes, chosen, "theme.dark");
 
     expect({
       current: [current(forTheme), current(forDark)],

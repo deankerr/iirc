@@ -229,26 +229,28 @@ export const defaultPreviewsMaxTotal = 1_073_741_824;
 export const OwnerOptions = Schema.Struct({
   "away.after": Schema.optionalKey(
     Schema.Int.check(Schema.isBetween(awayAfterBounds)).annotate({
-      description: `How many minutes no Frontend has been open before Self is marked away on every Network not already away, from ${awayAfterBounds.minimum} to ${awayAfterBounds.maximum}. Self is back once one has been open a short while. Unset, Self is never marked away by itself.`,
+      description: `How many minutes after the last Frontend closes Self is marked away, on every Network where it is not away already, from ${awayAfterBounds.minimum} to ${awayAfterBounds.maximum}. Self is back shortly after a Frontend opens. Unset, Self is never marked away by itself.`,
     })
   ),
   "away.message": Schema.optionalKey(
     AwayMessage.annotate({
-      description: `The away message Self is marked away with when no Frontend is open. Unset, it is ${defaultAwayMessage}.`,
+      description: `The away message used when Self is marked away by away.after. Unset, it is ${defaultAwayMessage}.`,
     })
   ),
   "previews.maxTotal": ByteCount.annotate({
     default: defaultPreviewsMaxTotal,
     description:
-      "The most bytes the store may hold for Previews' images. 1073741824, 1 GiB, unless set; the least recently shown lose their images first.",
+      "The most bytes of Previews' images the store may hold. Past it, the images shown least recently are deleted first. The default is 1 GiB.",
   }),
   "store.s3.accessKeyId": Schema.optionalKey(
     CredentialName.annotate({
-      description: "The Credential holding the access key id of the bucket that keeps Uploads.",
+      description: "The Credential that holds the bucket's access key id.",
     })
   ),
   "store.s3.bucket": Schema.optionalKey(
-    BucketName.annotate({ description: "The name of the S3 bucket that keeps Uploads' bytes." })
+    BucketName.annotate({
+      description: "The S3 bucket that keeps the bytes of Uploads and of Previews' images.",
+    })
   ),
   "store.s3.endpoint": Schema.optionalKey(
     HttpUrl.annotate({
@@ -261,34 +263,34 @@ export const OwnerOptions = Schema.Struct({
   ),
   "store.s3.secretAccessKey": Schema.optionalKey(
     CredentialName.annotate({
-      description: "The Credential holding the secret access key of the bucket that keeps Uploads.",
+      description: "The Credential that holds the bucket's secret access key.",
     })
   ),
   "uploads.expireAfter": Schema.optionalKey(
     Schema.Int.check(Schema.isBetween(expireAfterBounds)).annotate({
-      description: `How many days an Upload is kept before it is deleted, from ${expireAfterBounds.minimum} to ${expireAfterBounds.maximum}. Unset, Uploads are kept until deleted.`,
+      description: `How many days an Upload is kept before it is deleted, from ${expireAfterBounds.minimum} to ${expireAfterBounds.maximum}. Unset, an Upload is kept until the Owner deletes it.`,
     })
   ),
   "uploads.listen": Schema.optionalKey(
     ListenAddress.annotate({
       description:
-        "Where the listener that serves Uploads' links listens, as host:port, such as 127.0.0.1:7668.",
+        "The address the Link listener listens on, as host:port, such as 127.0.0.1:7668.",
     })
   ),
   "uploads.maxSize": ByteCount.annotate({
     default: defaultMaxSize,
-    description: "The largest an Upload may be, in bytes. 104857600, 100 MiB, unless set.",
+    description: "The largest an Upload may be, in bytes. The default is 100 MiB.",
   }),
   "uploads.maxTotal": Schema.optionalKey(
     ByteCount.annotate({
       description:
-        "The most bytes the store may hold for live Uploads, each distinct file counted once; an upload that would pass it is refused, and nothing is evicted. Unset, there is no limit.",
+        "The most bytes of Uploads the store may hold, each distinct file counted once. An upload that would pass it is refused, and nothing is deleted to make room. Unset, there is no limit.",
     })
   ),
   "uploads.publicUrl": Schema.optionalKey(
     HttpUrl.annotate({
       description:
-        "The base of every Upload's link, an http or https URL, such as https://files.example.com, kept without a trailing /.",
+        "The address every Upload's link starts with, an http or https URL, such as https://files.example.com.",
     })
   ),
 });

@@ -7,13 +7,15 @@
  * sidebar's drawer on a compact screen. What
  * the focused Pane shows is chosen, in the accent, and what another Pane shows is marked
  * dimly, with its number, as the Panes' status bars accent the focused one and dim the rest. React Aria's Tree gives it its keyboard: arrows move and expand, and
- * Enter or Space opens. Every Timeline's row has a menu, a Network's own too, opened by its
+ * Enter or Space opens. Every Timeline's row has a menu, and every Network's, opened by its
  * button, which ArrowRight reaches and which shows while the row is hovered or focused, and
  * always on a touch screen, or by the context menu, as a right-click, the menu key, or
  * Shift+F10 opens it. It chooses the Timeline's own Previews over `ui.previews`, for every
  * device, marking the choice in force, and closes a Channel's or Direct Message's Timeline,
  * which the Daemon keeps out of the sidebar until something arrives in it. It pins a
- * Channel's or Direct Message's Timeline, or unpins it.
+ * Channel's or Direct Message's Timeline, or unpins it. On a Network's row it asks to
+ * remove the Network, or, removed with its Timelines kept, to drop them, as
+ * `/network remove` does.
  *
  * The Networks and their Timelines are in the Owner's order, which every device shares,
  * and the Timelines pinned are in a part of their own above the Networks, each saying which
@@ -68,6 +70,7 @@ import type { DropTarget, Key, Selection } from "react-aria-components";
 
 import { perform } from "../composer/atoms.ts";
 import { openOptions, openUploads } from "../options/atoms.ts";
+import { askToRemove } from "../options/removal.ts";
 import { arrangedSidebar, arrangement } from "../options/ui.ts";
 import { compact, drawerState } from "../page/drawer.ts";
 import { previewsModes } from "../previews/atoms.ts";
@@ -275,12 +278,15 @@ const PaneMark = ({ pane }: { readonly pane: number | undefined }) =>
     </span>
   );
 
-/** The attribute a Timeline's row carries its id in, which its context menu is found by. */
-const timelineAttribute = "data-timeline";
+/**
+ * The attribute a row with a menu carries its key in, which its context menu is found by: a
+ * Timeline's id, or the key of a Network with no Timeline of its own yet.
+ */
+const menuAttribute = "data-row";
 
 /**
- * The button that opens a Timeline's menu, placed by its row.
- * @param props - The Timeline's name, and what opens its menu.
+ * The button that opens a row's menu, placed by its row.
+ * @param props - The row's name, and what opens its menu.
  * @returns The button.
  */
 const MoreButton = ({
@@ -350,7 +356,7 @@ const TimelineItem = ({
       data-menu={menu || undefined}
       id={timeline.id}
       textValue={timeline.name}
-      {...{ [timelineAttribute]: timeline.id }}
+      {...{ [menuAttribute]: timeline.id }}
     >
       <TreeItemContent>
         <span aria-hidden className={`${styles.gutter} ${styles.pane}`}>
@@ -389,15 +395,23 @@ const previewsChoices: readonly {
 ];
 
 /**
- * What can be done with a Timeline from its row: choosing its own Previews, the choice in
- * force marked, exporting it as text, muting it or unmuting it, pinning it or unpinning it,
- * unless it is a Network's own, and closing it, when it can be closed.
- * @param props - The Timeline, whether it is muted and whether it is pinned, its row, and
- * what closes the menu.
- * @returns The menu, placed under its row.
+ * What a menu is open on: a row's Timeline, the Network whose row it is, or both, as a
+ * Network's row is its own Timeline's once it has one.
  */
-const TimelineMenu = ({
-  anchor,
+interface MenuRow {
+  readonly timeline: Timeline | undefined;
+  readonly network: SidebarNetwork | undefined;
+}
+
+/**
+ * What a row's menu does with its Timeline: choosing its own Previews, the choice in force
+ * marked, exporting it as text, muting it or unmuting it, pinning it or unpinning it, unless
+ * it is a Network's own, and closing it, when it can be closed.
+ * @param props - The Timeline, whether it is muted and whether it is pinned, and what
+ * closes the menu.
+ * @returns The menu's parts for it.
+ */
+const TimelineActions = ({
   muted,
   onClose,
   pinned,
@@ -406,7 +420,6 @@ const TimelineMenu = ({
   readonly timeline: Timeline;
   readonly muted: boolean;
   readonly pinned: boolean;
-  readonly anchor: RefObject<HTMLElement | null>;
   readonly onClose: () => void;
 }) => {
   const carryOut = useAtomSet(perform);
@@ -415,122 +428,183 @@ const TimelineMenu = ({
   const chosen = modes === undefined ? undefined : (chosenIn(modes, timeline.id) ?? "default");
 
   return (
-    <Popover
-      className={styles.popover}
-      isOpen
-      offset={0}
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
+    <>
+      <MenuSection
+        className={styles.section}
+        disallowEmptySelection
+        onSelectionChange={(keys) => {
+          const [key] = keys === "all" ? [] : keys;
+          const choice = previewsChoices.find((one) => one.id === key);
+
           onClose();
-        }
-      }}
-      placement="bottom end"
-      triggerRef={anchor}
-    >
-      <Menu
-        aria-label={`What to do with ${timeline.name}`}
-        autoFocus="first"
-        className={styles.menu}
+
+          if (choice !== undefined && choice.id !== chosen) {
+            carryOut([{ _tag: "ChoosePreviews", mode: choice.mode, timeline: timeline.id }]);
+          }
+        }}
+        selectedKeys={chosen === undefined ? [] : [chosen]}
+        selectionMode="single"
       >
-        <MenuSection
-          className={styles.section}
-          disallowEmptySelection
-          onSelectionChange={(keys) => {
-            const [key] = keys === "all" ? [] : keys;
-            const choice = previewsChoices.find((one) => one.id === key);
-
-            onClose();
-
-            if (choice !== undefined && choice.id !== chosen) {
-              carryOut([{ _tag: "ChoosePreviews", mode: choice.mode, timeline: timeline.id }]);
-            }
-          }}
-          selectedKeys={chosen === undefined ? [] : [chosen]}
-          selectionMode="single"
-        >
-          <Header className={styles.header}>Previews</Header>
-          {previewsChoices.map((choice) => (
-            <MenuItem
-              className={styles.action}
-              id={choice.id}
-              key={choice.id}
-              // The choice in force, chosen again, changes nothing, and closes the menu.
-              onAction={onClose}
-              textValue={`Previews ${choice.id}`}
-            >
-              {({ isSelected }) => (
-                <>
-                  <span className={styles.mark}>{isSelected ? <Icon name="chosen" /> : null}</span>
-                  {choice.id}
-                </>
-              )}
-            </MenuItem>
-          ))}
-        </MenuSection>
-        <MenuSection className={styles.section}>
+        <Header className={styles.header}>Previews</Header>
+        {previewsChoices.map((choice) => (
           <MenuItem
             className={styles.action}
-            id="export"
+            id={choice.id}
+            key={choice.id}
+            // The choice in force, chosen again, changes nothing, and closes the menu.
+            onAction={onClose}
+            textValue={`Previews ${choice.id}`}
+          >
+            {({ isSelected }) => (
+              <>
+                <span className={styles.mark}>{isSelected ? <Icon name="chosen" /> : null}</span>
+                {choice.id}
+              </>
+            )}
+          </MenuItem>
+        ))}
+      </MenuSection>
+      <MenuSection className={styles.section}>
+        <MenuItem
+          className={styles.action}
+          id="export"
+          onAction={() => {
+            onClose();
+            carryOut([
+              { _tag: "Export", since: undefined, timeline: timeline.id, until: undefined },
+            ]);
+          }}
+          textValue="Export as text"
+        >
+          Export as text
+        </MenuItem>
+      </MenuSection>
+      <MenuSection className={styles.section}>
+        <MenuItem
+          className={styles.action}
+          id="mute"
+          onAction={() => {
+            onClose();
+            carryOut([{ _tag: "Mute", muted: !muted, timeline: timeline.id }]);
+          }}
+          textValue={muted ? "Unmute" : "Mute"}
+        >
+          {muted ? "Unmute" : "Mute"}
+        </MenuItem>
+        {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
+        {timeline.kind === "Network" ? null : (
+          <MenuItem
+            className={styles.action}
+            id="pin"
             onAction={() => {
               onClose();
               carryOut([
-                { _tag: "Export", since: undefined, timeline: timeline.id, until: undefined },
+                {
+                  _tag: "Arrange",
+                  edit: { _tag: "Pin", pinned: !pinned, timeline: timeline.id },
+                },
               ]);
             }}
-            textValue="Export as text"
+            textValue={pinned ? "Unpin" : "Pin"}
           >
-            Export as text
+            {pinned ? "Unpin" : "Pin"}
           </MenuItem>
-        </MenuSection>
-        <MenuSection className={styles.section}>
+        )}
+        {close === undefined ? null : (
           <MenuItem
             className={styles.action}
-            id="mute"
+            id="close"
             onAction={() => {
               onClose();
-              carryOut([{ _tag: "Mute", muted: !muted, timeline: timeline.id }]);
+              carryOut([close]);
             }}
-            textValue={muted ? "Unmute" : "Mute"}
+            textValue="Close"
           >
-            {muted ? "Unmute" : "Mute"}
+            Close
           </MenuItem>
-          {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
-          {timeline.kind === "Network" ? null : (
-            <MenuItem
-              className={styles.action}
-              id="pin"
-              onAction={() => {
-                onClose();
-                carryOut([
-                  {
-                    _tag: "Arrange",
-                    edit: { _tag: "Pin", pinned: !pinned, timeline: timeline.id },
-                  },
-                ]);
-              }}
-              textValue={pinned ? "Unpin" : "Pin"}
-            >
-              {pinned ? "Unpin" : "Pin"}
-            </MenuItem>
-          )}
-          {close === undefined ? null : (
-            <MenuItem
-              className={styles.action}
-              id="close"
-              onAction={() => {
-                onClose();
-                carryOut([close]);
-              }}
-              textValue="Close"
-            >
-              Close
-            </MenuItem>
-          )}
-        </MenuSection>
-      </Menu>
-    </Popover>
+        )}
+      </MenuSection>
+    </>
   );
 };
+
+/**
+ * What a row's menu does with its Network, on a Network's row: asking to remove it, or,
+ * removed with its Timelines kept, to drop them, as `/network remove` does. Nothing is
+ * removed until the Owner answers.
+ * @param props - The Network, and what closes the menu.
+ * @returns The menu's part for it.
+ */
+const NetworkActions = ({
+  network,
+  onClose,
+}: {
+  readonly network: SidebarNetwork;
+  readonly onClose: () => void;
+}) => {
+  const ask = useAtomSet(askToRemove);
+
+  return (
+    <MenuSection className={styles.section}>
+      <MenuItem
+        className={styles.action}
+        id="remove"
+        onAction={() => {
+          onClose();
+          ask(network.network);
+        }}
+        textValue={network.removed ? "Drop Timelines" : "Remove Network"}
+      >
+        {network.removed ? "Drop Timelines…" : "Remove Network…"}
+      </MenuItem>
+    </MenuSection>
+  );
+};
+
+/**
+ * What can be done from a row: with its Timeline, and, on a Network's row, with its
+ * Network.
+ * @param props - The row's Timeline and Network, whether the Timeline is muted and whether
+ * it is pinned, the row, and what closes the menu.
+ * @returns The menu, placed under its row.
+ */
+const RowMenu = ({
+  anchor,
+  muted,
+  network,
+  onClose,
+  pinned,
+  timeline,
+}: MenuRow & {
+  readonly muted: boolean;
+  readonly pinned: boolean;
+  readonly anchor: RefObject<HTMLElement | null>;
+  readonly onClose: () => void;
+}) => (
+  <Popover
+    className={styles.popover}
+    isOpen
+    offset={0}
+    onOpenChange={(isOpen) => {
+      if (!isOpen) {
+        onClose();
+      }
+    }}
+    placement="bottom end"
+    triggerRef={anchor}
+  >
+    <Menu
+      aria-label={`What to do with ${timeline?.name ?? network?.network ?? ""}`}
+      autoFocus="first"
+      className={styles.menu}
+    >
+      {timeline === undefined ? null : (
+        <TimelineActions muted={muted} onClose={onClose} pinned={pinned} timeline={timeline} />
+      )}
+      {network === undefined ? null : <NetworkActions network={network} onClose={onClose} />}
+    </Menu>
+  </Popover>
+);
 
 /**
  * What a Network's row says is unread: its own Timeline's, while what is under it shows
@@ -553,7 +627,7 @@ const networkUnread = (
 /**
  * A Network's row: its chevron, which expands and collapses it without choosing, its id,
  * coloured by what is unread, marked when its own Timeline is muted, how its connection
- * stands, as a symbol unless connected, and, once it has its own Timeline, the button that opens that Timeline's menu.
+ * stands, as a symbol unless connected, and the button that opens its menu.
  * @param props - The Network, its own Timeline, whether that is muted, whether its
  * Timelines are shown, and what opens the menu.
  * @returns The row's content.
@@ -602,7 +676,7 @@ const NetworkRow = ({
           <Icon className={standing.mark.className} name={standing.mark.icon} />
         </span>
       )}
-      {own === undefined ? null : <MoreButton name={own.name} onMenu={onMenu} />}
+      <MoreButton name={own?.name ?? network.network} onMenu={onMenu} />
       <DragButton />
     </>
   );
@@ -775,24 +849,32 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
 /** The type a dragged row carries its Timeline's name in, which only the sidebar takes. */
 const dragType = "application/x-iirc-timeline";
 
+/** No Network's own row, for a part that draws none. */
+const noNetworks: ReadonlyMap<Key, SidebarNetwork> = new Map();
+
 /**
  * What every part of the sidebar does with its rows: choosing one opens its Timeline, a
  * row's menu opens by its button or the context menu, and a row dragged before or after
  * another of the part moves it there, for every device.
  * @param timelines - The part's Timelines, which a row's key is read back as.
  * @param pinned - The Timelines pinned, for the menu.
- * @returns The Tree's handlers, its drag and drop, the Timeline whose menu is open, what
- * opens a menu, and the menu itself.
+ * @param own - The Networks whose own rows the part draws, each by its row's key.
+ * @returns The Tree's handlers, its drag and drop, the key of the row whose menu is open,
+ * what opens a menu, and the menu itself.
  */
-const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>) => {
+const usePart = (
+  timelines: readonly Timeline[],
+  pinned: ReadonlySet<TimelineId>,
+  own: ReadonlyMap<Key, SidebarNetwork> = noNetworks
+) => {
   const choose = useAtomSet(open);
   const setDrawer = useAtomSet(drawerState);
   const carryOut = useAtomSet(perform);
   const networks = useAtomValue(sidebarNetworks);
   const muted = useAtomValue(mutedShown);
   const order = useAtomValue(arrangement);
-  // The Timeline whose menu is open, placed by its row.
-  const [menu, setMenu] = useState<TimelineId | undefined>(undefined);
+  // The key of the row whose menu is open, placed by its row.
+  const [menu, setMenu] = useState<Key | undefined>(undefined);
   const anchor = useRef<HTMLElement | null>(null);
   // The keys of the rows dragged, which a place to drop them is judged by.
   const dragged = useRef<ReadonlySet<Key>>(new Set());
@@ -801,25 +883,30 @@ const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>
   // as the row of a Network with no Timeline of its own, opens nothing.
   const timelineOf = (key: Key) => timelines.find((timeline) => timeline.id === key);
 
-  // A menu is opened on a row, which it is placed by.
-  const openMenu = (timeline: Timeline, row: HTMLElement) => {
+  // What a row's key names: its Timeline, the Network whose row it is, or both, read back
+  // from the key, never cast.
+  const rowOf = (key: Key): MenuRow => ({ network: own.get(key), timeline: timelineOf(key) });
+
+  // A menu is opened on a row, by its key, which it is placed by.
+  const openMenu = (key: Key, row: HTMLElement) => {
     anchor.current = row;
-    setMenu(timeline.id);
+    setMenu(key);
   };
 
   // The context menu, from a pointer or the keyboard, on a row that has a menu opens it in
-  // place of the browser's. The row's Timeline is read back from its id, never cast.
+  // place of the browser's.
   const onContextMenu = (event: MouseEvent<HTMLElement>) => {
     const row =
       event.target instanceof Element
-        ? event.target.closest<HTMLElement>(`[${timelineAttribute}]`)
+        ? event.target.closest<HTMLElement>(`[${menuAttribute}]`)
         : null;
 
-    const timeline = timelineOf(row?.getAttribute(timelineAttribute) ?? "");
+    const key = row?.getAttribute(menuAttribute) ?? "";
+    const named = rowOf(key);
 
-    if (row !== null && timeline !== undefined) {
+    if (row !== null && (named.timeline !== undefined || named.network !== undefined)) {
       event.preventDefault();
-      openMenu(timeline, row);
+      openMenu(key, row);
     }
   };
 
@@ -893,8 +980,8 @@ const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>
     renderDropIndicator: (target) => <DropIndicator className={styles.drop} target={target} />,
   });
 
-  // The menu's Timeline, as it is now, while it is still listed.
-  const menuTimeline = menu === undefined ? undefined : timelineOf(menu);
+  // The menu's row, as it is now, while it is still listed.
+  const menuRow = menu === undefined ? undefined : rowOf(menu);
 
   return {
     dragAndDropHooks,
@@ -902,15 +989,17 @@ const usePart = (timelines: readonly Timeline[], pinned: ReadonlySet<TimelineId>
     handleSelectionChange: onSelectionChange,
     menu,
     menuElement:
-      menuTimeline === undefined ? null : (
-        <TimelineMenu
+      menuRow === undefined ||
+      (menuRow.timeline === undefined && menuRow.network === undefined) ? null : (
+        <RowMenu
           anchor={anchor}
           onClose={() => {
             setMenu(undefined);
           }}
-          muted={muted.has(menuTimeline.id)}
-          pinned={pinned.has(menuTimeline.id)}
-          timeline={menuTimeline}
+          muted={menuRow.timeline !== undefined && muted.has(menuRow.timeline.id)}
+          network={menuRow.network}
+          pinned={menuRow.timeline !== undefined && pinned.has(menuRow.timeline.id)}
+          timeline={menuRow.timeline}
         />
       ),
     openMenu,
@@ -969,7 +1058,7 @@ const PinnedTree = ({ pins }: { readonly pins: readonly Pin[] }) => {
             of={network.network}
             quietBots={network.quietBots}
             onMenu={(row) => {
-              part.openMenu(timeline, row);
+              part.openMenu(timeline.id, row);
             }}
             pane={others.get(timeline.id)}
             timeline={timeline}
@@ -1000,17 +1089,18 @@ const NetworkTrees = ({
   const others = useAtomValue(elsewhere);
   const setCollapsed = useAtomSet(collapsed);
 
-  // A Timeline under a Network is not pinned, as a pinned one is in the part above.
-  const part = usePart(
-    networks.flatMap((network) => network.timelines),
-    nonePinned
-  );
-
   const trees = networks.map((network) => ({ network, tree: treeOf(network) }));
 
   // A Network's row is its own Timeline's, keyed by its id, once it has one.
   const rowKey = ({ network, tree }: (typeof trees)[number]) =>
     tree.own?.id ?? networkKey(network.network);
+
+  // A Timeline under a Network is not pinned, as a pinned one is in the part above.
+  const part = usePart(
+    networks.flatMap((network) => network.timelines),
+    nonePinned,
+    new Map(trees.map((one) => [rowKey(one), one.network]))
+  );
 
   // Only this tree's Networks are expanded or collapsed by it.
   const onExpandedChange = (keys: Set<Key>) => {
@@ -1052,12 +1142,12 @@ const NetworkTrees = ({
             <TreeItem
               aria-label={`${rowLabel(network.network, activity, muted, pane)}, ${standingWords(standingOf(network))}`}
               className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
-              data-menu={(tree.own !== undefined && part.menu === tree.own.id) || undefined}
+              data-menu={part.menu === rowKey(one) || undefined}
               id={rowKey(one)}
               // React Aria never changes an item's id, so a row that gains its own Timeline is drawn anew.
               key={rowKey(one)}
               textValue={network.network}
-              {...(tree.own === undefined ? {} : { [timelineAttribute]: tree.own.id })}
+              {...{ [menuAttribute]: rowKey(one) }}
             >
               <TreeItemContent>
                 {({ hasChildItems, isExpanded }) => (
@@ -1067,9 +1157,7 @@ const NetworkTrees = ({
                     muted={muted}
                     network={network}
                     onMenu={(row) => {
-                      if (tree.own !== undefined) {
-                        part.openMenu(tree.own, row);
-                      }
+                      part.openMenu(rowKey(one), row);
                     }}
                     own={tree.own}
                     pane={pane}
@@ -1096,7 +1184,7 @@ const NetworkTrees = ({
                   muted={network.muted.has(timeline.id)}
                   quietBots={network.quietBots}
                   onMenu={(row) => {
-                    part.openMenu(timeline, row);
+                    part.openMenu(timeline.id, row);
                   }}
                   pane={others.get(timeline.id)}
                   timeline={timeline}

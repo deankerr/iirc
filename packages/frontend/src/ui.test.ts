@@ -16,17 +16,13 @@ import {
 
 const shared = {
   options: {
-    activity: "quiet",
     aliases: [],
-    colours: "theme",
-    dark: "dark",
-    day: "long",
-    enter: "newline",
+    "composer.enter": "newline",
+    "composer.nickSuffix": ": ",
+    "composer.spellcheck": true,
     font: "commit-mono",
-    leading: 1.45,
-    light: "light",
-    line: "columns",
-    muted: [],
+    "font.lineHeight": 1.45,
+    "font.size": 16,
     previews: "off",
     "previews.animate": false,
     "previews.folded": "summary",
@@ -34,18 +30,22 @@ const shared = {
     "previews.players": ["player.vimeo.com"],
     "previews.style": "thumbnail",
     "previews.timelines": {},
-    quietBots: false,
-    read: "latest",
     "sidebar.networks": [],
     "sidebar.order": [],
     "sidebar.pinned": [],
-    size: 16,
-    spellcheck: true,
-    suffix: ": ",
     theme: "dark",
-    themes: [],
-    time: "HH:mm:ss",
-    width: "none",
+    "theme.dark": "dark",
+    "theme.imported": [],
+    "theme.light": "light",
+    "timeline.activity": "quiet",
+    "timeline.colours": "theme",
+    "timeline.dateFormat": "long",
+    "timeline.layout": "columns",
+    "timeline.maxWidth": "none",
+    "timeline.timeFormat": "HH:mm:ss",
+    "unread.markRead": "latest",
+    "unread.muted": [],
+    "unread.quietBots": false,
   },
   sequence: 4,
 } as const;
@@ -53,45 +53,58 @@ const shared = {
 describe("a device's overrides", () => {
   it("are read back from the text they are kept as, option by option", () => {
     expect({
-      back: deviceUiOf(deviceUiText({ theme: "light", time: "none" })),
+      back: deviceUiOf(deviceUiText({ theme: "light", "timeline.timeFormat": "none" })),
       empty: deviceUiText(noOverrides),
       family: deviceUiOf('{"font":"Iosevka Term"}'),
-      habits: deviceUiOf('{"enter":"send","spellcheck":false,"suffix":", "}'),
-      habitsOut: deviceUiOf('{"enter":"shift","spellcheck":"no","suffix":"\\u0003","size":20}'),
-      habitsTooLong: deviceUiOf('{"suffix":"123456789","enter":"newline"}'),
-      leading: deviceUiOf('{"leading":1.2}'),
-      leadingFine: deviceUiOf('{"leading":1.455,"size":20}'),
-      leadings: deviceUiOf('{"leading":3,"size":20}'),
+      habits: deviceUiOf(
+        '{"composer.enter":"send","composer.spellcheck":false,"composer.nickSuffix":", "}'
+      ),
+      habitsOut: deviceUiOf(
+        '{"composer.enter":"shift","composer.spellcheck":"no","composer.nickSuffix":"\\u0003","font.size":20}'
+      ),
+      habitsTooLong: deviceUiOf('{"composer.nickSuffix":"123456789","composer.enter":"newline"}'),
+      lineHeight: deviceUiOf('{"font.lineHeight":1.2}'),
+      lineHeightFine: deviceUiOf('{"font.lineHeight":1.455,"font.size":20}'),
+      lineHeights: deviceUiOf('{"font.lineHeight":3,"font.size":20}'),
       long: deviceUiOf(`{"theme":"light","x":"${"x".repeat(50_000)}"}`),
-      mixed: deviceUiOf('{"theme":"light","time":"noon","palette":"dusk","activity":3}'),
+      mixed: deviceUiOf(
+        '{"theme":"light","timeline.timeFormat":"noon","palette":"dusk","timeline.activity":3}'
+      ),
+      // Kept under the name an option had before, which is the option's still.
+      namedBefore: deviceUiOf('{"size":20,"time":"none"}'),
       none: deviceUiOf(undefined),
       notAnObject: deviceUiOf("[1,2]"),
       notJson: deviceUiOf("{theme"),
-      sized: deviceUiOf('{"size":24,"font":"jetbrains-mono"}'),
-      sizes: deviceUiOf('{"size":9,"font":"Ios\\"evka"}'),
-      widths: deviceUiOf('{"width":"none","size":20}'),
-      widthsOut: deviceUiOf('{"width":0,"size":20}'),
-      widthsSet: deviceUiOf('{"width":72}'),
+      sized: deviceUiOf('{"font.size":24,"font":"jetbrains-mono"}'),
+      sizes: deviceUiOf('{"font.size":9,"font":"Ios\\"evka"}'),
+      widths: deviceUiOf('{"timeline.maxWidth":"none","font.size":20}'),
+      widthsOut: deviceUiOf('{"timeline.maxWidth":0,"font.size":20}'),
+      widthsSet: deviceUiOf('{"timeline.maxWidth":72}'),
     }).toStrictEqual({
-      back: { theme: "light", time: "none" },
+      back: { theme: "light", "timeline.timeFormat": "none" },
       empty: undefined,
       family: { font: "Iosevka Term" },
-      habits: { enter: "send", spellcheck: false, suffix: ", " },
-      habitsOut: { size: 20 },
-      habitsTooLong: { enter: "newline" },
-      leading: { leading: 1.2 },
-      leadingFine: { size: 20 },
-      leadings: { size: 20 },
+      habits: {
+        "composer.enter": "send",
+        "composer.nickSuffix": ", ",
+        "composer.spellcheck": false,
+      },
+      habitsOut: { "font.size": 20 },
+      habitsTooLong: { "composer.enter": "newline" },
+      lineHeight: { "font.lineHeight": 1.2 },
+      lineHeightFine: { "font.size": 20 },
+      lineHeights: { "font.size": 20 },
       long: {},
       mixed: { theme: "light" },
+      namedBefore: { "font.size": 20, "timeline.timeFormat": "none" },
       none: {},
       notAnObject: {},
       notJson: {},
-      sized: { font: "jetbrains-mono", size: 24 },
+      sized: { font: "jetbrains-mono", "font.size": 24 },
       sizes: {},
-      widths: { size: 20, width: "none" },
-      widthsOut: { size: 20 },
-      widthsSet: { width: 72 },
+      widths: { "font.size": 20, "timeline.maxWidth": "none" },
+      widthsOut: { "font.size": 20 },
+      widthsSet: { "timeline.maxWidth": 72 },
     });
   });
 
@@ -101,7 +114,7 @@ describe("a device's overrides", () => {
     expect({
       back: overridden(light, "theme", undefined),
       light,
-      refused: overridden(light, "time", "noon"),
+      refused: overridden(light, "timeline.timeFormat", "noon"),
       replaced: overridden(light, "theme", "dark"),
     }).toStrictEqual({
       back: {},
@@ -125,25 +138,33 @@ describe("a device's overrides", () => {
       palette,
     }));
 
-    const full = overridden(overridden(noOverrides, "theme", "dark"), "themes", themes);
+    const full = overridden(overridden(noOverrides, "theme", "dark"), "theme.imported", themes);
     const text = deviceUiText(full) ?? "";
 
     const badOne = deviceUiOf(
       JSON.stringify({
         theme: "dark",
-        themes: [...themes.slice(0, 2), { name: "nord", palette }, { name: "x", palette: {} }],
-        time: "none",
+        "theme.imported": [
+          ...themes.slice(0, 2),
+          { name: "nord", palette },
+          { name: "x", palette: {} },
+        ],
+        "timeline.timeFormat": "none",
       })
     );
 
     expect({
       back: deviceUiOf(text),
       badOne,
-      count: full.themes?.length,
+      count: full["theme.imported"]?.length,
       theme: full.theme,
     }).toStrictEqual({
       back: full,
-      badOne: { theme: "dark", themes: themes.slice(0, 2), time: "none" },
+      badOne: {
+        theme: "dark",
+        "theme.imported": themes.slice(0, 2),
+        "timeline.timeFormat": "none",
+      },
       count: 32,
       theme: "dark",
     });
@@ -152,22 +173,18 @@ describe("a device's overrides", () => {
   it("win over the shared options, which win over the defaults", () => {
     expect({
       before: effectiveUi(undefined, noOverrides),
-      device: effectiveUi(shared, { size: 20, theme: "light" }),
-      leading: effectiveUi(shared, { leading: 1.8 }).leading,
+      device: effectiveUi(shared, { "font.size": 20, theme: "light" }),
+      "font.lineHeight": effectiveUi(shared, { "font.lineHeight": 1.8 })["font.lineHeight"],
       shared: effectiveUi(shared, noOverrides),
     }).toStrictEqual({
       before: {
-        activity: "all",
         aliases: [],
-        colours: "theme",
-        dark: "dark",
-        day: "full",
-        enter: "send",
+        "composer.enter": "send",
+        "composer.nickSuffix": ": ",
+        "composer.spellcheck": true,
         font: "system",
-        leading: 1.45,
-        light: "light",
-        line: "columns",
-        muted: [],
+        "font.lineHeight": 1.45,
+        "font.size": 14,
         previews: "off",
         "previews.animate": false,
         "previews.folded": "summary",
@@ -182,32 +199,39 @@ describe("a device's overrides", () => {
         ],
         "previews.style": "thumbnail",
         "previews.timelines": {},
-        quietBots: false,
-        read: "latest",
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        size: 14,
-        spellcheck: true,
-        suffix: ": ",
         theme: "system",
-        themes: [],
-        time: "HH:mm",
-        width: "none",
+        "theme.dark": "dark",
+        "theme.imported": [],
+        "theme.light": "light",
+        "timeline.activity": "all",
+        "timeline.colours": "theme",
+        "timeline.dateFormat": "full",
+        "timeline.layout": "columns",
+        "timeline.maxWidth": "none",
+        "timeline.timeFormat": "HH:mm",
+        "unread.markRead": "latest",
+        "unread.muted": [],
+        "unread.quietBots": false,
       },
-      device: { ...shared.options, size: 20, theme: "light" },
-      leading: 1.8,
+      device: { ...shared.options, "font.size": 20, theme: "light" },
+      "font.lineHeight": 1.8,
       shared: shared.options,
     });
   });
 
   it("know when a Timeline is marked read only once this device or the shared options say", () => {
-    const asked = { ...shared, options: { ...shared.options, read: "asked" as const } };
+    const asked = {
+      ...shared,
+      options: { ...shared.options, "unread.markRead": "asked" as const },
+    };
 
     expect({
       before: readRuleOf(undefined, noOverrides),
-      device: readRuleOf(asked, { read: "shown" }),
-      deviceBefore: readRuleOf(undefined, { read: "shown" }),
+      device: readRuleOf(asked, { "unread.markRead": "shown" }),
+      deviceBefore: readRuleOf(undefined, { "unread.markRead": "shown" }),
       shared: readRuleOf(asked, noOverrides),
     }).toStrictEqual({
       before: undefined,
@@ -222,16 +246,16 @@ const unknown = { _tag: "Unknown" } as const;
 
 describe("an option every device shares only", () => {
   it("is never a device's: not read back, not kept, not in effect, and never written there", () => {
-    const kept = deviceUiOf('{"previews":"on","size":20}');
+    const kept = deviceUiOf('{"previews":"on","font.size":20}');
 
     expect({
-      effective: effectiveUi(shared, { previews: "on", size: 20 }).previews,
+      effective: effectiveUi(shared, { "font.size": 20, previews: "on" }).previews,
       kept,
       overridden: overridden(noOverrides, "previews", "links only"),
       written: [writtenOnDevice("previews", "on", false), writtenOnDevice("previews", "on", true)],
     }).toStrictEqual({
       effective: "off",
-      kept: { size: 20 },
+      kept: { "font.size": 20 },
       overridden: noOverrides,
       written: [false, false],
     });
@@ -379,8 +403,8 @@ describe("where a change of an option is written", () => {
       bundledOverridden: writtenOnDevice("font", "inter", true),
       family: writtenOnDevice("font", "Fira Code", false),
       familyOverridden: writtenOnDevice("font", "Fira Code", true),
-      other: writtenOnDevice("size", 20, false),
-      otherOverridden: writtenOnDevice("size", 20, true),
+      other: writtenOnDevice("font.size", 20, false),
+      otherOverridden: writtenOnDevice("font.size", 20, true),
       unset: writtenOnDevice("font", undefined, false),
       unsetOverridden: writtenOnDevice("font", undefined, true),
     }).toStrictEqual({

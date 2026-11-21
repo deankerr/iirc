@@ -500,10 +500,10 @@ export const runColours = (style: Style, theme: Drawn): RunStyle => {
 export const systemTheme = "system";
 
 /**
- * An option under `ui` that names a theme: `theme`, the one drawn, or `light` or `dark`,
- * the one `system` draws while the device is light or dark.
+ * An option under `ui` that names a theme: `theme`, the one drawn, or `theme.light` or
+ * `theme.dark`, the one `system` draws while the device is light or dark.
  */
-export type ThemeOption = Extract<UiOptionName, "dark" | "light" | "theme">;
+export type ThemeOption = Extract<UiOptionName, "theme" | "theme.dark" | "theme.light">;
 
 /** A theme a list shows: its name, and whether it is built in or imported. */
 export interface ListedTheme {
@@ -536,7 +536,7 @@ const builtInNamed = (name: string) => builtInThemes.find((one) => one.name === 
  * The options a theme's name is drawn from: the themes imported, and the theme `system`
  * draws while the device is light, and while it is dark.
  */
-export type ThemesShown = Pick<UiOptions, "dark" | "light" | "themes">;
+export type ThemesShown = Pick<UiOptions, "theme.dark" | "theme.imported" | "theme.light">;
 
 /**
  * The palette of a theme other than `system`: a built-in one's own, or an imported one's.
@@ -551,7 +551,7 @@ const ownPalette = (name: string, imported: readonly Theme[]): Palette | undefin
 
 /**
  * The palette a theme's name draws: a built-in one its own, an imported one its own, and
- * `system`'s that of `ui.dark` or `ui.light`, as the device prefers. A name that names no
+ * `system`'s that of `ui.theme.dark` or `ui.theme.light`, as the device prefers. A name that names no
  * theme, as one removed since, draws as `system`, and `system` draws the built-in dark or
  * light when the theme it names for the device's setting is none there is.
  * @param name - The theme's name.
@@ -561,10 +561,11 @@ const ownPalette = (name: string, imported: readonly Theme[]): Palette | undefin
  */
 export const paletteNamed = (name: string, shown: ThemesShown, prefersDark: boolean): Palette => {
   const scheme = prefersDark ? "dark" : "light";
+  const imported = shown["theme.imported"];
 
   return (
-    ownPalette(name, shown.themes) ??
-    ownPalette(shown[scheme], shown.themes) ??
+    ownPalette(name, imported) ??
+    ownPalette(shown[`theme.${scheme}`], imported) ??
     builtInNamed(scheme)?.palette ??
     builtInThemes[0]?.palette ??
     fallback

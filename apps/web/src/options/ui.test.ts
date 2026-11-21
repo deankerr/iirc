@@ -54,10 +54,14 @@ describe("the options under ui", () => {
     const second = await page(fake);
 
     await eventually(() => fake.daemon.uiFollowers.length === 2);
-    await until(first.registry, uiInEffect, (ui) => ui.time === "HH:mm");
-    await first.type("/set ui.time HH:mm:ss");
+    await until(first.registry, uiInEffect, (ui) => ui["timeline.timeFormat"] === "HH:mm");
+    await first.type("/set ui.timeline.timeFormat HH:mm:ss");
 
-    const seen = await until(second.registry, uiInEffect, (ui) => ui.time === "HH:mm:ss");
+    const seen = await until(
+      second.registry,
+      uiInEffect,
+      (ui) => ui["timeline.timeFormat"] === "HH:mm:ss"
+    );
 
     expect({
       changes: fake.daemon.uiChanges,
@@ -65,10 +69,10 @@ describe("the options under ui", () => {
       seen,
       shared: fake.daemon.ui,
     }).toStrictEqual({
-      changes: [{ ifSequence: "0", route: "PUT time" }],
+      changes: [{ ifSequence: "0", route: "PUT timeline.timeFormat" }],
       notice: undefined,
-      seen: { ...uiDefaults, time: "HH:mm:ss" },
-      shared: { options: { ...uiDefaults, time: "HH:mm:ss" }, sequence: 10 },
+      seen: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" },
+      shared: { options: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" }, sequence: 10 },
     });
   });
 
@@ -79,7 +83,10 @@ describe("the options under ui", () => {
     await until(registry, optionsState, (state) => state.ui?.sequence === 0);
 
     // Another device's Change, which this page has not heard of yet.
-    fake.daemon.ui = { options: { ...fake.daemon.ui.options, activity: "quiet" }, sequence: 7 };
+    fake.daemon.ui = {
+      options: { ...fake.daemon.ui.options, "timeline.activity": "quiet" },
+      sequence: 7,
+    };
     await type("/set ui.theme dark");
 
     expect({
@@ -92,7 +99,7 @@ describe("the options under ui", () => {
         { ifSequence: "7", route: "PUT theme" },
       ],
       notice: undefined,
-      ui: { ...uiDefaults, activity: "quiet", theme: "dark" },
+      ui: { ...uiDefaults, theme: "dark", "timeline.activity": "quiet" },
     });
   });
 
@@ -147,22 +154,25 @@ describe("the options under ui", () => {
   });
 });
 
-describe("a change of ui.read on its way", () => {
+describe("a change of ui.unread.markRead on its way", () => {
   it("marks nothing by it until the Daemon has taken it", () => {
     const fake = signedIn();
     const registry = registryFor(fake.fetch);
 
     const folded = [
       { _tag: "UiRead", ui: { options: uiDefaults, sequence: 1 } },
-      { _tag: "Asked", change: { _tag: "Ui", option: "read", value: "asked" } },
+      { _tag: "Asked", change: { _tag: "Ui", option: "unread.markRead", value: "asked" } },
     ] as const;
 
     for (const event of folded) {
       registry.set(optionsState, reduceOptions(registry.get(optionsState), event));
     }
 
-    expect({ rule: registry.get(readRule), shown: registry.get(uiInEffect).read }).toStrictEqual({
-      rule: uiDefaults.read,
+    expect({
+      rule: registry.get(readRule),
+      shown: registry.get(uiInEffect)["unread.markRead"],
+    }).toStrictEqual({
+      rule: uiDefaults["unread.markRead"],
       shown: "asked",
     });
   });
