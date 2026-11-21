@@ -61,8 +61,7 @@ describe("folding the ui options", () => {
         "font.lineHeight": 1.45,
         "font.size": 14,
         previews: "off",
-        "previews.animate": false,
-        "previews.folded": "summary",
+        "previews.animate": true,
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -72,6 +71,7 @@ describe("folding the ui options", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
+        "previews.start": "open",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
@@ -113,8 +113,7 @@ describe("folding the ui options", () => {
         "font.lineHeight": 1.45,
         "font.size": 14,
         previews: "off",
-        "previews.animate": false,
-        "previews.folded": "summary",
+        "previews.animate": true,
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -124,6 +123,7 @@ describe("folding the ui options", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
+        "previews.start": "open",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
@@ -160,6 +160,28 @@ describe("a Change of ui.previews.style, which is gone", () => {
     expect({ options, sequence }).toStrictEqual({
       options: { ...uiDefaults, "previews.mediaHeight": "large" },
       sequence: 4,
+    });
+  });
+});
+
+describe("a Change journaled under ui.previews.folded, which is now ui.previews.start", () => {
+  it("is read as start, open as open and summary or chip as closed, and fails nothing", () => {
+    const after = (...changes: readonly Change[]) => fold(changes).options["previews.start"];
+
+    expect({
+      chip: after(set("previews.folded", "chip")),
+      open: after(set("previews.folded", "summary"), set("previews.folded", "open")),
+      summary: after(set("previews.folded", "summary")),
+      thenStart: after(set("previews.folded", "chip"), set("previews.start", "open")),
+      unknown: after(set("previews.folded", "chip"), set("previews.folded", "nope")),
+      unset: after(set("previews.folded", "chip"), unset("previews.folded")),
+    }).toStrictEqual({
+      chip: "closed",
+      open: "open",
+      summary: "closed",
+      thenStart: "open",
+      unknown: "closed",
+      unset: "open",
     });
   });
 });
@@ -234,8 +256,7 @@ describe("the ui options, kept", () => {
           "font.lineHeight": 1.45,
           "font.size": 14,
           previews: "off",
-          "previews.animate": false,
-          "previews.folded": "summary",
+          "previews.animate": true,
           "previews.mediaHeight": "medium",
           "previews.players": [
             "www.youtube-nocookie.com",
@@ -245,6 +266,7 @@ describe("the ui options, kept", () => {
             "open.spotify.com",
             "player.twitch.tv",
           ],
+          "previews.start": "open",
           "previews.timelines": {},
           "sidebar.networks": [],
           "sidebar.order": [],
@@ -277,8 +299,7 @@ describe("the ui options, kept", () => {
             "font.lineHeight": 1.45,
             "font.size": 14,
             previews: "off",
-            "previews.animate": false,
-            "previews.folded": "summary",
+            "previews.animate": true,
             "previews.mediaHeight": "medium",
             "previews.players": [
               "www.youtube-nocookie.com",
@@ -288,6 +309,7 @@ describe("the ui options, kept", () => {
               "open.spotify.com",
               "player.twitch.tv",
             ],
+            "previews.start": "open",
             "previews.timelines": {},
             "sidebar.networks": [],
             "sidebar.order": [],

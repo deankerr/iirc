@@ -496,7 +496,7 @@ export type PreviewsShown = typeof PreviewsShown.Type;
  * reduce motion keeps animated images still whatever this says.
  */
 export const PreviewsAnimate = Schema.Boolean.annotate({
-  default: false,
+  default: true,
   description:
     "Whether an animated image in a Preview plays by itself. Off, it shows its first frame until pressed. A device set to reduce motion keeps it still either way.",
 });
@@ -505,18 +505,20 @@ export const PreviewsAnimate = Schema.Boolean.annotate({
 export type PreviewsAnimate = typeof PreviewsAnimate.Type;
 
 /**
- * Whether a Message's Previews start folded: `open`, each drawn whole; `summary`, each with
- * more to show folded to its one line until pressed; or `chip`, all of them one `[+n]`,
- * which a press opens. A device chooses its own.
+ * Whether a Message's Previews start open, each drawn as its card under the Message, or
+ * closed, drawing nothing until the toggle after its link opens it. A closed Preview is not
+ * asked for, so under `closed` nothing is fetched until the Owner opens one. A Direct
+ * Message with no mode of its own starts closed whatever this says. A device chooses its
+ * own.
  */
-export const PreviewsFolded = Schema.Literals(["open", "summary", "chip"]).annotate({
-  default: "summary",
+export const PreviewsStart = Schema.Literals(["open", "closed"]).annotate({
+  default: "open",
   description:
-    "How Previews start: open, shown whole; summary, each folded to its site and title until pressed; or chip, all of a Message's Previews folded into one [+n] until pressed.",
+    "Whether Previews start open, each drawn under its Message, or closed until the toggle after its link opens it. A closed Preview is not fetched. A Direct Message with no mode of its own starts closed.",
 });
 
-/** The decoded form of {@link PreviewsFolded}. */
-export type PreviewsFolded = typeof PreviewsFolded.Type;
+/** The decoded form of {@link PreviewsStart}. */
+export type PreviewsStart = typeof PreviewsStart.Type;
 
 /**
  * How tall a Preview's image, video, poster, or player is drawn at most: `small`, 160
@@ -784,9 +786,9 @@ export const UiOptions = Schema.Struct({
   "font.size": TextSize,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
-  "previews.folded": PreviewsFolded,
   "previews.mediaHeight": PreviewsMediaHeight,
   "previews.players": PreviewsPlayers,
+  "previews.start": PreviewsStart,
   "previews.timelines": PreviewsByTimeline,
   "sidebar.networks": SidebarNetworks,
   "sidebar.order": SidebarOrder,
@@ -866,6 +868,7 @@ const namedBefore: ReadonlyMap<string, UiOptionName> = new Map([
   ["light", "theme.light"],
   ["line", "timeline.layout"],
   ["muted", "unread.muted"],
+  ["previews.folded", "previews.start"],
   ["quietBots", "unread.quietBots"],
   ["read", "unread.markRead"],
   ["size", "font.size"],
@@ -896,9 +899,13 @@ const decodeJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String,
 // What Previews' middle mode was called before it was `text`.
 const textBefore = "links only";
 
+// What `previews.start` was before, as `previews.folded`, that starts a Preview closed.
+const closedBefore: ReadonlySet<Schema.Json> = new Set(["summary", "chip"]);
+
 /**
  * A value kept before with the words it has now: Previews journaled as `links only`, in
- * `ui.previews` or in a Timeline's own choice, are `text`. Any other is as it was.
+ * `ui.previews` or in a Timeline's own choice, are `text`, and `previews.start` kept as
+ * `previews.folded` was, `summary` or `chip`, is `closed`. Any other is as it was.
  * @param option - The option.
  * @param value - Its value, as JSON.
  * @returns The value with the words it has now.
@@ -906,6 +913,10 @@ const textBefore = "links only";
 const valueNamedNow = (option: UiOptionName, value: Schema.Json): Schema.Json => {
   if (option === "previews") {
     return value === textBefore ? "text" : value;
+  }
+
+  if (option === "previews.start") {
+    return closedBefore.has(value) ? "closed" : value;
   }
 
   const byTimeline = option === "previews.timelines" ? decodeJsonRecord(value) : undefined;
