@@ -173,7 +173,7 @@ const editIn = async (
 };
 
 /**
- * Presses Enter in the composer, which sends under `ui.enter` `send`, as it starts.
+ * Presses Enter in the composer, which sends under `ui.composer.enter` `send`, as it starts.
  * @param container - The page.
  */
 const enter = async (container: HTMLElement) => {

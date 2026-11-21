@@ -76,7 +76,7 @@ const noneMuted: ReadonlySet<TimelineId> = new Set();
 const mutedList = Atom.make((get): readonly TimelineId[] => {
   const shown = uiShown(get(optionsState));
 
-  return shown === undefined ? [] : shown.options.muted;
+  return shown === undefined ? [] : shown.options["unread.muted"];
 });
 
 /**
@@ -98,7 +98,7 @@ export const mutedShown = Atom.make((get): ReadonlySet<TimelineId> => {
 const mutedHeld = Atom.make((get): Muted => {
   const { ui } = get(optionsState);
 
-  return ui === undefined ? "NotKnown" : new Set(ui.options.muted);
+  return ui === undefined ? "NotKnown" : new Set(ui.options["unread.muted"]);
 });
 
 /**
@@ -108,14 +108,16 @@ const mutedHeld = Atom.make((get): Muted => {
 export const quietBotsShown = Atom.make((get): boolean => {
   const shown = uiShown(get(optionsState));
 
-  return shown === undefined ? false : shown.options.quietBots;
+  return shown === undefined ? false : shown.options["unread.quietBots"];
 });
 
 /**
  * Whether bots are quieted as the Daemon holds it, not as a change on its way shows it, or
  * not until the options are read, so a notification is quieted only by what is settled.
  */
-const quietBotsHeld = Atom.make((get): boolean => get(optionsState).ui?.options.quietBots ?? false);
+const quietBotsHeld = Atom.make(
+  (get): boolean => get(optionsState).ui?.options["unread.quietBots"] ?? false
+);
 
 /**
  * The Networks and their Timelines, in sidebar order, a Timeline asked to be closed left

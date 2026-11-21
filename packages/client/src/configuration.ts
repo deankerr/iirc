@@ -236,7 +236,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: [],
       description:
-        "Words that make a Message a Highlight, as Self's nick does, matched as whole words in any case: at most 64, of at most 64 characters each.",
+        "Words that make a Message a Highlight, as Self's nick does, matched as whole words in any case. At most 64, of at most 64 characters each.",
     }),
   /**
    * Masks of the Users to ignore. A Journal written before the field existed holds
@@ -252,7 +252,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: [],
       description:
-        "Users to ignore by mask, nick!user@host with * and ?: what they say is kept but not shown, counted or notified. At most 64.",
+        "Users to ignore, each by a mask such as nick!user@host, in which * and ? match anything. What they say is kept, but not shown, counted, or notified. At most 64.",
     }),
   ircds: Schema.NonEmptyArray(IrcdAddress).annotate({
     description: "The Ircds to connect to, tried in turn.",
@@ -271,12 +271,12 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: [],
       description:
-        "Lines to send as each Session begins, written as /quote takes them, sent in order after any login and before Channels are joined. At most 16. They are stored in the clear, so hold no password.",
+        "Lines to send as each Session begins, written as /quote takes them, in order, after any login and before Channels are joined. At most 16. They are kept in the clear, so put no password in one.",
     }),
   login: Login.annotate({
     default: { _tag: "None" },
     description:
-      "How to log in to an account: none, SASL, or by telling a service, with the options under it.",
+      "How to log in to an account: none, sasl, or service, which tells a service such as NickServ. The options under it say the rest.",
   }),
   nicks: Schema.NonEmptyArray(Schema.String).annotate({
     description: "The nicks to use, the first preferred and the rest tried in turn.",
@@ -295,7 +295,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: noOper,
       description:
-        "Whether to log in as an IRC operator with OPER as each Session begins: none, or login with the options under it.",
+        "Whether to log in as an IRC operator as each Session begins: none, or login, with the options under it.",
     }),
   password: Schema.optionalKey(
     CredentialName.annotate({
@@ -320,7 +320,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: "",
       description:
-        "User modes to set on Self as each Session begins, such as +ix-w, sent as one MODE before any of the Lines: at most 64 characters. Empty sets none.",
+        "User modes to set on Self as each Session begins, such as +ix-w, before any of the Lines are sent. At most 64 characters. Empty sets none.",
     }),
   username: Schema.String.annotate({
     description: "The username, the part of Self's mask before the @.",

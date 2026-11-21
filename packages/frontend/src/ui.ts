@@ -17,6 +17,7 @@ import {
   isFontName,
   themesCap,
   uiDefaults,
+  uiNameKept,
   uiSharedOnly,
   uiValueKept,
 } from "@iirc/api/ui";
@@ -95,7 +96,8 @@ export const deviceUiOf = (text: string | undefined): DeviceUi => {
 
   return Object.fromEntries(
     Object.entries(kept.value).flatMap(([key, value]) => {
-      const name = Option.filter(decodeName(key), isOverridable);
+      // A name an option had before is the option's still, so an override kept under it is kept.
+      const name = Option.filter(Option.fromUndefinedOr(uiNameKept(key)), isOverridable);
 
       const parsed = Option.isSome(name) ? uiValueKept(name.value, value) : undefined;
 
@@ -197,7 +199,7 @@ export const effectiveUi = (shared: UiInForce | undefined, device: DeviceUi): Ui
  * @returns The rule, or none while it is not yet known.
  */
 export const readRuleOf = (shared: UiInForce | undefined, device: DeviceUi): ReadRule | undefined =>
-  device.read ?? shared?.options.read;
+  device["unread.markRead"] ?? shared?.options["unread.markRead"];
 
 /** The Activity `quiet` leaves out: a User coming or going, or a batch of them. */
 const comings: ReadonlySet<string> = new Set(["Joined", "Parted", "Quit", "Netsplit", "Netjoin"]);

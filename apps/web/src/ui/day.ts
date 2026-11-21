@@ -1,5 +1,5 @@
 /**
- * How a day is written where a Timeline's day changes, as `ui.day` says, in the device's
+ * How a day is written where a Timeline's day changes, as `ui.timeline.dateFormat` says, in the device's
  * own language and time zone, which only a view reads. Every day the web frontend writes
  * comes from here, so no two places can disagree on the form.
  *
@@ -31,7 +31,7 @@ const isoOf = (date: Date) => {
 };
 
 /**
- * An instant's day written as `ui.day` says, in the device's zone.
+ * An instant's day written as `ui.timeline.dateFormat` says, in the device's zone.
  * @param shown - How a day is written.
  * @param at - The instant.
  * @returns The day, or none when a `Date` cannot hold the instant.

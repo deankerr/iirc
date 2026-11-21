@@ -207,7 +207,7 @@ export const labelOf = (name: string, activity: Activity, muted = false): string
 };
 
 /**
- * The Timelines the Owner muted, as the option `ui.muted` should be after muting or
+ * The Timelines the Owner muted, as the option `ui.unread.muted` should be after muting or
  * unmuting one.
  * @param muted - The list in force.
  * @param timeline - The Timeline.
@@ -379,7 +379,7 @@ const seenIn = (
 
 /**
  * Whether a Timeline the Owner sees is due to be marked read, and up to what, as
- * `ui.read` says: under `latest`, when the view said the Owner sees its latest; under
+ * `ui.unread.markRead` says: under `latest`, when the view said the Owner sees its latest; under
  * `shown`, whenever the view said what is in view, scrolled up or not; under `asked`,
  * never, so only `/read` marks it. It is up to the instant of the last item the view
  * showed, which is never past what was shown and never before its Read Marker. Of several

@@ -25,7 +25,7 @@ export const documentTitle = Atom.make((get) => titleOf(get(sidebarNetworks)));
 
 /**
  * Whether the open Timeline is due to be marked read, and up to what, as the core says by
- * `ui.read` on this device, and never while that is not yet known.
+ * `ui.unread.markRead` on this device, and never while that is not yet known.
  */
 const dueMark = Atom.make((get) => {
   const rule = get(readRule);

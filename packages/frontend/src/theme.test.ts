@@ -255,8 +255,8 @@ describe("the themes there are", () => {
   it("draw a name as its own palette, system as the device prefers, and a name gone as system", () => {
     expect({
       builtIn: paletteNamed("tokyo-night", uiDefaults, true),
-      gone: paletteNamed("removed", { ...uiDefaults, themes: [mine] }, false).background,
-      imported: paletteNamed("mine", { ...uiDefaults, themes: [mine] }, false),
+      gone: paletteNamed("removed", { ...uiDefaults, "theme.imported": [mine] }, false).background,
+      imported: paletteNamed("mine", { ...uiDefaults, "theme.imported": [mine] }, false),
       systemDark: paletteNamed("system", uiDefaults, true).background,
       systemLight: paletteNamed("system", uiDefaults, false).background,
     }).toStrictEqual({
@@ -268,8 +268,14 @@ describe("the themes there are", () => {
     });
   });
 
-  it("draw system as ui.light or ui.dark as the device prefers, an imported one too, and the built-in one when it names no theme", () => {
-    const shown = { ...uiDefaults, dark: "mine", light: "solarized-light", themes: [mine] };
+  it("draw system as ui.theme.light or ui.theme.dark as the device prefers, an imported one too, and the built-in one when it names no theme", () => {
+    const shown = {
+      ...uiDefaults,
+      "theme.dark": "mine",
+      "theme.imported": [mine],
+      "theme.light": "solarized-light",
+    };
+
     const solarized = builtInThemes.find((one) => one.name === "solarized-light");
 
     expect({
@@ -277,9 +283,9 @@ describe("the themes there are", () => {
       gone: paletteNamed("gone", shown, false),
       light: paletteNamed("system", shown, false),
       named: paletteNamed("tokyo-night", shown, true),
-      removed: paletteNamed("system", { ...shown, themes: [] }, true).background,
-      system: paletteNamed("system", { ...shown, light: "system" }, false).background,
-      unknown: paletteNamed("system", { ...shown, light: "nope" }, false).background,
+      removed: paletteNamed("system", { ...shown, "theme.imported": [] }, true).background,
+      system: paletteNamed("system", { ...shown, "theme.light": "system" }, false).background,
+      unknown: paletteNamed("system", { ...shown, "theme.light": "nope" }, false).background,
     }).toStrictEqual({
       dark: mine.palette,
       gone: solarized?.palette,

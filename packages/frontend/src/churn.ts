@@ -1,6 +1,6 @@
 /**
  * The Activity of Users coming and going: a join, a part, a quit, or a change of nick. A
- * Timeline folds a run of these into one line, and `ui.activity` may hide those of Users who
+ * Timeline folds a run of these into one line, and `ui.timeline.activity` may hide those of Users who
  * did not speak. Which of them are Self's is worked out here, since no item says so.
  *
  * @packageDocumentation

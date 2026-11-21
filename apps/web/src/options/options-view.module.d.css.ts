@@ -20,13 +20,12 @@ declare const styles: {
   readonly missing: string;
   readonly muted: string;
   readonly name: string;
-  readonly networks: string;
   readonly note: string;
   readonly notice: string;
+  readonly part: string;
   readonly popover: string;
   readonly row: string;
   readonly scroller: string;
-  readonly starts: string;
   readonly value: string;
   readonly view: string;
   readonly waits: string;

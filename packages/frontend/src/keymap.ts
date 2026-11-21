@@ -496,7 +496,8 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * with none does. Starting a command and moving between Timelines work while typing in the
  * composer, as an IRC client's do, and Alt+A jumps to what calls for the Owner most, as
  * WeeChat's does. Alt+M shows or hides the members and Alt+N the sidebar of Networks beside
- * them: Mod+Shift+M is the browser's own in Chrome and Firefox. Formatting is Mod and a
+ * them: Mod+Shift+M is the browser's own in Chrome and Firefox. Alt+O shows the options:
+ * Mod+, is the browser's own for its settings on a Mac, which a page never hears. Formatting is Mod and a
  * letter, as an IRC client's and a word processor's are: B, I, and U, E for fixed pitch, as
  * some editors mark code, R for reverse, and Mod+Shift+X to strike through. mIRC's Ctrl+K for
  * colour is starting `/go ` here, so the colours are Mod+Shift+K. They act only while typing
@@ -518,7 +519,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "timeline.unread", keys: "alt+a" },
   { command: "members.toggle", keys: "alt+m" },
   { command: "sidebar.toggle", keys: "alt+n" },
-  { args: "", command: "options.set", keys: "mod+," },
+  { args: "", command: "options.set", keys: "alt+o" },
   { command: "search.open", keys: "mod+shift+f" },
   { command: "format.bold", keys: "mod+b", when: "inComposer" },
   { command: "format.italic", keys: "mod+i", when: "inComposer" },
@@ -719,7 +720,7 @@ const enterWith = ({ mod, shift }: { readonly mod: boolean; readonly shift: bool
 });
 
 /**
- * The chord that sends what the Composer holds, as `ui.enter` says: Enter for `send`, and
+ * The chord that sends what the Composer holds, as `ui.composer.enter` says: Enter for `send`, and
  * Mod+Enter for `newline`.
  * @param enter - What Enter does.
  * @returns The chord.
@@ -728,7 +729,7 @@ export const sendChord = (enter: EnterKey): Chord =>
   enterWith({ mod: enter === "newline", shift: false });
 
 /**
- * The chord that begins a new line in the Composer, as `ui.enter` says: Shift+Enter for
+ * The chord that begins a new line in the Composer, as `ui.composer.enter` says: Shift+Enter for
  * `send`, and Enter for `newline`.
  * @param enter - What Enter does.
  * @returns The chord.
@@ -740,7 +741,7 @@ export const newLineChord = (enter: EnterKey): Chord =>
 export type EnterPress = "Send" | "NewLine";
 
 /**
- * What an Enter pressed in the Composer does, as `ui.enter` says. With `send`, Enter sends
+ * What an Enter pressed in the Composer does, as `ui.composer.enter` says. With `send`, Enter sends
  * whatever else is held, as it always has, but Shift, which begins a new line. With
  * `newline`, Mod+Enter sends, and Enter or Shift+Enter begins a new line, which the field
  * does itself. Any other key, or Enter with another modifier under `newline`, is none of

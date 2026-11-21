@@ -251,7 +251,6 @@ describe("ui.previews", () => {
     }).toStrictEqual({
       sharedOnly: [
         "aliases",
-        "muted",
         "previews",
         "previews.players",
         "previews.timelines",
@@ -259,6 +258,7 @@ describe("ui.previews", () => {
         "sidebar.order",
         "sidebar.pinned",
         "tail",
+        "unread.muted",
       ],
       taken: [true, true, true, false, false, false],
     });
@@ -404,14 +404,16 @@ const ids = (count: number) =>
     (_, at) => `00000000000001-${String(at).padStart(8, "0")}-00000000`
   );
 
-describe("ui.muted", () => {
+describe("ui.unread.muted", () => {
   it("starts empty, names ids that may have gone, and refuses one named twice or past the cap", () => {
     const options = Schema.decodeUnknownOption(UiOptions);
-    const decodes = (muted: readonly string[]) => Option.isSome(options({ ...uiDefaults, muted }));
+
+    const decodes = (muted: readonly string[]) =>
+      Option.isSome(options({ ...uiDefaults, "unread.muted": muted }));
 
     expect({
       cap: [decodes(ids(mutedCap)), decodes(ids(mutedCap + 1))],
-      default: uiDefaults.muted,
+      default: uiDefaults["unread.muted"],
       gone: decodes(ids(2)),
       twice: decodes([...ids(1), ...ids(1)]),
     }).toStrictEqual({

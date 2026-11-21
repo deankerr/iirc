@@ -487,12 +487,12 @@ describe("the web frontend on iirc daemon --web", () => {
         await composer.press("ArrowUp");
         const recalled = await composer.inputValue();
 
-        // With ui.enter newline on this device, Enter begins a line, a send button shows, and
+        // With ui.composer.enter newline on this device, Enter begins a line, a send button shows, and
         // Mod+Enter sends both lines.
         const sendButton = page.getByRole("button", { exact: true, name: "Send" });
         const buttonBefore = await sendButton.count();
 
-        await composer.fill("/set -device ui.enter newline");
+        await composer.fill("/set -device ui.composer.enter newline");
         await composer.press("Enter");
         await sendButton.waitFor();
         await composer.fill("one");

@@ -445,8 +445,8 @@ describe("the keymap", () => {
     });
   });
 
-  it("opens the options with Mod+,", () => {
-    expect(resolve(defaultKeymap, at(), press(",", "Comma", { ctrl: true }))).toStrictEqual([
+  it("opens the options with Alt+O", () => {
+    expect(resolve(defaultKeymap, at(), press("o", "KeyO", { alt: true }))).toStrictEqual([
       { _tag: "OpenOptions", filter: "" },
     ]);
   });

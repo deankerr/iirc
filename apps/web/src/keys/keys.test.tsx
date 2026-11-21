@@ -528,11 +528,11 @@ describe("the keys", () => {
 
   it("edits the text's size in a number field within its bounds, set for every device on Enter", async () => {
     const { container, daemon, registry } = await signedIn();
-    const name = "ui.size";
+    const name = "ui.font.size";
     const selector = `input[aria-label="Value of ${name}"]`;
 
     await act(async () => {
-      await run(registry, openOptions, "ui.size");
+      await run(registry, openOptions, "ui.font.size");
     });
     await act(async () => {
       registry.set(editing, name);
@@ -555,7 +555,7 @@ describe("the keys", () => {
     });
 
     await press(editor, { key: "Enter" });
-    await settled(() => daemon.ui.options.size === 17);
+    await settled(() => daemon.ui.options["font.size"] === 17);
 
     expect(field).toStrictEqual(["number", "10", "24", "1", "14"]);
   });

@@ -2,14 +2,14 @@
  * The options view: every option under `ui`, every option of every Network, and every
  * option under `store`, `uploads`, and `previews`, as the core derives and heads them from
  * the Schemas, filtered as the Owner types. Each option takes two lines: its name and value,
- * then its description and what it starts as. An option under `ui` this device overrides
+ * then, dimmer, its description and its default. A list's value wraps between its elements,
+ * each kept whole where it fits. An option under `ui` this device overrides
  * says so, beside the value every device shares. No device overrides one under `store`, `uploads`, or `previews`. React Aria's
  * GridList gives it its keyboard: arrows move, Enter opens a menu of an option's choices
  * where its kind lists them, which ends in "Custom…" where it also takes text, edits the
  * focused value in place as its raw text, or a whole number in a number field, turns a
  * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
- * unset it. Beside the filter, a button for each Network asks to remove it, or, removed
- * with its Timelines kept, to drop them. Escape anywhere else in it shows what the Pane
+ * unset it. Escape anywhere else in it shows what the Pane
  * showed before. An edit is a plain,
  * uncontrolled input read once when Enter is pressed. A Credential's value is never edited
  * here.
@@ -17,8 +17,8 @@
  * @packageDocumentation
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
-import { menuOf, parseOwnerText, parseUiText } from "@iirc/frontend/options";
-import type { Menu as Choices, Option, OptionGroup, Value } from "@iirc/frontend/options";
+import { menuOf, parseOwnerText, parseUiText, partsOf } from "@iirc/frontend/options";
+import type { Kind, Menu as Choices, Option, OptionGroup, Value } from "@iirc/frontend/options";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
 import { useContext, useEffect, useId, useRef, useState } from "react";
@@ -39,7 +39,6 @@ import type { Key } from "react-aria-components";
 import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../keys/press.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
-import { sidebarNetworks } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
   change,
@@ -55,30 +54,55 @@ import {
   promptCredential,
 } from "./atoms.ts";
 import { changeOwnerOption } from "./owner.ts";
-import { askToRemove } from "./removal.ts";
 import { changeUiOption } from "./ui.ts";
 
 import styles from "./options-view.module.css";
 
 /**
+ * A value's text, or `empty` where it is none, such as an empty list's. A list is drawn in
+ * its elements, each kept whole where a line wraps, with the space between them where it
+ * may.
+ * @param props - The value's kind, and its text.
+ * @returns The text.
+ */
+const Text = ({ kind, text }: { readonly kind: Kind; readonly text: string }) => {
+  if (text === "") {
+    return <span className={styles.muted}>empty</span>;
+  }
+
+  const parts = partsOf(kind, text);
+
+  return (
+    <bdi>
+      {parts.length === 1
+        ? text
+        : parts.map((part, index) => (
+            // A list may hold an element twice, so its place is its key.
+            // oxlint-disable-next-line react/no-array-index-key
+            <span key={index}>
+              {index === 0 ? null : " "}
+              <span className={styles.part}>{part}</span>
+            </span>
+          ))}
+    </bdi>
+  );
+};
+
+/**
  * An option's value, as the view shows it: a Credential by its name and whether it is
  * held, never a value. What is still being read draws as a wait, never as a default or
  * as "not held".
- * @param props - The value.
+ * @param props - The value, and its kind.
  * @returns The value.
  */
-const Shown = ({ value }: { readonly value: Value }) => {
+const Shown = ({ kind, value }: { readonly kind: Kind; readonly value: Value }) => {
   switch (value._tag) {
     case "Reading": {
       return <span className={styles.muted}>reading…</span>;
     }
 
     case "Shown": {
-      return value.text === "" ? (
-        <span className={styles.muted}>empty</span>
-      ) : (
-        <bdi>{value.text}</bdi>
-      );
+      return <Text kind={kind} text={value.text} />;
     }
 
     case "Unset": {
@@ -117,18 +141,18 @@ const Shown = ({ value }: { readonly value: Value }) => {
 const startsInWords = (starts: string) => (starts === "" ? "empty" : starts);
 
 /**
- * What an option starts as, as the view shows it: in words, or that it must be given.
- * @param props - What it starts as, or nothing when it must be given.
+ * What an option starts as, as the view shows it: its default, or that it must be given.
+ * @param props - The option's kind, and what it starts as, or nothing when it must be given.
  * @returns What it starts as.
  */
-const Starts = ({ starts }: { readonly starts: string | undefined }) => {
+const Starts = ({ kind, starts }: { readonly kind: Kind; readonly starts: string | undefined }) => {
   if (starts === undefined) {
     return "must be given";
   }
 
   return (
     <>
-      default <bdi>{startsInWords(starts)}</bdi>
+      default: <Text kind={kind} text={starts} />
     </>
   );
 };
@@ -428,33 +452,6 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
 };
 
 /**
- * A button for each Network, which asks to remove it, and for each removed with its
- * Timelines kept, which asks to drop them, as `/network remove` does.
- * @returns The buttons, or nothing with no Network.
- */
-const NetworkRemovals = () => {
-  const networks = useAtomValue(sidebarNetworks);
-  const ask = useAtomSet(askToRemove);
-
-  return networks.length === 0 ? null : (
-    <div className={styles.networks}>
-      {networks.map(({ network, removed }) => (
-        <Button
-          key={network}
-          onPress={() => {
-            ask(network);
-          }}
-          size="small"
-        >
-          {/* A Network's id is ASCII, so it needs no isolating. */}
-          {`${removed ? "Drop" : "Remove"} ${network}…`}
-        </Button>
-      ))}
-    </div>
-  );
-};
-
-/**
  * The options view, filtered, in a Pane.
  * @param props - The Pane.
  * @returns The view.
@@ -624,9 +621,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
           onChange={setFilter}
           value={filter}
         >
-          <Input className={styles.filterInput} placeholder="network.libera.* or *nick*" />
+          <Input className={styles.filterInput} placeholder="Filter, as font or network.*" />
         </SearchField>
-        <NetworkRemovals />
       </div>
       {notice === undefined ? null : (
         <p className={styles.notice} id={noticeId} role="alert">
@@ -696,7 +692,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                                 className={editor ? styles.hidden : undefined}
                                 data-value
                               >
-                                <Shown value={option.value} />
+                                <Shown kind={option.kind} value={option.value} />
                               </span>
                               {editor ? (
                                 <Editor done={focusRow(option.name)} option={option} />
@@ -715,7 +711,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                             {option._tag === "Ui" && option.device !== undefined ? (
                               <span className={styles.device}>
                                 {" "}
-                                on this device, over <Shown value={option.shared} />
+                                on this device, over{" "}
+                                <Shown kind={option.kind} value={option.shared} />
                               </span>
                             ) : null}
                             {option._tag === "Ui" && option.note !== undefined ? (
@@ -725,8 +722,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                         </span>
                         <span className={styles.about}>
                           <span>{option.description}</span>{" "}
-                          <span className={styles.starts}>
-                            <Starts starts={option.starts} />
+                          <span>
+                            <Starts kind={option.kind} starts={option.starts} />
                           </span>
                         </span>
                       </GridListItem>

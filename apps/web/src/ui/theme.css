@@ -2,10 +2,10 @@
  * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
  * read these and never name a colour of their own. Once the page runs, every colour is
  * the core's, derived from the palette of the theme in effect, and the text's size, line
- * height, and font are `ui.size`, `ui.leading`, and `ui.font`, each set on the root's own
+ * height, and font are `ui.font.size`, `ui.font.lineHeight`, and `ui.font`, each set on the root's own
  * style, which wins over these. Until then each colour is light-dark(), so the first
  * paint follows the device's own setting, and the text is in the defaults' size, line
- * height, and font. The widest line, `ui.width`, is `--widest-line` there too, in `ch`, and
+ * height, and font. The widest line, `ui.timeline.maxWidth`, is `--widest-line` there too, in `ch`, and
  * is never set here or while it is `none`, so a line then runs the width of its Pane.
  */
 :root {

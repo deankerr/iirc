@@ -156,7 +156,7 @@ export const drawnTheme = Atom.make((get) => {
   const ui = get(uiInEffect);
   const palette = get(previewed) ?? paletteNamed(ui.theme, ui, get(prefersDark));
 
-  return drawn(palette, ui.colours);
+  return drawn(palette, ui["timeline.colours"]);
 });
 
 /**
@@ -172,11 +172,14 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
   const font = (listed?._tag === "Font" ? listed.font : undefined) ?? ui.font;
 
   return [
-    ["--font-size", `${ui.size}px`],
-    ["--line-height", String(ui.leading)],
+    ["--font-size", `${ui["font.size"]}px`],
+    ["--line-height", String(ui["font.lineHeight"])],
     ["--font-text", fontStack(font)],
     ["--font-mono", monoStack(font)],
-    ["--widest-line", ui.width === "none" ? undefined : `${ui.width}ch`],
+    [
+      "--widest-line",
+      ui["timeline.maxWidth"] === "none" ? undefined : `${ui["timeline.maxWidth"]}ch`,
+    ],
   ];
 });
 
@@ -188,8 +191,8 @@ export const themesListed = Atom.make((get) => {
   const ui = get(uiInEffect);
 
   return {
-    chosen: { dark: ui.dark, light: ui.light, theme: ui.theme },
-    themes: listedThemes(ui.themes),
+    chosen: { theme: ui.theme, "theme.dark": ui["theme.dark"], "theme.light": ui["theme.light"] },
+    themes: listedThemes(ui["theme.imported"]),
   };
 });
 
@@ -226,7 +229,7 @@ export const chooseTheme = (
   Effect.gen(function* () {
     yield* sharedNow(registry);
 
-    const found = usable(name, registry.get(uiInEffect).themes);
+    const found = usable(name, registry.get(uiInEffect)["theme.imported"]);
 
     if (found._tag === "Invalid") {
       const refused: Outcome = { _tag: "NotDone", message: found.message };
@@ -248,8 +251,8 @@ const themesJson = Schema.encodeSync(Schema.toCodecJson(Themes));
  * @returns What it came to.
  */
 export const changeThemes = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
-  changeWhole(registry, "themes", (read) => {
-    const themes = editThemes(read.options.themes, edit);
+  changeWhole(registry, "theme.imported", (read) => {
+    const themes = editThemes(read.options["theme.imported"], edit);
 
     return themes._tag === "Invalid" ? themes : { _tag: "Parsed", value: themesJson(themes.value) };
   });

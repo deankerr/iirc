@@ -174,11 +174,11 @@ const lines = (container: ParentNode) =>
 const words = (container: ParentNode) => lines(container).map((line) => line.message);
 
 /**
- * A time as the view draws it under the default `ui.time`.
+ * A time as the view draws it under the default `ui.timeline.timeFormat`.
  * @param at - The instant.
  * @returns The time.
  */
-const timeOf = (at: number) => clockFor(uiDefaults.time).format(new Date(at));
+const timeOf = (at: number) => clockFor(uiDefaults["timeline.timeFormat"]).format(new Date(at));
 
 /**
  * The view's banner: the art, as a screen reader names it, and the version under it.

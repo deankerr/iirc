@@ -277,7 +277,7 @@ const uiChangedIn = <E>(events: Stream.Stream<UiEvent, E>, count: number) =>
     Stream.runCollect,
     Effect.map((all) =>
       all.map((event) =>
-        event.event === "changed" ? `${event.id} ${event.data.options.time}` : ""
+        event.event === "changed" ? `${event.id} ${event.data.options["timeline.timeFormat"]}` : ""
       )
     )
   );
@@ -373,7 +373,7 @@ describe("the handlers", () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         const ui = yield* api.ui.set({
-          params: { option: "time" },
+          params: { option: "timeline.timeFormat" },
           payload: { value: "none" },
           query: { ifSequence: 0 },
         });
@@ -418,7 +418,7 @@ describe("the handlers", () => {
         sequence: 3,
       },
       journaled: [
-        { _tag: "UiSet", option: "time", value: "none" },
+        { _tag: "UiSet", option: "timeline.timeFormat", value: "none" },
         { _tag: "OptionSet", option: "uploads.expireAfter", value: 30 },
         { _tag: "OptionUnset", option: "uploads.maxSize" },
       ],
@@ -437,7 +437,11 @@ describe("the handlers", () => {
           1
         );
 
-        yield* api.ui.set({ params: { option: "time" }, payload: { value: "none" }, query: {} });
+        yield* api.ui.set({
+          params: { option: "timeline.timeFormat" },
+          payload: { value: "none" },
+          query: {},
+        });
 
         // After 1, which the header says and wins over the query: only what came later.
         const resumed = yield* Effect.forkChild(
@@ -449,7 +453,7 @@ describe("the handlers", () => {
 
         yield* Effect.yieldNow;
         yield* api.ui.set({
-          params: { option: "time" },
+          params: { option: "timeline.timeFormat" },
           payload: { value: "HH:mm:ss" },
           query: {},
         });

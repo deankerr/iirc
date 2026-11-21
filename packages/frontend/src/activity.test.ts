@@ -850,7 +850,7 @@ const scrolledTo = (state: Timelines, index: number): Timelines => {
     : state;
 };
 
-describe("when a Timeline is marked read, as ui.read says", () => {
+describe("when a Timeline is marked read, as ui.unread.markRead says", () => {
   const unreadIirc = described({
     id: iirc,
     latest: 40,
