@@ -1,14 +1,15 @@
 /*
  * A Message's Previews: under its text, in the text's column, as wide as its text may run,
- * marked by a rule at their start, one row each, a little apart so two images never touch. A row pending is one line, so a Preview
- * that arrives folded moves nothing below it. Nothing in it scrolls sideways. Its media is
- * as tall as `--preview-media-height` at most, which the view sets from the option.
+ * marked by one rule at their start, each a card stacked under the last, far enough apart
+ * that two cards never read as one. A row pending is one line, so a Preview that arrives
+ * folded moves nothing below it. Nothing in it scrolls sideways. Its media is as tall as
+ * `--preview-media-height` at most, which the view sets from the option.
  */
 .previews {
   display: flex;
   grid-column: 3 / 4;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-3);
   min-width: 0;
   max-width: var(--widest-line, none);
   margin: var(--space-1) 0;
@@ -20,62 +21,110 @@
   white-space: normal;
 }
 
-.row,
-.pending,
-.ready,
-.card,
-.media,
-.failed,
-.text {
+/*
+ * One Preview, but a link waiting for a press, which runs as its link does, never wider
+ * than a card is. 34em of the Previews' own text is about seventy
+ * characters, the far end of a comfortable line to read a description in, and a 16 by 9
+ * poster that wide is about as tall as `ui.previews.mediaHeight`'s middle size, so a card's
+ * words and its media end near each other. In a narrower Pane it is the Pane's width.
+ */
+.row {
   min-width: 0;
 }
 
+.row:not(:has(> [data-preview="waiting"])) {
+  max-width: min(34em, 100%);
+}
+
+/* A row whose card holds nothing, as a link that is itself media that failed, takes no room. */
+.row:has(> .card:empty) {
+  display: none;
+}
+
 /*
- * A ready Preview: its text, which takes the room, and a page's thumbnail on the right.
- * Without an image, or once it fails, the text stands alone, as one line.
+ * A card: its words, then its media under them, each only when it has it, in one column
+ * that every part fills and none overflows.
  */
-.ready {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.text {
-  flex: 1 1 0;
-}
-
-/* A card: its text, and the page's image under it. */
 .card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
-}
-
-.card > .text {
-  flex: none;
-  width: 100%;
-}
-
-/* A link that is itself a video or a sound: its text, and the player under it. */
-.media {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
+  min-width: 0;
 }
 
-.media > .text {
-  flex: none;
+/* The host it was read from, its title, and its description, close together. */
+.words {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-/* A sound runs the row, up to a width that stays calm. */
+/* Where a card was read from, when another host than its link's: small and quiet. */
+.host {
+  display: block;
+  overflow: hidden;
+  font-size: 0.86em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The title, two lines at most. */
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* The description, three lines at most until it is pressed open. */
+.description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.description[data-open="true"] {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+}
+
+/* A description that was cut: a press of all of it, which reads as the text it is. */
+.more {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: default;
+}
+
+.more[data-hovered] .description {
+  text-decoration: underline dotted var(--color-muted);
+}
+
+.more[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+/* A sound runs the card's width. */
 .audio {
   display: block;
   width: 100%;
-  max-width: 32em;
 }
 
-/* While pending: a bar a line high, pulsing, standing where the line will be. */
+/* While pending: a bar a line high, pulsing, standing where the card will be. */
 .pending {
   display: flex;
   align-items: center;
@@ -112,8 +161,21 @@
   white-space: nowrap;
 }
 
-/* The site and title on one line, cut to it, which a press opens when there is more. */
-.summary {
+/* A failure: one quiet line of why there is none. */
+/* A failure is one line, cut to it, whose whole reason a hover says. */
+.failed {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Folded, a card is its name on one line, cut to it, which a press opens. */
+.folded {
+  min-width: 0;
+}
+
+.name {
   display: block;
   width: 100%;
   overflow: hidden;
@@ -125,43 +187,16 @@
   text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-button.summary {
   cursor: default;
 }
 
-button.summary[data-hovered] {
+.name[data-hovered] {
   text-decoration: underline dotted var(--color-muted);
 }
 
-button.summary[data-focus-visible] {
+.name[data-focus-visible] {
   outline: var(--border-width) solid var(--color-focus);
   outline-offset: var(--border-width);
-}
-
-/* Opened: the description, wrapped anywhere. React Aria hides it while closed. */
-.description {
-  overflow-wrap: anywhere;
-}
-
-/* A card's summary wraps to two lines at most, and its description to three. */
-.text[data-card="true"] .summary {
-  display: -webkit-box;
-  overflow-wrap: anywhere;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-
-.below {
-  display: -webkit-box;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
 }
 
 /* A Message's Previews folded to one chip, quiet until hovered, which a press opens. */
@@ -184,7 +219,7 @@ button.summary[data-focus-visible] {
   outline-offset: var(--border-width);
 }
 
-/* A failure is the plain link, cut to its line, saying why on hover. */
+/* A link the Daemon holds for a press: the plain link, cut to its line. */
 .plain {
   display: block;
   overflow: hidden;
@@ -240,8 +275,8 @@ a.plain:focus-visible {
 
 /*
  * With no columns, the Previews run the Timeline's width under the words: in a narrow
- * Timeline, and under `ui.timeline.layout` inline or stacked, as the Timeline's `data-line` says. The two rules
- * must stay alike.
+ * Timeline, and under `ui.timeline.layout` inline or stacked, as the Timeline's `data-line`
+ * says. The two rules must stay alike.
  */
 @container (max-width: 36em) {
   .previews {
@@ -254,7 +289,7 @@ a.plain:focus-visible {
 }
 
 @media (pointer: coarse) {
-  button.summary,
+  .name,
   .chip,
   .press {
     min-height: var(--target-size);

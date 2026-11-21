@@ -192,24 +192,19 @@ const Holder = ({
   readonly loaded: boolean;
   readonly reference: (element: HTMLSpanElement | null) => void;
   readonly box: Size | undefined;
-}) =>
-  drawn === "Thumbnail" ? (
-    <span className={styles.thumbnail} data-loaded={loaded} ref={reference}>
-      {children}
-    </span>
-  ) : (
-    <span
-      className={styles.whole}
-      data-loaded={loaded}
-      data-reserved={box !== undefined || undefined}
-      ref={reference}
-      style={
-        box === undefined ? undefined : boxStyle(box, drawn === "Poster" ? undefined : box.width)
-      }
-    >
-      {children}
-    </span>
-  );
+}) => (
+  <span
+    className={styles.whole}
+    data-loaded={loaded}
+    data-reserved={box !== undefined || undefined}
+    ref={reference}
+    style={
+      box === undefined ? undefined : boxStyle(box, drawn === "Poster" ? undefined : box.width)
+    }
+  >
+    {children}
+  </span>
+);
 
 /**
  * The control in the corner of what is drawn, which opens it large.
@@ -362,8 +357,8 @@ const AnimatedImage = ({
 };
 
 /**
- * What a poster draws: the text, and the poster under it in the box its video or player
- * plays in.
+ * What a poster draws: its card's words, and the poster under them in the box its video
+ * or player plays in.
  * @param props - The text, the box's content and shape, whether it is loaded, and how it
  *   is found.
  * @returns The column.

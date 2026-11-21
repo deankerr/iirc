@@ -1,10 +1,11 @@
 /*
- * A player's play button: a small chip with the play glyph, a scrim's quiet beside a summary,
- * and larger on the page's own colour over a poster, where it stands in the middle.
+ * A player's play button: a small chip with the play glyph, a scrim's quiet after a card's
+ * words, and larger on the page's own colour over a poster, where it stands in the middle.
  */
 .place {
   display: inline-flex;
   flex: none;
+  justify-self: start;
 }
 
 .place[data-over="poster"] {

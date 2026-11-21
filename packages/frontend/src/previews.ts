@@ -5,8 +5,8 @@
  * while the stream is followed, since the Daemon fetches on the ask. Whether a Message is
  * asked for, and what it shows, follows its Timeline's own mode: its choice in
  * `ui.previews.timelines`, or else `ui.previews`. A link the Daemon holds for a press is
- * fetched only once the Owner presses it. What each Message shows, the summary line, and a
- * failure's words are derived as it is drawn, never held.
+ * fetched only once the Owner presses it. What each Message shows, each Preview's card, and
+ * a failure's words are derived as it is drawn, never held.
  *
  * @packageDocumentation
  */
@@ -20,7 +20,6 @@ import type {
   PreviewsFolded,
   PreviewsPlayers,
   PreviewsShown,
-  PreviewsStyle,
   TimelineId,
   UiInForce,
 } from "@iirc/api";
@@ -515,7 +514,7 @@ export const pressOf = (
 });
 
 /**
- * A failure's reason, in words, as a hover says it.
+ * A failure's reason, in words, as its one line says it.
  * @param reason - The reason.
  * @returns The words.
  */
@@ -545,33 +544,6 @@ export const reasonWords = (reason: PreviewFailure): string => {
       return reason satisfies never;
     }
   }
-};
-
-/** What a link to media itself is called in its summary. */
-const kindWords = { audio: "sound", image: "image", video: "video" } as const;
-
-/**
- * A ready Preview's summary, its one line: a page's site and title, or the site alone with
- * no title, as a player's is too, and a link to media itself as what it is, its type, and
- * its site. Every part a stranger wrote is contained.
- * @param preview - The Preview.
- * @returns The line.
- */
-export const summaryOf = (preview: Preview): string => {
-  const site = contained(preview.site);
-
-  // A player is its page's summary: what it plays is its title, and where it plays from is
-  // said by its play button.
-  if (preview.kind === "page" || preview.kind === "player") {
-    return preview.title === null ? site : `${site} · ${contained(preview.title)}`;
-  }
-
-  const parts = [kindWords[preview.kind], preview.type, preview.title];
-
-  return [
-    ...parts.flatMap((part) => (part === null || part === "" ? [] : [contained(part)])),
-    site,
-  ].join(" · ");
 };
 
 /**
@@ -607,15 +579,14 @@ export interface Size {
  * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
  * its link; where the Daemon serves it, from its own origin and never the host it came
  * from; whether it moves; its `dimensions` in pixels, when the Daemon read them from its
- * bytes; and how it is drawn, `Thumbnail` beside a page's summary, `Card` under a page's
- * text, `Whole` for a link that is itself the image, or `Poster` for a player's or a
- * video's, which a play button is drawn over.
+ * bytes; and how it is drawn, `Whole`, a page's image or a link that is itself the image,
+ * or `Poster`, a player's or a video's, which a play button is drawn over.
  */
 export interface ImageShown {
   readonly alt: string;
   readonly animated: boolean;
   readonly dimensions: Size | undefined;
-  readonly drawn: "Card" | "Poster" | "Thumbnail" | "Whole";
+  readonly drawn: "Poster" | "Whole";
   readonly src: string;
 }
 
@@ -672,52 +643,14 @@ export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): Pr
   return motion === "Still" ? "Play" : "Stop";
 };
 
-/** How each style draws a page's image, or a sound's: beside its text, under it, or not at all. */
-const besideText: Readonly<Record<PreviewsStyle, ImageShown["drawn"] | undefined>> = {
-  card: "Card",
-  line: undefined,
-  thumbnail: "Thumbnail",
-};
-
 /**
- * How a Preview's image is drawn, by what the Preview is and `ui.previews.style`: a page's
- * or a sound's beside its text, under it as a card, or not at all on its one line.
- * @param kind - The Preview's kind.
- * @param style - `ui.previews.style` on this device.
- * @returns How its image is drawn, or none.
- */
-const drawnOf = (kind: Preview["kind"], style: PreviewsStyle): ImageShown["drawn"] | undefined => {
-  switch (kind) {
-    case "image": {
-      return "Whole";
-    }
-
-    case "player":
-    case "video": {
-      return "Poster";
-    }
-
-    case "page":
-    case "audio": {
-      return besideText[style];
-    }
-
-    default: {
-      return kind satisfies never;
-    }
-  }
-};
-
-/**
- * A ready Preview's image as drawn.
+ * A ready Preview's image as drawn: a player's or a video's as its poster, and any other
+ * whole.
  * @param preview - The Preview.
- * @param style - `ui.previews.style` on this device.
- * @returns The image, or none when the Daemon kept none or the style draws none.
+ * @returns The image, or none when the Daemon kept none.
  */
-const imageOf = (preview: Preview, style: PreviewsStyle): ImageShown | undefined => {
-  const drawn = drawnOf(preview.kind, style);
-
-  return preview.image === null || drawn === undefined
+const imageOf = (preview: Preview): ImageShown | undefined =>
+  preview.image === null
     ? undefined
     : {
         alt: contained(
@@ -725,30 +658,44 @@ const imageOf = (preview: Preview, style: PreviewsStyle): ImageShown | undefined
         ),
         animated: preview.image.animated,
         dimensions: preview.image.dimensions ?? undefined,
-        drawn,
+        drawn: preview.kind === "player" || preview.kind === "video" ? "Poster" : "Whole",
         src: `/api/previews/images/${preview.image.hash}`,
       };
+
+/**
+ * What a stranger wrote for a part of a card, contained, or none when they wrote nothing.
+ * @param text - What they wrote.
+ * @returns It, or none.
+ */
+const wordsOf = (text: string | null): string | undefined =>
+  text === null || text.trim() === "" ? undefined : contained(text);
+
+/**
+ * A host as a card compares it: lower case, without a leading `www.`.
+ * @param link - A link.
+ * @returns Its host, or none when it cannot be read.
+ */
+const hostCompared = (link: string): string | undefined => {
+  const host = URL.parse(link)?.hostname.toLowerCase();
+
+  return host === undefined || host === "" ? undefined : host.replace(/^www\./u, "");
 };
 
 /**
- * A page's description, as drawn: `Pressed`, behind a press of its summary, beside a
- * thumbnail; or `Below`, always under its summary, cut to a few lines, as a card is.
+ * The host a Preview was read from, when it is another than its Message's link's, so a
+ * link that led elsewhere, as a shortened one does, says where. A leading `www.` is no
+ * other host.
+ * @param address - The link as its Message holds it.
+ * @param read - The link the Preview was read from, after any redirects.
+ * @returns The host it was read from, contained, or none when it is the same, or either
+ *   cannot be read.
  */
-export interface DescriptionShown {
-  readonly drawn: "Below" | "Pressed";
-  readonly text: string;
-}
+export const hostNamed = (address: string, read: string): string | undefined => {
+  const said = hostCompared(address);
+  const from = hostCompared(read);
 
-/**
- * A ready Preview's description as drawn: none on its one line, or when it has none.
- * @param preview - The Preview.
- * @param style - `ui.previews.style` on this device.
- * @returns The description, or none.
- */
-const descriptionOf = (preview: Preview, style: PreviewsStyle): DescriptionShown | undefined =>
-  preview.description === null || preview.description === "" || style === "line"
-    ? undefined
-    : { drawn: style === "card" ? "Below" : "Pressed", text: contained(preview.description) };
+  return said === undefined || from === undefined || said === from ? undefined : contained(from);
+};
 
 /**
  * A video or a sound, a link that is itself one or a page that names a video file, as drawn: which, where the Daemon streams it
@@ -873,35 +820,41 @@ const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
 };
 
 /**
+ * A ready Preview as its card draws it, in this order, each part only when it has it: the
+ * host it was read from when another than its link's; its `title`; its `description`; and
+ * its media, an image, a video or a sound, or a player. A page, and a page that names a
+ * video file or a listed player, is its title and description, with its image, or its
+ * poster, under them. A link that is itself an image, a video, or a sound is its media
+ * alone. The site's name is never drawn, since the link stands right above. Under `text`, a
+ * card is its words alone. `name` is what the card is called: its title, or else its link.
+ */
+export interface CardShown {
+  readonly _tag: "Ready";
+  readonly key: string;
+  readonly link: LinkShown;
+  readonly name: string;
+  readonly host: string | undefined;
+  readonly title: string | undefined;
+  readonly description: string | undefined;
+  readonly image: ImageShown | undefined;
+  readonly media: MediaShown | undefined;
+  readonly player: PlayerShown | undefined;
+}
+
+/**
  * One Preview, as drawn:
  *
- * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
- * - `Ready`: its summary, with its description when it has one, its image when the
- *   Daemon kept one, for a video or a sound, its media, and for a player, where it plays
- *   from. A video's image is its poster. Images, media, and players are shown only under
- *   `on`. `ui.previews.style` decides how a page's description and image are drawn.
- * - `Plain`: the plain link, with why there is no Preview, when it failed.
+ * - `Pending`: a placeholder in its card's place, while it is fetched or before it is
+ *   asked for.
+ * - `Ready`: its card.
+ * - `Failed`: one line of why there is none, and never the link again.
  * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
  *   Message's links, as the Daemon holds it until the Owner presses.
  */
 export type PreviewShown =
   | { readonly _tag: "Pending"; readonly key: string; readonly link: LinkShown }
-  | {
-      readonly _tag: "Ready";
-      readonly key: string;
-      readonly link: LinkShown;
-      readonly summary: string;
-      readonly description: DescriptionShown | undefined;
-      readonly image: ImageShown | undefined;
-      readonly media: MediaShown | undefined;
-      readonly player: PlayerShown | undefined;
-    }
-  | {
-      readonly _tag: "Plain";
-      readonly key: string;
-      readonly link: LinkShown;
-      readonly reason: string | undefined;
-    }
+  | CardShown
+  | { readonly _tag: "Failed"; readonly key: string; readonly reason: string }
   | {
       readonly _tag: "Waiting";
       readonly key: string;
@@ -910,55 +863,92 @@ export type PreviewShown =
     };
 
 /**
+ * A ready Preview's card.
+ * @param preview - The Preview, as the hosts listed now allow.
+ * @param id - Its id.
+ * @param address - The link as its Message holds it.
+ * @param key - Its key among its Message's.
+ * @param on - Whether Previews are `on`, as media is shown only then.
+ * @param timeline - The Message's Timeline.
+ * @param position - Its place there.
+ * @returns The card, or none when it would hold nothing.
+ */
+const cardOf = (
+  preview: Preview,
+  id: PreviewId,
+  address: string,
+  key: string,
+  on: boolean,
+  timeline: TimelineId,
+  position: Position
+): CardShown | undefined => {
+  const link = linkShown(address);
+  // Only a page has words: the Daemon gives a link that is itself media neither.
+  const title = wordsOf(preview.title);
+  const description = wordsOf(preview.description);
+  const image = on ? imageOf(preview) : undefined;
+  const media = on ? mediaOf(preview, id, timeline, position) : undefined;
+  const player = on ? playerOf(preview) : undefined;
+
+  // The host it was read from says nothing on its own.
+  if ([title, description, image, media, player].every((part) => part === undefined)) {
+    return undefined;
+  }
+
+  return {
+    _tag: "Ready",
+    description,
+    host: hostNamed(address, preview.link),
+    image,
+    key,
+    link,
+    media,
+    name: title ?? link.text,
+    player,
+    title,
+  };
+};
+
+/**
  * An item as drawn, under the link its Message holds, which may differ from the item's
  * by a fragment the id leaves out.
  * @param item - The item.
  * @param address - The link as the Message holds it.
  * @param index - Which of its Message's links it is.
- * @param on - Whether Previews are `on`, as images and media are shown only then.
- * @param drawing - The hosts `ui.previews.players` lists now, and `ui.previews.style`.
+ * @param on - Whether Previews are `on`, as media is shown only then.
+ * @param players - The hosts `ui.previews.players` lists now.
  * @param timeline - The Message's Timeline.
  * @param position - Its place there.
- * @returns It.
+ * @returns It, or none for a ready one whose card would hold nothing.
  */
 const itemShown = (
   item: PreviewItem,
   address: string,
   index: number,
   on: boolean,
-  drawing: PreviewsDrawing,
+  players: PreviewsPlayers,
   timeline: TimelineId,
   position: Position
-): PreviewShown => {
-  const link = linkShown(address);
+): PreviewShown | undefined => {
   const key = String(index);
 
   switch (item.state._tag) {
     case "Pending": {
-      return { _tag: "Pending", key, link };
+      return { _tag: "Pending", key, link: linkShown(address) };
     }
 
     case "Ready": {
-      const preview = listedNow(item.state.preview, drawing.players);
+      const preview = listedNow(item.state.preview, players);
 
-      return {
-        _tag: "Ready",
-        description: descriptionOf(preview, drawing.style),
-        image: on ? imageOf(preview, drawing.style) : undefined,
-        key,
-        link,
-        media: on ? mediaOf(preview, item.id, timeline, position) : undefined,
-        player: on ? playerOf(preview) : undefined,
-        summary: summaryOf(preview),
-      };
+      return cardOf(preview, item.id, address, key, on, timeline, position);
     }
 
     case "Failed": {
-      return { _tag: "Plain", key, link, reason: reasonWords(item.state.reason) };
+      return { _tag: "Failed", key, reason: reasonWords(item.state.reason) };
     }
 
     case "WaitingForPress": {
-      return { _tag: "Waiting", index, key, link };
+      return { _tag: "Waiting", index, key, link: linkShown(address) };
     }
 
     default: {
@@ -996,23 +986,17 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
   return asksFor(mode) && text !== undefined && previewableLinksOf(text).length > 0;
 };
 
-/** What decides how a Preview is drawn: the hosts `ui.previews.players` lists now, and `ui.previews.style` on this device. */
-export interface PreviewsDrawing {
-  readonly players: PreviewsPlayers;
-  readonly style: PreviewsStyle;
-}
-
 /**
  * What a Message shows below it: nothing while its Timeline's mode does not ask, or for a Message
  * with no link that may be previewed, or one the Daemon refused; the items the Daemon
- * answered with, as each is now; and before then, a placeholder for each link, so the
- * Message's height is the same once it is answered.
+ * answered with, as each is now, but a card that would hold nothing; and before then, a
+ * placeholder for each link.
  * @param state - The state.
  * @param mode - Its Timeline's mode, once known.
  * @param timeline - The Message's Timeline.
  * @param position - Its place.
  * @param content - What it holds.
- * @param drawing - The hosts `ui.previews.players` lists now, and `ui.previews.style`.
+ * @param players - The hosts `ui.previews.players` lists now.
  * @returns Its Previews, in its order.
  */
 export const previewsOf = (
@@ -1021,7 +1005,7 @@ export const previewsOf = (
   timeline: TimelineId,
   position: Position,
   content: ItemContent,
-  drawing: PreviewsDrawing
+  players: PreviewsPlayers
 ): readonly PreviewShown[] => {
   const text = messageText(content);
 
@@ -1043,19 +1027,20 @@ export const previewsOf = (
     return held.ids.flatMap((id, index) => {
       const item = state.items.get(id);
 
-      return item === undefined
-        ? []
-        : [
-            itemShown(
+      const shown =
+        item === undefined
+          ? undefined
+          : itemShown(
               item.item,
               found[index]?.href ?? item.item.link,
               index,
               mode === "on",
-              drawing,
+              players,
               timeline,
               position
-            ),
-          ];
+            );
+
+      return shown === undefined ? [] : [shown];
     });
   }
 
@@ -1067,11 +1052,10 @@ export const previewsOf = (
 };
 
 /**
- * How one Preview stands under `ui.previews.folded`: `Folded`, its summary line alone,
- * which a press opens; `Opened`, pressed open from that, its description shown; or `Open`,
- * drawn as its style draws it.
+ * How one Preview stands under `ui.previews.folded`: `Folded`, its card's name alone, its
+ * title or else its link, which a press opens; or `Open`, its whole card.
  */
-export type Fold = "Folded" | "Open" | "Opened";
+export type Fold = "Folded" | "Open";
 
 /** One Preview as a Message draws it, and how it stands folded. */
 export interface PreviewRow {
@@ -1097,8 +1081,8 @@ export type PreviewsFolding =
 const openedKey = (key: string, shown: PreviewShown): string => `${key} ${shown.key}`;
 
 /**
- * Whether a Preview shows more than its summary line, so folding it hides something: a
- * ready one with a description, an image, media, or a player, as its style draws it.
+ * Whether a Preview's card shows more than its title, so folding it hides something: a
+ * ready one with a description, an image, media, or a player.
  * @param shown - The Preview.
  * @returns Whether it does.
  */
@@ -1111,10 +1095,10 @@ const showsMore = (shown: PreviewShown): boolean =>
 
 /**
  * A Message's Previews as `ui.previews.folded` draws them. Under `open`, each is open.
- * Under `summary`, each that shows more than its summary line is folded to it until it is
- * pressed open, and any other, pending, failed, waiting for a press, or with nothing more,
+ * Under `summary`, each whose card shows more than its title is folded to its name until it
+ * is pressed open, and any other, pending, failed, waiting for a press, or a title alone,
  * is drawn as it is. Under `chip`, they are one `[+n]` until it is pressed, which opens
- * them all, each that shows more `Opened`, as a summary pressed is.
+ * them all.
  * @param folded - `ui.previews.folded` on this device.
  * @param opened - The Previews pressed open, as {@link opening} keeps them.
  * @param key - The Message's key.
@@ -1137,22 +1121,17 @@ export const foldedOf = (
     case "summary": {
       return {
         _tag: "Rows",
-        rows: shown.map((one) => {
-          if (!showsMore(one)) {
-            return open(one);
-          }
-
-          return { fold: opened.has(openedKey(key, one)) ? "Opened" : "Folded", shown: one };
-        }),
+        rows: shown.map((one) =>
+          showsMore(one) && !opened.has(openedKey(key, one))
+            ? { fold: "Folded", shown: one }
+            : open(one)
+        ),
       };
     }
 
     case "chip": {
       return shown.every((one) => opened.has(openedKey(key, one)))
-        ? {
-            _tag: "Rows",
-            rows: shown.map((one) => (showsMore(one) ? { fold: "Opened", shown: one } : open(one))),
-          }
+        ? { _tag: "Rows", rows: shown.map(open) }
         : { _tag: "Chip", count: shown.length };
     }
 
@@ -1164,7 +1143,7 @@ export const foldedOf = (
 
 /**
  * The Previews pressed open, with some of one Message's opened too: one, as a folded
- * summary is pressed, or all of them, as a chip is.
+ * card is pressed, or all of them, as a chip is.
  * @param opened - The Previews pressed open before.
  * @param key - The Message's key.
  * @param shown - Its Previews pressed open.

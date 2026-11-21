@@ -136,8 +136,11 @@ const readyWithImage = (
     _tag: "Ready",
     preview: {
       ...ready.preview,
+      // The Daemon gives a link that is itself an image no words.
+      description: kind === "image" ? null : ready.preview.description,
       image: { animated, dimensions, hash, size: 1234, type: imageType },
       kind,
+      title: kind === "image" ? null : ready.preview.title,
       type: kind === "image" ? imageType : null,
     },
   } as const;
@@ -153,6 +156,7 @@ const readyMedia = (kind: "video" | "audio") =>
     _tag: "Ready",
     preview: {
       ...ready.preview,
+      description: null,
       kind,
       stream: ready.preview.link,
       title: null,
@@ -317,8 +321,8 @@ const layOut = () => {
   });
 };
 
-/** How rich a Preview looks: `ui.previews.style`, `folded`, and `mediaHeight`. */
-type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight" | "previews.style">>;
+/** How a card is folded and how tall its media is: `ui.previews.folded` and `mediaHeight`. */
+type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight">>;
 
 /**
  * The Frontend signed in, with `ui.previews` as given and `#iirc` open, holding a Message
@@ -327,8 +331,8 @@ type Look = Partial<Pick<UiOptions, "previews.folded" | "previews.mediaHeight" |
  * @param answer - What the Daemon answers for the Message, as it stands then.
  * @param timelines - `ui.previews.timelines`, none unless given.
  * @param animate - `ui.previews.animate`, shared, off unless given.
- * @param also - How rich a Preview looks, shared, `open` unless given so each is drawn
- *   whole, and a second link's answer, which the Message then holds after the first.
+ * @param also - How a card is folded and sized, shared, `open` unless given so each is
+ *   drawn whole, and a second link's answer, which the Message then holds after the first.
  * @returns The fake, the registry, and the page.
  */
 const opened = async (
@@ -433,10 +437,45 @@ const drawn = () =>
 const mediaHeight = () => list()?.style.getPropertyValue("--preview-media-height");
 
 /**
- * The summary line of the Message's first Preview, without the description under it.
+ * One of the Message's Previews, as drawn.
+ * @param index - Which, the first unless given.
+ * @returns It, or none.
+ */
+const card = (index = 0) => list()?.querySelectorAll<HTMLElement>("[data-preview]")[index];
+
+/**
+ * The press of a card's description that was cut, if it was.
+ * @returns It, or none.
+ */
+const more = () =>
+  card()?.firstElementChild?.querySelector<HTMLButtonElement>("[aria-expanded]") ?? null;
+
+/**
+ * The press of a card's description that says it is about cats, never the control that
+ * opens a poster large.
+ * @returns It, or none.
+ */
+const catsDescription = () =>
+  [...(list()?.querySelectorAll<HTMLButtonElement>("[aria-expanded]") ?? [])].find(
+    (one) => one.textContent === "A page about cats."
+  ) ?? null;
+
+/**
+ * What a card says, its words and its media's together.
  * @returns Its text.
  */
-const summaryLine = () => list()?.querySelector("button")?.textContent;
+const cardText = () => card()?.textContent;
+
+/**
+ * A card's words, each part as its text, in the order drawn.
+ * @returns Them, none when it has no words.
+ */
+const words = () => {
+  const first = card()?.firstElementChild;
+  const parts = first?.querySelector("[data-loaded], video, audio") === null ? first : undefined;
+
+  return [...(parts?.children ?? [])].map((part) => part.textContent);
+};
 
 /**
  * Waits for the Message's image to be drawn, and says it came into view, as a browser
@@ -732,60 +771,50 @@ describe("a Message's Previews", () => {
     expect(daemon.previewAsks).toStrictEqual([{ position: cursor(2), timeline: iirc }]);
   });
 
-  it("shows a pending Preview ready once the stream says so, and opens its description on a press", async () => {
+  it("draws a pending Preview as a placeholder, and its card once the stream says so, under text its words alone", async () => {
     const { daemon, sendPreview } = await opened("text");
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
     await settled(() => daemon.previewAsks.length === 1);
 
+    const pending = drawn();
+
     await act(async () => {
-      sendPreview(catsItem(ready));
+      sendPreview(catsItem(readyWithImage("page")));
       await Promise.resolve();
     });
     await settled(() => drawn()[0]?.state === "ready");
-
-    const summary = list()?.querySelector<HTMLButtonElement>("button");
+    await scrolledIntoView();
 
     expect({
-      expanded: summary?.getAttribute("aria-expanded"),
-      text: summary?.textContent,
-    }).toStrictEqual({ expanded: "false", text: "example.com · Cats" });
-
-    await act(async () => {
-      summary?.click();
-      await Promise.resolve();
+      media: list()?.querySelectorAll("[data-loaded], img, canvas, video, audio").length,
+      pending,
+      words: words(),
+    }).toStrictEqual({
+      media: 0,
+      pending: [{ state: "pending", text: "Previewing https://example.com/cats" }],
+      words: ["Cats", "A page about cats."],
     });
-
-    expect({
-      description: list()?.textContent?.includes("A page about cats."),
-      expanded: summary?.getAttribute("aria-expanded"),
-    }).toStrictEqual({ description: true, expanded: "true" });
   });
 
-  it("shows a failure as the plain link, saying why on hover", async () => {
+  it("draws a failure as one line of why, and never the link again", async () => {
     const { daemon } = await opened("text", catsItem({ _tag: "Failed", reason: "Unreachable" }));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
     await settled(() => drawn()[0]?.state === "failed");
 
-    const link = list()?.querySelector<HTMLAnchorElement>("a");
-
     expect({
-      href: link?.getAttribute("href"),
-      rel: link?.getAttribute("rel"),
-      text: link?.textContent,
-      title: link?.getAttribute("title"),
+      drawn: drawn(),
+      links: list()?.querySelectorAll("a").length,
     }).toStrictEqual({
-      href: "https://example.com/cats",
-      rel: "noopener noreferrer",
-      text: "https://example.com/cats",
-      title: "No preview: the Daemon could not reach this link.",
+      drawn: [{ state: "failed", text: "No preview: the Daemon could not reach this link." }],
+      links: 0,
     });
   });
 
-  it("shows a page's image as a thumbnail from the images route, beside its summary", async () => {
+  it("draws a page as its title, its description, and its image under them, from the images route, and never its site's name", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("page")));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -799,22 +828,107 @@ describe("a Message's Previews", () => {
       alt: image?.getAttribute("alt"),
       decoding: image?.getAttribute("decoding"),
       drawn: image?.dataset.drawn,
+      last: card()?.lastElementChild?.contains(image ?? null),
       loading: image?.getAttribute("loading"),
+      // A description that fits is no press.
+      pressable: card()?.firstElementChild?.querySelector("[aria-expanded]"),
       referrerPolicy: image?.getAttribute("referrerpolicy"),
       src: image?.getAttribute("src"),
-      text: summaryLine(),
+      text: cardText(),
+      words: words(),
     }).toStrictEqual({
       alt: "Cats",
       decoding: "async",
-      drawn: "thumbnail",
+      drawn: "whole",
+      last: true,
       loading: "lazy",
+      pressable: null,
       referrerPolicy: "no-referrer",
       src: `/api/previews/images/${hash}`,
-      text: "example.com · Cats",
+      text: "CatsA page about cats.",
+      words: ["Cats", "A page about cats."],
     });
   });
 
-  it("shows a link that is itself an image as the image", async () => {
+  it("names the host a page was read from above its title, when another than its link's", async () => {
+    const { daemon } = await opened(
+      "text",
+      catsItem({ ...ready, preview: { ...ready.preview, link: "https://www.cats.example.org/c" } })
+    );
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect(words()).toStrictEqual(["cats.example.org", "Cats", "A page about cats."]);
+  });
+
+  it("shows all of a description that was cut on a press, and cuts it again on another", async () => {
+    // Laid out, the description runs past the lines it is cut to.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.localName === "bdi" ? 60 : 0;
+      },
+    });
+    restores.push(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    });
+
+    const { daemon } = await opened("text", catsItem(ready));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => more() !== null);
+
+    const cut = { expanded: more()?.getAttribute("aria-expanded"), text: more()?.textContent };
+
+    await pressed(more());
+
+    const open = more()?.getAttribute("aria-expanded");
+
+    await pressed(more());
+
+    expect({ again: more()?.getAttribute("aria-expanded"), cut, open }).toStrictEqual({
+      again: "false",
+      cut: { expanded: "false", text: "A page about cats." },
+      open: "true",
+    });
+  });
+
+  it("keeps a description shown whole once play swaps its poster for the video", async () => {
+    // Laid out, the description runs past the lines it is cut to.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.localName === "bdi" ? 60 : 0;
+      },
+    });
+    restores.push(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    });
+
+    const video = readyVideoPage();
+
+    const described = {
+      ...video,
+      preview: { ...video.preview, description: "A page about cats." },
+    };
+
+    const { daemon } = await opened("on", catsItem(described));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await imageSeen();
+    await settled(() => catsDescription() !== null && imageButton("Play A cat") !== null);
+    await pressed(catsDescription());
+    await pressed(imageButton("Play A cat"));
+    await settled(() => list()?.querySelector("video") !== null);
+
+    expect(catsDescription()?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("draws a link that is itself an image as the image alone, with no words", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("image")));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -829,7 +943,13 @@ describe("a Message's Previews", () => {
       alt: image?.getAttribute("alt"),
       drawn: image?.dataset.drawn,
       src: image?.getAttribute("src"),
-    }).toStrictEqual({ alt: "Cats", drawn: "whole", src: `/api/previews/images/${hash}` });
+      text: cardText(),
+    }).toStrictEqual({
+      alt: "https://example.com/cats",
+      drawn: "whole",
+      src: `/api/previews/images/${hash}`,
+      text: "",
+    });
   });
 
   it("draws a link that is itself a video as a player that fetches nothing until pressed", async () => {
@@ -849,16 +969,16 @@ describe("a Message's Previews", () => {
       label: video?.getAttribute("aria-label"),
       preload: video?.getAttribute("preload"),
       src: video?.getAttribute("src"),
-      text: summaryLine(),
+      words: card()?.querySelectorAll("bdi").length,
     }).toStrictEqual({
       audio: null,
       autoplay: false,
       controls: true,
       kind: "video",
-      label: "Play video · video/mp4 · example.com",
+      label: "Play https://example.com/cats",
       preload: "none",
       src: streamOfCats,
-      text: "video · video/mp4 · example.com",
+      words: 0,
     });
   });
 
@@ -876,17 +996,19 @@ describe("a Message's Previews", () => {
       kind: audio?.dataset.previewMedia,
       preload: audio?.getAttribute("preload"),
       src: audio?.getAttribute("src"),
+      text: cardText(),
       video: list()?.querySelector("video"),
     }).toStrictEqual({
       controls: true,
       kind: "audio",
       preload: "none",
       src: streamOfCats,
+      text: "",
       video: null,
     });
   });
 
-  it("falls back to the text alone when a player fails to load", async () => {
+  it("draws nothing of a link that is itself a video once it fails to play", async () => {
     const { daemon } = await opened("on", catsItem(readyMedia("video")));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -898,15 +1020,14 @@ describe("a Message's Previews", () => {
       await Promise.resolve();
     });
 
-    expect({
-      state: drawn()[0]?.state,
-      text: summaryLine(),
-      video: list()?.querySelector("video"),
-    }).toStrictEqual({ state: "ready", text: "video · video/mp4 · example.com", video: null });
+    expect({ drawn: drawn(), video: list()?.querySelector("video") }).toStrictEqual({
+      drawn: [{ state: "ready", text: "" }],
+      video: null,
+    });
   });
 
   describe("a page's video", () => {
-    const name = "video · video/mp4 · A cat · example.com";
+    const name = "A cat";
 
     const play = () => imageButton(`Play ${name}`);
     const enlarge = () => imageButton(`Open ${name} large`);
@@ -925,6 +1046,8 @@ describe("a Message's Previews", () => {
               : []
           )
         ),
+        // The poster is under the title.
+        order: [...(card()?.querySelectorAll("bdi, img") ?? [])].map((one) => one.localName),
         poster: list()?.querySelector("img")?.getAttribute("src"),
         press: play()?.disabled,
         title: play()?.closest("[title]"),
@@ -932,6 +1055,7 @@ describe("a Message's Previews", () => {
       }).toStrictEqual({
         fetches: [],
         holding: [],
+        order: ["bdi", "img"],
         poster: `/api/previews/images/${hash}`,
         press: false,
         title: null,
@@ -1047,7 +1171,7 @@ describe("a Message's Previews", () => {
       const video = list()?.querySelector("video");
 
       expect({
-        enlarge: imageButton("Open video · video/mp4 · A cat · example.com large") !== null,
+        enlarge: imageButton(`Open ${name} large`) !== null,
         preload: video?.getAttribute("preload"),
         src: video?.getAttribute("src"),
       }).toStrictEqual({ enlarge: true, preload: "none", src: streamOfCats });
@@ -1103,7 +1227,7 @@ describe("a Message's Previews", () => {
       await scrolledIntoView();
       await settled(() => list()?.querySelector("video") !== null);
 
-      const label = "Open video · video/mp4 · example.com large";
+      const label = "Open https://example.com/cats large";
 
       await pressed(imageButton(label));
       await settled(() => larger() !== null);
@@ -1147,7 +1271,7 @@ describe("a Message's Previews", () => {
         drawn: "poster",
         hover: `plays from ${playerHost}`,
         src: `/api/previews/images/${hash}`,
-        text: "example.com · A song▶",
+        text: "youtube.comA song▶",
       });
     });
 
@@ -1185,7 +1309,7 @@ describe("a Message's Previews", () => {
         frames: [frame],
         poster: false,
         press: false,
-        text: "example.com · A song",
+        text: "youtube.comA song",
       });
     });
 
@@ -1234,7 +1358,7 @@ describe("a Message's Previews", () => {
       expect({
         button: playButton()?.closest("[title]")?.getAttribute("title"),
         image: list()?.querySelector("img"),
-        text: list()?.textContent?.includes("example.com · A song"),
+        text: list()?.textContent?.includes("A song"),
       }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
     });
 
@@ -1249,7 +1373,7 @@ describe("a Message's Previews", () => {
       expect({
         button: playButton()?.closest("[title]")?.getAttribute("title"),
         image: list()?.querySelector("img"),
-        text: list()?.textContent?.includes("example.com · A song"),
+        text: list()?.textContent?.includes("A song"),
       }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
     });
 
@@ -1277,7 +1401,7 @@ describe("a Message's Previews", () => {
     });
   });
 
-  it("falls back to the text row, summary and all, when a link that is an image fails to load", async () => {
+  it("draws nothing of a link that is itself an image once it fails to load", async () => {
     const { daemon } = await opened("on", catsItem(readyWithImage("image")));
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
@@ -1291,14 +1415,29 @@ describe("a Message's Previews", () => {
       await Promise.resolve();
     });
 
-    expect({
-      image: list()?.querySelector("img"),
-      state: drawn()[0]?.state,
-      text: summaryLine(),
-    }).toStrictEqual({
+    expect({ drawn: drawn(), image: list()?.querySelector("img") }).toStrictEqual({
+      drawn: [{ state: "ready", text: "" }],
       image: null,
-      state: "ready",
-      text: "image · image/png · Cats · example.com",
+    });
+  });
+
+  it("leaves a page's words when its image fails to load", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("img") !== null);
+
+    await act(async () => {
+      list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+      await Promise.resolve();
+    });
+
+    expect({ image: list()?.querySelector("img"), text: cardText() }).toStrictEqual({
+      image: null,
+      text: "CatsA page about cats.",
     });
   });
 
@@ -1326,12 +1465,12 @@ describe("a Message's Previews", () => {
     expect({
       label: press?.getAttribute("aria-label"),
       presses: daemon.presses,
-      text: summaryLine(),
+      text: cardText(),
       waiting,
     }).toStrictEqual({
       label: "Show a preview of https://example.com/cats",
       presses: [{ link: 0, position: cursor(2), timeline: iirc }],
-      text: "example.com · Cats",
+      text: "CatsA page about cats.",
       waiting: {
         drawn: [{ state: "waiting", text: "https://example.com/catsshow preview" }],
         presses: [],
@@ -1398,7 +1537,7 @@ describe("a Message's Previews", () => {
 
       const poster = boxOf(list()?.querySelector("[data-loaded]"));
 
-      await pressed(imageButton("Play video · video/mp4 · A cat · example.com"));
+      await pressed(imageButton("Play A cat"));
 
       expect({ poster, video: boxOf(list()?.querySelector("video")?.parentElement) }).toStrictEqual(
         {
@@ -1464,9 +1603,9 @@ describe("a Message's Previews", () => {
     await scrolledIntoView();
     await settled(() => drawn()[0]?.state === "ready");
     await imageSeen();
-    await settled(() => imageButton("Open Cats large") !== null);
+    await settled(() => imageButton("Open https://example.com/cats large") !== null);
 
-    const button = imageButton("Open Cats large");
+    const button = imageButton("Open https://example.com/cats large");
 
     await pressed(button);
     await settled(() => larger() !== null);
@@ -1496,7 +1635,7 @@ describe("a Message's Previews", () => {
     expect(open).toStrictEqual({
       href: "https://example.com/cats",
       image: `/api/previews/images/${hash}`,
-      name: "Cats",
+      name: "https://example.com/cats",
       outside: true,
       rel: "noopener noreferrer",
       target: "_blank",
@@ -1547,16 +1686,16 @@ describe("a Message's Previews", () => {
     const still = { ...animated(), draws: [...draws], fetches: fetches() };
     const canvas = list()?.querySelector("canvas");
 
-    await pressed(imageButton("Play Cats"));
+    await pressed(imageButton("Play https://example.com/cats"));
     await settled(() => list()?.querySelector("img") !== null);
 
     const playing = {
       ...animated(),
       fetches: fetches(),
-      stop: imageButton("Stop Cats") !== null,
+      stop: imageButton("Stop https://example.com/cats") !== null,
     };
 
-    await pressed(imageButton("Stop Cats"));
+    await pressed(imageButton("Stop https://example.com/cats"));
     await settled(() => list()?.querySelector("canvas") !== null);
 
     expect({
@@ -1659,7 +1798,7 @@ describe("a Message's Previews", () => {
 
     const still = animated();
 
-    await pressed(imageButton("Play Cats"));
+    await pressed(imageButton("Play https://example.com/cats"));
     await settled(() => list()?.querySelector("img") !== null);
 
     expect({ playing: animated(), still }).toStrictEqual({
@@ -1686,15 +1825,16 @@ describe("a Message's Previews", () => {
     expect({
       image: list()?.querySelectorAll("img, canvas").length,
       state: drawn()[0]?.state,
-      text: summaryLine(),
-    }).toStrictEqual({ image: 0, state: "ready", text: "example.com · Cats" });
+      text: cardText(),
+    }).toStrictEqual({ image: 0, state: "ready", text: "CatsA page about cats." });
   });
 
-  describe("how rich a Preview looks", () => {
+  describe("how cards are stacked, folded, and sized", () => {
     /**
-     * The Frontend with the Message's Preview answered as given and seen, under a look.
+     * The Frontend with the Message's Preview answered as given and seen, folded and sized
+     * as given.
      * @param answer - The Preview's state.
-     * @param look - The look, shared.
+     * @param look - How cards are folded and sized, shared.
      * @param dogs - A second link's answer, if the Message holds one.
      * @returns The fake.
      */
@@ -1718,26 +1858,26 @@ describe("a Message's Previews", () => {
       link: "https://example.com/dogs",
     } as const;
 
-    it("draws a page as a card, its description shown and its image under its text", async () => {
-      await seenWith(readyWithImage("page"), { "previews.style": "card" });
-      await settled(() => drawn()[0]?.state === "ready");
+    it("stacks a Message's cards in its order under one list", async () => {
+      await seenWith(ready, {}, dogsItem);
+      await settled(() => drawn().length === 2 && drawn().every((one) => one.state === "ready"));
       await imageSeen();
       await settled(() => list()?.querySelector("img") !== null);
 
-      const row = list()?.querySelector<HTMLElement>('[data-preview="ready"]');
-
       expect({
-        drawn: list()?.querySelector("img")?.dataset.drawn,
-        last: row?.querySelector<HTMLElement>(":scope > :last-child")?.dataset.loaded !== undefined,
-        text: row?.firstElementChild?.textContent,
+        alt: card(1)?.querySelector("img")?.getAttribute("alt"),
+        lists: document.querySelectorAll('ul[aria-label="Previews"]').length,
+        rows: list()?.querySelectorAll(":scope > li").length,
+        texts: drawn().map((one) => one.text),
       }).toStrictEqual({
-        drawn: "card",
-        last: true,
-        text: "example.com · CatsA page about cats.",
+        alt: "https://example.com/cats",
+        lists: 1,
+        rows: 2,
+        texts: ["CatsA page about cats.", ""],
       });
     });
 
-    it("folds a ready Preview with more to show to its summary line, which a press opens", async () => {
+    it("folds a ready Preview with more to show to its title, which a press opens", async () => {
       await seenWith(readyWithImage("page"), { "previews.folded": "summary" });
       await settled(() => drawn()[0]?.state === "folded");
 
@@ -1753,7 +1893,7 @@ describe("a Message's Previews", () => {
           image: list()?.querySelector("[data-loaded]") !== null,
         },
       }).toStrictEqual({
-        folded: { drawn: [{ state: "folded", text: "example.com · Cats" }], image: null },
+        folded: { drawn: [{ state: "folded", text: "Cats" }], image: null },
         opened: { description: true, image: true },
       });
     });
@@ -1768,7 +1908,7 @@ describe("a Message's Previews", () => {
       expect(drawn().map((one) => one.state)).toStrictEqual(["ready", "folded"]);
     });
 
-    it("folds a Message's Previews into one chip under chip, which a press opens, all of them, descriptions shown", async () => {
+    it("folds a Message's Previews into one chip under chip, which a press opens, all of them", async () => {
       await seenWith(readyWithImage("page"), { "previews.folded": "chip" }, dogsItem);
       await settled(() => drawn()[0]?.state === "chip");
 
@@ -1777,13 +1917,8 @@ describe("a Message's Previews", () => {
       await pressed(list()?.querySelector("button") ?? null);
       await settled(() => drawn().length === 2);
 
-      const expanded = [...(list()?.querySelectorAll('[slot="trigger"]') ?? [])].map((one) =>
-        one.getAttribute("aria-expanded")
-      );
-
-      expect({ chip, expanded, opened: drawn().map((one) => one.state) }).toStrictEqual({
+      expect({ chip, opened: drawn().map((one) => one.state) }).toStrictEqual({
         chip: [{ state: "chip", text: "[+2]" }],
-        expanded: ["true"],
         opened: ["ready", "ready"],
       });
     });

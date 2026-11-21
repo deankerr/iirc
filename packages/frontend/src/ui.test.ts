@@ -28,7 +28,6 @@ const shared = {
     "previews.folded": "summary",
     "previews.mediaHeight": "medium",
     "previews.players": ["player.vimeo.com"],
-    "previews.style": "thumbnail",
     "previews.timelines": {},
     "sidebar.networks": [],
     "sidebar.order": [],
@@ -108,6 +107,15 @@ describe("a device's overrides", () => {
       widths: { "font.size": 20, "timeline.maxWidth": "none" },
       widthsOut: { "font.size": 20 },
       widthsSet: { "timeline.maxWidth": 72 },
+    });
+  });
+
+  it("drop one kept under ui.previews.style, which is gone, and keep every other", () => {
+    const device = deviceUiOf('{"previews.style":"card","previews.mediaHeight":"large"}');
+
+    expect({ device, inEffect: effectiveUi(shared, device) }).toStrictEqual({
+      device: { "previews.mediaHeight": "large" },
+      inEffect: { ...shared.options, "previews.mediaHeight": "large" },
     });
   });
 
@@ -200,7 +208,6 @@ describe("a device's overrides", () => {
           "open.spotify.com",
           "player.twitch.tv",
         ],
-        "previews.style": "thumbnail",
         "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],

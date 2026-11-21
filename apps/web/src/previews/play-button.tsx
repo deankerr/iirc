@@ -22,7 +22,7 @@ export interface Play {
 }
 
 /**
- * A play button, beside a summary or centred over a poster.
+ * A play button, after a card's words or centred over a poster.
  * @param props - What it is, and where it is drawn.
  * @returns The button.
  */
