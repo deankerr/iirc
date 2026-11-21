@@ -2,23 +2,43 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
-import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList } from "@iirc/api";
+import { MessagePreviews, PreviewItem, PreviewsEvent, TailRead, TimelineList } from "@iirc/api";
 import { Sha256 } from "@iirc/byte-store";
 import { configured } from "@iirc/client/testing";
-import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType, limits } from "@iirc/link-fetch";
+import {
+  LinkRefused,
+  LinkTimedOut,
+  LinkTooLarge,
+  LinkUnreachable,
+  LinkWrongType,
+  limits,
+} from "@iirc/link-fetch";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
 import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
 import type { PreviewCacheService } from "@iirc/preview-cache";
 import { makeSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
 import type { JournalService } from "@iirc/runtime/journal";
 import type { TimelineStoreService } from "@iirc/timeline-store";
-import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema, Stream } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Ref,
+  References,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import type { Scope } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { Tail } from "./tail.ts";
 import { gif, png } from "./testing/images.ts";
 import {
   heard,
@@ -56,6 +76,8 @@ interface Setup {
   readonly previews?: PreviewCacheService;
   /** What a Daemon that was stopped left, for the next one to start on. */
   readonly left?: Left;
+  /** Whether what the server logs from `Debug` up is kept in its Tail, as the Daemon's is. */
+  readonly tail?: boolean;
 }
 
 /** What outlives a Daemon: its data directory and key, its Journal, and its Timelines. */
@@ -65,6 +87,12 @@ interface Left {
   readonly journal?: JournalService;
   readonly store?: TimelineStoreService;
 }
+
+// The Tail's Logger alone, from Debug up, so it keeps what is logged and nothing prints it.
+const tailLogging = Layer.merge(
+  Layer.unwrap(Tail.useSync((tail) => Logger.layer([tail.logger]))),
+  Layer.succeed(References.MinimumLogLevel, "Debug")
+);
 
 /**
  * Serves the API over a real Bun server on an ephemeral loopback port, on the in-memory
@@ -93,6 +121,7 @@ const serve = (answers: Readonly<Record<string, Answer>>, setup: Setup = {}) =>
       Layer.provideMerge(
         BunHttpServer.layer({ gracefulShutdownTimeout: 100, hostname: "127.0.0.1", port: 0 })
       ),
+      Layer.provide(setup.tail === true ? tailLogging : Layer.empty),
       // A burst wide enough that no Line waits on the real clock's pacing.
       Layer.provide(layerWorld(world, dataDir, { burst: 100, interval: 2000 })),
       Layer.provide(Layer.succeed(Heartbeat, Duration.millis(50)))
@@ -754,6 +783,78 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     type: null,
     ...preview,
   },
+});
+
+const decodeTail = Schema.decodeUnknownSync(Schema.fromJsonString(TailRead));
+
+describe("what each fetch for a Preview came to, in the Tail as a Frontend reads it", () => {
+  it("shows a page that gave a title and no player, and a fetch that failed, at Debug", async () => {
+    const answers = {
+      "https://cats.example/": cats,
+      "https://gone.example/": new LinkUnreachable({ reason: "gone.example has no address" }),
+    };
+
+    const lines = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const served = yield* serve(answers, { tail: true });
+
+          yield* setPreviews(served, "text");
+          yield* talk(served, ["see https://cats.example/ and https://gone.example/"]);
+          const [message] = yield* messages(served, 1);
+
+          yield* settled(served, message ?? { position: "", text: "", timeline: "" });
+
+          // Each line is logged as its fetch's Scope closes, before its Preview settles.
+          const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
+
+          return lines.filter((line) => line.message === "Fetched a link for a Preview");
+        })
+      )
+    );
+
+    expect(
+      lines
+        .map(({ annotations: { took, ...annotations }, level }) => ({
+          annotations,
+          level,
+          took: /^\d+ms$/u.test(took ?? ""),
+        }))
+        .toSorted((one, other) =>
+          (one.annotations.link ?? "").localeCompare(other.annotations.link ?? "")
+        )
+    ).toStrictEqual([
+      {
+        annotations: {
+          answered: "https://cats.example/",
+          as: "page",
+          bytes: String(cats.body.length),
+          description: "yes",
+          image: "no",
+          link: "https://cats.example/",
+          oembed: "no",
+          player: "no",
+          status: "200",
+          title: "yes",
+          type: "text/html",
+          video: "no",
+        },
+        level: "Debug",
+        took: true,
+      },
+      {
+        annotations: {
+          as: "page",
+          bytes: "0",
+          failed: "LinkUnreachable",
+          link: "https://gone.example/",
+          why: "gone.example has no address",
+        },
+        level: "Debug",
+        took: true,
+      },
+    ]);
+  });
 });
 
 describe("a page's oEmbed over a real server", () => {

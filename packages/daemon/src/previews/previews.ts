@@ -67,6 +67,8 @@ import { UiConfiguration } from "../ui.ts";
 import type { StartingRange } from "../uploads/wanted.ts";
 import { animated } from "./animated.ts";
 import { dimensionsOf } from "./dimensions.ts";
+import { logged, logging } from "./fetch-log.ts";
+import type { Logged } from "./fetch-log.ts";
 import { playerOf, stillListed } from "./players.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
@@ -344,11 +346,11 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 
 /**
  * What a page's answer says: a Preview of media from its type alone, or what the page says
- * of itself in its head, which is read whole.
- * @param fetched - The answer.
+ * of itself in its head, which is read whole, and joins the fetch's line.
+ * @param logged - The answer, and how what the page said joins its line.
  * @returns What it came to, or the page and the link it answered as.
  */
-const answered = (fetched: Fetched) =>
+const answered = ({ fetched, said }: Logged) =>
   Effect.gen(function* () {
     if (readMedia(fetched.type) !== undefined) {
       return mediaPreview(fetched.link, fetched.type);
@@ -356,10 +358,15 @@ const answered = (fetched: Fetched) =>
 
     const head = joined(yield* Stream.runCollect(fetched.body));
 
-    return {
+    const page = readPage({
+      contentType: fetched.headers["content-type"],
+      head,
       link: fetched.link,
-      page: readPage({ contentType: fetched.headers["content-type"], head, link: fetched.link }),
-    };
+    });
+
+    yield* said(page);
+
+    return { link: fetched.link, page };
   });
 
 /**
@@ -609,7 +616,9 @@ const streamed = (id: PreviewId, fetched: Fetched) => {
  */
 export const layerPreviews = Layer.effect(Previews)(
   Effect.gen(function* () {
-    const links = yield* LinkFetch;
+    const fetcher = yield* LinkFetch;
+    // Every fetch for a Preview logs what it came to.
+    const links = logging(fetcher);
     const cache = yield* PreviewCache;
     const store = yield* TimelineStore;
     const ui = yield* UiConfiguration;
@@ -734,7 +743,7 @@ export const layerPreviews = Layer.effect(Previews)(
     // Every failure of the fetch is answered with its reason, and anything unforeseen with
     // `Unreachable`, so no Preview stays pending for ever.
     const fetchOne = (key: string, link: string, shown: PreviewsShown) =>
-      Effect.scoped(Effect.flatMap(links.fetch(key, { kind: "page" }), answered)).pipe(
+      Effect.scoped(Effect.flatMap(logged(fetcher, key, { kind: "page" }), answered)).pipe(
         Effect.filterOrElse(
           (said): said is Read => "state" in said,
           (said) =>
