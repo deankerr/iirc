@@ -212,7 +212,9 @@ describe("the web frontend on iirc daemon --web", () => {
 
         const cookies = await context.cookies();
 
+        // Signing out asks first.
         await page.getByRole("button", { name: "Sign out" }).click();
+        await page.getByRole("alertdialog").getByRole("button", { name: "Sign out" }).click();
         await page.getByLabel("Key").waitFor();
         await page.reload();
         await page.getByLabel("Key").waitFor();
@@ -280,6 +282,7 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.getByRole("button", { name: "Sign in" }).click();
 
         const status = await networkRow(page);
+        const connected = await page.getByRole("row", { name: /, connected$/u }).count();
 
         await page.getByRole("row", { name: channel }).click();
         const log = page.getByRole("log", { name: channel });
@@ -389,22 +392,25 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         expect({
+          connected,
           formatting,
           kept,
           linked,
           pinned,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
-          status: status.startsWith("\u25BEprivate") && status.endsWith("\u25CF"),
+          status,
           violations,
         }).toStrictEqual({
+          // Its row's name says so, as a connected Network's row has no mark.
+          connected: 1,
           // mIRC's red is the theme's bright red, `light`'s under Playwright's light device.
           formatting: { bold: "700", red: "rgb(194, 24, 91)" },
           kept: true,
           linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
           pinned: true,
           problems: [],
-          // The chevron, the id, and a filled circle, which is connected.
-          status: true,
+          // The chevron and the id.
+          status: "\u25BEprivate",
           violations: "",
         });
       } finally {
