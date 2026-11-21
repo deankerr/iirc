@@ -17,7 +17,7 @@ Both open the file, creating it when it does not exist, and close it when their 
 CREATE TABLE previews (link TEXT PRIMARY KEY, state TEXT NOT NULL, image TEXT,
   fetched INTEGER NOT NULL, shown INTEGER NOT NULL) STRICT;
 CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL;
-PRAGMA user_version = 4;  -- the layout's version
+PRAGMA user_version = 5;  -- the layout's version
 ```
 
 - **`state` is the JSON text of `Settled`'s encoding.** Every read decodes it, and a row that does not decode fails that read with `PreviewCacheFailed`.
@@ -33,6 +33,7 @@ When it opens a file, it reads, changing nothing:
 
 - A file with nothing in it is new: the table is made and `user_version` is set.
 - A file of the layout's `user_version` whose table and columns, by name and declared type, are exactly the layout's is opened as it is.
+- A file of `user_version` 4 whose table and columns are exactly the layout's is the version before, whose Previews named their stream `media`. In the same transaction that would make the table, one `UPDATE` renames each Preview's `media` to `stream` in `state` with `json_set`, leaving a `state` that is not JSON to fail its own read, and `user_version` becomes 5, so every record is read as it was.
 - Any other file is removed, with its `-wal`, `-shm`, and `-journal`, and made again from nothing, with a warning in the log: one of another `user_version`, one whose table or columns differ, and one SQLite says is not a database or is corrupt, which it says with `SQLITE_NOTADB` or `SQLITE_CORRUPT`, read from the native error's result code, never its text.
 - Any other failure fails with `PreviewCacheFailed` and leaves the file as it was: a lock another connection holds past the busy timeout (5 seconds unless `busyTimeout` says otherwise), a failed read, or a file it may not read. A path that cannot be opened at all, such as one in a directory that does not exist, fails the same way and removes nothing.
 

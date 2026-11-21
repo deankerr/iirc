@@ -84,7 +84,7 @@ type Record = Schema.JsonObject;
  *   member's fields are options of their own under the option's name.
  * - `ChoiceByKey`: one of `choices` for each key, each `key=choice`, comma-separated, such
  *   as each Timeline's own Previews. A choice is in any ASCII case, and may be given by its
- *   first word alone where no other choice starts with it, such as `links` for `links only`.
+ *   first word alone where no other choice starts with it.
  */
 export type Kind =
   | { readonly _tag: "Toggle" }

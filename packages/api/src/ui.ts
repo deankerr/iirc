@@ -474,17 +474,17 @@ export const TailShown = Schema.Literals(["debug", "info", "warning", "error"]).
 export type TailShown = typeof TailShown.Type;
 
 /**
- * Whether the Daemon previews the links in Messages: `off`; `links only`, a page's title,
+ * Whether the Daemon previews the links in Messages: `off`; `text`, a page's title,
  * description, and site, with no image or media fetched; or `on`, which adds a page's
  * image, or a link's own image, kept in the store when a bucket is set. The Daemon
  * fetches each link itself, never the browser, so it is shared only: no device turns
  * fetching on for itself.
  */
-export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annotate({
+export const PreviewsShown = Schema.Literals(["off", "text", "on"]).annotate({
   ...sharedOnly,
   default: "off",
   description:
-    "Whether links in Messages are previewed: off, links only for a page's title, description, and site, or on, which adds images, kept in the store when a bucket is set. The Daemon fetches each link, never the browser. Every device shares it.",
+    "Whether links in Messages are previewed: off, text for a page's title, description, and site, or on, which adds images, kept in the store when a bucket is set. The Daemon fetches each link, never the browser. Every device shares it.",
 });
 
 /** The decoded form of {@link PreviewsShown}. */
@@ -548,19 +548,19 @@ export type PreviewsMediaHeight = typeof PreviewsMediaHeight.Type;
 
 /**
  * Each Timeline's own choice of whether the Daemon previews its links, by its id, over
- * `ui.previews`: `off`, `links only`, or `on`. A Timeline it does not name follows
+ * `ui.previews`: `off`, `text`, or `on`. A Timeline it does not name follows
  * `ui.previews`, and an entry for a Timeline that no longer exists does nothing. A Direct
- * Message's Timeline named here as `links only` or `on` is fetched without waiting for a
+ * Message's Timeline named here as `text` or `on` is fetched without waiting for a
  * press. It is set whole, like any option, and shared only, as `ui.previews` is.
  */
 export const PreviewsByTimeline = Schema.Record(
   TimelineId,
-  Schema.Literals(["off", "links only", "on"])
+  Schema.Literals(["off", "text", "on"])
 ).annotate({
   ...sharedOnly,
   default: {},
   description:
-    "Each Timeline's own choice in place of ui.previews, by its id: off, links only, or on. A Timeline not listed follows ui.previews, and a Direct Message set to links only or on is previewed without a press. /previews off|links|on|default sets the focused Timeline's. Every device shares it.",
+    "Each Timeline's own choice in place of ui.previews, by its id: off, text, or on. A Timeline not listed follows ui.previews, and a Direct Message set to text or on is previewed without a press. /previews off|text|on|default sets the focused Timeline's. Every device shares it.",
 });
 
 /** The decoded form of {@link PreviewsByTimeline}. */
@@ -907,10 +907,39 @@ export const uiNameKept = (name: string): UiOptionName | undefined => {
   return now._tag === "Some" ? now.value : namedBefore.get(name);
 };
 
+const decodeJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json));
+
+// What Previews' middle mode was called before it was `text`.
+const textBefore = "links only";
+
+/**
+ * A value kept before with the words it has now: Previews journaled as `links only`, in
+ * `ui.previews` or in a Timeline's own choice, are `text`. Any other is as it was.
+ * @param option - The option.
+ * @param value - Its value, as JSON.
+ * @returns The value with the words it has now.
+ */
+const valueNamedNow = (option: UiOptionName, value: Schema.Json): Schema.Json => {
+  if (option === "previews") {
+    return value === textBefore ? "text" : value;
+  }
+
+  const byTimeline = option === "previews.timelines" ? decodeJsonRecord(value) : undefined;
+
+  return byTimeline?._tag === "Some"
+    ? Object.fromEntries(
+        Object.entries(byTimeline.value).map(([timeline, mode]) => [
+          timeline,
+          mode === textBefore ? "text" : mode,
+        ])
+      )
+    : value;
+};
+
 /**
  * A `ui` option's value read from JSON kept before, as a journaled Change or a device's
- * override: by its Schema, or, for `theme.imported`, entry by entry when its Schema refuses the
- * whole, so one bad theme drops only itself. Anything else that its Schema refuses is none.
+ * override: by its Schema, with the words it has now, or, for `theme.imported`, entry by
+ * entry when its Schema refuses the whole, so one bad theme drops only itself. Anything else that its Schema refuses is none.
  * @param option - The option.
  * @param value - Its value, as JSON.
  * @returns The value, or none.
@@ -919,7 +948,9 @@ export const uiValueKept = (
   option: UiOptionName,
   value: Schema.Json
 ): UiOptionValue | undefined => {
-  const decoded = Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(value);
+  const decoded = Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(
+    valueNamedNow(option, value)
+  );
 
   if (decoded._tag === "Some") {
     return decoded.value;

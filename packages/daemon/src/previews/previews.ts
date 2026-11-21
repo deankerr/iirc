@@ -10,8 +10,8 @@
 import { createHash } from "node:crypto";
 
 import {
-  LinksOnly,
-  MediaType,
+  PreviewsText,
+  ImageType,
   NotWaiting,
   PreviewId,
   PreviewsOff,
@@ -21,7 +21,7 @@ import {
   UnknownTimeline,
 } from "@iirc/api";
 import type {
-  MediaHash,
+  ImageHash,
   PreviewFailure,
   PreviewImage,
   PreviewItem,
@@ -73,11 +73,11 @@ import { makeRoom } from "./room.ts";
 import { previewStore } from "./store.ts";
 
 /** No Preview holds an image with the hash, or the store no longer holds its bytes. */
-export class NoSuchMedia extends Data.TaggedError("NoSuchMedia") {}
+export class NoSuchImage extends Data.TaggedError("NoSuchImage") {}
 
 /** An image a Preview holds, as it is served: its type, read from its bytes, and they. */
-export interface Media {
-  readonly type: MediaType;
+export interface HeldImage {
+  readonly type: ImageType;
   readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
 }
 
@@ -130,11 +130,11 @@ export class Previews extends Context.Service<
     /**
      * The image a Preview holds, by its hash, with its type read from its leading bytes,
      * which are read before it answers. A hash no record kept refers to, or bytes of none
-     * of the image types, is `NoSuchMedia`.
+     * of the image types, is `NoSuchImage`.
      */
-    readonly media: (
-      hash: MediaHash
-    ) => Effect.Effect<Media, NoSuchMedia | ByteStoreUnavailable, Scope.Scope>;
+    readonly image: (
+      hash: ImageHash
+    ) => Effect.Effect<HeldImage, NoSuchImage | ByteStoreUnavailable, Scope.Scope>;
     /**
      * The video or sound a link of the Message at a position in a Timeline is, streamed from
      * the address the Daemon read for its Preview, never any other, and kept nowhere. Only a
@@ -153,7 +153,7 @@ export class Previews extends Context.Service<
       | UnknownTimeline
       | UnknownMessage
       | PreviewsOff
-      | LinksOnly
+      | PreviewsText
       | UnknownStream
       | StreamFailed
       | TimelineStoreFailed,
@@ -163,7 +163,7 @@ export class Previews extends Context.Service<
      * Whether any Preview kept holds the image with the hash, without reading its bytes. A
      * cache that cannot be read is as unavailable as the store.
      */
-    readonly refers: (hash: MediaHash) => Effect.Effect<boolean, ByteStoreUnavailable>;
+    readonly refers: (hash: ImageHash) => Effect.Effect<boolean, ByteStoreUnavailable>;
   }
 >()("@iirc/daemon/Previews") {}
 
@@ -237,9 +237,9 @@ const mediaPreview = (link: string, type: string): Read => {
             image: null,
             kind,
             link,
-            media: kind === "image" ? null : link,
             player: null,
             site: hostOf(link),
+            stream: kind === "image" ? null : link,
             title: null,
             type,
           },
@@ -411,9 +411,9 @@ const pageRead = (
           image: null,
           kind,
           link,
-          media: video?.link ?? null,
           player: playing ?? null,
           site: page.site ?? hostOf(link),
+          stream: video?.link ?? null,
           title: page.title ?? null,
           type: video?.type ?? null,
         },
@@ -424,12 +424,12 @@ const pageRead = (
   });
 
 /**
- * A state as it is answered under a mode and the list in force now: under `links only`, a
+ * A state as it is answered under a mode and the list in force now: under `text`, a
  * Preview holds text only, even one kept with its image while Previews were `on`, and a
- * player whose address the list no longer allows, or which `links only` forbids, is a page
+ * player whose address the list no longer allows, or which `text` forbids, is a page
  * again.
  * @param state - The state, as kept.
- * @param shown - Whether Previews are `on` or `links only`.
+ * @param shown - Whether Previews are `on` or `text`.
  * @param hosts - The hosts the Owner lists as players now.
  * @returns The state to answer.
  */
@@ -472,7 +472,7 @@ const asStreamed = (state: PreviewState, hosts: readonly string[]): PreviewState
     ? { ...state, preview: { ...state.preview, kind: "page", player: null } }
     : state;
 
-const decodeMediaType = Schema.decodeUnknownOption(MediaType);
+const decodeImageType = Schema.decodeUnknownOption(ImageType);
 
 /** Why an image was not kept, beyond what the fetch and the store say. */
 class NoImage extends Data.TaggedError("NoImage")<{ readonly reason: string }> {}
@@ -671,7 +671,7 @@ export const layerPreviews = Layer.effect(Previews)(
           return yield* new NoImage({ reason: `it answered ${fetched.status}` });
         }
 
-        const type = decodeMediaType(fetched.type);
+        const type = decodeImageType(fetched.type);
 
         if (Option.isNone(type)) {
           return yield* new NoImage({ reason: `it is of the type ${fetched.type}` });
@@ -701,7 +701,7 @@ export const layerPreviews = Layer.effect(Previews)(
      * A Preview with its image, when it names one and Previews are `on`. Whatever goes wrong
      * with the image, in any way at all, leaves the Preview as it was, with no image.
      * @param read - What the fetch came to.
-     * @param shown - Whether Previews are `on` or `links only`, as they were when asked.
+     * @param shown - Whether Previews are `on` or `text`, as they were when asked.
      * @param holding - The Scope its image's claim lasts for.
      * @returns The state.
      */
@@ -808,7 +808,7 @@ export const layerPreviews = Layer.effect(Previews)(
      * Timeline that waits for a press, waiting until it is kept or pressed.
      * @param link - The link, as the URL parser wrote it.
      * @param how - Whether its Timeline waits, whether it is a press, and whether Previews
-     * are `on` or `links only`, which a fetch it starts keeps.
+     * are `on` or `text`, which a fetch it starts keeps.
      * @returns Its item, and whether it started its fetch.
      */
     const stateOf = (link: string, how: How) =>
@@ -878,7 +878,7 @@ export const layerPreviews = Layer.effect(Previews)(
         };
       });
 
-    const refers = (hash: MediaHash) =>
+    const refers = (hash: ImageHash) =>
       cache.refers(Sha256.make(hash)).pipe(
         Effect.mapError(
           (error) =>
@@ -910,31 +910,31 @@ export const layerPreviews = Layer.effect(Previews)(
           )
         )
       ),
-      media: (hash) =>
+      image: (hash) =>
         Effect.gen(function* () {
           if (!(yield* refers(hash))) {
-            return yield* new NoSuchMedia();
+            return yield* new NoSuchImage();
           }
 
           const bytesStore = yield* bucket;
 
           const bytes = yield* bytesStore
             .read(Sha256.make(hash))
-            .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchMedia())));
+            .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchImage())));
 
           // The type is read from the bytes as they are served, never from what was recorded,
           // and bytes of none of the image types are not served at all.
           const [leading, rest] = yield* Stream.peel(bytes, head);
-          const type = decodeMediaType(sniff(joined(leading.chunks)));
+          const type = decodeImageType(sniff(joined(leading.chunks)));
 
           if (Option.isNone(type)) {
-            return yield* new NoSuchMedia();
+            return yield* new NoSuchImage();
           }
 
           return {
             bytes: Stream.concat(Stream.fromIterable(leading.chunks), rest),
             type: type.value,
-          } satisfies Media;
+          } satisfies HeldImage;
         }),
       press: (timeline, position, link) =>
         Effect.gen(function* () {
@@ -960,8 +960,8 @@ export const layerPreviews = Layer.effect(Previews)(
         Effect.gen(function* () {
           const { links: found, shown } = yield* locate(timeline, position);
 
-          if (shown === "links only") {
-            return yield* new LinksOnly({ timeline });
+          if (shown === "text") {
+            return yield* new PreviewsText({ timeline });
           }
 
           const key = found.map(keyOf).find((one) => idOf(one) === id);
@@ -985,7 +985,7 @@ export const layerPreviews = Layer.effect(Previews)(
           if (
             preview === undefined ||
             (preview.kind !== "video" && preview.kind !== "audio") ||
-            preview.media === null
+            preview.stream === null
           ) {
             return yield* new UnknownStream({ id });
           }
@@ -1002,7 +1002,7 @@ export const layerPreviews = Layer.effect(Previews)(
 
           const fetched = yield* links
             .fetch(
-              preview.media,
+              preview.stream,
               asking === undefined ? { kind: "stream" } : { kind: "stream", range: asking }
             )
             .pipe(

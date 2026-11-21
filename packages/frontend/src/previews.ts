@@ -210,13 +210,13 @@ export const choosing = (
 };
 
 /**
- * Whether a Frontend asks for a Timeline's Previews: under `links only` or `on`, never
+ * Whether a Frontend asks for a Timeline's Previews: under `text` or `on`, never
  * under `off`, and never before the mode is known.
  * @param mode - The Timeline's mode.
  * @returns Whether it asks.
  */
 export const asksFor = (mode: PreviewsShown | undefined): boolean =>
-  mode === "links only" || mode === "on";
+  mode === "text" || mode === "on";
 
 /**
  * Whether a Frontend follows the stream of Previews: while any Timeline could ask, as
@@ -717,7 +717,7 @@ const imageOf = (preview: Preview, style: PreviewsStyle): ImageShown | undefined
         ),
         animated: preview.image.animated,
         drawn,
-        src: `/api/previews/media/${preview.image.hash}`,
+        src: `/api/previews/images/${preview.image.hash}`,
       };
 };
 

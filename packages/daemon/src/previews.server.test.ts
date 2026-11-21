@@ -339,9 +339,9 @@ const media = (link: string, kind: string, type: string) => ({
     image: null,
     kind,
     link,
-    media: kind === "image" ? null : link,
     player: null,
     site: new URL(link).host,
+    stream: kind === "image" ? null : link,
     title: null,
     type,
   },
@@ -366,10 +366,10 @@ describe("Previews over a real server", () => {
     expect(result).toStrictEqual({ asked: [], error: "PreviewsOff", status: 409 });
   });
 
-  it("gives a page's Preview under links only, pending first, fetched as a page", async () => {
+  it("gives a page's Preview under text, pending first, fetched as a page", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, ["see https://cats.example/ now"]);
         const [message] = yield* messages(served, 1);
         const place = message ?? { position: "", text: "", timeline: "" };
@@ -392,9 +392,9 @@ describe("Previews over a real server", () => {
               image: null,
               kind: "page",
               link: "https://cats.example/",
-              media: null,
               player: null,
               site: "Cat News",
+              stream: null,
               title: "Cats",
               type: null,
             },
@@ -412,7 +412,7 @@ describe("Previews over a real server", () => {
       { "https://cats.example/": cats, "https://ours.example/": cats },
       (served) =>
         Effect.gen(function* () {
-          yield* setPreviews(served, "links only");
+          yield* setPreviews(served, "text");
 
           const configured = yield* served.request("/api/networks/libera", {
             method: "PUT",
@@ -471,7 +471,7 @@ describe("Previews over a real server", () => {
       },
       (served) =>
         Effect.gen(function* () {
-          yield* setPreviews(served, "links only");
+          yield* setPreviews(served, "text");
           yield* talk(served, ["https://short.example/p"]);
           const [place] = yield* messages(served, 1);
 
@@ -526,7 +526,7 @@ describe("Previews over a real server", () => {
   it("fetches one link in two Messages once, under one id, and a Message with no link gives none", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, [
           "https://cats.example/",
           "again https://cats.example/#top",
@@ -585,7 +585,7 @@ describe("Previews over a real server", () => {
 
     const result = await run(answers, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, texts);
         const places = yield* messages(served, 3);
         const items: PreviewItem[] = [];
@@ -617,7 +617,7 @@ describe("Previews over a real server", () => {
   it("streams each change of a Preview's state, pending then ready, to a Frontend that did not ask", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, ["https://cats.example/"]);
         const [message] = yield* messages(served, 1);
         const following = yield* served.request("/api/previews/changes");
@@ -676,7 +676,7 @@ describe("Previews over a real server", () => {
   it("refuses an unknown Timeline and a place where no Message stands, with 404", async () => {
     const result = await run({}, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, ["hello"]);
         const [message] = yield* messages(served, 1);
         const place = message ?? { position: "", timeline: "" };
@@ -719,7 +719,7 @@ const answer = (value: Schema.Json) => ({
 });
 
 /**
- * Previews the one link in a Message under `links only`.
+ * Previews the one link in a Message under `text`.
  * @param answers - What each link answers.
  * @param link - The link.
  * @returns Its state, and every fetch asked.
@@ -727,7 +727,7 @@ const answer = (value: Schema.Json) => ({
 const previewed = async (answers: Readonly<Record<string, Answer>>, link: string) =>
   await run(answers, (served) =>
     Effect.gen(function* () {
-      yield* setPreviews(served, "links only");
+      yield* setPreviews(served, "text");
       yield* talk(served, [`see ${link}`]);
       const [place] = yield* messages(served, 1);
       const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
@@ -746,9 +746,9 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     image: null,
     kind: "page",
     link: "https://page.example/",
-    media: null,
     player: null,
     site: "page.example",
+    stream: null,
     title: null,
     type: null,
     ...preview,
@@ -942,7 +942,7 @@ const day = 24 * hour;
  */
 const said = (served: Served) =>
   Effect.gen(function* () {
-    yield* setPreviews(served, "links only");
+    yield* setPreviews(served, "text");
     yield* talk(served, ["see https://cats.example/"]);
     const [message] = yield* live(messages(served, 1));
 
@@ -1198,7 +1198,7 @@ const svg = new TextEncoder().encode(
  * Previews the one link in a Message, under a mode, and gives its state, and every fetch.
  * @param served - The server.
  * @param link - The link.
- * @param mode - `on` or `links only`.
+ * @param mode - `on` or `text`.
  * @returns Its state, and every fetch asked.
  */
 const previewedOn = (served: Served, link: string, mode = "on") =>
@@ -1233,24 +1233,27 @@ const asPageAgain = { kind: "page" } as const;
 const asImage = { kind: "image" } as const;
 
 describe("a Preview's image over a real server", () => {
-  it("keeps a page's og:image in the store and serves it on the media route, bytes and headers exact", async () => {
+  it("keeps a page's og:image in the store and serves it on the images route, bytes and headers exact", async () => {
     const result = await run(
       { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
       (served) =>
         Effect.gen(function* () {
           yield* setBucket(served);
           const { asked, state } = yield* previewedOn(served, CAT);
-          const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+          const response = yield* served.request(`/api/previews/images/${sha256(png)}`);
 
-          const again = yield* served.request(`/api/previews/media/${sha256(png)}`, {
+          const again = yield* served.request(`/api/previews/images/${sha256(png)}`, {
             headers: { "if-none-match": `W/"other", "${sha256(png)}"` },
           });
+
+          const media = yield* served.request(`/api/previews/media/${sha256(png)}`);
 
           return {
             again: { body: yield* bodyOf(again), headers: headersOf(again), status: again.status },
             asked,
             body: yield* bytesOf(response),
             headers: headersOf(response),
+            media: media.status,
             state,
             status: response.status,
           };
@@ -1264,9 +1267,9 @@ describe("a Preview's image over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "page",
         link: CAT,
-        media: null,
         player: null,
         site: "cat.example",
+        stream: null,
         title: "Cat",
         type: null,
       },
@@ -1275,7 +1278,11 @@ describe("a Preview's image over a real server", () => {
       { link: CAT, purpose: asPageAgain },
       { link: CAT_IMAGE, purpose: asImage },
     ]);
-    expect({ body: result.body, status: result.status }).toStrictEqual({ body: png, status: 200 });
+    expect({ body: result.body, media: result.media, status: result.status }).toStrictEqual({
+      body: png,
+      media: 404,
+      status: 200,
+    });
     expect(result.headers).toMatchObject({
       "cache-control": "private",
       "content-security-policy": "default-src 'none'; sandbox",
@@ -1308,9 +1315,9 @@ describe("a Preview's image over a real server", () => {
         image: { animated: true, hash: sha256(gif), size: gif.length, type: "image/gif" },
         kind: "image",
         link,
-        media: null,
         player: null,
         site: "image.example",
+        stream: null,
         title: null,
         type: "image/gif",
       },
@@ -1333,7 +1340,7 @@ describe("a Preview's image over a real server", () => {
         Effect.gen(function* () {
           yield* setBucket(served);
           const { state } = yield* previewedOn(served, CAT);
-          const response = yield* served.request(`/api/previews/media/${sha256(svg)}`);
+          const response = yield* served.request(`/api/previews/images/${sha256(svg)}`);
 
           return { body: yield* bytesOf(response), headers: headersOf(response), state };
         })
@@ -1382,9 +1389,9 @@ describe("a Preview's image over a real server", () => {
         image: null,
         kind: "page",
         link: CAT,
-        media: null,
         player: null,
         site: "cat.example",
+        stream: null,
         title: "Cat",
         type: null,
       },
@@ -1394,14 +1401,14 @@ describe("a Preview's image over a real server", () => {
     expect(result.logged.join("\n")).toContain("LinkTooLarge");
   });
 
-  it("fetches no image under links only", async () => {
+  it("fetches no image under text", async () => {
     const result = await run(
       { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
       (served) =>
         Effect.gen(function* () {
           yield* setBucket(served);
 
-          return yield* previewedOn(served, CAT, "links only");
+          return yield* previewedOn(served, CAT, "text");
         })
     );
 
@@ -1438,9 +1445,9 @@ describe("a Preview's image over a real server", () => {
       Effect.gen(function* () {
         yield* setBucket(served);
         yield* served.world.bytes.store.put(Stream.make(png));
-        const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const response = yield* served.request(`/api/previews/images/${sha256(png)}`);
 
-        const etagged = yield* served.request(`/api/previews/media/${sha256(png)}`, {
+        const etagged = yield* served.request(`/api/previews/images/${sha256(png)}`, {
           headers: { "if-none-match": "*" },
         });
 
@@ -1452,7 +1459,7 @@ describe("a Preview's image over a real server", () => {
       })
     );
 
-    expect(result).toStrictEqual({ body: { _tag: "UnknownMedia" }, etagged: 404, status: 404 });
+    expect(result).toStrictEqual({ body: { _tag: "UnknownImage" }, etagged: 404, status: 404 });
   });
 
   it("answers 503, never kept, when the store is unreachable or no bucket is set", async () => {
@@ -1462,7 +1469,7 @@ describe("a Preview's image over a real server", () => {
         Effect.gen(function* () {
           yield* setBucket(served);
           yield* previewedOn(served, CAT);
-          const path = `/api/previews/media/${sha256(png)}`;
+          const path = `/api/previews/images/${sha256(png)}`;
 
           yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
           const unreachable = yield* served.request(path);
@@ -1498,7 +1505,7 @@ describe("a Preview's image over a real server", () => {
           const { id, hash } = decodeUploaded(yield* bodyOf(sent));
           const { state } = yield* previewedOn(served, CAT);
           const deleted = yield* served.request(`/api/uploads/${id}`, { method: "DELETE" });
-          const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+          const response = yield* served.request(`/api/previews/images/${sha256(png)}`);
 
           return {
             body: yield* bytesOf(response),
@@ -1777,11 +1784,11 @@ describe("evicting Preview images over a real server", () => {
         const { id } = decodeUploaded(yield* bodyOf(sent));
 
         yield* live(settled(served, a));
-        const before = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const before = yield* served.request(`/api/previews/images/${sha256(png)}`);
 
         yield* TestClock.adjust(1000);
         yield* live(settled(served, b));
-        const preview = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const preview = yield* served.request(`/api/previews/images/${sha256(png)}`);
         const upload = yield* served.request(`/api/uploads/${id}/content`);
 
         return {
@@ -2079,7 +2086,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
         const inChannel = yield* refusal(yield* press(served, channel, 0));
         const past = yield* refusal(yield* press(served, direct, 1));
 
-        yield* setOverrides(served, { [direct.timeline]: "links only" });
+        yield* setOverrides(served, { [direct.timeline]: "text" });
         const overridden = yield* refusal(yield* press(served, direct, 0));
 
         return { asked: yield* served.asked, inChannel, overridden, past };
@@ -2135,7 +2142,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
     });
   });
 
-  it("fetches a Direct Message's link unasked once the Timeline is overridden on, or links only", async () => {
+  it("fetches a Direct Message's link unasked once the Timeline is overridden on, or text", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
         yield* setPreviews(served, "off");
@@ -2175,7 +2182,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
   it("serves a link a Channel fetched in a Direct Message with no press, fetching nothing more", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         yield* talk(served, ["https://cats.example/"], ["#iirc", "iirc"]);
         const channel = yield* only(served, "Channel");
         const direct = yield* only(served, "Direct");
@@ -2244,7 +2251,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
           return listed.timelines.some((one) => one.id === merged) ? yield* new NotYet() : true;
         }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"));
 
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
         // The merged id is `on`, but the Direct Message it went to has no override, so it waits.
         yield* setOverrides(served, { [merged]: "on" });
         const waiting = yield* asking(served, place);
@@ -2277,7 +2284,7 @@ describe("a Direct Message's press and a Timeline's override over a real server"
  */
 const saying = (served: Served, links: readonly string[]) =>
   Effect.gen(function* () {
-    yield* setPreviews(served, "links only");
+    yield* setPreviews(served, "text");
 
     const texts = Array.from({ length: Math.ceil(links.length / 3) }, (_, at) =>
       links.slice(at * 3, at * 3 + 3).join(" ")
@@ -2822,15 +2829,15 @@ describe("a link that is itself video or sound, streamed over a real server", ()
       expect(result).toStrictEqual({ asked: [], refusal: [404, "UnknownStream"] });
     });
 
-    it("while the Timeline is links only: LinksOnly", async () => {
+    it("while the Timeline is text: PreviewsText", async () => {
       const result = await refused(
         [`watch ${VIDEO}`],
         { [VIDEO]: video },
-        (served) => setPreviews(served, "links only"),
+        (served) => setPreviews(served, "text"),
         firstOf
       );
 
-      expect(result).toStrictEqual({ asked: [], refusal: [409, "LinksOnly"] });
+      expect(result).toStrictEqual({ asked: [], refusal: [409, "PreviewsText"] });
     });
   });
 });
@@ -2913,9 +2920,9 @@ describe("a player over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "player",
         link: CLIP,
-        media: null,
         player: { link: VIMEO, size: { height: 720, width: 1280 } },
         site: "clip.example",
+        stream: null,
         title: "Clip",
         type: null,
       },
@@ -3063,12 +3070,12 @@ describe("a player over a real server", () => {
     expect(result).toStrictEqual({ image: true, kind: "page", player: null });
   });
 
-  it("answers a player kept under on as a text Preview once Previews are links only", async () => {
+  it("answers a player kept under on as a text Preview once Previews are text", async () => {
     const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
       Effect.gen(function* () {
         yield* setBucket(served);
         const before = yield* previewedOn(served, CLIP);
-        yield* setPreviews(served, "links only");
+        yield* setPreviews(served, "text");
 
         return { after: playing(yield* answeredNow(served)), before: playing(before.state) };
       })
@@ -3113,7 +3120,7 @@ describe("a page that names a video file over a real server", () => {
         yield* setBucket(served);
         yield* setPlayers(served, ["streamable.com"]);
         const { asked, state } = yield* previewedOn(served, WATCH);
-        const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const response = yield* served.request(`/api/previews/images/${sha256(png)}`);
 
         return {
           asked,
@@ -3131,9 +3138,9 @@ describe("a page that names a video file over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "video",
         link: WATCH,
-        media: FILE,
         player: null,
         site: "streamable.com",
+        stream: FILE,
         title: "A clip",
         type: "video/mp4",
       },

@@ -255,7 +255,7 @@ describe("an option every device shares only", () => {
     expect({
       effective: effectiveUi(shared, { "font.size": 20, previews: "on" }).previews,
       kept,
-      overridden: overridden(noOverrides, "previews", "links only"),
+      overridden: overridden(noOverrides, "previews", "text"),
       written: [writtenOnDevice("previews", "on", false), writtenOnDevice("previews", "on", true)],
     }).toStrictEqual({
       effective: "off",

@@ -42,41 +42,41 @@ export type PreviewKind = typeof PreviewKind.Type;
 
 /**
  * The hash of an image a Preview holds: the SHA-256 of its bytes, as 64 lower-case hex
- * digits, which names it at `GET /api/previews/media/{hash}`.
+ * digits, which names it at `GET /api/previews/images/{hash}`.
  */
-export const MediaHash = Schema.String.check(
+export const ImageHash = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{64}$/u, { message: "must be 64 lower-case hex digits" })
 ).annotate({
-  description: "The SHA-256 of an image a Preview holds, which names it on the media route.",
-  identifier: "MediaHash",
+  description: "The SHA-256 of an image a Preview holds, which names it on the images route.",
+  identifier: "ImageHash",
 });
 
-/** The decoded form of {@link MediaHash}. */
-export type MediaHash = typeof MediaHash.Type;
+/** The decoded form of {@link ImageHash}. */
+export type ImageHash = typeof ImageHash.Type;
 
 /** The types an image a Preview holds may be, as read from its leading bytes. */
-export const MediaType = Schema.Literals([
+export const ImageType = Schema.Literals([
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
   "image/avif",
   "image/svg+xml",
-]).annotate({ identifier: "MediaType" });
+]).annotate({ identifier: "ImageType" });
 
-/** The decoded form of {@link MediaType}. */
-export type MediaType = typeof MediaType.Type;
+/** The decoded form of {@link ImageType}. */
+export type ImageType = typeof ImageType.Type;
 
 /**
  * An image a Preview holds, kept by the Daemon and served from its own origin at
- * `GET /api/previews/media/{hash}`, never from the host it came from: its hash, its type
+ * `GET /api/previews/images/{hash}`, never from the host it came from: its hash, its type
  * and whether it moves, both read from its bytes, and its size in bytes.
  */
 export const PreviewImage = Schema.Struct({
   animated: Schema.Boolean,
-  hash: MediaHash,
+  hash: ImageHash,
   size: Schema.Int.check(Schema.isGreaterThan(0)),
-  type: MediaType,
+  type: ImageType,
 }).annotate({ identifier: "PreviewImage" });
 
 /** The decoded form of {@link PreviewImage}. */
@@ -111,7 +111,7 @@ export type PreviewPlayer = typeof PreviewPlayer.Type;
  * itself, read from its headers alone, or of the video file a page names, as the page gave
  * it, and `null` for any other page. `image` is the image the
  * Daemon kept for it, a page's own or the link itself, or `null` for none: a player's or a
- * video's is its poster. `media` is where a Preview of kind `video` or `audio` is: the link
+ * video's is its poster. `stream` is where a Preview of kind `video` or `audio` is: the link
  * itself, or the video file its page names, which only the Daemon fetches, through
  * `GET /api/previews/{id}/stream`, and `null` for any other kind. `player` is the player of
  * a Preview of kind `player`, and `null` for any other. Every field but `kind` and `image`
@@ -122,9 +122,9 @@ export const Preview = Schema.Struct({
   image: Schema.NullOr(PreviewImage),
   kind: PreviewKind,
   link: Untrusted,
-  media: Schema.NullOr(Untrusted),
   player: Schema.NullOr(PreviewPlayer),
   site: Untrusted,
+  stream: Schema.NullOr(Untrusted),
   title: Schema.NullOr(Untrusted),
   type: Schema.NullOr(Untrusted),
 }).annotate({ identifier: "Preview" });

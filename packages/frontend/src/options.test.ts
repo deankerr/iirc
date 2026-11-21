@@ -1584,7 +1584,7 @@ describe("the options under ui", () => {
     });
   });
 
-  it("offer ui.previews as off, links only, or on, off to start, set by /set for every device and never for one", () => {
+  it("offer ui.previews as off, text, or on, off to start, set by /set for every device and never for one", () => {
     const previews = uiOptionsOf(shared, { previews: "on" }).find(
       (one) => one.option === "previews"
     );
@@ -1592,10 +1592,10 @@ describe("the options under ui", () => {
     expect({
       device: read("/set -device ui.previews on"),
       kind: previews?.kind,
-      links: read("/set ui.previews links only"),
-      linksCase: read("/set ui.previews  Links Only "),
-      linksWord: read("/set ui.previews links"),
+      linksOnly: read("/set ui.previews links only"),
       shown: [previews?.value, previews?.device, previews?.starts],
+      text: read("/set ui.previews text"),
+      textCase: read("/set ui.previews  Text "),
       unset: read("/unset ui.previews"),
       unsetDevice: read("/unset -device ui.previews"),
     }).toStrictEqual({
@@ -1604,21 +1604,21 @@ describe("the options under ui", () => {
         message:
           "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
       },
-      kind: { _tag: "Choice", choices: ["off", "links only", "on"] },
-      links: {
-        _tag: "Parsed",
-        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "links only" }],
-      },
-      linksCase: {
-        _tag: "Parsed",
-        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "links only" }],
-      },
-      linksWord: {
+      kind: { _tag: "Choice", choices: ["off", "text", "on"] },
+      linksOnly: {
         _tag: "Invalid",
-        message: 'ui.previews: Choose one of off, links only, on, not "links".',
+        message: 'ui.previews: Choose one of off, text, on, not "links only".',
       },
       // A device's override of it, kept by hand, is neither shown nor in effect.
       shown: [{ _tag: "Shown", text: "off" }, undefined, "off"],
+      text: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "text" }],
+      },
+      textCase: {
+        _tag: "Parsed",
+        value: [{ _tag: "ChangeUi", device: false, option: "previews", value: "text" }],
+      },
       unset: {
         _tag: "Parsed",
         value: [{ _tag: "ChangeUi", device: false, option: "previews", value: undefined }],
@@ -1699,13 +1699,13 @@ describe("the options under ui", () => {
   it("offer ui.previews.timelines as each Timeline's choice, typed id=mode and read back the same", () => {
     const one = "00000000000002-00000000-00000000";
     const two = "00000000000003-00000000-00000000";
-    const kind: Kind = { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] };
-    const typed = parseText(kind, ` ${one}=LINKS, ${two} = on `);
+    const kind: Kind = { _tag: "ChoiceByKey", choices: ["off", "text", "on"] };
+    const typed = parseText(kind, ` ${one}=TEXT, ${two} = on `);
     const option = uiOptionsOf(shared, {}).find((found) => found.option === "previews.timelines");
 
     expect({
       kind: option?.kind,
-      named: read(`/set ui.previews.timelines ${one}=links only`),
+      named: read(`/set ui.previews.timelines ${one}=text`),
       notAnId: read("/set ui.previews.timelines libera=on"),
       shown: [option?.value, option?.starts],
       twice: parseText(kind, `${one}=on,${one}=off`),
@@ -1722,27 +1722,25 @@ describe("the options under ui", () => {
             _tag: "ChangeUi",
             device: false,
             option: "previews.timelines",
-            value: { [one]: "links only" },
+            value: { [one]: "text" },
           },
         ],
       },
       notAnId: { _tag: "Invalid", message: 'ui.previews.timelines cannot be "libera=on".' },
       shown: [{ _tag: "Shown", text: "" }, ""],
       twice: { _tag: "Invalid", message: `${one} is given more than once.` },
-      typed: { _tag: "Parsed", value: { [one]: "links only", [two]: "on" } },
-      typedBack: { _tag: "Parsed", value: { [one]: "links only", [two]: "on" } },
+      typed: { _tag: "Parsed", value: { [one]: "text", [two]: "on" } },
+      typedBack: { _tag: "Parsed", value: { [one]: "text", [two]: "on" } },
       unknownMode: {
         _tag: "Invalid",
-        message: 'Choose one of off, links only, on, not "sometimes".',
+        message: 'Choose one of off, text, on, not "sometimes".',
       },
       without: {
         _tag: "Invalid",
         message: `Give each as key=choice, not "${one}".`,
       },
     });
-    expect(showText(kind, { [one]: "links only", [two]: "on" })).toBe(
-      `${one}=links only, ${two}=on`
-    );
+    expect(showText(kind, { [one]: "text", [two]: "on" })).toBe(`${one}=text, ${two}=on`);
   });
 
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {

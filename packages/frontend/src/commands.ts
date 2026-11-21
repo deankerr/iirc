@@ -1504,14 +1504,13 @@ const notifyArguments = (args: string): Parsed<boolean> => {
 /** Each word `/previews` takes, and the choice it makes, none returning to `ui.previews`. */
 const previewsWords: ReadonlyMap<string, PreviewsShown | undefined> = new Map([
   ["default", undefined],
-  ["links", "links only"],
-  ["links only", "links only"],
+  ["text", "text"],
   ["off", "off"],
   ["on", "on"],
 ]);
 
 /**
- * What `/previews` was given: `off`, `links`, `on`, or `default`, in any case.
+ * What `/previews` was given: `off`, `text`, `on`, or `default`, in any case.
  * @param args - The text after `/previews`.
  * @returns The Timeline's own choice, none to follow `ui.previews`, or why it cannot tell.
  */
@@ -1520,7 +1519,7 @@ const previewsArguments = (args: string): Parsed<PreviewsShown | undefined> => {
 
   return previewsWords.has(said)
     ? parsed(previewsWords.get(said))
-    : invalid("Use /previews off, links, on, or default.");
+    : invalid("Use /previews off, text, on, or default.");
 };
 
 /**
@@ -3096,14 +3095,14 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Choose whether the open Timeline's links are previewed, over ui.previews, for every device: off, links only, on, or default to follow ui.previews. A Direct Message chosen links or on is previewed without a press.",
+      "Choose whether the open Timeline's links are previewed, over ui.previews, for every device: off, text, on, or default to follow ui.previews. A Direct Message chosen text or on is previewed without a press.",
     id: "previews.choose",
     intents: (mode: PreviewsShown | undefined, focus) => [
       { _tag: "ChoosePreviews", mode, timeline: focus.timeline },
     ],
     name: "previews",
     parse: previewsArguments,
-    usage: "/previews off|links|on|default",
+    usage: "/previews off|text|on|default",
     when: focused,
   }),
   unfocused({

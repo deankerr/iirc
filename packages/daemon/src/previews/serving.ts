@@ -7,9 +7,9 @@
  * @packageDocumentation
  */
 import type {
-  LinksOnly,
-  MediaHash,
-  MediaType,
+  PreviewsText,
+  ImageHash,
+  ImageType,
   PreviewId,
   PreviewsOff,
   StreamFailed,
@@ -25,7 +25,7 @@ import type { Scope } from "effect";
 import { HttpServerResponse } from "effect/http";
 
 import { startingRangeOf } from "../uploads/wanted.ts";
-import type { NoSuchMedia, Previews } from "./previews.ts";
+import type { NoSuchImage, Previews } from "./previews.ts";
 
 /**
  * The policy an image is served under. An SVG may style itself from within, as it draws
@@ -33,7 +33,7 @@ import type { NoSuchMedia, Previews } from "./previews.ts";
  * @param type - Its type.
  * @returns The `Content-Security-Policy`.
  */
-const policyOf = (type: MediaType) =>
+const policyOf = (type: ImageType) =>
   type === "image/svg+xml"
     ? "default-src 'none'; style-src 'unsafe-inline'; sandbox"
     : "default-src 'none'; sandbox";
@@ -55,19 +55,19 @@ const matches = (header: string | undefined, etag: string) =>
 /**
  * An image a Preview holds, as an answer: `304` when the Frontend already holds it, and
  * otherwise its bytes. Its hash names its bytes, so they never change under its tag. A hash
- * no Preview holds is `NoSuchMedia`, whether the Frontend says it holds it or not.
+ * no Preview holds is `NoSuchImage`, whether the Frontend says it holds it or not.
  * @param previews - The Previews.
  * @param hash - The image's hash.
  * @param ifNoneMatch - The request's `If-None-Match`, if any.
  * @returns The response.
  */
-export const servedMedia = (
+export const servedImage = (
   previews: (typeof Previews)["Service"],
-  hash: MediaHash,
+  hash: ImageHash,
   ifNoneMatch: string | undefined
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
-  NoSuchMedia | ByteStoreUnavailable,
+  NoSuchImage | ByteStoreUnavailable,
   Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -78,7 +78,7 @@ export const servedMedia = (
       return HttpServerResponse.empty({ headers: cached, status: 304 });
     }
 
-    const { bytes, type } = yield* previews.media(hash);
+    const { bytes, type } = yield* previews.image(hash);
 
     return HttpServerResponse.stream(bytes, {
       contentType: type,
@@ -115,7 +115,7 @@ export const servedStream = (
   | UnknownTimeline
   | UnknownMessage
   | PreviewsOff
-  | LinksOnly
+  | PreviewsText
   | UnknownStream
   | StreamFailed
   | TimelineStoreFailed,

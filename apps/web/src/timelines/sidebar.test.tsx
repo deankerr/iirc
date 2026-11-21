@@ -849,7 +849,7 @@ describe("a Timeline's own Previews, from the sidebar", () => {
     // Another device chooses for #other between this one's read and its change.
     fake.daemon.holdUiReads = true;
     await pressButton("More for #iirc");
-    await chooseFromMenu("links only");
+    await chooseFromMenu("text");
     await settled(() => fake.daemon.uiReadsHeld.length === 1);
     fake.daemon.ui = {
       options: { ...uiDefaults, "previews.timelines": { [other]: "off" } },
@@ -869,7 +869,7 @@ describe("a Timeline's own Previews, from the sidebar", () => {
       now: fake.daemon.ui.options["previews.timelines"],
     }).toStrictEqual({
       changes: ["4", "9"],
-      now: { [iirc]: "links only", [other]: "off" },
+      now: { [iirc]: "text", [other]: "off" },
     });
   });
 });
