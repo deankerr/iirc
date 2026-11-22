@@ -342,12 +342,13 @@ const dayLines = () =>
  * How the log is laid out, as a browser would and happy-dom does not: how tall its view is,
  * and how tall what it holds is, which a test changes to scroll back, how tall each row is,
  * and how wide the view is, which a test changes to wrap the rows again: `width` as the DOM
- * rounds it, and `exact` its content box's, unrounded, when the two differ, as a
- * ResizeObserver reports it.
+ * rounds it, `exact` its box's, unrounded, when the two differ, as a ResizeObserver
+ * reports it, and `gutter` how much of it a scrollbar takes.
  */
 interface Laid {
   content: number;
   exact: number | undefined;
+  gutter: number;
   row: number;
   top: number;
   view: number;
@@ -357,6 +358,7 @@ interface Laid {
 const layout: Laid = {
   content: 0,
   exact: undefined,
+  gutter: 0,
   row: 20,
   top: 0,
   view: 0,
@@ -377,6 +379,12 @@ const layOut = () => {
     },
   });
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return isLog(this) ? layout.width - layout.gutter : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
     get(this: HTMLElement) {
       return isLog(this) ? layout.width : 0;
@@ -605,6 +613,7 @@ describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
     layout.exact = undefined;
+    layout.gutter = 0;
     layout.row = 20;
     layout.top = 0;
     layout.view = 500;
@@ -1634,8 +1643,13 @@ const wrapAgain = async (row: number) => {
         return target.isConnected && (isLog(target) || isRow)
           ? [
               {
-                borderBoxSize: [{ blockSize: height, inlineSize: layout.width }],
-                contentRect: new DOMRect(0, 0, layout.exact ?? layout.width, height),
+                borderBoxSize: [{ blockSize: height, inlineSize: layout.exact ?? layout.width }],
+                contentRect: new DOMRect(
+                  0,
+                  0,
+                  (layout.exact ?? layout.width) - layout.gutter,
+                  height
+                ),
                 target,
               },
             ]
@@ -1828,14 +1842,22 @@ describe("where the view stands as its rows wrap again", () => {
     await wrapAgain(20);
     const justWide = logOf().dataset.line;
 
+    // Wide enough with its scrollbar, which takes a little of it.
     layout.exact = undefined;
+    layout.gutter = 15;
+    layout.width = 580;
+    await wrapAgain(20);
+    const scrollbar = logOf().dataset.line;
+
+    layout.gutter = 0;
     layout.width = 400;
     await wrapAgain(40);
 
-    expect({ first, justWide, narrowAgain: logOf().dataset.line, wide }).toStrictEqual({
+    expect({ first, justWide, narrowAgain: logOf().dataset.line, scrollbar, wide }).toStrictEqual({
       first: ["inline"],
       justWide: undefined,
       narrowAgain: "inline",
+      scrollbar: undefined,
       wide: undefined,
     });
   });

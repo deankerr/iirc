@@ -102,14 +102,16 @@ const narrowest = 36;
 
 /**
  * Whether a log is too narrow for columns: its own width, not the screen's, as Panes split,
- * against its own text's size, so this holds at any size.
+ * against its own text's size, so this holds at any size. The width is its border box's,
+ * which, as the log has no border or padding, is what a container query on it measured: a
+ * scrollbar's gutter counts.
  * @param element - The log.
- * @param width - Its content box's width, unrounded, as its ResizeObserver last reported it,
+ * @param width - Its border box's width, unrounded, as its ResizeObserver last reported it,
  * or none before it has, when its rounded width stands in until the observer reports.
  * @returns Whether it is.
  */
 const tooNarrow = (element: HTMLElement, width: number | undefined) =>
-  (width ?? element.clientWidth) <=
+  (width ?? element.offsetWidth) <=
   // A computed font size is always in pixels.
   narrowest * Number(getComputedStyle(element).fontSize.replace(/px$/u, ""));
 
@@ -798,7 +800,7 @@ const Lines = ({
         ? undefined
         : new ResizeObserver((entries) => {
             setViewHeight(element.clientHeight);
-            logWidth.current = entries.at(-1)?.contentRect.width ?? logWidth.current;
+            logWidth.current = entries.at(-1)?.borderBoxSize[0]?.inlineSize ?? logWidth.current;
             // Drawn before the frame is painted, so no frame shows the rows in columns.
             flushSync(() => {
               setNarrow(tooNarrow(element, logWidth.current));
