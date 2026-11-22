@@ -88,4 +88,24 @@ describe("a Feature turning off reports the Channels whose members' facts went s
       ])
     ).toStrictEqual([]);
   });
+
+  // Catches Self's own fact going stale unreported where a listing left Self out, though
+  // Self is in every Channel it is joined to.
+  it("names every Joined Channel when only Self's fact went stale", () => {
+    expect(
+      learnedBy([
+        registered(base, { isupport: bot }),
+        lines(
+          "!! configure +#iirc",
+          ">> JOIN #iirc",
+          "<< :iirc!~iirc@iirc.test JOIN #iirc",
+          ">> MODE #iirc",
+          "<< :irc.test 353 iirc = #iirc :peer",
+          "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+          "<< :iirc!~iirc@iirc.test MODE iirc +B"
+        ),
+        lines("<< :irc.test 005 iirc -BOT :are supported by this server"),
+      ])
+    ).toStrictEqual(["#iirc"]);
+  });
 });

@@ -12,7 +12,7 @@ import type { Fact } from "./known.ts";
 import { changeListing } from "./members.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
-import type { Joined, Member, Seen, State } from "./state.ts";
+import type { InSession, Joined, Member, Seen, State } from "./state.ts";
 import { mapUsers, noUsers, userIn } from "./users.ts";
 import type { Users } from "./users.ts";
 import { openOf, sessionOf } from "./views.ts";
@@ -68,41 +68,41 @@ const joinedStaled = (joined: Joined, since: Instant): Joined => ({
 
 const usersStaled = (users: Users, change: (seen: Seen) => Seen): Users => mapUsers(users, change);
 
-// What a member's facts are, by kind alone: staling only turns a fact known, or known in
-// part, stale, so a fact went stale where its kind changed. Self's are the Session's own.
-const kindsOf = (state: State, key: string, member: Member): string => {
-  const self = sessionOf(state);
+// What is known of a User, by kind alone: staling only turns a fact known, or known in
+// part, stale, so a fact went stale where its kind changed.
+const kindsOf = (seen: Seen | InSession | undefined): string =>
+  [seen?.account._tag, seen?.away._tag, seen?.bot._tag, seen?.mask._tag, seen?.realname._tag].join(
+    " "
+  );
 
-  const seen =
-    self !== undefined && folder(state)(self.nick) === key
-      ? self
-      : userIn(openOf(state)?.users ?? noUsers, key);
+const selfChanged = (before: State, after: State): boolean =>
+  kindsOf(sessionOf(before)) !== kindsOf(sessionOf(after));
 
-  return [
-    seen?.account._tag,
-    seen?.away._tag,
-    seen?.bot._tag,
-    seen?.mask._tag,
-    seen?.realname._tag,
-    member.prefixes._tag,
-  ].join(" ");
-};
+const memberChanged = (before: State, after: State, key: string, was: Member, now: Member) =>
+  was.prefixes._tag !== now.prefixes._tag ||
+  kindsOf(userIn(openOf(before)?.users ?? noUsers, key)) !==
+    kindsOf(userIn(openOf(after)?.users ?? noUsers, key));
 
 // Each Channel Self is joined to in which some member's facts changed between two States.
-const changedIn = (before: State, after: State): readonly string[] =>
-  [...after.channels].flatMap(([key, { name, phase }]) => {
+// Self is in every one, as `channelsSharedWith` counts it, listed or not.
+const changedIn = (before: State, after: State): readonly string[] => {
+  const self = selfChanged(before, after);
+
+  return [...after.channels].flatMap(([key, { name, phase }]) => {
     const was = before.channels.get(key)?.phase;
 
     return phase._tag === "Joined" &&
       was?._tag === "Joined" &&
-      [...phase.members].some(([nick, member]) => {
-        const old = was.members.get(nick);
+      (self ||
+        [...phase.members].some(([nick, member]) => {
+          const old = was.members.get(nick);
 
-        return old !== undefined && kindsOf(before, nick, old) !== kindsOf(after, nick, member);
-      })
+          return old !== undefined && memberChanged(before, after, nick, old, member);
+        }))
       ? [name]
       : [];
   });
+};
 
 // Rewrites the facts no Feature keeps any longer as stale, from now.
 const rewrite = (run: Run, facts: readonly Kept[]): void => {
