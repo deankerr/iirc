@@ -7,7 +7,9 @@
  * paint follows the device's own setting, and the text is in the defaults' size, line
  * height, and font. The widest line, `ui.timeline.maxWidth`, is `--widest-line` there too, in `ch`, and
  * is never set here or while it is `none`, so a line then runs the width of its Pane. The
- * nick column and the members' panel are `--nick-width` and `--members-width`, in `ch`.
+ * nick column and the members' panel are `--nick-width` and `--members-width`, in `ch`, and
+ * the room between a Timeline's rows, `ui.timeline.spacing`, is `--row-spacing`, a multiple
+ * of the text's size.
  */
 :root {
   color-scheme: light dark;
@@ -26,7 +28,10 @@
   /* `ui.timeline.nickWidth` and `ui.members.width` as they start, until the page runs. */
   --nick-width: 16ch;
   --members-width: 18ch;
+  --row-spacing: 0.3;
   --font-size: 14px;
+  /* What each row of a Timeline keeps above and below itself: half the room between two rows. */
+  --row-padding: calc(var(--row-spacing) * var(--font-size) / 2);
   /* A field's text: as the page's on a desktop, and never under 16px on a touch screen,
      where iOS Safari zooms the page into a field whose text is smaller. */
   --font-size-input: var(--font-size);

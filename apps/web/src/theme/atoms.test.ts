@@ -118,6 +118,8 @@ const drawnNow = () => document.documentElement.style.getPropertyValue("--color-
 
 const lineHeight = () => document.documentElement.style.getPropertyValue("--line-height");
 
+const rowSpacing = () => document.documentElement.style.getPropertyValue("--row-spacing");
+
 const widestLine = () => document.documentElement.style.getPropertyValue("--widest-line");
 
 const columnWidths = () => ({
@@ -435,18 +437,26 @@ describe("themes", () => {
     });
   });
 
-  it("draws the line height on the root at once", async () => {
+  it("draws the line height and the room between rows on the root at once, each its own", async () => {
     const { registry, type } = await page(signedIn());
     const stop = watchTheme(registry);
-    const before = lineHeight();
+    const before = { leading: lineHeight(), spacing: rowSpacing() };
 
     await type("/set ui.font.lineHeight 1.8");
     await until(registry, uiInEffect, (ui) => ui["font.lineHeight"] === 1.8);
-    const shared = lineHeight();
+    const leading = { leading: lineHeight(), spacing: rowSpacing() };
+
+    await type("/set ui.timeline.spacing 1");
+    await until(registry, uiInEffect, (ui) => ui["timeline.spacing"] === 1);
+    const spaced = { leading: lineHeight(), spacing: rowSpacing() };
 
     stop();
 
-    expect({ before, shared }).toStrictEqual({ before: "1.45", shared: "1.8" });
+    expect({ before, leading, spaced }).toStrictEqual({
+      before: { leading: "1.45", spacing: "0.3" },
+      leading: { leading: "1.8", spacing: "0.3" },
+      spaced: { leading: "1.8", spacing: "1" },
+    });
   });
 
   it("closes an import on sign-out, ending its read, and draws the theme in effect", async () => {

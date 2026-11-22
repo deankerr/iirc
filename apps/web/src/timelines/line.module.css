@@ -21,6 +21,9 @@
  * height of itself, so it runs unbroken down the rows, past a reply's line and a Preview.
  * The column's gap then sets what was said as far past it. A Gap or a Day draws a rule of
  * its own across.
+ *
+ * Every row keeps half of `ui.timeline.spacing` above and half below inside itself, as rows
+ * are placed and measured one by one, so a Highlight's tint and the rule cover the room.
  */
 .message,
 .highlight,
@@ -38,7 +41,7 @@
     max-content calc(var(--nick-width) + var(--space-3) + var(--border-width))
     minmax(0, 1fr) auto;
   column-gap: var(--space-3);
-  padding: 0 var(--space-3);
+  padding: var(--row-padding) var(--space-3);
   line-height: var(--line-height);
 }
 
@@ -296,7 +299,7 @@
 .more {
   display: inline-flex;
   position: absolute;
-  top: 0;
+  top: var(--row-padding);
   right: var(--space-1);
   align-items: center;
   justify-content: center;
@@ -382,8 +385,6 @@
 /* A Gap: a dashed rule through the senders' column, its words where text starts, and on. */
 .gap {
   align-items: center;
-  padding-top: var(--space-1);
-  padding-bottom: var(--space-1);
   color: var(--color-danger);
 }
 
@@ -408,8 +409,6 @@
 /* Where the day changes: a calm rule through the senders' column, the day's words after it. */
 .day {
   align-items: center;
-  padding-top: var(--space-1);
-  padding-bottom: var(--space-1);
   color: var(--color-muted);
 }
 
@@ -456,7 +455,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) var(--space-3);
+  padding: var(--row-padding) var(--space-3);
   color: var(--color-level-highlight);
 }
 
@@ -560,10 +559,11 @@
  * Under `ui.timeline.layout` stacked, a run of plain speech from one User: its head has the nick, in
  * its colour, and the time beside it on a line of their own, a little apart from the row
  * above, and each Message's text, the head's too, starts a line of its own below. These rows
- * are only ever drawn under stacked, in a Pane of any width.
+ * are only ever drawn under stacked, in a Pane of any width. The room the head keeps above
+ * is beside the room every row keeps.
  */
 .head {
-  padding-top: var(--space-1);
+  padding-top: calc(var(--space-1) + var(--row-padding));
 }
 
 .heading {
@@ -585,7 +585,7 @@
 
 .later {
   position: absolute;
-  top: 0;
+  top: var(--row-padding);
   right: var(--space-3);
   padding: 0 var(--space-1);
   background: var(--color-background);

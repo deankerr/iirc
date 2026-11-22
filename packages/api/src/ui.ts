@@ -332,6 +332,29 @@ export const NickWidth = Schema.Int.check(Schema.isBetween(nickWidthBounds)).ann
 /** The decoded form of {@link NickWidth}. */
 export type NickWidth = typeof NickWidth.Type;
 
+/** The least and the most room between a Timeline's rows, as a multiple of the text's size. */
+const rowSpacingBounds = { maximum: 1.5, minimum: 0 } as const;
+
+/** The step the room between rows moves in, a twentieth of the text's size. */
+const rowSpacingStep = 0.05;
+
+/**
+ * The room between a Timeline's rows, as a multiple of the text's size, within
+ * {@link rowSpacingBounds} and a multiple of {@link rowSpacingStep}: apart from the line
+ * height, which also spreads the lines of one Message, so the two are set apart. At 0 rows
+ * touch. It follows the text's size, as the line height does.
+ */
+export const RowSpacing = Schema.Finite.check(
+  Schema.isBetween(rowSpacingBounds),
+  Schema.isMultipleOf(rowSpacingStep)
+).annotate({
+  default: 0.3,
+  description: `The room between the rows of a Timeline, as a multiple of the text size, from ${rowSpacingBounds.minimum} to ${rowSpacingBounds.maximum}, apart from ui.font.lineHeight. At 0 rows touch. The last row stands as far from the Composer, and at least half the text size.`,
+});
+
+/** The decoded form of {@link RowSpacing}. */
+export type RowSpacing = typeof RowSpacing.Type;
+
 /**
  * The least and the most characters the members' panel may be. At fourteen it holds the
  * longest nick RFC 2812 allows, nine characters, whole after a rank's symbol and with the
@@ -847,6 +870,7 @@ export const UiOptions = Schema.Struct({
   "timeline.layout": LineLayout,
   "timeline.maxWidth": WidestLine,
   "timeline.nickWidth": NickWidth,
+  "timeline.spacing": RowSpacing,
   "timeline.timeFormat": TimeShown,
   "unread.markRead": ReadRule,
   "unread.muted": TimelinesMuted,

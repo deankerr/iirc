@@ -19,7 +19,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
-import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
+import { activityShown, leadingShown, lineShown, sizeShown, spacingShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { ScrollerProvider } from "../previews/near-view.ts";
 import { leaveTarget } from "../search/atoms.ts";
@@ -45,6 +45,9 @@ const nearTop = 240;
 
 /** How near the bottom counts as at it, in pixels. */
 const nearBottom = 8;
+
+/** The least room under a Timeline's last row, as a multiple of the text's size. */
+const minimumRoomUnder = 0.5;
 
 /** How long, in milliseconds, the Owner's input or a move it made lets a scroll be theirs. */
 const gestureLife = 1000;
@@ -106,6 +109,17 @@ const visible = (element: HTMLDivElement) => element.isConnected && element.clie
  */
 const tooNarrow = (element: HTMLElement, width: number | undefined, least: HTMLElement | null) =>
   least !== null && (width ?? element.offsetWidth) < least.offsetWidth;
+
+/**
+ * The room under a Timeline's last row, past the half of the room between rows it keeps
+ * itself, so it stands as far from the Composer as from the row above, and never nearer than
+ * half the text's size.
+ * @param size - The text's size, in pixels.
+ * @param spacing - The room between rows, as a multiple of it.
+ * @returns The room, in pixels.
+ */
+const roomUnder = (size: number, spacing: number) =>
+  size * Math.max(minimumRoomUnder, spacing) - (size * spacing) / 2;
 
 /** Where an item stands. */
 type Position = TimelineItem["position"];
@@ -286,6 +300,7 @@ const Lines = ({
   const self = useAtomValue(selfNick(window.network));
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);
+  const spacing = useAtomValue(spacingShown);
   const line = useAtomValue(lineShown);
   const cap = useAtomValue(windowCapOf);
   // Whether the page before can be read without asking, as scrolling near the top, or a
@@ -347,6 +362,9 @@ const Lines = ({
   // `ui.timeline.activity` is found among the rows around it.
   const laidOut = useRef<readonly LaidOut[]>([]);
   const shownActivity = useRef(activity);
+  // What a row not yet measured was estimated at, so a change of the text's size, the line
+  // height, or the room between rows, which moves every such row, is found.
+  const shownEstimate = useRef<number | undefined>(undefined);
   // What the core was last told: of which window, at the latest or away, and the last item
   // in view. Nothing yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
@@ -429,17 +447,21 @@ const Lines = ({
   // or not, leaves its own values behind in the virtualizer.
   const { current: adjusts } = useRef(keepsStill(pinned));
 
+  const estimated = Math.ceil(size * (leading + spacing));
+
   // TanStack Virtual hands back new functions each render, which nothing here memoizes.
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
-    // A line of text, as `--line-height` sets it, until a row is measured.
-    estimateSize: () => Math.ceil(size * leading),
+    // A line of text, as `--line-height` sets it, and the room each row keeps about it, as
+    // `--row-padding` sets it, until a row is measured.
+    estimateSize: () => estimated,
     getItemKey: (index) => rows[index]?.key ?? index,
     getScrollElement: () => scroller.current,
     // A screen of rows beyond the view each way, as a row is at least a line tall, for the
     // Previews of rows a screen away to be asked for and loaded; never fewer than 24.
     overscan: Math.max(24, Math.ceil(viewHeight / Math.ceil(size * leading))),
+    paddingEnd: roomUnder(size, spacing),
     // Its corrections, as rows above the view are measured, are the view's own scrolls.
     scrollToFn: (offset, options, instance) => {
       const element = instance.scrollElement;
@@ -861,21 +883,24 @@ const Lines = ({
     };
   }, []);
 
-  // After rows change: at the bottom, stay there; with rows added above, or hidden or shown
-  // again by `ui.timeline.activity`, put the row that was in view back where it was. A row above the
-  // view that changes height is kept still by the virtualizer itself.
+  // After rows change: at the bottom, stay there; with rows added above, hidden or shown
+  // again by `ui.timeline.activity`, or estimated anew, put the row that was in view back where
+  // it was. A row above the view that changes height once measured is kept still by the
+  // virtualizer itself.
   useLayoutEffect(() => {
     const element = scroller.current;
     const first = rows[0]?.key;
 
-    // Rows added above, the oldest dropped past the cap, or rows hidden or shown again move
-    // every row.
+    // Rows added above, the oldest dropped past the cap, rows hidden or shown again, or rows
+    // never measured estimated anew move every row.
     const shifted =
       (firstKey.current !== undefined && first !== firstKey.current) ||
-      shownActivity.current !== activity;
+      shownActivity.current !== activity ||
+      (shownEstimate.current !== undefined && shownEstimate.current !== estimated);
 
     firstKey.current = first;
     shownActivity.current = activity;
+    shownEstimate.current = estimated;
 
     if (element !== null) {
       // The item jumped to stays in the middle until the Owner scrolls.
