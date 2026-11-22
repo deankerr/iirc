@@ -22,7 +22,7 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { JournalFailed, NetworkId, networkOf } from "./journal.ts";
+import { JournalFailed, NetworkId, networkOf, Sequence } from "./journal.ts";
 import { LifeChanged, TimelinesKept, UnknownNetwork } from "./runtime.ts";
 import type { RuntimeService } from "./runtime.ts";
 import { outline, runTest, settle, startRuntime, wrapJournal } from "./testing/harness.ts";
@@ -437,6 +437,141 @@ describe("a Network whose Client throws on its first Configuration", () => {
       outline: ["1 libera Configured", "2 libera Removed"],
       removal: { life: 1, sequence: 2 },
       retaken: "TimelinesKept",
+    });
+  });
+});
+
+// The Journal, but a `Configured` waits or fails as `mode` says, so a Network added holds
+// no life yet while every other append, such as a `Removed`, goes through.
+const holdingBack = (world: World, mode: Ref.Ref<"pass" | "fail">, gate: Latch.Latch) =>
+  wrapJournal(world.journal, {
+    before: (record) =>
+      record._tag === "Input" && record.input._tag === "Configured"
+        ? Effect.flatMap(Ref.get(mode), (now) =>
+            now === "fail"
+              ? Effect.fail(new JournalFailed({ reason: "the disk is full" }))
+              : gate.await
+          )
+        : Effect.void,
+  });
+
+// What a Runtime holds of `libera`.
+const holding = (runtime: RuntimeService) =>
+  Effect.gen(function* () {
+    const living = (yield* runtime.lives).get(libera);
+
+    return {
+      kept: yield* runtime.kept,
+      living: living === undefined ? undefined : { life: living.life, tag: living._tag },
+    };
+  });
+
+describe("a Network whose first Configured is not yet stepped", () => {
+  it.each([
+    { earlier: false, name: "added for the first time" },
+    { earlier: true, name: "added again after a life removed without keep" },
+  ])(
+    "is unknown to a removal, which journals nothing, so a restart holds the same, when $name",
+    async ({ earlier }) => {
+      const result = await runTest((world) =>
+        Effect.gen(function* () {
+          const mode = yield* Ref.make<"pass" | "fail">("pass");
+          const gate = yield* Latch.make(true);
+          const journal = holdingBack(world, mode, gate);
+          const first = yield* startRuntime({ ...world, journal }, client);
+
+          if (earlier) {
+            yield* first.runtime.configure(libera, configured({ enabled: false }));
+            yield* first.runtime.remove(libera, { keep: false });
+          }
+
+          const before = (yield* outline(world.journal)).length;
+
+          // Its first `Configured` is never journaled, so it holds no life.
+          yield* Ref.set(mode, "fail");
+          yield* Effect.exit(first.runtime.configure(libera, configured({ enabled: false })));
+
+          const refused = yield* Effect.flip(first.runtime.remove(libera, { keep: true }));
+
+          const named = yield* Effect.flip(
+            first.runtime.remove(libera, { keep: true, life: Sequence.make(1) })
+          );
+
+          const journaled = (yield* outline(world.journal)).length - before;
+          const running = yield* holding(first.runtime);
+
+          yield* first.close;
+          const second = yield* startRuntime(world, client);
+
+          return { journaled, named, refused, restarted: yield* holding(second.runtime), running };
+        })
+      );
+
+      const held = { kept: new Map(), living: undefined };
+
+      expect(result).toStrictEqual({
+        journaled: 0,
+        named: new LifeChanged({ life: null, network: libera }),
+        refused: new UnknownNetwork({ network: libera }),
+        restarted: held,
+        running: held,
+      });
+    }
+  );
+
+  it("leaves a configure in flight to complete, the same after a restart, and is removed by the life it then has", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const mode = yield* Ref.make<"pass" | "fail">("pass");
+        const gate = yield* Latch.make(false);
+        const journal = holdingBack(world, mode, gate);
+        const first = yield* startRuntime({ ...world, journal }, client);
+
+        const quiet = configured({ enabled: false });
+        const adding = yield* Effect.forkChild(first.runtime.configure(libera, quiet));
+
+        yield* settle;
+        const refused = yield* Effect.flip(first.runtime.remove(libera, { keep: true }));
+        const journaled = yield* outline(world.journal);
+
+        yield* gate.open;
+        const began = yield* Fiber.join(adding);
+        const running = yield* holding(first.runtime);
+        const again = (yield* Effect.exit(first.runtime.configure(libera, quiet)))._tag;
+
+        yield* first.close;
+        const second = yield* startRuntime(world, client);
+        const restarted = yield* holding(second.runtime);
+        const retaken = (yield* Effect.exit(second.runtime.configure(libera, quiet)))._tag;
+        const removal = yield* second.runtime.remove(libera, { keep: true, life: began });
+
+        return {
+          again,
+          began,
+          journaled,
+          kept: yield* second.runtime.kept,
+          refused,
+          removed: removal.life,
+          restarted,
+          retaken,
+          running,
+        };
+      })
+    );
+
+    const { began } = result;
+    const held = { kept: new Map(), living: { life: began, tag: "Live" } };
+
+    expect(result).toStrictEqual({
+      again: "Success",
+      began,
+      journaled: [],
+      kept: new Map([[libera, began]]),
+      refused: new UnknownNetwork({ network: libera }),
+      removed: began,
+      restarted: held,
+      retaken: "Success",
+      running: held,
     });
   });
 });

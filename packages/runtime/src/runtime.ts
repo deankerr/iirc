@@ -375,7 +375,8 @@ export interface RuntimeService {
    * it. The Network is then unknown, and the Credentials its Configuration names are
    * forgotten, but those another Network's names. A Network removed with its Timelines
    * kept can be removed again, which journals another `Removed`, to drop them, and fails
-   * with `JournalFailed` when it cannot be.
+   * with `JournalFailed` when it cannot be. One added whose first `Configured` is not yet
+   * stepped has no life, and is `UnknownNetwork`, with nothing journaled.
    */
   readonly remove: (
     network: NetworkId,
@@ -764,7 +765,7 @@ export const makeRuntime = <S>(
     // Journal already holds it, and a restart folds it as any other. Either way it is then
     // held no more, drained within the bound, and its Credentials forgotten, by the
     // Configuration in force when it was removed.
-    const removeHeld = (id: NetworkId, network: Network<S>, keep: boolean) =>
+    const removeHeld = (id: NetworkId, network: Network<S>, keep: boolean, life: Life) =>
       Effect.gen(function* () {
         const running = (yield* Ref.get(network.status))._tag === "Running";
 
@@ -776,10 +777,7 @@ export const makeRuntime = <S>(
           : undefined;
 
         const sequence = told ?? (yield* removedAt(id)) ?? (yield* appendRemoved(id, keep));
-        const current = yield* Ref.get(network.current);
-        const { configured } = current;
-        // One removed before its first `Configured` was stepped has a life of its own.
-        const life = current.life ?? sequence;
+        const { configured } = yield* Ref.get(network.current);
 
         // Kept before it is held no more, so `lives`, which reads what is held first, finds
         // it as one or the other.
@@ -841,7 +839,13 @@ export const makeRuntime = <S>(
                   return yield* new LifeChanged({ life: life ?? null, network: id });
                 }
 
-                return yield* removeHeld(id, network, keep);
+                // One added whose first `Configured` is not yet stepped has no life, which a
+                // restart would not find to remove or keep, so it is unknown, as to `known`.
+                if (life === undefined) {
+                  return yield* new UnknownNetwork({ network: id });
+                }
+
+                return yield* removeHeld(id, network, keep, life);
               }
 
               const life = (yield* Ref.get(kept)).get(id);
