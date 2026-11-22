@@ -65,6 +65,9 @@ export const leadingShown = Atom.make((get) => get(uiInEffect)["font.lineHeight"
  */
 export const spacingShown = Atom.make((get) => get(uiInEffect)["timeline.spacing"]);
 
+/** Whether a sender's nick stands in `<` and `>` on this device, alone, as `timeShown` is. */
+export const bracketsShown = Atom.make((get) => get(uiInEffect)["timeline.nickBrackets"]);
+
 /** How a line is laid out on this device, alone, as `timeShown` is. */
 export const lineShown = Atom.make((get) => get(uiInEffect)["timeline.layout"]);
 

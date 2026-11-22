@@ -1397,6 +1397,79 @@ describe("what the view says it shows", () => {
     });
   });
 
+  // Catches brackets that stay on a sender's nick when turned off, or that take a NOTICE's
+  // or an action's marks with them, which are all that tell those kinds apart.
+  it("draws a PRIVMSG's sender without brackets under ui.timeline.nickBrackets off, in columns and inline, a NOTICE's and an action's as they are, and a stacked head bare either way", async () => {
+    const of = (sequence: number, kind: "Privmsg" | "Notice" | "Action") => {
+      const item = message(sequence);
+
+      return { ...item, content: { ...item.content, kind } };
+    };
+
+    const { registry } = await signedIn(
+      [],
+      [of(1, "Privmsg"), of(2, "Notice"), of(3, "Action"), message(4, null, true)]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 4"));
+
+    const drawn = async (layout: "columns" | "inline" | "stacked", brackets: boolean) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.layout": layout, "timeline.nickBrackets": brackets });
+        await Promise.resolve();
+      });
+
+      return linesOf();
+    };
+
+    expect({
+      columns: await drawn("columns", false),
+      inline: await drawn("inline", false),
+      on: await drawn("columns", true),
+      stacked: await drawn("stacked", true),
+      stackedOff: await drawn("stacked", false),
+    }).toStrictEqual({
+      columns: ["T peer line 1", "T -peer- line 2", "T * peer line 3", "T bot peer line 4"],
+      inline: ["T peer line 1", "T -peer- line 2", "T * peer line 3", "T bot peer line 4"],
+      on: ["T <peer> line 1", "T -peer- line 2", "T * peer line 3", "T bot <peer> line 4"],
+      stacked: ["peer T line 1", "T -peer- line 2", "T * peer line 3", "peer bot T line 4"],
+      stackedOff: ["peer T line 1", "T -peer- line 2", "T * peer line 3", "peer bot T line 4"],
+    });
+  });
+
+  // Catches the sender's nick drawn anew as brackets come or go, from another device's change,
+  // which would take focus, and an open menu, from it.
+  it("keeps focus on a sender's nick as ui.timeline.nickBrackets turns off and on", async () => {
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const nick = logOf().querySelector<HTMLElement>('[aria-haspopup="menu"][role="button"]');
+
+    nick?.focus();
+
+    const focused = nick !== null && document.activeElement === nick;
+
+    const kept = async (brackets: boolean) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.nickBrackets": brackets });
+        await Promise.resolve();
+      });
+
+      return document.activeElement === nick;
+    };
+
+    expect({ focused, off: await kept(false), on: await kept(true) }).toStrictEqual({
+      focused: true,
+      off: true,
+      on: true,
+    });
+  });
+
   // Catches a "new" divider still drawn above what only bots said, once the Owner quieted them.
   it('draws no "new" divider above what only bots said while bots are quieted', async () => {
     const { registry } = await signedIn([], [message(1, null, true), message(2, null, true)], {

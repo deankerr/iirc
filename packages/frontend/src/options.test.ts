@@ -1422,6 +1422,7 @@ describe("the options under ui", () => {
       "timeline.dateFormat": "full",
       "timeline.layout": "columns",
       "timeline.maxWidth": "none",
+      "timeline.nickBrackets": true,
       "timeline.nickWidth": 16,
       "timeline.spacing": 0.3,
       "timeline.timeFormat": "HH:mm",
@@ -1552,6 +1553,7 @@ describe("the options under ui", () => {
         "ui.timeline.dateFormat",
         "ui.timeline.layout",
         "ui.timeline.maxWidth",
+        "ui.timeline.nickBrackets",
         "ui.timeline.nickWidth",
         "ui.timeline.spacing",
         "ui.timeline.timeFormat",
@@ -1751,6 +1753,7 @@ describe("the options under ui", () => {
     expect({
       alone: read("/set ui.timeline.timeFormat"),
       anyCase: read("/set ui.timeline.timeFormat hh:mm:ss"),
+      brackets: read("/set -device ui.timeline.nickBrackets off"),
       device: read("/set -device ui.theme light"),
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
@@ -1783,6 +1786,7 @@ describe("the options under ui", () => {
     }).toStrictEqual({
       alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.timeline.timeFormat" }] },
       anyCase: change("timeline.timeFormat", "HH:mm:ss", false),
+      brackets: change("timeline.nickBrackets", false, true),
       device: change("theme", "light", true),
       deviceAlone: {
         _tag: "Invalid",

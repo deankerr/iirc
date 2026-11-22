@@ -320,17 +320,31 @@ export const nickWidthBounds = { maximum: 40, minimum: 11 } as const;
 
 /**
  * How wide a Timeline's nick column is under `columns`, in characters, a whole number within
- * {@link nickWidthBounds}, with what marks the nick as said, such as `<` and `>`. A nick
+ * {@link nickWidthBounds}, with what marks the nick as said, such as `<` and `>` where shown. A nick
  * longer is cut. A character is the font's own `0` at the text's size, so the column holds
  * as much at any size and in any font.
  */
 export const NickWidth = Schema.Int.check(Schema.isBetween(nickWidthBounds)).annotate({
   default: 16,
-  description: `How many characters wide a Timeline's nick column is, from ${nickWidthBounds.minimum} to ${nickWidthBounds.maximum}, with the < and > around a nick. A longer nick is cut. A character is as wide as the font's 0.`,
+  description: `How many characters wide a Timeline's nick column is, from ${nickWidthBounds.minimum} to ${nickWidthBounds.maximum}, with any marks around a nick, such as < and >. A longer nick is cut. A character is as wide as the font's 0.`,
 });
 
 /** The decoded form of {@link NickWidth}. */
 export type NickWidth = typeof NickWidth.Type;
+
+/**
+ * Whether the nick of a Message's sender stands in `<` and `>`. Off takes away only those: a
+ * `NOTICE` keeps `-nick-` and an action keeps `* nick`, since those marks are all that tell
+ * the kinds apart.
+ */
+export const NickBrackets = Schema.Boolean.annotate({
+  default: true,
+  description:
+    "Whether the nick of a Message's sender stands in < and >. Off takes away only those: a notice keeps -nick- and an action keeps * nick.",
+});
+
+/** The decoded form of {@link NickBrackets}. */
+export type NickBrackets = typeof NickBrackets.Type;
 
 /** The least and the most room between a Timeline's rows, as a multiple of the text's size. */
 const rowSpacingBounds = { maximum: 1.5, minimum: 0 } as const;
@@ -869,6 +883,7 @@ export const UiOptions = Schema.Struct({
   "timeline.dateFormat": DayShown,
   "timeline.layout": LineLayout,
   "timeline.maxWidth": WidestLine,
+  "timeline.nickBrackets": NickBrackets,
   "timeline.nickWidth": NickWidth,
   "timeline.spacing": RowSpacing,
   "timeline.timeFormat": TimeShown,

@@ -33,7 +33,7 @@ import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-compon
 
 import { chooseReply, perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
-import { dayShown, lineShown, timeShown } from "../options/ui.ts";
+import { bracketsShown, dayShown, lineShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews, PreviewToggle } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
 import { BotMark } from "../ui/bot-mark.tsx";
@@ -481,6 +481,8 @@ const Said = ({
   readonly line: Extract<LineOfRow, { readonly _tag: "Message" }>;
   readonly place: Place;
 }) => {
+  const brackets = useAtomValue(bracketsShown);
+
   const nick = (
     <NickButton nick={line.nick} timeline={item.timeline}>
       <Nick colour={line.colour} nick={line.nick} />
@@ -529,7 +531,15 @@ const Said = ({
               <BotMark />{" "}
             </>
           ) : null}
-          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
+          {/* The brackets come and go around the nick, which stays where it is, so it keeps
+              focus and an open menu. */}
+          {line.kind === "Privmsg" ? (
+            <>
+              {brackets ? "<" : null}
+              {nick}
+              {brackets ? ">" : null}
+            </>
+          ) : null}
           {line.kind === "Notice" ? <>-{nick}-</> : null}
           {line.kind === "Action" ? <>* {nick}</> : null}
         </span>
