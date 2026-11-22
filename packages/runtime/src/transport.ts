@@ -22,7 +22,7 @@ export const maxReceivedBytes = maxReceivedTagBytes + maxLineBytes;
 /** What a Connection reports, in order. */
 export type LinkEvent =
   | { readonly _tag: "Opened" }
-  /** One Line's bytes, without its line ending. */
+  /** One Line's bytes, without its line ending. CR, LF, and CRLF each end one, as Ircds differ. */
   | { readonly _tag: "Received"; readonly bytes: Uint8Array }
   | { readonly _tag: "Closed"; readonly reason: CloseReason };
 
@@ -36,7 +36,11 @@ export interface Link {
   readonly events: Stream.Stream<LinkEvent>;
   /** Writes one Line's bytes, with its line ending. Before `Opened` or after `Closed`, it does nothing. */
   readonly send: (bytes: Uint8Array) => Effect.Effect<void>;
-  /** Ends the Connection. Its `Closed` says `HungUp`, unless it had already ended otherwise. */
+  /**
+   * Ends the Connection. Its `Closed` says `HungUp`, unless it had already ended otherwise.
+   * What was already sent reaches the Ircd first, within a bound, so a `QUIT` arrives, and
+   * a peer that never reads cannot hold it past the bound.
+   */
   readonly hangup: Effect.Effect<void>;
 }
 
