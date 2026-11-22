@@ -57,6 +57,7 @@ The core decides and this package draws and does the I/O.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
 - **The nick column is `ui.timeline.nickWidth` characters wide,** each as wide as the font's `0`, in any font. A longer nick is cut with an ellipsis. A thin rule stands after it, unbroken down the rows.
+- **The rule after the nick column drags, or takes the arrows, Home, and End once focused,** as the Sidebar's edge does, and resizes every row's nick column as it moves. Letting go, or each key, writes `ui.timeline.nickWidth` in whole characters, this device's own where it overrides the option, else the shared one, and the Composer says why if it is refused. A drag the browser cancels writes nothing. While the rule is dragged the rows stay in columns, and a drag across the log selects and scrolls nothing. A Timeline drawn inline or stacked has no grip.
 - **A Timeline reads as `inline` where `columns` would leave its text fewer than about thirty characters,** from its first frame, as a Pane split a few times, or a phone, does, and again at once as the font, the text's size, the time's format, or the nick column changes.
 - **Activity is dimmer than what was said.** An Ircd's numeric replies are not.
 - **A run of joins, parts, quits, and changes of nick is one dim line** that says how many and who. A press opens it to each one's own line, and closes it again. A netsplit or a netjoin is likewise one dim line that opens to its nicks.
@@ -121,6 +122,7 @@ The core decides and this package draws and does the I/O.
 - **A press on the topic discloses it in full under the bar.**
 - **The toggle, `/members`, or Alt+M shows the members under the bar, by rank.** A press, a tap, or Enter on one opens the menu on their nick, Query first, so Enter twice opens their Direct Message.
 - **The members beside a Timeline are `ui.members.width` characters wide,** each as wide as the font's `0`. Over a narrow Pane they are as wide, up to four fifths of the Pane, and on a compact screen they are a sheet the screen's width. A longer nick is cut with an ellipsis.
+- **The edge of the members beside a Timeline drags, or takes the arrows, Home, and End once focused,** as the Sidebar's does, and writes `ui.members.width` as the nick column's rule writes its option. Over a narrow Pane and as a sheet they have no edge to drag.
 - **A member's menu says, dimly, `account` and the account they are logged in to, or `logged out`,** and nothing while it is not known.
 - **A Pane narrower than 600px shows its members over its Timeline, never beside it.** There the toggle opens them for that Pane alone, and Escape, a press elsewhere, or choosing an action puts them away. The device's choice of a column covers only the Panes wide enough for one.
 - **A User known to be a bot has a dim, small `bot` after their nick,** as a member and beside the sender of a Message they said, and the row's label says it too. A fact gone stale or never learned marks nothing.
@@ -269,7 +271,7 @@ The core decides and this package draws and does the I/O.
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the Sidebar, closing a Timeline, saving one as text, and the Timeline view |
 | `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |
 | `src/composer/` | The Composer, what carries out its intents, its list of completions, and uploading files through the `Uploader` port |
-| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, the options under `ui`, `store`, `uploads`, and `previews`, and the Uploads view |
+| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, the options under `ui`, `store`, `uploads`, and `previews`, the widths a drag holds and writes, and the Uploads view |
 | `src/search/`, `src/channel/`, `src/lookup/`, `src/tail/` | Each of those views and its atoms |
 | `src/keys/` | The keymap the page holds, and the one key listener |
 | `src/nick/` | The menu on a nick, and its atoms |
@@ -277,7 +279,7 @@ The core decides and this package draws and does the I/O.
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the Sidebar's width and whether it shows |
 | `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
-| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, and dates |
+| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, the grip on a width the Owner drags, and dates |
 | `src/testing/` | The fake Daemon, and the test ports for uploading, notifying, and downloading |
 
 ### The runtime
@@ -328,7 +330,7 @@ The core decides and this package draws and does the I/O.
 - **The core owns the Panes, and `react-resizable-panels` only draws them.** Only a change the Owner made goes back to the core.
 - **A split or a swap never draws a Pane's content afresh,** and the Timeline view puts back the scroll position a move loses.
 - **A row's layout follows its Timeline's own width,** never the screen's. Nothing in a Timeline scrolls sideways: a row breaks what has no place to break, and the view clips what is left.
-- **No width counts characters.** The time and sender columns, the members' column, the Composer's prompt, and a Pane's choice in the switcher are sized from samples drawn in the font, so a sans font cuts no nick that monospace showed whole where there is room, and every row lines up in any font.
+- **No width counts characters.** The time column, the Composer's prompt, and a Pane's choice in the switcher are sized from samples drawn in the font, and the nick column and the members' column in the font's own `0`, so every row lines up in any font.
 - **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page.
 - **The first row whose top is in view stays still** as rows are added above, dropped, hidden by `ui.timeline.activity`, or wrapped again at a new width or text size, and a view at the latest stays there.
 - **A window's held Previews are read before the window is drawn.** A held read that fails, or is not answered within `Waits.held`, is let go of, and the window is drawn all the same.

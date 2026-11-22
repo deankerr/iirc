@@ -1,0 +1,50 @@
+/*
+ * A grip on a width, drawn as the Sidebar's edge is: a line over the rule or the edge it
+ * stands on, with a wider grip either side of it, in the accent while hovered or dragged.
+ * Whatever holds it places it.
+ */
+.edge {
+  z-index: 1;
+  width: var(--border-width);
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.edge::before {
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-2));
+  content: "";
+}
+
+.edge:hover,
+.edge:active {
+  background: var(--color-accent);
+}
+
+/* Focused from the keyboard: the line in the focus colour, as wide as an edge either side. */
+.edge:focus-visible {
+  background: var(--color-focus);
+  outline: none;
+  box-shadow: 0 0 0 var(--edge-width) var(--color-focus);
+}
+
+/* A hundred of the font's `0`, unseen, which a drag measures to move in whole ones. */
+.zero {
+  position: absolute;
+  width: 100ch;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* On a touch screen, the grip is a finger's size. */
+@media (pointer: coarse) {
+  .edge::before {
+    inset: 0 calc(var(--target-size) / -2);
+  }
+}

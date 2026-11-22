@@ -5,10 +5,11 @@ import type { Member, TimeShown, Timeline } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
+import { pageState } from "../page/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, sync } from "../timelines/atoms.ts";
@@ -231,6 +232,61 @@ const measure = async (registry: Parameters<typeof paneMeasured>[0], width: numb
   });
 };
 
+/**
+ * The grip on the members' edge, beside a Timeline.
+ * @returns It, or none.
+ */
+const grip = () => document.querySelector<HTMLElement>('[aria-label="Resize the members"]');
+
+/**
+ * Has the page measure each of the font's `0` as eight pixels, from a grip's unseen measure
+ * of a hundred beside it, and everything else as nothing, as happy-dom does.
+ * @returns What puts the measure back.
+ */
+const zeroOfEight = () => {
+  const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: Element
+  ) {
+    return new DOMRect(0, 0, this.previousElementSibling?.tagName === "HR" ? 800 : 0, 0);
+  });
+
+  return () => {
+    spy.mockRestore();
+  };
+};
+
+/**
+ * A pointer's event at an x, as a mouse's first button gives it.
+ * @param type - The event.
+ * @param clientX - Where the pointer is.
+ * @returns The event.
+ */
+const at = (type: string, clientX: number) =>
+  new PointerEvent(type, { bubbles: true, cancelable: true, clientX, pointerId: 1 });
+
+/**
+ * Drags a grip from the first x to the last, through each between, as a pointer does.
+ * @param target - The grip.
+ * @param xs - Where the pointer is, from where it goes down to where it lets go.
+ * @param between - Called once the pointer has moved, before it lets go.
+ */
+const drag = async (target: HTMLElement | null, xs: readonly number[], between?: () => void) => {
+  await act(async () => {
+    target?.dispatchEvent(at("pointerdown", xs[0] ?? 0));
+
+    for (const x of xs.slice(1)) {
+      target?.dispatchEvent(at("pointermove", x));
+    }
+
+    await Promise.resolve();
+  });
+  between?.();
+  await act(async () => {
+    target?.dispatchEvent(at("pointerup", xs.at(-1) ?? 0));
+    await Promise.resolve();
+  });
+};
+
 describe("a Pane's status bar", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -444,6 +500,170 @@ describe("a Pane's members", () => {
       floating: { focused: true, pressed: "true", under: true },
       narrowed: true,
       wide: true,
+    });
+  });
+
+  // Catches a drag that writes the option at every step, or past its bounds, or not at all.
+  it("are resized as their edge is dragged, within the option's bounds, and write it once, as it ends", async () => {
+    const { daemon, registry } = await signedIn();
+    const restore = zeroOfEight();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+
+    const now = () => grip()?.getAttribute("aria-valuenow");
+    const steps: (string | null | undefined)[] = [];
+    let written = -1;
+
+    // Left widens them: four `0`s, then far past the widest.
+    await drag(grip(), [600, 568, 0], () => {
+      steps.push(now());
+      written = daemon.uiChanges.length;
+    });
+    await settled(() => daemon.ui.options["members.width"] === 40);
+
+    const widest = { changes: daemon.uiChanges.map((one) => one.route), now: now() };
+
+    // Right narrows them, and never below the narrowest.
+    await drag(grip(), [100, 140, 2000]);
+    await settled(() => daemon.ui.options["members.width"] === 14);
+    restore();
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      narrowest: now(),
+      steps,
+      widest,
+      written,
+    }).toStrictEqual({
+      changes: ["PUT members.width", "PUT members.width"],
+      narrowest: "14",
+      steps: ["40"],
+      widest: { changes: ["PUT members.width"], now: "40" },
+      written: 0,
+    });
+  });
+
+  // Catches a key that writes the shared option over the one this device overrides, which
+  // would then win, so the edge would seem not to move.
+  it("are resized from their edge by the arrows, Home, and End, written as this device's own where it overrides the option", async () => {
+    const { daemon, registry } = await signedIn();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+
+    const shared = [];
+
+    await key(grip(), "ArrowLeft");
+    await settled(() => daemon.ui.options["members.width"] === 19);
+    shared.push(grip()?.getAttribute("aria-valuenow"));
+
+    await act(async () => {
+      registry.set(deviceUi, { "members.width": 20 });
+      await Promise.resolve();
+    });
+
+    const ownAfter = async (name: string) => {
+      await key(grip(), name);
+
+      return registry.get(deviceUi)["members.width"];
+    };
+
+    const own = [await ownAfter("ArrowRight"), await ownAfter("End"), await ownAfter("Home")];
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      focusable: grip()?.tabIndex,
+      own,
+      shared,
+      sharedAfter: daemon.ui.options["members.width"],
+    }).toStrictEqual({
+      changes: ["PUT members.width"],
+      focusable: 0,
+      own: [19, 40, 14],
+      shared: ["19"],
+      sharedAfter: 19,
+    });
+  });
+
+  // Catches a key on the members' edge that lets go of a nick column dragged meanwhile.
+  it("keep a nick column dragged meanwhile as it was dragged while a key resizes them", async () => {
+    const { daemon, registry } = await signedIn();
+    const restore = zeroOfEight();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+
+    const nick = document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
+
+    await act(async () => {
+      nick?.dispatchEvent(at("pointerdown", 200));
+      nick?.dispatchEvent(at("pointermove", 224));
+      await Promise.resolve();
+    });
+    await key(grip(), "ArrowLeft");
+    await settled(() => daemon.ui.options["members.width"] === 19);
+
+    const meanwhile = nick?.getAttribute("aria-valuenow");
+
+    await act(async () => {
+      nick?.dispatchEvent(at("pointerup", 224));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.uiChanges.length === 2);
+    restore();
+
+    expect({ meanwhile, written: daemon.ui.options["timeline.nickWidth"] }).toStrictEqual({
+      meanwhile: "19",
+      written: 19,
+    });
+  });
+
+  // Catches a width the Daemon refused that snaps back with no word of why.
+  it("say in the Composer why a width was not written, and draw the one in force", async () => {
+    const { daemon, registry } = await signedIn();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+    daemon.refuseUi = true;
+    await key(grip(), "ArrowLeft");
+    await settled(() => document.body.textContent.includes("could not record"));
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      now: grip()?.getAttribute("aria-valuenow"),
+    }).toStrictEqual({ changes: ["PUT members.width"], now: "18" });
+  });
+
+  // Catches a grip on members that a drag cannot resize: over a narrow Pane, or a sheet.
+  it("have no edge to drag over a narrow Pane or as a sheet", async () => {
+    const { registry } = await signedIn();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 400);
+    await press(toggle());
+    await settled(() => members() !== null);
+
+    const narrow = { grip: grip() === null, members: members() !== null };
+
+    await act(async () => {
+      registry.set(pageState, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await press(toggle());
+    await settled(() => document.querySelector('[role="dialog"] h2')?.textContent === "members");
+
+    expect({ narrow, sheet: grip() === null }).toStrictEqual({
+      narrow: { grip: true, members: true },
+      sheet: true,
     });
   });
 

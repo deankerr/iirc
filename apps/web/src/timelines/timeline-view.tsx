@@ -36,7 +36,7 @@ import {
   selfNick,
   windowCapOf,
 } from "./atoms.ts";
-import { ColumnsLeast, Line } from "./line.tsx";
+import { ColumnsLeast, Line, NickEdge } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
 
@@ -321,6 +321,8 @@ const Lines = ({
   const [viewHeight, setViewHeight] = useState(0);
   // Whether the log is too narrow for columns, as it was last laid out.
   const [narrow, setNarrow] = useState(false);
+  // Whether this log's nick grip is being dragged, which keeps it in columns till let go.
+  const [nickDragged, setNickDragged] = useState(false);
   // The log's width as its ResizeObserver last reported it: the DOM's, not state.
   const logWidth = useRef<number | undefined>(undefined);
   // The least a row in columns takes, laid out unseen beside the log.
@@ -890,11 +892,13 @@ const Lines = ({
     }));
   });
 
-  // A log too narrow for columns draws its rows as `inline` does.
-  const drawn = line === "columns" && narrow ? "inline" : line;
+  // A log too narrow for columns draws its rows as `inline` does, but for while its own nick
+  // grip is dragged, so the grip stays under the pointer until it lets go. Another log keeps
+  // to its own width.
+  const drawn = line === "columns" && narrow && !nickDragged ? "inline" : line;
 
   return (
-    <>
+    <div className={styles.log}>
       {/* Keys, a press, a touch, and the wheel only say the Owner moved the log themselves. */}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
@@ -968,7 +972,8 @@ const Lines = ({
         </ScrollerProvider>
       </div>
       <ColumnsLeast ref={least} />
-    </>
+      {drawn === "columns" ? <NickEdge onHeld={setNickDragged} /> : null}
+    </div>
   );
 };
 

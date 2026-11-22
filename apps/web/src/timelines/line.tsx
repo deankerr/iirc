@@ -39,6 +39,7 @@ import { jumpTo } from "../search/atoms.ts";
 import { BotMark } from "../ui/bot-mark.tsx";
 import { Button } from "../ui/button.tsx";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
+import { ColumnEdge } from "../ui/column-edge.tsx";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { dayIso, dayWritten } from "../ui/day.ts";
 import { Icon } from "../ui/icon.tsx";
@@ -62,6 +63,30 @@ export const ColumnsLeast = ({ ref }: { readonly ref: Ref<HTMLDivElement> }) => 
       <div className={styles.leastRow} ref={ref}>
         <span className={styles.time} data-sample={sample} />
       </div>
+    </div>
+  );
+};
+
+/**
+ * The grip on the rule between nick and text, laid over a log in columns: one control for
+ * every row, since each row is a grid of its own. It stands in columns as a row's are, so it
+ * lies on the rule whatever the time's format, and takes the pointer only where it is.
+ * @param props - What to tell as a drag of it begins and ends.
+ * @returns The grip.
+ */
+export const NickEdge = ({ onHeld }: { readonly onHeld: (held: boolean) => void }) => {
+  const sample = sampleOf(useAtomValue(timeShown));
+
+  return (
+    <div className={styles.edgeRow}>
+      <span className={styles.time} data-sample={sample} />
+      <ColumnEdge
+        className={styles.edge}
+        grows="Right"
+        label="Resize the nick column"
+        onHeld={onHeld}
+        option="timeline.nickWidth"
+      />
     </div>
   );
 };

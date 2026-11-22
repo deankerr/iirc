@@ -316,7 +316,7 @@ export type WidestLine = typeof WidestLine.Type;
  * longest nick RFC 2812 allows, nine characters, whole between `<` and `>`; at forty it is
  * half a line of eighty, so the columns beside a Timeline's text never take most of it.
  */
-const nickWidthBounds = { maximum: 40, minimum: 11 } as const;
+export const nickWidthBounds = { maximum: 40, minimum: 11 } as const;
 
 /**
  * How wide a Timeline's nick column is under `columns`, in characters, a whole number within
@@ -338,7 +338,7 @@ export type NickWidth = typeof NickWidth.Type;
  * room at its edges, which are pixels and so take more characters at the smallest text; at
  * forty, as the nick column, it leaves a Pane to its Timeline.
  */
-const membersWidthBounds = { maximum: 40, minimum: 14 } as const;
+export const membersWidthBounds = { maximum: 40, minimum: 14 } as const;
 
 /**
  * How wide the members' panel is beside its Timeline, in characters, a whole number within

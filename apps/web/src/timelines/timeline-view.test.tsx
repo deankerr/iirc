@@ -437,6 +437,11 @@ const layOut = () => {
         return new DOMRect(0, 0, layout.width, layout.view);
       }
 
+      // A grip's unseen measure of a hundred of the font's `0`, each eight pixels.
+      if (this.previousElementSibling?.tagName === "HR") {
+        return new DOMRect(0, 0, 800, 0);
+      }
+
       return new DOMRect(0, 0, 0, Object.hasOwn(this.dataset, "index") ? layout.row : 0);
     },
   });
@@ -623,6 +628,21 @@ const seen = () => [
   motdButton()?.getAttribute("aria-expanded"),
   motdBlock(),
 ];
+
+/**
+ * A pointer's event at an x, as a mouse's first button gives it.
+ * @param type - The event.
+ * @param clientX - Where the pointer is.
+ * @returns The event.
+ */
+const at = (type: string, clientX: number) =>
+  new PointerEvent(type, { bubbles: true, cancelable: true, clientX, pointerId: 1 });
+
+/**
+ * The grip on the rule between nick and text, over the log.
+ * @returns It, or none.
+ */
+const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
 
 describe("what the view says it shows", () => {
   beforeEach(() => {
@@ -1396,6 +1416,60 @@ describe("what the view says it shows", () => {
     expect({ loud, quiet: dividedNow() }).toStrictEqual({ loud: true, quiet: false });
   });
 
+  // Catches a grip on the rule that writes at every step, or none, or one left where no
+  // rule is drawn to resize.
+  it("lays one grip over the rule in columns, none inline or stacked, and a drag writes ui.timeline.nickWidth once, as it ends", async () => {
+    const { daemon, registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const grips = document.querySelectorAll('[aria-label="Resize the nick column"]').length;
+
+    // Right widens it, three `0`s.
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerdown", 200));
+      nickGrip()?.dispatchEvent(at("pointermove", 210));
+      nickGrip()?.dispatchEvent(at("pointermove", 224));
+      await Promise.resolve();
+    });
+
+    const moving = {
+      changes: daemon.uiChanges.length,
+      now: nickGrip()?.getAttribute("aria-valuenow"),
+    };
+
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerup", 224));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.ui.options["timeline.nickWidth"] === 19);
+
+    const shown = (layout: "inline" | "stacked") => async () => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.layout": layout });
+        await Promise.resolve();
+      });
+
+      return nickGrip() === null;
+    };
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      grips,
+      inline: await shown("inline")(),
+      moving,
+      stacked: await shown("stacked")(),
+    }).toStrictEqual({
+      changes: ["PUT timeline.nickWidth"],
+      grips: 1,
+      inline: true,
+      moving: { changes: 0, now: "19" },
+      stacked: true,
+    });
+  });
+
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {
     const { registry } = await signedIn();
 
@@ -1926,6 +2000,55 @@ describe("where the view stands as its rows wrap again", () => {
       wider: "inline",
     });
     expect(following(registry)).toBeTruthy();
+  });
+
+  // Catches a nick drag that widens the columns past what the log holds: the rows going
+  // inline took the grip from under the pointer and wrote the width mid-drag.
+  it("stays in columns while the nick column is dragged wider than the log holds, writing the width once the pointer lets go, and nothing for a drag the browser cancels", async () => {
+    const { daemon } = await opened();
+    const grip = nickGrip();
+
+    await act(async () => {
+      grip?.dispatchEvent(at("pointerdown", 200));
+      grip?.dispatchEvent(at("pointermove", 240));
+      await Promise.resolve();
+    });
+    // As wide as the drag made the nick column: too wide for the log.
+    await columnsTake(820);
+
+    const held = {
+      changes: daemon.uiChanges.length,
+      grip: nickGrip() === grip,
+      line: logOf().dataset.line,
+    };
+
+    await act(async () => {
+      grip?.dispatchEvent(at("pointerup", 240));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.ui.options["timeline.nickWidth"] === 21);
+
+    const released = logOf().dataset.line;
+
+    await columnsTake(600);
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerdown", 200));
+      nickGrip()?.dispatchEvent(at("pointermove", 160));
+      nickGrip()?.dispatchEvent(at("pointercancel", 160));
+      await Promise.resolve();
+    });
+
+    expect({
+      cancelled: nickGrip()?.getAttribute("aria-valuenow"),
+      changes: daemon.uiChanges.map((one) => one.route),
+      held,
+      released,
+    }).toStrictEqual({
+      cancelled: "21",
+      changes: ["PUT timeline.nickWidth"],
+      held: { changes: 0, grip: true, line: undefined },
+      released: "inline",
+    });
   });
 
   it("stays at the latest as its rows wrap again, though the browser moved the log as its box changed", async () => {

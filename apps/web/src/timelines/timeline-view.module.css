@@ -5,6 +5,15 @@
   height: 100%;
 }
 
+/* The log, and the grip on its nick column's rule laid over it. */
+.log {
+  display: flex;
+  position: relative;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .scroller {
   display: flex;
   flex: 1;

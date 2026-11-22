@@ -2,6 +2,7 @@
 declare const styles: {
   readonly held: string;
   readonly jump: string;
+  readonly log: string;
   readonly placeholder: string;
   readonly row: string;
   readonly rows: string;

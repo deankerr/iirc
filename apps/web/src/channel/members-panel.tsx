@@ -6,7 +6,8 @@
  * account they are logged in to above it, Query first, so Enter twice opens their Direct
  * Message.
  *
- * Where the Pane is wide, they are a column beside its Timeline, a region. Where it is
+ * Where the Pane is wide, they are a column beside its Timeline, a region, whose edge drags
+ * or takes the arrows to resize it, as the Sidebar's does. Where it is
  * narrow, they lie over its Timeline instead, a dialog that leaves the page usable, and on
  * a compact screen they are a sheet over the focused Pane, a modal dialog. Those two are put away by the toggle, Escape, a press elsewhere,
  * `/members`, Alt+M, or choosing what to do with a member, so what it does shows.
@@ -37,6 +38,7 @@ import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
 import { BotMark } from "../ui/bot-mark.tsx";
 import { IconButton } from "../ui/button.tsx";
+import { ColumnEdge } from "../ui/column-edge.tsx";
 import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
@@ -368,7 +370,13 @@ const Shown = ({ pane }: { readonly pane: string }) => {
   }
 
   return (
-    <section aria-label="Members" className={styles.panel}>
+    <section aria-label="Members" className={`${styles.panel} ${styles.beside}`}>
+      <ColumnEdge
+        className={styles.edge}
+        grows="Left"
+        label="Resize the members"
+        option="members.width"
+      />
       {body}
     </section>
   );
