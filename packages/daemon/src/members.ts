@@ -131,7 +131,9 @@ export const rankOrder = (view: ChannelView): ReadonlyMap<string, number> =>
  * A page of a Channel's members: those after `after` in the order, up to `limit`, and with
  * `prefix`, only those whose nick starts with it under the Connection's casemapping. A
  * member who left since `after` was given is simply not there, and none is given twice
- * while their rank and nick stay as they were.
+ * while their rank and nick stay as they were. The Client keeps members by folded nick, not
+ * in rank order, so each page ranks and sorts the one Channel again, rather than an order
+ * being kept up to date on every `JOIN`, `PART`, `NICK`, and `MODE`.
  * @param view - The Channel, as the Client knows it now.
  * @param query - Where to start, how many, and the start of the nicks wanted.
  * @returns The page, and where the next begins.
