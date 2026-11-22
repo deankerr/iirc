@@ -1439,6 +1439,37 @@ describe("what the view says it shows", () => {
     });
   });
 
+  // Catches the sender's nick drawn anew as brackets come or go, from another device's change,
+  // which would take focus, and an open menu, from it.
+  it("keeps focus on a sender's nick as ui.timeline.nickBrackets turns off and on", async () => {
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const nick = logOf().querySelector<HTMLElement>('[aria-haspopup="menu"][role="button"]');
+
+    nick?.focus();
+
+    const focused = nick !== null && document.activeElement === nick;
+
+    const kept = async (brackets: boolean) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.nickBrackets": brackets });
+        await Promise.resolve();
+      });
+
+      return document.activeElement === nick;
+    };
+
+    expect({ focused, off: await kept(false), on: await kept(true) }).toStrictEqual({
+      focused: true,
+      off: true,
+      on: true,
+    });
+  });
+
   // Catches a "new" divider still drawn above what only bots said, once the Owner quieted them.
   it('draws no "new" divider above what only bots said while bots are quieted', async () => {
     const { registry } = await signedIn([], [message(1, null, true), message(2, null, true)], {

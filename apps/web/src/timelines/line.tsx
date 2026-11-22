@@ -531,8 +531,15 @@ const Said = ({
               <BotMark />{" "}
             </>
           ) : null}
-          {line.kind === "Privmsg" && brackets ? <>&lt;{nick}&gt;</> : null}
-          {line.kind === "Privmsg" && !brackets ? nick : null}
+          {/* The brackets come and go around the nick, which stays where it is, so it keeps
+              focus and an open menu. */}
+          {line.kind === "Privmsg" ? (
+            <>
+              {brackets ? "<" : null}
+              {nick}
+              {brackets ? ">" : null}
+            </>
+          ) : null}
           {line.kind === "Notice" ? <>-{nick}-</> : null}
           {line.kind === "Action" ? <>* {nick}</> : null}
         </span>
