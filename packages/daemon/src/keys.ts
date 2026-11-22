@@ -1,6 +1,8 @@
 /**
  * API keys. A key is 256 random bits, given to the Owner once, and kept only as its
  * SHA-256 in `keys.json` in the data directory, written atomically with mode `0600`.
+ * Keys, and the Sign-ins traded for them, live in files rather than the Journal: a key is
+ * the Daemon's, not a Network's, and is checked, never replayed.
  *
  * @packageDocumentation
  */

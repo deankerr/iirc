@@ -1,4 +1,7 @@
-/** How many random bytes make an Upload's id: 80 bits. */
+/**
+ * How many random bytes make an Upload's id: 80 bits. The id is all that makes a link
+ * unguessable, since the Link listener asks for nothing else.
+ */
 export const idBytes = 10;
 
 /** Crockford's base32, lower case: no `i`, `l`, `o` or `u`, so an id is hard to misread. */
