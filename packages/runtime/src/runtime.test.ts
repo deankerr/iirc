@@ -623,13 +623,28 @@ describe("one Network's failure", () => {
         const before = yield* first.runtime.networks;
 
         yield* first.close;
+        world.logged.length = 0;
         const second = yield* startRuntime(world, client);
 
-        return { after: yield* second.runtime.networks, before };
+        return {
+          after: yield* second.runtime.networks,
+          before,
+          errors: world.logged
+            .filter((logged) => logged.level === "Error")
+            .map(({ message, network }) => ({ message, network })),
+        };
       })
     );
 
     const stopped: NetworkStatus = { _tag: "Stopped", reason: "The Client threw: Error: boom" };
+
+    // A Frontend reading the Tail tells which Network stopped by its annotation alone.
+    expect(result.errors).toStrictEqual([
+      {
+        message: ["The Network stopped on restart", { reason: "Error: boom" }],
+        network: oftc,
+      },
+    ]);
 
     expect(result.before).toStrictEqual(
       new Map<NetworkId, NetworkStatus>([
