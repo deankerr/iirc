@@ -107,7 +107,6 @@ Each package's README says what it does and what it guarantees.
 | `VISION.md`                 | What iirc is for, and how we build it    |
 | `GLOSSARY.md`               | What each word means here                |
 | `ARCHITECTURE.md`           | How the pieces fit together              |
-| `KNOWN-ISSUES.md`           | What is built but not yet right          |
 | `docs/adr/`                 | Decisions and why                        |
 | `docs/agents/`              | How the agent skills use this repository |
 | `docs/irc-docs-2026-10-26/` | The IRC protocol documents we work from  |
