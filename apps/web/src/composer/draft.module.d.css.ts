@@ -5,7 +5,6 @@ declare const styles: {
   readonly italic: string;
   readonly marks: string;
   readonly monospace: string;
-  readonly reverse: string;
   readonly strikethrough: string;
   readonly underline: string;
 };

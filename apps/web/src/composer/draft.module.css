@@ -24,10 +24,12 @@
 }
 
 /*
- * And italic is a dotted line at the foot of the run, below where a solid underline stands,
- * so a run both italic and underlined shows both.
+ * And italic is a dotted line below the run, held under where a solid underline stands by
+ * padding below it, which moves no line and no letter, so a run both italic and underlined
+ * shows both at any size.
  */
 .marks .italic {
+  padding-bottom: 0.2em;
   background-image: linear-gradient(to right, currentColor 50%, transparent 50%);
   background-position: 0 100%;
   background-repeat: repeat-x;
@@ -57,9 +59,4 @@
 
 .underline.strikethrough {
   text-decoration: underline line-through;
-}
-
-.reverse {
-  background-color: var(--color-text);
-  color: var(--color-background);
 }

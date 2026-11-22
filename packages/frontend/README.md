@@ -247,12 +247,13 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 
 ## Formatting
 
-A draft's formatting, between its text with codes and the plain text the Owner edits. `merged` takes an edit of the plain text back into the codes, `formattedIn` puts a format over a range, `pendingAfter` keeps one at a caret, and `linesIn` gives the lines to draw.
+A draft's formatting, between its text with codes and the plain text the Owner edits. `merged` takes an edit of the plain text back into the codes, `formattedIn` puts a format over a range, `pendingAfter` keeps one at a caret, `linesIn` gives the lines to draw, and `runsIn` each line's runs.
 
 - **Formatting is per line.** A style over a line break is written again at the start of the next line.
 - **No code stands where nothing follows it,** however the text is edited.
 - **Typed text takes the style around it:** the style pending there, else the style of what it was typed over, else of the character before it, or after it at the start of a line.
 - **A paste's codes are read as formatting.**
+- **A run of a draft holds its characters as written,** a tab or a control among them, never shown as a symbol as a Network's text is.
 - **Where the text alone could place an edit in several ways,** as a letter typed beside the same letter, the caret places it.
 - **A flag goes off where the whole range has it, and on otherwise.**
 - **A colour is chosen from the sixteen, `colourNames`, or the default** (`colourChoices`).

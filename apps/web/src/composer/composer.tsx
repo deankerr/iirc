@@ -33,10 +33,11 @@ import {
   hasFormatting,
   linesIn,
   pendingWords,
+  runsIn,
   plainOf,
 } from "@iirc/frontend/formatting";
 import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
-import { formatted, quotedOf } from "@iirc/frontend/render";
+import { quotedOf } from "@iirc/frontend/render";
 import type { Style } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
 import { Atom } from "effect/reactivity";
@@ -539,30 +540,26 @@ const draftClasses = (style: Style) => {
     [style.underline, draftStyles.underline],
     [style.strikethrough, draftStyles.strikethrough],
     [style.monospace, draftStyles.monospace],
-    [style.reverse, draftStyles.reverse],
   ];
 
   return flags.flatMap(([on, name]) => (on ? [name] : [])).join(" ");
 };
 
 /**
- * One line of the draft, each run a text node in a span whose classes say its style, a
- * link's text too, with its colours as a Timeline draws them.
+ * One line of the draft, each run a text node in a span whose classes say its style, its
+ * characters exactly as the textarea holds them, with its colours as a Timeline draws them,
+ * reverse among them.
  * @param props - The line, as it is sent.
  * @returns Its runs.
  */
 const DraftLine = ({ line }: { readonly line: string }) => {
   const theme = useAtomValue(drawnTheme);
 
-  return formatted(line).map((inline, index) => (
+  return runsIn(line).map((run, index) => (
     // The runs of one line never move, so their order is their identity.
     // oxlint-disable-next-line react/no-array-index-key
-    <span
-      className={draftClasses(inline.style)}
-      key={index}
-      style={runColours(inline.style, theme)}
-    >
-      {inline.text}
+    <span className={draftClasses(run.style)} key={index} style={runColours(run.style, theme)}>
+      {run.text}
     </span>
   ));
 };

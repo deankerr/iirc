@@ -1175,6 +1175,18 @@ describe("the Composer's formatting", () => {
     });
   });
 
+  it("draws a formatted draft's characters as the textarea holds them, a tab and a bell among them", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "a\tb \u0007c");
+    await select(container, 2, 3);
+    await chordIn(container, "b");
+
+    expect(backdropOf(container)?.textContent?.replace("\u200B", "")).toBe(
+      composerOf(container).value
+    );
+  });
+
   it("with nothing selected, says the style pending and types it next", async () => {
     const { container, daemon } = await signedIn();
 
