@@ -247,5 +247,4 @@ A body over 1 MiB is refused with 413 before it is read, on every route but an u
 
 - **Managing keys through the API.** A key is made with `iirc key create` while the Daemon is stopped.
 - **Ending sign-ins other than by signing out.** A sign-in lasts until it is signed out or its key is no longer held. It does not expire, and there is no listing or revoking the sign-ins of a key.
-- **A search of several terms.** `text` is one run of characters, as a phrase. Terms that must all appear belong in a Frontend's query syntax, and then here.
 - **Other Lookups, and Leave.** `WHOIS`, `WHOWAS`, `NAMES`, `WHO`, `LIST`, and a Channel's bans, exceptions, and invitation masks are the Lookups the Client offers. Others are new tags of `lookup` once the Client collects them, and until then their replies can be asked for as a raw Line, and read only as their Lines arrive.
