@@ -22,7 +22,7 @@ A test earns its place by the regression it alone catches, one a Frontend, the O
 
 # Determinism
 
-`@iirc/protocol`, `@iirc/client`, `@iirc/timelines`, and `@iirc/frontend` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and their state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
+`@iirc/protocol`, `@iirc/client`, `@iirc/outbox`, `@iirc/timelines`, and `@iirc/frontend` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and their state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
 
 The lint fence in `oxlint.config.ts` is deliberately small. A gap it misses is fixed in the code and named in review, not added to the fence.
 
@@ -34,6 +34,9 @@ The lint fence in `oxlint.config.ts` is deliberately small. A gap it misses is f
 - **No links between documents.** Name a path in backticks where a reader needs it. An ADR may link another ADR, and is named only where a choice would surprise a reader.
 - **`GLOSSARY.md` and `VISION.md` point at nothing,** and nothing else explains them. A term is settled in `GLOSSARY.md` before it is used anywhere else.
 - **Describe what is, and rewrite rather than append.** Exact types stay in `src/`, an edge case in a test named for it, and the reason for a choice in a comment beside the code or in an ADR.
+- **An ADR states a decision and its reason,** and may lead the code. It lists nothing the code lists: no commands, flags, or counts.
+- **A README bullet is one behaviour a caller can rely on,** in a sentence or two.
+- **"Not yet" names what a caller would otherwise assume the package does,** once, in the package that would do it. Work someone means to do is an issue.
 
 # Agent skills
 

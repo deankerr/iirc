@@ -1,6 +1,6 @@
 # Configuration lives in the Journal
 
-Configuration is a projection of Change Entries, and TOML is only a way to read and write it: `iirc config export` produces a file, and `iirc config import` applies one as a single Change. A file the Daemon obeyed was the obvious choice for a server, but past state could then only be derived by recording each version of the file, and the API and the Owner's editor would be two writers of one document, with a plain rewrite dropping the Owner's comments.
+Configuration is a projection of the Journal's Entries, and TOML is only a way to read and write it: `iirc config export` produces a file, and `iirc config import` applies one as a single write. A file the Daemon obeyed was the obvious choice for a server, but past state could then only be derived by recording each version of the file, and the API and the Owner's editor would be two writers of one document, with a plain rewrite dropping the Owner's comments.
 
 ## Consequences
 

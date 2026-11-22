@@ -1,7 +1,7 @@
 /**
- * The Client's State: plain data, one discriminated union per machine of the
- * statecharts in `ARCHITECTURE.md`. Timers are not held here: each state
- * names the instants it is waiting for, and `timers.ts` derives the timer table from them.
+ * The Client's State: plain data, one discriminated union per machine. Timers are not held
+ * here: each state names the instants it is waiting for, and `timers.ts` derives the timer
+ * table from them.
  *
  * @packageDocumentation
  */

@@ -100,6 +100,6 @@ One end-to-end file runs from this directory, as `bun run --filter @iirc/web bui
 ## Not yet
 
 - `iirc web`, the web frontend alone as a proxy to a Daemon.
-- `iirc config`, `iirc credential`, and `iirc backup`, which will be Frontends of the API.
+- `iirc config export` and `iirc config import`, which read and write Configuration as TOML through the API.
 - A flag for extra TLS roots to trust, which `DaemonOptions` already takes.
 - An executable for another platform. `build.ts` compiles for the machine it runs on.

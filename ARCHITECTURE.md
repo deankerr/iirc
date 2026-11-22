@@ -113,9 +113,8 @@ flowchart TB
   store --> timelines
   tbun & jsql & vfile --> runtime
   tsql --> store
-  previewcache --> bytestore
+  previewcache --> api & bytestore
   psql --> previewcache
-  bytestore --> runtime
   bs3 --> bytestore
   lfbun --> linkfetch
   api --> client & timelines
@@ -127,7 +126,3 @@ flowchart TB
   web --> api & frontend
   app -.->|"serves its build"| web
 ```
-
-## Decisions waiting
-
-- **`message-redaction`.** A redaction points at an earlier message id, which fits an append-only Journal. How a Timeline shows a redacted Message is still to decide.

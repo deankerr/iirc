@@ -6,7 +6,7 @@ iirc is an always-on IRC client you can build on. A headless Daemon stays on you
 
 - **The Daemon** stays on any number of Networks, redials with backoff, rejoins Channels, and answers the keepalive. It paces what it sends, and stops gracefully with a `QUIT`. It logs in to a service where there is no SASL, sends `OPER` with a Credential as each Session begins, takes a configured nick back once its holder leaves it, and answers CTCP `VERSION`, `PING`, `TIME`, and `CLIENTINFO` within a budget.
 - **The RFC floor,** on any Ircd that speaks RFC 1459 and 2812, with or without cap negotiation.
-- **IRCv3:** `cap-notify`, SASL PLAIN, `message-tags`, `server-time`, `batch`, `echo-message` with `labeled-response`, `multi-prefix`, `away-notify`, `standard-replies`, `UTF8ONLY`, and STS.
+- **IRCv3,** as Features the Client turns on while an Ircd offers them. `packages/client` lists each one.
 - **The Journal** in SQLite. A restart rebuilds every Network from it, and News resumes from any point in it.
 - **The API:** configure and remove Networks, say things, hold Credentials, read what the Client knows and its machines' states, run Lookups, follow News as Server-Sent Events, read and close Timelines, and ask for a Message's Previews, which the Daemon fetches through a guard that keeps a stranger's link off our own network.
 - **Uploads** to an S3-compatible bucket, stripped first of any metadata drawing them does not need if they are JPEG, PNG, GIF, WebP, HEIC, or AVIF images, or MP4 or MOV videos, and served at their links by a listener of their own.
@@ -75,32 +75,32 @@ Configuration always goes whole, so joining or parting a Channel is another `PUT
 
 Each package's README says what it does and what it guarantees.
 
-| Path | Pure | What |
-| --- | --- | --- |
-| `packages/protocol` | yes | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, formatting, and links |
-| `packages/client` | yes | The Client, iirc's pure understanding of one Network, and its transcript test kit |
-| `packages/outbox` | yes | Pacing: which Line leaves next, and when |
-| `packages/timelines` | yes | Timelines as a fold over News |
-| `packages/frontend` | yes | The web frontend's core: what it shows, as plain data and reducers |
-| `packages/api` | contract | The HTTP API every Frontend uses, as Schemas and typed errors |
-| `packages/runtime` | no | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
-| `packages/timeline-store` | no | The Timeline store port, its in-memory adapter, and its laws |
-| `packages/preview-cache` | no | The Preview cache port, its in-memory adapter, and its laws |
-| `packages/byte-store` | no | The byte store port, its in-memory adapter, and its laws |
-| `packages/link-fetch` | no | The link fetch port, the address policy, and a fake adapter |
-| `packages/transport-bun` | no | The production Transport: TCP and TLS on Bun |
-| `packages/journal-sqlite` | no | The production Journal: Entries in SQLite |
-| `packages/vault-file` | no | The production Vault: Credentials in a `0600` file |
-| `packages/timeline-store-sqlite` | no | The production Timeline store, in SQLite |
-| `packages/preview-cache-sqlite` | no | The production Preview cache, in SQLite |
-| `packages/byte-store-s3` | no | The byte store in an S3-compatible bucket |
-| `packages/link-fetch-bun` | no | The guard: fetches a stranger's link on Bun, pinned to the addresses it checked |
-| `packages/daemon` | no | The Daemon: wires it all together and serves the API |
-| `apps/iirc` | no | The `iirc` executable |
-| `apps/web` | no | The web frontend: React over its core, built with Vite |
-| `fixtures/transcripts` |  | Real Sessions on Ergo and ngircd, replayed in the tests |
-| `fixtures/nicks` |  | How a nick is read, as data two packages' tests run |
-| `fixtures/themes` |  | Real terminal theme files, for the theme importer's tests |
+| Path | What |
+| --- | --- |
+| `packages/protocol` | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, formatting, and links |
+| `packages/client` | The Client, iirc's pure understanding of one Network, and its transcript test kit |
+| `packages/outbox` | Pacing: which Line leaves next, and when |
+| `packages/timelines` | Timelines as a fold over News |
+| `packages/frontend` | The web frontend's core: what it shows, as plain data and reducers |
+| `packages/api` | The HTTP API every Frontend uses, as Schemas and typed errors |
+| `packages/runtime` | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
+| `packages/timeline-store` | The Timeline store port, its in-memory adapter, and its laws |
+| `packages/preview-cache` | The Preview cache port, its in-memory adapter, and its laws |
+| `packages/byte-store` | The byte store port, its in-memory adapter, and its laws |
+| `packages/link-fetch` | The link fetch port, the address policy, and a fake adapter |
+| `packages/transport-bun` | The production Transport: TCP and TLS on Bun |
+| `packages/journal-sqlite` | The production Journal: Entries in SQLite |
+| `packages/vault-file` | The production Vault: Credentials in a `0600` file |
+| `packages/timeline-store-sqlite` | The production Timeline store, in SQLite |
+| `packages/preview-cache-sqlite` | The production Preview cache, in SQLite |
+| `packages/byte-store-s3` | The byte store in an S3-compatible bucket |
+| `packages/link-fetch-bun` | The guard: fetches a stranger's link on Bun, pinned to the addresses it checked |
+| `packages/daemon` | The Daemon: wires it all together and serves the API |
+| `apps/iirc` | The `iirc` executable |
+| `apps/web` | The web frontend: React over its core, built with Vite |
+| `fixtures/transcripts` | Real Sessions on Ergo and ngircd, replayed in the tests |
+| `fixtures/nicks` | How a nick is read, as data two packages' tests run |
+| `fixtures/themes` | Real terminal theme files, for the theme importer's tests |
 
 | Document                    | Read it for                              |
 | --------------------------- | ---------------------------------------- |

@@ -234,6 +234,6 @@ Previews are tested over a real server with the link fetch's fake, which answers
 - **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser that follows the fixtures' rules.
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
-- **Key scopes, keys through the API, and ending sign-ins other than by signing out.**
+- **Keys through the API, and ending sign-ins other than by signing out.**
 - **Evicting Preview images by age.**
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.
