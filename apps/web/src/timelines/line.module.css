@@ -53,8 +53,10 @@
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
-  grid-column: 2;
+  /* A pixel past the row, as rows are placed at whole pixels and may stand that far apart. */
+  bottom: calc(-1 * var(--border-width));
+  /* Both lines: an absolutely placed box's end left auto is the row's edge, not the column's. */
+  grid-column: 2 / 3;
   border-right: var(--border-width) solid var(--color-border);
   content: "";
 }
