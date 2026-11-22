@@ -23,6 +23,7 @@ import {
 import {
   box,
   cat,
+  clipMov,
   clipMp4,
   itemData,
   itemsOf,
@@ -312,43 +313,51 @@ describe("stripping HEIC, AVIF, MP4 and MOV as they are uploaded", () => {
     });
   });
 
-  // What a phone and an editor leave in a video, which a reader of metadata would find.
-  it("drops an MP4's location and metadata boxes, keeping its length and its media data", async () => {
-    const words = [
-      "PLANTED-MAKE",
-      "PLANTED-TITLE",
-      "PLANTED-XMP",
-      "xpacket",
-      "loci",
-      Uint8Array.of(0xa9, 0x6d, 0x61, 0x6b),
-    ];
+  // What a phone and an editor leave in a video, which a reader of metadata would find: boxes
+  // of metadata, and a timed-metadata track of where it was shot, whose samples follow the
+  // picture and sound in an mdat of their own.
+  it.each([
+    [
+      "an MP4",
+      "clip.mp4",
+      clipMp4,
+      ["PLANTED-MAKE", "PLANTED-TITLE", "PLANTED-XMP", "xpacket", "loci"],
+    ],
+    ["a MOV", "clip.mov", clipMov, ["PLANTED-SOFTWARE", "PLANTED-XMP", "+51.5007", "ISO6709"]],
+  ] as const)(
+    "drops %s's location track and metadata boxes, keeping its length and its picture and sound",
+    async (_, name, clip, planted) => {
+      const words = [...planted, "+35.689", "mebx", Uint8Array.of(0xa9, 0x6d, 0x61, 0x6b)];
+      const { bytes, recorded } = await run((served) => servedBack(served, clip, name));
 
-    const { bytes, recorded } = await run((served) => servedBack(served, clipMp4, "clip.mp4"));
-
-    expect({
-      kept: words.filter((word) => Buffer.from(bytes).includes(word)),
-      length: bytes.length,
-      mdat: mdatOf(bytes),
-      recorded,
-    }).toStrictEqual({
-      kept: [],
-      length: clipMp4.length,
-      mdat: mdatOf(clipMp4),
-      recorded: true,
-    });
-  });
+      expect({
+        kept: words.filter((word) => Buffer.from(bytes).includes(word)),
+        length: bytes.length,
+        mdat: mdatOf(bytes),
+        recorded,
+      }).toStrictEqual({
+        kept: [],
+        length: clip.length,
+        mdat: mdatOf(clip),
+        recorded: true,
+      });
+    }
+  );
 
   it("zeroes a large box that is on no keep-list in pieces, keeping the media after it", async () => {
     const big = new Uint8Array(3 * 1024 * 1024 + 5).fill(0x41);
-    const file = cat(clipMp4.subarray(0, 32), box("uuid", big), clipMp4.subarray(32));
+    const after = box("mdat", text("MEDIA-AFTER"));
+    const file = cat(clipMp4, box("uuid", big), after);
     const { bytes, recorded } = await run((served) => servedBack(served, file, "big.mp4"));
 
     expect({
+      after: bytes.subarray(-after.length),
       length: bytes.length,
       mdat: mdatOf(bytes),
       recorded,
       untouched: holds(bytes, "AAAA"),
     }).toStrictEqual({
+      after,
       length: file.length,
       mdat: mdatOf(file),
       recorded: true,

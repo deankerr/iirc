@@ -132,11 +132,12 @@ An image or video is stripped of its metadata, with no way to skip it, by a walk
 | GIF | Its images, the graphic controls that apply to them, looping, and its ICC profile |
 | WebP | Its image data, alpha, ICC, animation, and an `EXIF` of Orientation only, with `VP8X` and the RIFF size rewritten to match |
 | HEIC, AVIF | Its image items with their codec, size, colour, orientation, and cropping. Every other item, Exif and XMP among them, is dropped with its data |
-| MP4, MOV | Its tracks and their sample tables. Every other box, `udta`, `meta`, `uuid`, and XMP among them, is retyped `free` and zeroed where it lies |
+| MP4, MOV | Its picture, sound, text, and timecode tracks with their sample tables. Any other track, a phone's timed-metadata track of locations among them, is dropped with its samples, and every other box, `udta`, `meta`, `uuid`, and XMP among them, is retyped `free` and zeroed where it lies |
 
 - **A JPEG, PNG, GIF, or WebP is stripped in memory,** so stripping one takes up to twice `uploads.maxSize`.
 - **A HEIC, AVIF, MP4, or MOV is patched in place in the staged file,** at the same length, so no video is held whole.
 - **A file that cannot be walked is refused** with 422.
+- **An MP4 or MOV is refused when which of its samples to drop is not known:** media with no `moov`, a dropped track whose sample table is missing or ambiguous, or fragments holding samples of a dropped track, since zeroing a fragment's samples is not built.
 - **A file cut short keeps what was walked whole, once there is an image to keep.** A JPEG cut within its scans, or a PNG, GIF, or WebP cut after its first image data is whole, is kept to there. One cut short earlier, or a HEIC, AVIF, MP4, or MOV with a box cut short or lying about its size, is refused.
 
 ### The Link listener

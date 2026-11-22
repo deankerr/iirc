@@ -18,10 +18,16 @@ export const photoHeic = fixture("photo.heic");
 /** The same photo as AVIF. */
 export const photoAvif = fixture("photo.avif");
 
-/** An H.264 and AAC MP4 with a location in `udta`, a title, and an XMP `uuid` box. */
+/**
+ * An H.264 and AAC MP4 with a location in `udta`, a title, an XMP `uuid` box, and a `mebx`
+ * track of ISO 6709 locations, as a phone writes, whose samples are in a second `mdat`.
+ */
 export const clipMp4 = fixture("clip.mp4");
 
-/** A QuickTime movie with `com.apple.quicktime.location.ISO6709` in `keys`, and XMP. */
+/**
+ * A QuickTime movie with `com.apple.quicktime.location.ISO6709` in `keys`, XMP, and the same
+ * `mebx` track of locations as the MP4.
+ */
 export const clipMov = fixture("clip.mov");
 
 /**
@@ -625,4 +631,178 @@ export const heif = (options: HeifOptions): Heif => {
     mdat: { end: mdatStart + data.mdatSize, start: mdatStart },
     meta: { end: ftyp.length + metaBox.length, start: ftyp.length },
   };
+};
+
+/** A track of a movie to be built. */
+export interface MovieTrack {
+  readonly id: number;
+  /** The handler type its `mdia`'s `hdlr` names, or none for no `hdlr`. */
+  readonly handler?: string;
+  /** The type of its one sample entry. */
+  readonly entry?: string;
+  /** Its samples, chunk by chunk. */
+  readonly chunks: readonly (readonly Uint8Array[])[];
+  /** Its `tref`, as each reference type and the track ids it names. */
+  readonly references?: readonly { readonly type: string; readonly ids: readonly number[] }[];
+  /** Whether chunk offsets are 32-bit `stco` or 64-bit `co64`. */
+  readonly offsets?: "stco" | "co64";
+  /** Chunk offsets to say instead of where the chunks were put, which is how a table that lies is made. */
+  readonly at?: readonly number[];
+  /** Whether it has a sample table, as it does unless said. */
+  readonly table?: boolean;
+  /** Boxes to put at the end of its sample table, which is how one that is ambiguous is made. */
+  readonly extra?: readonly Uint8Array[];
+  /** Whether it has a `tkhd`, as it does unless said. */
+  readonly tkhd?: boolean;
+  /** The version of its `tkhd`, 0 unless said, though its fields are laid out as version 0's. */
+  readonly tkhdVersion?: number;
+}
+
+/** What a movie is built with. */
+export interface MovieOptions {
+  readonly tracks: readonly MovieTrack[];
+  /** Whether `moov` has an `mvex` with a `trex` for each track. */
+  readonly fragmented?: boolean;
+  /** Whether `moov` comes after the `mdat`, as a camera that writes as it records leaves it. */
+  readonly moovLast?: boolean;
+  readonly brand?: string;
+}
+
+/** A movie built, and where each track's chunks are. */
+export interface Movie {
+  readonly bytes: Uint8Array;
+  readonly chunks: ReadonlyMap<number, readonly { readonly start: number; readonly end: number }[]>;
+}
+
+const sampleTableOf = (track: MovieTrack, offsets: readonly number[]) => {
+  const samples = track.chunks.flat();
+  const size = samples[0]?.length ?? 0;
+  const same = samples.every((sample) => sample.length === size);
+  const runs: [number, number][] = [];
+
+  for (const [index, chunk] of track.chunks.entries()) {
+    if (runs.at(-1)?.[1] !== chunk.length) {
+      runs.push([index + 1, chunk.length]);
+    }
+  }
+
+  const wide = track.offsets === "co64";
+
+  return box(
+    "stbl",
+    fullBox("stsd", 0, 0, u(1, 4), box(track.entry ?? "zzzz", zeros(8))),
+    fullBox("stts", 0, 0, u(1, 4), u(samples.length, 4), u(1, 4)),
+    fullBox(
+      "stsc",
+      0,
+      0,
+      u(runs.length, 4),
+      ...runs.map(([first, count]) => cat(u(first, 4), u(count, 4), u(1, 4)))
+    ),
+    fullBox(
+      "stsz",
+      0,
+      0,
+      u(same ? size : 0, 4),
+      u(samples.length, 4),
+      ...(same ? [] : samples.map((sample) => u(sample.length, 4)))
+    ),
+    fullBox(
+      wide ? "co64" : "stco",
+      0,
+      0,
+      u(offsets.length, 4),
+      ...offsets.map((at) => u(at, wide ? 8 : 4))
+    ),
+    ...(track.extra ?? [])
+  );
+};
+
+const trakOf = (track: MovieTrack, offsets: readonly number[]) =>
+  box(
+    "trak",
+    ...(track.tkhd === false
+      ? []
+      : [fullBox("tkhd", track.tkhdVersion ?? 0, 0, u(0, 8), u(track.id, 4), zeros(68))]),
+    ...(track.references === undefined
+      ? []
+      : [
+          box(
+            "tref",
+            ...track.references.map(({ ids, type }) => box(type, ...ids.map((id) => u(id, 4))))
+          ),
+        ]),
+    box(
+      "mdia",
+      fullBox("mdhd", 0, 0, zeros(20)),
+      ...(track.handler === undefined
+        ? []
+        : [fullBox("hdlr", 0, 0, u(0, 4), text(track.handler), zeros(12), text("\0"))]),
+      box(
+        "minf",
+        fullBox("nmhd", 0, 0),
+        box("dinf", fullBox("dref", 0, 0, u(1, 4), fullBox("url ", 0, 1))),
+        ...(track.table === false ? [] : [sampleTableOf(track, track.at ?? offsets)])
+      )
+    )
+  );
+
+/**
+ * A movie of exactly the tracks a test is about: `ftyp`, `moov` with a `trak` for each, and
+ * an `mdat` with their chunks interleaved, the first chunk of each track, then the second.
+ * `moov` comes first unless said.
+ * @param options - What it is built with.
+ * @returns The file, and where each track's chunks are.
+ */
+export const movie = (options: MovieOptions): Movie => {
+  const ftyp = box("ftyp", text(options.brand ?? "isom"), u(0, 4), text("isom"));
+  const most = Math.max(0, ...options.tracks.map(({ chunks }) => chunks.length));
+
+  const order = Array.from({ length: most }, (_, index) =>
+    options.tracks.flatMap((track) => {
+      const chunk = track.chunks[index];
+
+      return chunk === undefined ? [] : [{ chunk: cat(...chunk), id: track.id }];
+    })
+  ).flat();
+
+  const moov = (start: number) => {
+    const offsets = new Map<number, number[]>();
+    let at = start;
+
+    for (const { chunk, id } of order) {
+      offsets.set(id, [...(offsets.get(id) ?? []), at]);
+      at += chunk.length;
+    }
+
+    return box(
+      "moov",
+      fullBox("mvhd", 0, 0, zeros(96)),
+      ...options.tracks.map((track) => trakOf(track, offsets.get(track.id) ?? [])),
+      ...(options.fragmented === true
+        ? [
+            box(
+              "mvex",
+              ...options.tracks.map(({ id }) => fullBox("trex", 0, 0, u(id, 4), zeros(16)))
+            ),
+          ]
+        : [])
+    );
+  };
+
+  const mdat = box("mdat", ...order.map(({ chunk }) => chunk));
+  const start = ftyp.length + (options.moovLast === true ? 0 : moov(0).length) + 8;
+
+  const bytes =
+    options.moovLast === true ? cat(ftyp, mdat, moov(start)) : cat(ftyp, moov(start), mdat);
+
+  const chunks = new Map<number, { start: number; end: number }[]>();
+  let at = start;
+
+  for (const { chunk, id } of order) {
+    chunks.set(id, [...(chunks.get(id) ?? []), { end: at + chunk.length, start: at }]);
+    at += chunk.length;
+  }
+
+  return { bytes, chunks };
 };
