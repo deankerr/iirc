@@ -80,7 +80,7 @@
 }
 
 .held {
-  padding: var(--space-2) var(--space-3);
+  padding: calc(var(--space-2) + var(--row-padding)) var(--space-3);
   color: var(--color-muted);
 }
 

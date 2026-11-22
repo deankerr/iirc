@@ -59,6 +59,12 @@ export const sizeShown = Atom.make((get) => get(uiInEffect)["font.size"]);
 /** The line height on this device, as a multiple of the text's size, alone, as `timeShown` is. */
 export const leadingShown = Atom.make((get) => get(uiInEffect)["font.lineHeight"]);
 
+/**
+ * The room between a Timeline's rows on this device, as a multiple of the text's size, alone,
+ * as `timeShown` is.
+ */
+export const spacingShown = Atom.make((get) => get(uiInEffect)["timeline.spacing"]);
+
 /** How a line is laid out on this device, alone, as `timeShown` is. */
 export const lineShown = Atom.make((get) => get(uiInEffect)["timeline.layout"]);
 

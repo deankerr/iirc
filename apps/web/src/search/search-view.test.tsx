@@ -304,10 +304,21 @@ const resultsOf = (container: HTMLElement) => {
 
 /**
  * Waits out the mark the Timeline is given for being opened at its latest, so that what is
- * marked after it is what the test did, however long the machine took to get there.
+ * marked after it is what the test did, however long the machine took to get there. The
+ * view put the log at the bottom, which a browser reports as a scroll the Owner did not
+ * make, so the rows drawn are those there.
+ * @param container - The page.
  * @param daemon - The fake Daemon.
  */
-const openedAndMarked = async (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
+const openedAndMarked = async (
+  container: HTMLElement,
+  daemon: ReturnType<typeof fakeDaemon>["daemon"]
+) => {
+  await settled(() => container.querySelector('[role="log"] [data-index]') !== null);
+  await act(async () => {
+    container.querySelector('[role="log"]')?.dispatchEvent(new Event("scroll"));
+    await Promise.resolve();
+  });
   await settled(() => daemon.reads.length === 1);
 };
 
@@ -597,7 +608,7 @@ describe("the search view", () => {
   it("marks read once the Owner scrolls back to the latest after a jump to the newest result", async () => {
     const { container, daemon, registry } = await signedIn(60);
 
-    await openedAndMarked(daemon);
+    await openedAndMarked(container, daemon);
     const log = await jumpToNewest(container, registry);
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight <= 8;
 

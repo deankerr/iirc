@@ -2,10 +2,10 @@
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
  * palette, or one previewed, while the Composer's list highlights a theme or the import
  * dialog reads one, in a Worker through the `ThemeReader` port, one text at a time and for
- * at most a second; the text's size, line height, font, and widths, or a font the
- * Composer's list highlights; drawing them as CSS custom properties on the document's root; choosing a
- * theme, and importing and removing themes for every device, each made from the options
- * read.
+ * at most a second; the text's size, line height, font, widths, and room between rows, or
+ * a font the Composer's list highlights; drawing them as CSS custom properties on the
+ * document's root; choosing a theme, and importing and removing themes for every device,
+ * each made from the options read.
  *
  * @packageDocumentation
  */
@@ -164,8 +164,8 @@ export const drawnTheme = Atom.make((get) => {
 });
 
 /**
- * The text's size, line height, font, widest line, nick column, and members' panel in effect
- * on this device, as the root's custom properties, with the monospace font IRC's formatting
+ * The text's size, line height, font, widest line, nick column, members' panel, and the room
+ * between a Timeline's rows in effect on this device, as the root's custom properties, with the monospace font IRC's formatting
  * asks for beside it: the font the Composer's list highlights, while one is highlighted,
  * else the one in effect. The widths are in `ch`, the font's own `0` at the text's size, so
  * they follow both, and no widest line is no property at all, which leaves a line as wide
@@ -188,6 +188,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
     ],
     ["--nick-width", `${widths["timeline.nickWidth"]}ch`],
     ["--members-width", `${widths["members.width"]}ch`],
+    ["--row-spacing", String(ui["timeline.spacing"])],
   ];
 });
 
@@ -397,8 +398,8 @@ export const saveImport = runtime
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
  * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
- * text's size, line height, font, and widths are custom properties there too. Whether
- * the device prefers dark is followed, for `system`.
+ * text's size, line height, font, widths, and room between rows are custom properties there
+ * too. Whether the device prefers dark is followed, for `system`.
  * @param registry - The registry.
  * @returns How to stop.
  */

@@ -38,6 +38,7 @@ import {
   FontShown,
   MembersWidth,
   NickWidth,
+  RowSpacing,
   UiInForce,
   UiOptionName,
   UiOptions,
@@ -530,6 +531,7 @@ describe("the contract", () => {
         "timeline.layout": "columns",
         "timeline.maxWidth": "none",
         "timeline.nickWidth": 16,
+        "timeline.spacing": 0.3,
         "timeline.timeFormat": "HH:mm",
         "unread.markRead": "latest",
         "unread.muted": [],
@@ -564,6 +566,7 @@ describe("the contract", () => {
         "timeline.layout",
         "timeline.maxWidth",
         "timeline.nickWidth",
+        "timeline.spacing",
         "timeline.timeFormat",
         "unread.markRead",
         "unread.muted",
@@ -808,6 +811,16 @@ describe("the contract", () => {
     });
   });
 
+  it("takes the room between rows as a multiple of the text's size from 0 to 1.5 in twentieths, and no other", () => {
+    const spacing = Schema.decodeUnknownOption(RowSpacing);
+
+    expect(
+      [0, 0.05, 0.3, 1, 1.5, 0.15, -0.05, 1.55, 0.31, 0.1 + 0.05, Number.NaN, "0.3", null].map(
+        (each) => Option.getOrNull(spacing(each))
+      )
+    ).toStrictEqual([0, 0.05, 0.3, 1, 1.5, 0.15, null, null, null, null, null, null, null]);
+  });
+
   it("takes the widest line as none or a whole count of characters from 40 to 400, and no other", () => {
     const widest = Schema.decodeUnknownOption(WidestLine);
 
@@ -929,12 +942,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
+        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
         event: "changed",
         id: "9",
       },

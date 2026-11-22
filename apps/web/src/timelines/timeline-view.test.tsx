@@ -914,11 +914,12 @@ describe("what the view says it shows", () => {
     });
 
     // Every row before it hidden, line 61 is the first after the day's, scrolled no higher
-    // than the top. The day's row, new to the view, is as tall as a line is estimated to be.
+    // than the top. The day's row, new to the view, is as tall as it is estimated to be: a
+    // line, and the room between rows.
     expect({ before, clamped, quiet: offsetOf("line 61") }).toStrictEqual({
       before: 40,
       clamped: 0,
-      quiet: 21,
+      quiet: 25,
     });
   });
 
@@ -1712,14 +1713,20 @@ class Observer {
 }
 
 /**
+ * How tall the log's rows are laid out, with the room under the last, which is less than a row.
+ * @returns The height, in pixels.
+ */
+const rowsHeight = () =>
+  Number(logOf().querySelector<HTMLElement>(":scope > div")?.style.height.replace("px", "") ?? 0);
+
+/**
  * Lays the log out again, as a browser does once its width or text size changed: every row
  * at a new height, what it holds as tall as they are, and each observer of the log or its
  * rows told of their boxes.
  * @param row - How tall each row is now.
  */
 const wrapAgain = async (row: number) => {
-  const rows = logOf().querySelector<HTMLElement>(":scope > div");
-  const count = Number(rows?.style.height.replace("px", "") ?? "0") / layout.row;
+  const count = Math.floor(rowsHeight() / layout.row);
 
   layout.row = row;
   layout.content = count * row;
@@ -1930,6 +1937,29 @@ describe("where the view stands as its rows wrap again", () => {
 
     expect({ back, taller }).toStrictEqual({ back: before, taller: before });
     expect(before.first?.offset).toBe(10);
+  });
+
+  it("keeps the last row as far from the Composer as from the row above, and never nearer than half the text's size", async () => {
+    // Few enough rows that each is drawn and measured, as tall as it is laid out.
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => logOf().textContent?.includes("line 2"));
+    await wrapAgain(20);
+
+    // Each row keeps half the room between rows under itself, and the log the rest.
+    const under = async (spacing: number) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.spacing": spacing });
+        await Promise.resolve();
+      });
+
+      return Math.round((rowsHeight() % layout.row) + (14 * spacing) / 2);
+    };
+
+    expect([await under(0), await under(0.3), await under(1), await under(1.5)]).toStrictEqual([
+      7, 7, 14, 21,
+    ]);
   });
 
   it("draws every row of a Timeline too narrow for columns as one run of text from its first frame, and in columns once it is resized wide enough", async () => {
