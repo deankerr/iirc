@@ -203,16 +203,10 @@
 }
 
 /*
- * With no columns, the Previews run the Timeline's width under the words: in a narrow
- * Timeline, and under `ui.timeline.layout` inline or stacked, as the Timeline's `data-line`
- * says. The two rules must stay alike.
+ * With no columns, the Previews run the Timeline's width under the words: in a Timeline too
+ * narrow for columns, and under `ui.timeline.layout` inline or stacked, as the Timeline's
+ * `data-line` says.
  */
-@container (max-width: 36em) {
-  .previews {
-    max-width: 100%;
-  }
-}
-
 :global([data-line]) .previews {
   max-width: 100%;
 }

@@ -1778,6 +1778,41 @@ describe("where the view stands as its rows wrap again", () => {
     expect(before.first?.offset).toBe(10);
   });
 
+  it("draws every row of a Timeline too narrow for columns as one run of text from its first frame, and in columns once it is resized wide enough", async () => {
+    // Its rows as the Timeline's first frame draws them, read as its log enters the page.
+    const first: (string | undefined)[] = [];
+
+    const entered = new MutationObserver(() => {
+      const log = document.querySelector<HTMLElement>('[role="log"][aria-label*="#iirc"]');
+
+      if (log !== null && first.length === 0) {
+        first.push(log.dataset.line);
+      }
+    });
+
+    entered.observe(document.body, { childList: true, subtree: true });
+    layout.width = 400;
+
+    try {
+      await opened();
+    } finally {
+      entered.disconnect();
+    }
+
+    layout.width = 800;
+    await wrapAgain(20);
+    const wide = logOf().dataset.line;
+
+    layout.width = 400;
+    await wrapAgain(40);
+
+    expect({ first, narrowAgain: logOf().dataset.line, wide }).toStrictEqual({
+      first: ["inline"],
+      narrowAgain: "inline",
+      wide: undefined,
+    });
+  });
+
   it("stays at the latest as its rows wrap again, though the browser moved the log as its box changed", async () => {
     const { registry } = await opened();
     const bottom = () => layout.content - layout.view;

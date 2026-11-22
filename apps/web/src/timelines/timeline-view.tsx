@@ -16,6 +16,7 @@ import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsIn } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
@@ -90,6 +91,24 @@ interface LaidOut {
  * @returns Whether it is.
  */
 const visible = (element: HTMLDivElement) => element.isConnected && element.clientHeight > 0;
+
+/**
+ * The widest a Timeline is, in its own text's em, and still too narrow for columns, so that
+ * every row reads as one run of text. The columns take up to seventeen em in monospace and
+ * twenty-one in the widest sans font, so thirty-six em, sixty characters of monospace, leaves
+ * the text at least fifteen em, some thirty characters, beside them.
+ */
+const narrowest = 36;
+
+/**
+ * Whether a log is too narrow for columns: its own width, not the screen's, as Panes split,
+ * against its own text's size, so this holds at any size.
+ * @param element - The log.
+ * @returns Whether it is.
+ */
+const tooNarrow = (element: HTMLElement) =>
+  // A computed font size is always in pixels.
+  element.clientWidth <= narrowest * Number(getComputedStyle(element).fontSize.replace(/px$/u, ""));
 
 /** Where an item stands. */
 type Position = TimelineItem["position"];
@@ -303,6 +322,8 @@ const Lines = ({
   // once it is in the page, and how tall its view is, which sets how many rows are drawn.
   const [scrollerElement, setScrollerElement] = useState<HTMLDivElement | null>(null);
   const [viewHeight, setViewHeight] = useState(0);
+  // Whether the log is too narrow for columns, as it was last laid out.
+  const [narrow, setNarrow] = useState(false);
 
   const attach = useCallback((element: HTMLDivElement | null) => {
     scroller.current = element;
@@ -772,6 +793,10 @@ const Lines = ({
         ? undefined
         : new ResizeObserver(() => {
             setViewHeight(element.clientHeight);
+            // Drawn before the frame is painted, so no frame shows the rows in columns.
+            flushSync(() => {
+              setNarrow(tooNarrow(element));
+            });
             restand.current(element);
           });
 
@@ -783,6 +808,16 @@ const Lines = ({
       observer?.disconnect();
     };
   }, []);
+
+  // Too narrow for columns from the first frame, and again as the text's size changes, which
+  // changes no box the observer watches.
+  useLayoutEffect(() => {
+    const element = scroller.current;
+
+    if (element !== null) {
+      setNarrow(tooNarrow(element));
+    }
+  }, [size]);
 
   // A Pane's node moved into another Panel loses its scroll position: put it back.
   useLayoutEffect(() => {
@@ -834,15 +869,18 @@ const Lines = ({
     }));
   });
 
+  // A log too narrow for columns draws its rows as `inline` does.
+  const drawn = line === "columns" && narrow ? "inline" : line;
+
   return (
     // Keys, a press, a touch, and the wheel only say the Owner moved the log themselves.
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       aria-label={label}
       className={styles.scroller}
-      // The rows' CSS reads this, so every row is one run of text, as a narrow Pane draws
-      // it, and under stacked, a run's Messages are drawn under one nick.
-      data-line={line === "columns" ? undefined : line}
+      // The rows' CSS reads this, so every row is one run of text, as `inline` and a log too
+      // narrow for columns draw it, and under stacked, a run's Messages are drawn under one nick.
+      data-line={drawn === "columns" ? undefined : drawn}
       onScroll={(event) => {
         const element = event.currentTarget;
 

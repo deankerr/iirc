@@ -56,7 +56,7 @@ The core decides and this package draws and does the I/O.
 - **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
-- **A Timeline too narrow for `columns` reads as `inline`,** as a Pane split a few times is.
+- **A Timeline too narrow for `columns` reads as `inline` from its first frame,** as a Pane split a few times, or a phone, is.
 - **Activity is dimmer than what was said.** An Ircd's numeric replies are not.
 - **A run of joins, parts, quits, and changes of nick is one dim line** that says how many and who. A press opens it to each one's own line, and closes it again. A netsplit or a netjoin is likewise one dim line that opens to its nicks.
 - **Connections that fail again and again are one row,** with how many and when the first and the latest were.

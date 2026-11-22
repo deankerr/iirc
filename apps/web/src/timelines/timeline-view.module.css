@@ -14,7 +14,10 @@
   overflow-anchor: none;
   /* The log never scrolls sideways, whatever a row holds: each row wraps or clips its own. */
   overflow-x: hidden;
-  /* Its own width, not the screen's, says how a row is laid out, since Panes split. */
+  /*
+   * Nothing it holds widens it, so its width, which the view reads to lay its rows out, is
+   * its Pane's, and it contains its rows' layout.
+   */
   container-type: inline-size;
 }
 
