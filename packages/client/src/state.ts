@@ -1,5 +1,7 @@
 /**
- * The Client's State: plain data, one discriminated union per machine. Timers are not held
+ * The Client's State: plain data, one discriminated union per machine. It never holds an
+ * Effect `HashMap` or `HashSet`, which hash an object by reference with `Math.random`, so their order
+ * could differ on replay. Timers are not held
  * here: each state names the instants it is waiting for, and `timers.ts` derives the timer
  * table from them.
  *

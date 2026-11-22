@@ -1,8 +1,8 @@
 /**
  * Strict Transport Security, in the core: an Ircd's policy that the Client connect to its
  * host only over TLS. It is not a Feature, because the policy outlives Connections and
- * decides where to dial before any cap is negotiated. The `sts` cap is never requested:
- * its value is read where `CAP LS` and `CAP NEW` offer it.
+ * decides where to dial before any cap is negotiated. The `sts` cap is never requested,
+ * since the spec forbids it: its value is read where `CAP LS` and `CAP NEW` offer it.
  *
  * @packageDocumentation
  */
