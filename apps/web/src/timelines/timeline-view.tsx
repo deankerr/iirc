@@ -104,11 +104,14 @@ const narrowest = 36;
  * Whether a log is too narrow for columns: its own width, not the screen's, as Panes split,
  * against its own text's size, so this holds at any size.
  * @param element - The log.
+ * @param width - Its content box's width, unrounded, as its ResizeObserver last reported it,
+ * or none before it has, when its rounded width stands in until the observer reports.
  * @returns Whether it is.
  */
-const tooNarrow = (element: HTMLElement) =>
+const tooNarrow = (element: HTMLElement, width: number | undefined) =>
+  (width ?? element.clientWidth) <=
   // A computed font size is always in pixels.
-  element.clientWidth <= narrowest * Number(getComputedStyle(element).fontSize.replace(/px$/u, ""));
+  narrowest * Number(getComputedStyle(element).fontSize.replace(/px$/u, ""));
 
 /** Where an item stands. */
 type Position = TimelineItem["position"];
@@ -324,6 +327,8 @@ const Lines = ({
   const [viewHeight, setViewHeight] = useState(0);
   // Whether the log is too narrow for columns, as it was last laid out.
   const [narrow, setNarrow] = useState(false);
+  // The log's width as its ResizeObserver last reported it: the DOM's, not state.
+  const logWidth = useRef<number | undefined>(undefined);
 
   const attach = useCallback((element: HTMLDivElement | null) => {
     scroller.current = element;
@@ -791,11 +796,12 @@ const Lines = ({
     const observer =
       element === null || typeof ResizeObserver === "undefined"
         ? undefined
-        : new ResizeObserver(() => {
+        : new ResizeObserver((entries) => {
             setViewHeight(element.clientHeight);
+            logWidth.current = entries.at(-1)?.contentRect.width ?? logWidth.current;
             // Drawn before the frame is painted, so no frame shows the rows in columns.
             flushSync(() => {
-              setNarrow(tooNarrow(element));
+              setNarrow(tooNarrow(element, logWidth.current));
             });
             restand.current(element);
           });
@@ -815,7 +821,7 @@ const Lines = ({
     const element = scroller.current;
 
     if (element !== null) {
-      setNarrow(tooNarrow(element));
+      setNarrow(tooNarrow(element, logWidth.current));
     }
   }, [size]);
 

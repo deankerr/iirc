@@ -341,9 +341,27 @@ const dayLines = () =>
 /**
  * How the log is laid out, as a browser would and happy-dom does not: how tall its view is,
  * and how tall what it holds is, which a test changes to scroll back, how tall each row is,
- * and how wide the view is, which a test changes to wrap the rows again.
+ * and how wide the view is, which a test changes to wrap the rows again: `width` as the DOM
+ * rounds it, and `exact` its content box's, unrounded, when the two differ, as a
+ * ResizeObserver reports it.
  */
-const layout = { content: 0, row: 20, top: 0, view: 0, width: 800 };
+interface Laid {
+  content: number;
+  exact: number | undefined;
+  row: number;
+  top: number;
+  view: number;
+  width: number;
+}
+
+const layout: Laid = {
+  content: 0,
+  exact: undefined,
+  row: 20,
+  top: 0,
+  view: 0,
+  width: 800,
+};
 
 const isLog = (element: Element) => element.getAttribute("role") === "log";
 
@@ -586,6 +604,7 @@ const seen = () => [
 describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
+    layout.exact = undefined;
     layout.row = 20;
     layout.top = 0;
     layout.view = 500;
@@ -884,13 +903,13 @@ describe("what the view says it shows", () => {
 
   it("reads on once the view is resized to be seen, with no move", async () => {
     // A ResizeObserver that reports only when told, for the log alone.
-    const told: (() => void)[] = [];
+    const told: ((entries: readonly never[]) => void)[] = [];
 
     // oxlint-disable-next-line typescript/no-extraneous-class -- it stands in for the browser's class.
     class Observer {
-      readonly #report: () => void;
+      readonly #report: (entries: readonly never[]) => void;
 
-      constructor(report: () => void) {
+      constructor(report: (entries: readonly never[]) => void) {
         this.#report = report;
       }
 
@@ -927,7 +946,7 @@ describe("what the view says it shows", () => {
       layout.view = 500;
       await act(async () => {
         for (const report of told) {
-          report();
+          report([]);
         }
 
         await Promise.resolve();
@@ -1616,7 +1635,7 @@ const wrapAgain = async (row: number) => {
           ? [
               {
                 borderBoxSize: [{ blockSize: height, inlineSize: layout.width }],
-                contentRect: new DOMRect(0, 0, layout.width, height),
+                contentRect: new DOMRect(0, 0, layout.exact ?? layout.width, height),
                 target,
               },
             ]
@@ -1803,11 +1822,19 @@ describe("where the view stands as its rows wrap again", () => {
     await wrapAgain(20);
     const wide = logOf().dataset.line;
 
+    // A hair wider than thirty-six of its 16px em, which the DOM rounds down to them.
+    layout.width = 576;
+    layout.exact = 576.25;
+    await wrapAgain(20);
+    const justWide = logOf().dataset.line;
+
+    layout.exact = undefined;
     layout.width = 400;
     await wrapAgain(40);
 
-    expect({ first, narrowAgain: logOf().dataset.line, wide }).toStrictEqual({
+    expect({ first, justWide, narrowAgain: logOf().dataset.line, wide }).toStrictEqual({
       first: ["inline"],
+      justWide: undefined,
       narrowAgain: "inline",
       wide: undefined,
     });
