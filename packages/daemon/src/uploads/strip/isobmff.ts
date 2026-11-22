@@ -26,7 +26,7 @@ import {
 import type { Box, Patch, Sink } from "./boxes.ts";
 import { walkMeta } from "./heif.ts";
 import type { Range } from "./heif.ts";
-import { movieParts, walkMovie } from "./movie.ts";
+import { droppedTracks, movieParts, walkMovie } from "./movie.ts";
 
 /** How a file's bytes are read: `length` of them from `at`, which the walk has checked to be inside the file. */
 export type Reader = (at: number, length: number) => Effect.Effect<Uint8Array>;
@@ -51,6 +51,8 @@ const walkedInImages = typesOf("moov moof meta");
 const mdat = typeOf("mdat");
 
 const meta = typeOf("meta");
+
+const moov = typeOf("moov");
 
 /** What the first pass over the top-level boxes found. */
 interface Scan {
@@ -125,12 +127,8 @@ const scanTop = (
     return { mdats, walked };
   });
 
-// Reads a box whole, and walks it.
-const walkBox = (
-  box: Box,
-  read: Reader,
-  file: { readonly size: number; readonly mdats: readonly Range[] }
-): Effect.Effect<readonly Patch[] | Unreadable> =>
+// Reads a box whole.
+const readWhole = (box: Box, read: Reader): Effect.Effect<Uint8Array | Unreadable> =>
   Effect.gen(function* () {
     const length = box.end - box.start;
 
@@ -140,20 +138,29 @@ const walkBox = (
 
     const bytes = yield* read(box.start, length);
 
-    if (bytes.length !== length) {
-      return bad("the file could not be read");
-    }
-
-    if (box.type === meta) {
-      return walkMeta(bytes, box.start, box.header, file);
-    }
-
-    const inside = movieParts.get(box.type);
-
-    return inside === undefined
-      ? bad("a box that is not walked")
-      : walkMovie(bytes, box.start, box.header, inside);
+    return bytes.length === length ? bytes : bad("the file could not be read");
   });
+
+// Walks a box read whole.
+const walkBox = (
+  box: Box,
+  bytes: Uint8Array,
+  file: {
+    readonly size: number;
+    readonly mdats: readonly Range[];
+    readonly dropped: ReadonlySet<number>;
+  }
+): readonly Patch[] | Unreadable => {
+  if (box.type === meta) {
+    return walkMeta(bytes, box.start, box.header, file);
+  }
+
+  const inside = movieParts.get(box.type);
+
+  return inside === undefined
+    ? bad("a box that is not walked")
+    : walkMovie(bytes, box.start, box.header, inside, file);
+};
 
 /**
  * Walks a file from the top.
@@ -175,8 +182,35 @@ export const plan = (layout: Layout, read: Reader, size: number): Effect.Effect<
       return bad("more than one meta at the top of an image");
     }
 
+    // Every `moov` is read before anything is walked, since which tracks it drops decides
+    // what is done with a fragment, wherever it lies.
+    const wholes = new Map<Box, Uint8Array>();
+    const dropped = new Set<number>();
+
     for (const box of scan.walked) {
-      const result = yield* walkBox(box, read, { mdats: scan.mdats, size });
+      if (box.type === moov) {
+        const bytes = yield* readWhole(box, read);
+
+        if (bytes instanceof Unreadable) {
+          return bytes;
+        }
+
+        wholes.set(box, bytes);
+
+        for (const id of droppedTracks(bytes, box.header)) {
+          dropped.add(id);
+        }
+      }
+    }
+
+    for (const box of scan.walked) {
+      const bytes = wholes.get(box) ?? (yield* readWhole(box, read));
+
+      if (bytes instanceof Unreadable) {
+        return bytes;
+      }
+
+      const result = walkBox(box, bytes, { dropped, mdats: scan.mdats, size });
 
       if (result instanceof Unreadable) {
         return result;

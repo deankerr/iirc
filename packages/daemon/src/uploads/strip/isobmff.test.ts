@@ -15,6 +15,7 @@ import {
   itemsOf,
   largeBox,
   mdatOf,
+  movie,
   pathsOf,
   payloadOf,
   photoAvif,
@@ -24,7 +25,7 @@ import {
   toEndBox,
   u,
 } from "../../testing/isobmff.ts";
-import type { HeifItem, HeifOptions } from "../../testing/isobmff.ts";
+import type { HeifItem, HeifOptions, Movie, MovieTrack } from "../../testing/isobmff.ts";
 import type { Patch } from "./boxes.ts";
 import { plan } from "./isobmff.ts";
 import type { Layout, Reader } from "./isobmff.ts";
@@ -114,6 +115,7 @@ describe("walking a movie", () => {
           box(
             "mdia",
             fullBox("mdhd", 0, 0, zeros(20)),
+            fullBox("hdlr", 0, 0, u(0, 4), text("vide"), zeros(12)),
             box(
               "minf",
               fullBox("vmhd", 0, 1, zeros(8)),
@@ -149,6 +151,7 @@ describe("walking a movie", () => {
         "moov/trak/tkhd",
         "moov/trak/mdia",
         "moov/trak/mdia/mdhd",
+        "moov/trak/mdia/hdlr",
         "moov/trak/mdia/minf",
         "moov/trak/mdia/minf/vmhd",
         "moov/trak/mdia/minf/stbl",
@@ -391,6 +394,247 @@ const withIloc = (bytes: Uint8Array, change: (iloc: Uint8Array) => void) => {
 };
 
 const twoItems = () => heif({ items: [keptItem(1, "IMAGE-ONE"), exifItem(2)], primary: 1 });
+
+const planted = (n: number) => text(`PLANTED-LOCATION-${n}`);
+
+const videoTrack: MovieTrack = {
+  chunks: [[text("VIDEO-A"), text("VIDEO-B")], [text("VIDEO-C")]],
+  entry: "avc1",
+  handler: "vide",
+  id: 1,
+};
+
+const soundTrack: MovieTrack = {
+  chunks: [[text("SOUND-A")], [text("SOUND-B"), text("SOUND-C")]],
+  entry: "mp4a",
+  handler: "soun",
+  id: 2,
+};
+
+const locationTrack: MovieTrack = {
+  chunks: [[planted(1)], [planted(2)]],
+  entry: "mebx",
+  handler: "meta",
+  id: 3,
+  references: [{ ids: [1], type: "cdsc" }],
+};
+
+// The tracks of a movie as a reader finds them: each `trak`'s type and bytes.
+const traksOf = (bytes: Uint8Array) => {
+  const moovBox = boxAt(bytes, "moov");
+
+  return moovBox === undefined
+    ? []
+    : childrenOf(bytes, moovBox)
+        .filter(({ type }) => type === "trak" || type === "free")
+        .map((found) => ({ bytes: bytes.subarray(found.start, found.end), type: found.type }));
+};
+
+const chunkBytes = (built: Movie, bytes: Uint8Array, id: number) =>
+  (built.chunks.get(id) ?? []).map(({ end, start }) => bytes.subarray(start, end));
+
+// What of a movie a test of a dropped track looks at: whether the planted text survives, the
+// tracks, and the samples of the kept ones.
+const droppedView = (built: Movie, kept: readonly number[]) => {
+  const out = stripped("movie", built.bytes);
+  const beforeDropped = traksOf(built.bytes).slice(2);
+
+  return {
+    actual: {
+      length: out.length,
+      planted: holds(out, "PLANTED-"),
+      samples: kept.map((id) => chunkBytes(built, out, id)),
+      traks: traksOf(out),
+    },
+    expected: {
+      length: built.bytes.length,
+      planted: false,
+      samples: kept.map((id) => chunkBytes(built, built.bytes, id)),
+      traks: [
+        ...traksOf(built.bytes).slice(0, 2),
+        ...beforeDropped.map(({ bytes }) => ({
+          bytes: cat(u(bytes.length, 4), text("free"), zeros(bytes.length - 8)),
+          type: "free",
+        })),
+      ],
+    },
+  };
+};
+
+describe("dropping a track a movie does not need", () => {
+  it.each([
+    ["a timed-metadata track of locations", locationTrack],
+    [
+      "one with co64 offsets and samples of differing sizes over several chunks",
+      {
+        ...locationTrack,
+        chunks: [
+          [planted(1), text("PLANTED-X")],
+          [planted(22)],
+          [text("PLANTED-"), planted(333), planted(4)],
+        ],
+        offsets: "co64",
+      },
+    ],
+    ["a hint track", { ...locationTrack, entry: "rtp ", handler: "hint" }],
+    ["a track of a handler type nobody here has heard of", { ...locationTrack, handler: "zzzz" }],
+    ["a track with no hdlr", { chunks: locationTrack.chunks, id: 3 }],
+  ] as const)(
+    "drops %s, zeroing its trak and its samples, and keeps the picture and sound",
+    (_, track) => {
+      const { actual, expected } = droppedView(
+        movie({ tracks: [videoTrack, soundTrack, track] }),
+        [1, 2]
+      );
+
+      expect(actual).toStrictEqual(expected);
+    }
+  );
+
+  it("drops a track whose chunks are the last of the mdat, joining those that touch", () => {
+    const built = movie({
+      tracks: [
+        videoTrack,
+        soundTrack,
+        { ...locationTrack, chunks: [[planted(1)], [planted(2)], [planted(3)]] },
+      ],
+    });
+
+    const { actual, expected } = droppedView(built, [1, 2]);
+
+    expect(actual).toStrictEqual(expected);
+  });
+
+  it("keeps a movie of only the tracks it keeps, one of each kind, as it is", () => {
+    const handlers = ["pict", "auxv", "soun", "sbtl", "subt", "text", "clcp", "tmcd"];
+
+    const built = movie({
+      tracks: [
+        { ...videoTrack, references: [{ ids: [2, 3], type: "cdsc" }] },
+        ...handlers.map((handler, index) => ({
+          chunks: [[text(`${handler}-SAMPLE`)]],
+          handler,
+          id: index + 2,
+        })),
+      ],
+    });
+
+    expect(stripped("movie", built.bytes)).toStrictEqual(built.bytes);
+  });
+
+  it("takes a dropped track out of a kept track's references, keeping its others", () => {
+    const built = movie({
+      tracks: [
+        {
+          ...videoTrack,
+          references: [
+            { ids: [2, 3, 4], type: "cdsc" },
+            { ids: [3], type: "chap" },
+            { ids: [2], type: "sync" },
+          ],
+        },
+        soundTrack,
+        locationTrack,
+        { ...locationTrack, id: 4 },
+      ],
+    });
+
+    const out = stripped("movie", built.bytes);
+    const tref = boxAt(out, "moov", "trak", "tref");
+
+    expect(
+      tref === undefined
+        ? []
+        : childrenOf(out, tref).map((found) => out.subarray(found.start, found.end))
+    ).toStrictEqual([
+      box("cdsc", u(2, 4)),
+      box("free", zeros(0)),
+      box("free", zeros(4)),
+      box("sync", u(2, 4)),
+    ]);
+  });
+
+  it("drops a dropped track's entry in mvex, and a fragment of it that holds no run", () => {
+    const built = movie({ fragmented: true, tracks: [videoTrack, soundTrack, locationTrack] });
+
+    const fragment = box(
+      "moof",
+      fullBox("mfhd", 0, 0, u(1, 4)),
+      box("traf", fullBox("tfhd", 0, 0, u(1, 4)), fullBox("trun", 0, 0, u(0, 4))),
+      box("traf", fullBox("tfhd", 0, 0, u(3, 4)), fullBox("tfdt", 0, 0, u(0, 4)))
+    );
+
+    const index = box(
+      "mfra",
+      fullBox("tfra", 0, 0, u(3, 4), zeros(8)),
+      fullBox("tfra", 0, 0, u(1, 4), zeros(8))
+    );
+
+    const out = stripped("movie", cat(built.bytes, fragment, index));
+
+    expect(
+      pathsOf(out, new Set(["moov", "moof", "mfra", "mvex"])).filter(
+        (path) => !path.startsWith("moov/t")
+      )
+    ).toStrictEqual([
+      "ftyp",
+      "moov",
+      "moov/mvhd",
+      "moov/free",
+      "moov/mvex",
+      "moov/mvex/trex",
+      "moov/mvex/trex",
+      "moov/mvex/free",
+      "mdat",
+      "moof",
+      "moof/mfhd",
+      "moof/traf",
+      "moof/free",
+      "mfra",
+      "mfra/free",
+      "mfra/tfra",
+    ]);
+  });
+
+  it.each([
+    [
+      "a dropped track with no sample table",
+      [videoTrack, { ...locationTrack, table: false }],
+      "a dropped track's sample table is missing",
+    ],
+    [
+      "a dropped track whose samples lie outside every mdat",
+      [videoTrack, { ...locationTrack, at: [0, 0] }],
+      "a dropped track's samples are not in an mdat",
+    ],
+    [
+      "a dropped track whose sample table disagrees with itself",
+      [videoTrack, { ...locationTrack, at: [200, 220, 240] }],
+      "a dropped track's sample table disagrees with itself",
+    ],
+    [
+      "a kept track's reference that cannot lose a dropped track at the same length",
+      [{ ...videoTrack, references: [{ ids: [1, 3], type: "cdsc" }] }, locationTrack],
+      "a kept track's reference to a dropped track cannot be removed",
+    ],
+  ] as const)("refuses %s", (_, tracks, reason) => {
+    expect(reasonOf("movie", movie({ tracks }).bytes)).toBe(reason);
+  });
+
+  it("refuses a fragmented movie whose fragment holds a run of a dropped track", () => {
+    const built = movie({ fragmented: true, tracks: [videoTrack, locationTrack] });
+
+    const fragment = box(
+      "moof",
+      fullBox("mfhd", 0, 0, u(1, 4)),
+      box("traf", fullBox("tfhd", 0, 0, u(3, 4)), fullBox("trun", 0, 0, u(1, 4), u(4, 4)))
+    );
+
+    expect(reasonOf("movie", cat(built.bytes, fragment, box("mdat", planted(9))))).toBe(
+      "a fragment holds a run of a dropped track"
+    );
+  });
+});
 
 describe("walking an image", () => {
   it("keeps the images, drops Exif and XMP with their data, and writes a free box for what meta gave up", () => {
@@ -715,6 +959,11 @@ const fixtures = [
   ["image", "photo.avif", photoAvif],
   ["movie", "clip.mp4", clipMp4],
   ["movie", "clip.mov", clipMov],
+  [
+    "movie",
+    "a movie with a location track",
+    movie({ tracks: [videoTrack, soundTrack, locationTrack] }).bytes,
+  ],
 ] as const;
 
 describe("walking a file in general", () => {
@@ -727,7 +976,7 @@ describe("walking a file in general", () => {
 
     expect(
       again.map(({ again: second, once }) => second.every((byte, i) => byte === once[i]))
-    ).toStrictEqual([true, true, true, true]);
+    ).toStrictEqual([true, true, true, true, true]);
   });
 
   it("never throws, nor keeps planted text, on any prefix of a file", () => {

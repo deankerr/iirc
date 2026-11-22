@@ -288,8 +288,18 @@ const runsInto = (occupied: Occupied, range: Range): boolean => {
   return before > 0 && (occupied.reach[before - 1] ?? 0) > range.start;
 };
 
-// Whether a run lies whole inside one of some that are in order and apart.
-const insideOne = (inside: readonly Range[], starts: readonly number[], range: Range): boolean => {
+/**
+ * Whether a run lies whole inside one of some that are in order and apart.
+ * @param inside - The runs, in order and apart.
+ * @param starts - Where each of them begins.
+ * @param range - The run.
+ * @returns Whether it does.
+ */
+export const insideOne = (
+  inside: readonly Range[],
+  starts: readonly number[],
+  range: Range
+): boolean => {
   const before = countBelow(starts, range.start, true);
 
   return before > 0 && range.end <= (inside[before - 1]?.end ?? 0);
