@@ -12,9 +12,11 @@ import type { Fact } from "./known.ts";
 import { changeListing } from "./members.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
-import type { Joined, Member, Seen } from "./state.ts";
-import { mapUsers } from "./users.ts";
+import type { Joined, Member, Seen, State } from "./state.ts";
+import { mapUsers, noUsers, userIn } from "./users.ts";
 import type { Users } from "./users.ts";
+import { openOf, sessionOf } from "./views.ts";
+import { named } from "./where.ts";
 
 /**
  * A fact as stale since an instant: what was known, or known in part, is what it was.
@@ -66,12 +68,44 @@ const joinedStaled = (joined: Joined, since: Instant): Joined => ({
 
 const usersStaled = (users: Users, change: (seen: Seen) => Seen): Users => mapUsers(users, change);
 
-/**
- * Rewrites the facts no Feature keeps any longer as stale, from now.
- * @param run - The step.
- * @param facts - The facts gone stale.
- */
-export const markStale = (run: Run, facts: readonly Kept[]): void => {
+// What a member's facts are, by kind alone: staling only turns a fact known, or known in
+// part, stale, so a fact went stale where its kind changed. Self's are the Session's own.
+const kindsOf = (state: State, key: string, member: Member): string => {
+  const self = sessionOf(state);
+
+  const seen =
+    self !== undefined && folder(state)(self.nick) === key
+      ? self
+      : userIn(openOf(state)?.users ?? noUsers, key);
+
+  return [
+    seen?.account._tag,
+    seen?.away._tag,
+    seen?.bot._tag,
+    seen?.mask._tag,
+    seen?.realname._tag,
+    member.prefixes._tag,
+  ].join(" ");
+};
+
+// Each Channel Self is joined to in which some member's facts changed between two States.
+const changedIn = (before: State, after: State): readonly string[] =>
+  [...after.channels].flatMap(([key, { name, phase }]) => {
+    const was = before.channels.get(key)?.phase;
+
+    return phase._tag === "Joined" &&
+      was?._tag === "Joined" &&
+      [...phase.members].some(([nick, member]) => {
+        const old = was.members.get(nick);
+
+        return old !== undefined && kindsOf(before, nick, old) !== kindsOf(after, nick, member);
+      })
+      ? [name]
+      : [];
+  });
+
+// Rewrites the facts no Feature keeps any longer as stale, from now.
+const rewrite = (run: Run, facts: readonly Kept[]): void => {
   const since = run.at;
 
   for (const fact of facts) {
@@ -171,5 +205,26 @@ export const markStale = (run: Run, facts: readonly Kept[]): void => {
         fact satisfies never;
       }
     }
+  }
+};
+
+/**
+ * Rewrites the facts no Feature keeps any longer as stale, from now. No Activity says so,
+ * so each Channel Self is joined to in which a member's fact went stale is reported
+ * learned, once, for a Frontend to read its members again.
+ * @param run - The step.
+ * @param facts - The facts gone stale.
+ */
+export const markStale = (run: Run, facts: readonly Kept[]): void => {
+  if (facts.length === 0) {
+    return;
+  }
+
+  const before = run.state;
+
+  rewrite(run, facts);
+
+  for (const channel of changedIn(before, run.state)) {
+    run.news.push({ _tag: "ChannelLearned", channel: named(run, channel) });
   }
 };

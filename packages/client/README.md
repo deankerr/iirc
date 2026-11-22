@@ -112,7 +112,7 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it. |
 | `Unignored` | The Owner took masks out of the Configuration's `ignores`, each given as every casemapping folds it. |
-| `ChannelLearned` | What is known of a Channel Self is in changed with no Activity saying so: its modes or topic, the end of a `NAMES` listing or of a `WHO` answer that described its members, or a member's bot mark. It names the Channel, keyed as `where` keys it. |
+| `ChannelLearned` | What is known of a Channel Self is in changed with no Activity saying so: its modes or topic, the end of a `NAMES` listing or of a `WHO` answer that described its members, a member's bot mark, or a fact of a member gone stale as the Feature that kept it turned off. It names the Channel, keyed as `where` keys it. |
 | `PartnerLearned` | Whether a Direct Message partner is on the Network changed with no Activity saying so: the first status `MONITOR` or `WATCH` gave, their joining or leaving a Channel Self shares, or the Session ending. It names the partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `AccountUnknown` or `NoAccount` for a ban by account, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
