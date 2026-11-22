@@ -204,6 +204,7 @@ export {
   TimeShown,
   WidestLine,
   MembersWidth,
+  NickBrackets,
   NickWidth,
   RowSpacing,
   UiInForce,
