@@ -442,15 +442,21 @@ describe("a Network whose Client throws on its first Configuration", () => {
 });
 
 // The Journal, but a `Configured` waits or fails as `mode` says, so a Network added holds
-// no life yet while every other append, such as a `Removed`, goes through.
-const holdingBack = (world: World, mode: Ref.Ref<"pass" | "fail">, gate: Latch.Latch) =>
+// no life yet while every other append, such as a `Removed`, goes through. `reached` opens
+// once a `Configured` waits at the gate.
+const holdingBack = (
+  world: World,
+  mode: Ref.Ref<"pass" | "fail">,
+  gate: Latch.Latch,
+  reached: Latch.Latch
+) =>
   wrapJournal(world.journal, {
     before: (record) =>
       record._tag === "Input" && record.input._tag === "Configured"
         ? Effect.flatMap(Ref.get(mode), (now) =>
             now === "fail"
               ? Effect.fail(new JournalFailed({ reason: "the disk is full" }))
-              : gate.await
+              : Effect.andThen(reached.open, gate.await)
           )
         : Effect.void,
   });
@@ -477,7 +483,7 @@ describe("a Network whose first Configured is not yet stepped", () => {
         Effect.gen(function* () {
           const mode = yield* Ref.make<"pass" | "fail">("pass");
           const gate = yield* Latch.make(true);
-          const journal = holdingBack(world, mode, gate);
+          const journal = holdingBack(world, mode, gate, yield* Latch.make(false));
           const first = yield* startRuntime({ ...world, journal }, client);
 
           if (earlier) {
@@ -524,13 +530,14 @@ describe("a Network whose first Configured is not yet stepped", () => {
       Effect.gen(function* () {
         const mode = yield* Ref.make<"pass" | "fail">("pass");
         const gate = yield* Latch.make(false);
-        const journal = holdingBack(world, mode, gate);
+        const reached = yield* Latch.make(false);
+        const journal = holdingBack(world, mode, gate, reached);
         const first = yield* startRuntime({ ...world, journal }, client);
 
         const quiet = configured({ enabled: false });
         const adding = yield* Effect.forkChild(first.runtime.configure(libera, quiet));
 
-        yield* settle;
+        yield* reached.await;
         const refused = yield* Effect.flip(first.runtime.remove(libera, { keep: true }));
         const journaled = yield* outline(world.journal);
 

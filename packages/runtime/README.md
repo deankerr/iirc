@@ -73,7 +73,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 
 - **Each life of a Network has an identity.** A `Life` is the sequence of the `Configured` that began it, the first after the Network was added or after a `Removed`. It is folded from the Journal, so a restart gives the same, and it only increases for an id.
 - **Every answer about a Network names its life.** `lives`, `known`, `kept`, a removal's answer, and every `Happened` name it.
-- **A Network not yet configured has no life.** One added whose first `Configured` is not yet stepped is left out of `lives` and `known`, and `remove` of it is `UnknownNetwork`, journaling nothing, or `LifeChanged` with `null` when it names a `life`.
+- **A Network not yet configured has no life.** One added whose first `Configured` is not yet stepped is left out of `lives` and `known`. `remove` of a Network with no life is `UnknownNetwork`, journaling nothing, or `LifeChanged` with `null` when it names a `life`.
 
 ### Recovering after `NetworkStopped`
 
