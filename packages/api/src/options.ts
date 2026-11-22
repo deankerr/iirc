@@ -224,7 +224,9 @@ export const defaultPreviewsMaxTotal = 1_073_741_824;
 /**
  * The options beyond `ui`, each named in full, with its
  * description, and with what it starts as where it starts as anything. One with no `default` is optional,
- * and absent until set.
+ * and absent until set. They are one flat Struct, so a Frontend lists them by its fields with
+ * no tree to walk, and a path names one in full, so a new root needs no new route. Their
+ * sequence is their own, so a change of an option under `ui` never makes a write of one stale.
  */
 export const OwnerOptions = Schema.Struct({
   "away.after": Schema.optionalKey(

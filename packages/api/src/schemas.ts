@@ -73,6 +73,8 @@ const everyOf =
   ): A =>
     list;
 
+// `NetworkId`, `Sequence`, the intents, and a Credential's name carry the same brands as the
+// Runtime's and the Client's, so the Daemon passes them on without a cast.
 export { NetworkId } from "./network-id.ts";
 
 /** An Entry's place in the Journal. Sequences only increase, and may skip numbers. */
@@ -161,7 +163,9 @@ export const ModeRequest = Schema.Struct({
 /**
  * What the Owner does on a Network besides saying something. The Client checks each
  * against what it knows of the Network, by ISUPPORT, before it sends anything, so the
- * wire checks only that no line break or NUL is in it.
+ * wire checks only that no line break or NUL is in it. They are one route with a tagged
+ * action, not a route each, since each is journaled, stepped, answered, and recovered
+ * alike, and a new action is then a new tag.
  */
 export const ActionRequest = Schema.TaggedUnion({
   /** Away with a message, or back with `null` or `""`. It outlives Sessions. */
@@ -412,7 +416,8 @@ export type Closed = typeof Closed.Type;
  * Whether a `say` or an `act` under an intent was journaled. `Journaled` means it is
  * stepped on every restart, so it must not be given again, though its Lines may not have
  * reached the Ircd. `NotJournaled` means it never was, and giving it again under the same
- * intent is safe.
+ * intent is safe. Both are a 200, never a 404 for `NotJournaled`, since whether it was
+ * journaled is the answer to the question asked, not a failure to find something.
  */
 export const SaidAnswer = Schema.Union([
   Schema.TaggedStruct("Journaled", { sequence: Sequence }),
@@ -920,7 +925,8 @@ export type LookResult = typeof LookResult.Type;
 /**
  * What a `look` answers, once its `Look` is journaled and stepped under its intent:
  * `LookedUp` with its result, or `Pending` when none came within the Daemon's bound,
- * which `GET /api/networks/{network}/lookups/{intent}` can ask after.
+ * which `GET /api/networks/{network}/lookups/{intent}` can ask after. The `POST` waits
+ * because a Frontend asking `WHOIS` wants the answer, not a sequence to follow News for.
  */
 export const Looked = Schema.Union([
   Schema.TaggedStruct("LookedUp", { intent: IntentId, result: LookResult, sequence: Sequence }),
@@ -932,7 +938,8 @@ export type Looked = typeof Looked.Type;
 
 /**
  * A Lookup by its intent: `LookedUp` once its result came, `Pending` while it has not, or
- * `NotJournaled` when no Lookup under the intent was journaled.
+ * `NotJournaled` when no Lookup under the intent was journaled, each a 200, as
+ * {@link SaidAnswer} is.
  */
 export const LookedAnswer = Schema.Union([
   Schema.TaggedStruct("LookedUp", { intent: IntentId, result: LookResult, sequence: Sequence }),
@@ -1071,14 +1078,18 @@ export type NewsEvent = typeof NewsEvent.Type;
 
 // The options under `ui`.
 
-/** A value for one `ui` option, as JSON, which the Daemon parses by that option's Schema. */
+/**
+ * A value for one `ui` option, as JSON, which the Daemon parses by that option's Schema, so
+ * the contract lists no body for each option, and a new option needs no new route.
+ */
 export const UiValue = Schema.Struct({ value: Schema.Json });
 
 /**
  * One event of the `ui` options' stream. `changed` carries the options in force, whole,
  * and the sequence of the last Change as its id, so a Frontend resumes after it and misses
  * nothing: each Change is the whole value of one option, so the latest options say all.
- * `heartbeat` says the stream is alive, and carries no id.
+ * `heartbeat` says the stream is alive, and carries no id. The stream is its own, not News,
+ * which is each Network's, nor the Timelines' changes, whose places are the projection's.
  */
 export const UiEvent = Schema.Union([
   Schema.Struct({
@@ -1097,7 +1108,10 @@ export type UiEvent = typeof UiEvent.Type;
 
 // The options beyond `ui`.
 
-/** A value for one option, as JSON, which the Daemon parses by that option's Schema. */
+/**
+ * A value for one option, as JSON, which the Daemon parses by that option's Schema, as
+ * {@link UiValue} is.
+ */
 export const OptionValue = Schema.Struct({ value: Schema.Json });
 
 /**
@@ -1125,7 +1139,9 @@ export type OptionsEvent = typeof OptionsEvent.Type;
 /**
  * Where an item stands in a Timeline, as an opaque cursor on the wire: text that compares
  * exactly as positions do, and is safe in a URL. It is parsed into its position at the
- * boundary, so text that is not a cursor the Daemon could have given is refused.
+ * boundary, so text that is not a cursor the Daemon could have given is refused. The parsing
+ * and `TimelineId` are `@iirc/timelines`'s, so a cursor is read one way everywhere, and the
+ * Daemon passes positions to the store as they were parsed.
  */
 const PositionType = Schema.toType(
   Schema.Struct({ at: Instant, n: Schema.Int, sequence: Schema.Int })
@@ -1197,7 +1213,10 @@ export const ProjectionVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(
 /**
  * Where a follower of the Timelines' changes is: the projection version and the last
  * sequence it has, written `<version>.<sequence>`, as each event's id. A Frontend keeps it
- * as it was given, and gives it back as `after` or `Last-Event-ID`.
+ * as it was given, and gives it back as `after` or `Last-Event-ID`. It carries the version,
+ * rather than the stream ending on a new one, since an `EventSource` reconnects with the
+ * last id it was given: a place that cannot be resumed is answered with `reset` on the same
+ * stream, so a Frontend handles a new version and a store that lags in one way.
  */
 export const Resume = Schema.String.annotate({
   description:
@@ -1679,7 +1698,8 @@ export type TimelineChange = typeof TimelineChange.Type;
 /**
  * A step that changed more than one event holds, such as a merge of two long Timelines:
  * the Timelines it touched or merged, to read again, or `null` when even they are too many,
- * which says to read every Timeline again.
+ * which says to read every Timeline again. The step is named rather than split, since part
+ * of a step would show as if it were whole, and a reader could not tell.
  */
 export const TimelineOverflow = Schema.Struct({
   sequence: Sequence,
@@ -1850,7 +1870,9 @@ export type Rank = typeof Rank.Type;
  * privileged first, so a Frontend shows `@` and `+` as the Network does. `standing` is
  * `null` when the Client holds no Channel by the Timeline's name, as after Self parted
  * one the Owner no longer wants. A Channel Self is not in has no members, and its topic
- * and modes are `Unknown`.
+ * and modes are `Unknown`. The head answers wherever Self stands, since that is part of what
+ * it shows, while a list of the members of a Channel Self is not in does not exist, so that
+ * is `NotInChannel`, and a Frontend paging one stops.
  */
 export const ChannelHeader = Schema.Struct({
   /**

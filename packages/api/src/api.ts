@@ -277,6 +277,8 @@ export class NewsGroup extends HttpApiGroup.make("news")
  * page at a time, newest first. A Timeline, or a range of time in it, is exported as plain
  * text, one line an item, read from the store as it is sent. Whether the Timelines are being folded at all is followed
  * as Server-Sent Events too, since a failure stops the folding until the Daemon restarts.
+ * Each read is a route of its own, not a field of News, so a Frontend that follows Timelines
+ * never reads News, and one that follows News never pays for Timelines.
  */
 export class TimelinesGroup extends HttpApiGroup.make("timelines")
   .add(

@@ -207,7 +207,8 @@ export type PreviewItem = typeof PreviewItem.Type;
 /**
  * Which Message's Previews are asked for: its place in the Timeline, as the item's
  * `position` a Timeline window gave, which says its Entry's sequence and its index in that
- * Entry's News.
+ * Entry's News. It is the cursor rather than those as two fields, since the cursor is what a
+ * Frontend holds, and a script that reads JSON then never takes one apart.
  */
 export const PreviewsRequest = Schema.Struct({ position: Cursor });
 
