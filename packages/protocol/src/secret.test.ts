@@ -24,7 +24,8 @@ const encodedBytes = (line: OutboundLine): Uint8Array => {
   return bytes;
 };
 
-const text = new TextDecoder();
+// A response may start with U+FEFF, which is text here and not a byte order mark.
+const text = new TextDecoder("utf-8", { ignoreBOM: true });
 const credential = CredentialName.make("libera");
 
 const wires = (lines: ReturnType<typeof fillSecret>) => {
@@ -207,7 +208,8 @@ describe("every SASL PLAIN response", () => {
 
           return true;
         }),
-        { numRuns: 2000 }
+        // An authzid of U+FEFF puts it first in the response, where a decoder may take it for a BOM.
+        { examples: [["", "\uFEFF", ""]], numRuns: 2000 }
       );
     }).not.toThrow();
   });
