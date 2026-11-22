@@ -113,6 +113,28 @@
   line-height: var(--line-height);
 }
 
+/*
+ * The grip on the rule, over the whole log: in columns as a row's, unseen but for the grip,
+ * which ends the senders' column where a row's rule does, and takes the pointer alone.
+ */
+.edgeRow {
+  display: grid;
+  position: absolute;
+  inset: 0;
+  grid-template-columns:
+    max-content calc(var(--nick-width) + var(--space-3) + var(--border-width))
+    minmax(0, 1fr);
+  column-gap: var(--space-3);
+  padding: 0 var(--space-3);
+  pointer-events: none;
+}
+
+.edge {
+  position: relative;
+  justify-self: end;
+  pointer-events: auto;
+}
+
 .activity,
 .refused,
 .session,

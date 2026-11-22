@@ -2,8 +2,10 @@
 declare const styles: {
   readonly account: string;
   readonly away: string;
+  readonly beside: string;
   readonly close: string;
   readonly dim: string;
+  readonly edge: string;
   readonly floating: string;
   readonly head: string;
   readonly heading: string;

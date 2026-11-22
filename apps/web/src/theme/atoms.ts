@@ -33,6 +33,7 @@ import { composerPreview } from "../composer/composer-state.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { changeUi, changeWhole, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
+import { widthsShown } from "../options/widths.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { fontStack, monoStack } from "./fonts.ts";
 import { ThemeReader } from "./reader.ts";
@@ -168,12 +169,13 @@ export const drawnTheme = Atom.make((get) => {
  * asks for beside it: the font the Composer's list highlights, while one is highlighted,
  * else the one in effect. The widths are in `ch`, the font's own `0` at the text's size, so
  * they follow both, and no widest line is no property at all, which leaves a line as wide
- * as its Pane.
+ * as its Pane. A width being dragged is drawn as the drag holds it.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string | undefined])[] => {
   const ui = get(uiInEffect);
   const listed = get(composerPreview);
   const font = (listed?._tag === "Font" ? listed.font : undefined) ?? ui.font;
+  const widths = get(widthsShown);
 
   return [
     ["--font-size", `${ui["font.size"]}px`],
@@ -184,8 +186,8 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
       "--widest-line",
       ui["timeline.maxWidth"] === "none" ? undefined : `${ui["timeline.maxWidth"]}ch`,
     ],
-    ["--nick-width", `${ui["timeline.nickWidth"]}ch`],
-    ["--members-width", `${ui["members.width"]}ch`],
+    ["--nick-width", `${widths["timeline.nickWidth"]}ch`],
+    ["--members-width", `${widths["members.width"]}ch`],
   ];
 });
 

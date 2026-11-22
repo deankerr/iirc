@@ -36,7 +36,7 @@ import {
   selfNick,
   windowCapOf,
 } from "./atoms.ts";
-import { ColumnsLeast, Line } from "./line.tsx";
+import { ColumnsLeast, Line, NickEdge } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
 
@@ -894,7 +894,7 @@ const Lines = ({
   const drawn = line === "columns" && narrow ? "inline" : line;
 
   return (
-    <>
+    <div className={styles.log}>
       {/* Keys, a press, a touch, and the wheel only say the Owner moved the log themselves. */}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
@@ -968,7 +968,8 @@ const Lines = ({
         </ScrollerProvider>
       </div>
       <ColumnsLeast ref={least} />
-    </>
+      {drawn === "columns" ? <NickEdge /> : null}
+    </div>
   );
 };
 

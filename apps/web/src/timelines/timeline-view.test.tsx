@@ -437,6 +437,11 @@ const layOut = () => {
         return new DOMRect(0, 0, layout.width, layout.view);
       }
 
+      // A grip's unseen measure of a hundred of the font's `0`, each eight pixels.
+      if (this.previousElementSibling?.tagName === "HR") {
+        return new DOMRect(0, 0, 800, 0);
+      }
+
       return new DOMRect(0, 0, 0, Object.hasOwn(this.dataset, "index") ? layout.row : 0);
     },
   });
@@ -623,6 +628,21 @@ const seen = () => [
   motdButton()?.getAttribute("aria-expanded"),
   motdBlock(),
 ];
+
+/**
+ * A pointer's event at an x, as a mouse's first button gives it.
+ * @param type - The event.
+ * @param clientX - Where the pointer is.
+ * @returns The event.
+ */
+const at = (type: string, clientX: number) =>
+  new PointerEvent(type, { bubbles: true, cancelable: true, clientX, pointerId: 1 });
+
+/**
+ * The grip on the rule between nick and text, over the log.
+ * @returns It, or none.
+ */
+const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
 
 describe("what the view says it shows", () => {
   beforeEach(() => {
@@ -1394,6 +1414,60 @@ describe("what the view says it shows", () => {
     });
 
     expect({ loud, quiet: dividedNow() }).toStrictEqual({ loud: true, quiet: false });
+  });
+
+  // Catches a grip on the rule that writes at every step, or none, or one left where no
+  // rule is drawn to resize.
+  it("lays one grip over the rule in columns, none inline or stacked, and a drag writes ui.timeline.nickWidth once, as it ends", async () => {
+    const { daemon, registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const grips = document.querySelectorAll('[aria-label="Resize the nick column"]').length;
+
+    // Right widens it, three `0`s.
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerdown", 200));
+      nickGrip()?.dispatchEvent(at("pointermove", 210));
+      nickGrip()?.dispatchEvent(at("pointermove", 224));
+      await Promise.resolve();
+    });
+
+    const moving = {
+      changes: daemon.uiChanges.length,
+      now: nickGrip()?.getAttribute("aria-valuenow"),
+    };
+
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerup", 224));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.ui.options["timeline.nickWidth"] === 19);
+
+    const shown = (layout: "inline" | "stacked") => async () => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.layout": layout });
+        await Promise.resolve();
+      });
+
+      return nickGrip() === null;
+    };
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      grips,
+      inline: await shown("inline")(),
+      moving,
+      stacked: await shown("stacked")(),
+    }).toStrictEqual({
+      changes: ["PUT timeline.nickWidth"],
+      grips: 1,
+      inline: true,
+      moving: { changes: 0, now: "19" },
+      stacked: true,
+    });
   });
 
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {

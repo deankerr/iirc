@@ -1,7 +1,7 @@
 /*
  * The members: a column beside the Timeline, over it in a narrow Pane, or a sheet. The
  * column is as wide as `ui.members.width` says, in the font's own `0`, and nothing in it
- * widens it.
+ * widens it but its edge, dragged.
  */
 .panel {
   display: flex;
@@ -12,6 +12,18 @@
   border-left: var(--border-width) solid var(--color-border);
   background: var(--color-background);
   outline: none;
+}
+
+/* Beside a Timeline, where its edge is dragged to resize it, as the Sidebar's is. */
+.beside {
+  position: relative;
+}
+
+.edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--border-width));
 }
 
 /* Over a narrow Pane's Timeline, under its bar, at its right. */
