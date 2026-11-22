@@ -89,11 +89,14 @@ export const ColumnEdge = ({
   className,
   grows,
   label,
+  onHeld,
   option,
 }: {
   readonly className: string;
   readonly grows: Side;
   readonly label: string;
+  /** Told as a drag of this grip begins and ends, so what holds it can keep it in place. */
+  readonly onHeld?: (held: boolean) => void;
   readonly option: WidthOption;
 }) => {
   const width = useAtomValue(widthsShown)[option];
@@ -109,10 +112,11 @@ export const ColumnEdge = ({
     () => () => {
       if (dragged.current !== undefined) {
         dragged.current = undefined;
+        onHeld?.(false);
         dropDrag(registry, option);
       }
     },
-    [option, registry]
+    [onHeld, option, registry]
   );
 
   const onPointerDown = (event: PointerEvent<HTMLHRElement>) => {
@@ -126,6 +130,7 @@ export const ColumnEdge = ({
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragged.current = { width, x: event.clientX, zero: measured };
+    onHeld?.(true);
   };
 
   const onPointerMove = (event: PointerEvent<HTMLHRElement>) => {
@@ -143,6 +148,7 @@ export const ColumnEdge = ({
   const onPointerUp = () => {
     if (dragged.current !== undefined) {
       dragged.current = undefined;
+      onHeld?.(false);
       resize(registry.get(widthsShown)[option]);
     }
   };
@@ -150,6 +156,7 @@ export const ColumnEdge = ({
   const onPointerDropped = () => {
     if (dragged.current !== undefined) {
       dragged.current = undefined;
+      onHeld?.(false);
       dropDrag(registry, option);
     }
   };

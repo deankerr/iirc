@@ -86,11 +86,14 @@ export const resizeWidth = Atom.family((option: WidthOption) =>
     .fn((asked: number, get) =>
       Effect.gen(function* () {
         const { registry } = get;
-        const held = registry.get(widthDragged);
+        const dragged = registry.get(widthDragged);
+        // What a drag of this option held, if this write ends one: a key on the other grip
+        // leaves the other's drag alone.
+        const held = dragged?.option === option ? dragged : undefined;
 
         // A drag begun since holds a width of its own, which this leaves to it.
         const letGo = Effect.sync(() => {
-          if (registry.get(widthDragged) === held) {
+          if (held !== undefined && registry.get(widthDragged) === held) {
             registry.set(widthDragged, undefined);
           }
         });

@@ -590,6 +590,41 @@ describe("a Pane's members", () => {
     });
   });
 
+  // Catches a key on the members' edge that lets go of a nick column dragged meanwhile.
+  it("keep a nick column dragged meanwhile as it was dragged while a key resizes them", async () => {
+    const { daemon, registry } = await signedIn();
+    const restore = zeroOfEight();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+
+    const nick = document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
+
+    await act(async () => {
+      nick?.dispatchEvent(at("pointerdown", 200));
+      nick?.dispatchEvent(at("pointermove", 224));
+      await Promise.resolve();
+    });
+    await key(grip(), "ArrowLeft");
+    await settled(() => daemon.ui.options["members.width"] === 19);
+
+    const meanwhile = nick?.getAttribute("aria-valuenow");
+
+    await act(async () => {
+      nick?.dispatchEvent(at("pointerup", 224));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.uiChanges.length === 2);
+    restore();
+
+    expect({ meanwhile, written: daemon.ui.options["timeline.nickWidth"] }).toStrictEqual({
+      meanwhile: "19",
+      written: 19,
+    });
+  });
+
   // Catches a width the Daemon refused that snaps back with no word of why.
   it("say in the Composer why a width was not written, and draw the one in force", async () => {
     const { daemon, registry } = await signedIn();

@@ -20,7 +20,6 @@ import { flushSync } from "react-dom";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
-import { widthDragged } from "../options/widths.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { ScrollerProvider } from "../previews/near-view.ts";
 import { leaveTarget } from "../search/atoms.ts";
@@ -288,7 +287,6 @@ const Lines = ({
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);
   const line = useAtomValue(lineShown);
-  const nickDragged = useAtomValue(widthDragged)?.option === "timeline.nickWidth";
   const cap = useAtomValue(windowCapOf);
   // Whether the page before can be read without asking, as scrolling near the top, or a
   // view that cannot be scrolled, reads it. Where it cannot, the view offers to read it on
@@ -323,6 +321,8 @@ const Lines = ({
   const [viewHeight, setViewHeight] = useState(0);
   // Whether the log is too narrow for columns, as it was last laid out.
   const [narrow, setNarrow] = useState(false);
+  // Whether this log's nick grip is being dragged, which keeps it in columns till let go.
+  const [nickDragged, setNickDragged] = useState(false);
   // The log's width as its ResizeObserver last reported it: the DOM's, not state.
   const logWidth = useRef<number | undefined>(undefined);
   // The least a row in columns takes, laid out unseen beside the log.
@@ -892,8 +892,9 @@ const Lines = ({
     }));
   });
 
-  // A log too narrow for columns draws its rows as `inline` does, but for while the nick
-  // column is dragged, so the grip stays under the pointer until it lets go.
+  // A log too narrow for columns draws its rows as `inline` does, but for while its own nick
+  // grip is dragged, so the grip stays under the pointer until it lets go. Another log keeps
+  // to its own width.
   const drawn = line === "columns" && narrow && !nickDragged ? "inline" : line;
 
   return (
@@ -971,7 +972,7 @@ const Lines = ({
         </ScrollerProvider>
       </div>
       <ColumnsLeast ref={least} />
-      {drawn === "columns" ? <NickEdge /> : null}
+      {drawn === "columns" ? <NickEdge onHeld={setNickDragged} /> : null}
     </div>
   );
 };

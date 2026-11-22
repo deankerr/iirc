@@ -71,9 +71,10 @@ export const ColumnsLeast = ({ ref }: { readonly ref: Ref<HTMLDivElement> }) => 
  * The grip on the rule between nick and text, laid over a log in columns: one control for
  * every row, since each row is a grid of its own. It stands in columns as a row's are, so it
  * lies on the rule whatever the time's format, and takes the pointer only where it is.
+ * @param props - What to tell as a drag of it begins and ends.
  * @returns The grip.
  */
-export const NickEdge = () => {
+export const NickEdge = ({ onHeld }: { readonly onHeld: (held: boolean) => void }) => {
   const sample = sampleOf(useAtomValue(timeShown));
 
   return (
@@ -83,6 +84,7 @@ export const NickEdge = () => {
         className={styles.edge}
         grows="Right"
         label="Resize the nick column"
+        onHeld={onHeld}
         option="timeline.nickWidth"
       />
     </div>
