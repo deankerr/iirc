@@ -795,7 +795,7 @@ describe("the contract", () => {
   });
 
   it("takes the nick column and the members' panel each as a whole count of characters within its bounds, and no other", () => {
-    const tried = [10, 11, 16, 18, 40, 41, 12, 13, 16.5, Number.NaN, "16", null];
+    const tried = [10, 11, 16, 18, 40, 41, 13, 14, 16.5, Number.NaN, "16", null];
     const nick = Schema.decodeUnknownOption(NickWidth);
     const members = Schema.decodeUnknownOption(MembersWidth);
 
@@ -803,8 +803,8 @@ describe("the contract", () => {
       members: tried.map((each) => Option.getOrNull(members(each))),
       nick: tried.map((each) => Option.getOrNull(nick(each))),
     }).toStrictEqual({
-      members: [null, null, 16, 18, 40, null, 12, 13, null, null, null, null],
-      nick: [null, 11, 16, 18, 40, null, 12, 13, null, null, null, null],
+      members: [null, null, 16, 18, 40, null, null, 14, null, null, null, null],
+      nick: [null, 11, 16, 18, 40, null, 13, 14, null, null, null, null],
     });
   });
 

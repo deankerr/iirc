@@ -333,11 +333,12 @@ export const NickWidth = Schema.Int.check(Schema.isBetween(nickWidthBounds)).ann
 export type NickWidth = typeof NickWidth.Type;
 
 /**
- * The least and the most characters the members' panel may be. At twelve it holds the
- * longest nick RFC 2812 allows, nine characters, whole after a rank's symbol, with the room
- * at its edges; at forty, as the nick column, it leaves a Pane to its Timeline.
+ * The least and the most characters the members' panel may be. At fourteen it holds the
+ * longest nick RFC 2812 allows, nine characters, whole after a rank's symbol and with the
+ * room at its edges, which are pixels and so take more characters at the smallest text; at
+ * forty, as the nick column, it leaves a Pane to its Timeline.
  */
-const membersWidthBounds = { maximum: 40, minimum: 12 } as const;
+const membersWidthBounds = { maximum: 40, minimum: 14 } as const;
 
 /**
  * How wide the members' panel is beside its Timeline, in characters, a whole number within
