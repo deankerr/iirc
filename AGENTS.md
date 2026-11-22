@@ -28,9 +28,23 @@ The lint fence in `oxlint.config.ts` is deliberately small. A gap it misses is f
 
 # Docs
 
-`GLOSSARY.md`, `VISION.md`, and `docs/adr/` are sources of truth the codebase implements. A package's README is its interface: read it before changing the package, and keep it true in the same commit. Issues live in GitHub Issues, as `docs/agents/` describes.
+`GLOSSARY.md`, `VISION.md`, and `docs/adr/` are sources of truth the codebase implements. A package's README is its interface: read it before changing the package, and keep it true in the same commit.
 
 - **Say a thing once, in the document that owns it.** A README describes its own package. `README.md` at the root holds the one index.
 - **No links between documents.** Name a path in backticks where a reader needs it. An ADR may link another ADR, and is named only where a choice would surprise a reader.
 - **`GLOSSARY.md` and `VISION.md` point at nothing,** and nothing else explains them. A term is settled in `GLOSSARY.md` before it is used anywhere else.
 - **Describe what is, and rewrite rather than append.** Exact types stay in `src/`, an edge case in a test named for it, and the reason for a choice in a comment beside the code or in an ADR.
+
+# Agent skills
+
+## Issue tracker
+
+Issues live in this repo's GitHub Issues, through the `gh` CLI. Read `docs/agents/issue-tracker.md` before filing, reading, linking, or closing one.
+
+## Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Read `docs/agents/triage-labels.md` before labelling an issue.
+
+## Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the root. Read `docs/agents/domain.md` before naming a domain concept or contradicting an ADR.

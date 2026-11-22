@@ -26,10 +26,16 @@ export const silentAfter = 90_000;
 /** How long a Lookup waits for the end of its reply, from when the Owner asked. */
 export const lookupTime = 30_000;
 
-/** How long a `MODE` query of the Client's own waits for its answer, from when it was sent. */
+/**
+ * How long a `MODE` query of the Client's own waits for its answer, from the step that asked
+ * it, which pacing may send later.
+ */
 export const modesQueryTime = 30_000;
 
-/** How long a `WHO` query of the Client's own waits for the end of its answer, from when it was sent. */
+/**
+ * How long a `WHO` query of the Client's own waits for the end of its answer, from the step
+ * that asked it, which pacing may send later.
+ */
 export const whoQueryTime = 30_000;
 
 /** What a timer is for, which decides what its `Fired` does. */

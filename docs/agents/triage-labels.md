@@ -12,7 +12,8 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-Two more labels are this repo's own:
+Three more labels are this repo's own:
 
 - `bug`: something built does not do what its README or an issue says it does.
+- `priority`: the maintainer's current priority, taken up before anything else that is ready.
 - `no-evidence`: a pull request with no before-and-after to show, such as a change to the docs alone, which the PR body check then passes over.
