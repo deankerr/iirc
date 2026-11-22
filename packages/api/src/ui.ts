@@ -333,7 +333,7 @@ export const NickWidth = Schema.Int.check(Schema.isBetween(nickWidthBounds)).ann
 export type NickWidth = typeof NickWidth.Type;
 
 /** The least and the most room between a Timeline's rows, as a multiple of the text's size. */
-export const rowSpacingBounds = { maximum: 1.5, minimum: 0 } as const;
+const rowSpacingBounds = { maximum: 1.5, minimum: 0 } as const;
 
 /** The step the room between rows moves in, a twentieth of the text's size. */
 const rowSpacingStep = 0.05;

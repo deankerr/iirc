@@ -221,7 +221,6 @@ export {
   mutedCap,
   nickWidthBounds,
   nickSuffixMaxLength,
-  rowSpacingBounds,
   sharedOnly,
   textSizeBounds,
   uiDefaults,

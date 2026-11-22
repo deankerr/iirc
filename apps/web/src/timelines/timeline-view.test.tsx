@@ -1962,6 +1962,38 @@ describe("where the view stands as its rows wrap again", () => {
     ]);
   });
 
+  it("keeps the first row in view where it was as the room between rows changes, though rows above it were never measured", async () => {
+    const { registry } = await signedIn(
+      [],
+      Array.from({ length: 100 }, (_, index) => message(index + 1))
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await wrapAgain(20);
+    await scrollTo(layout.content, layout.content);
+    await settled(() => logOf().textContent?.includes("line 100"));
+
+    // Far from the latest, past rows above the view that were never drawn, so never measured.
+    await act(async () => {
+      logOf().dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -800 }));
+      await Promise.resolve();
+    });
+    // What it holds is as tall as a browser would make it once the rows grow, so the view
+    // may stand anywhere in it.
+    await scrollTo(1600, 100_000);
+
+    const before = firstInView();
+
+    await act(async () => {
+      registry.set(deviceUi, { "timeline.spacing": 1.5 });
+      await Promise.resolve();
+    });
+
+    expect(firstInView()).toStrictEqual(before);
+    expect(before?.text).toBeDefined();
+  });
+
   it("draws every row of a Timeline too narrow for columns as one run of text from its first frame, and in columns once it is resized wide enough", async () => {
     // Its rows as the Timeline's first frame draws them, read as its log enters the page.
     const first: (string | undefined)[] = [];

@@ -362,6 +362,9 @@ const Lines = ({
   // `ui.timeline.activity` is found among the rows around it.
   const laidOut = useRef<readonly LaidOut[]>([]);
   const shownActivity = useRef(activity);
+  // What a row not yet measured was estimated at, so a change of the text's size, the line
+  // height, or the room between rows, which moves every such row, is found.
+  const shownEstimate = useRef<number | undefined>(undefined);
   // What the core was last told: of which window, at the latest or away, and the last item
   // in view. Nothing yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
@@ -880,21 +883,24 @@ const Lines = ({
     };
   }, []);
 
-  // After rows change: at the bottom, stay there; with rows added above, or hidden or shown
-  // again by `ui.timeline.activity`, put the row that was in view back where it was. A row above the
-  // view that changes height is kept still by the virtualizer itself.
+  // After rows change: at the bottom, stay there; with rows added above, hidden or shown
+  // again by `ui.timeline.activity`, or estimated anew, put the row that was in view back where
+  // it was. A row above the view that changes height once measured is kept still by the
+  // virtualizer itself.
   useLayoutEffect(() => {
     const element = scroller.current;
     const first = rows[0]?.key;
 
-    // Rows added above, the oldest dropped past the cap, or rows hidden or shown again move
-    // every row.
+    // Rows added above, the oldest dropped past the cap, rows hidden or shown again, or rows
+    // never measured estimated anew move every row.
     const shifted =
       (firstKey.current !== undefined && first !== firstKey.current) ||
-      shownActivity.current !== activity;
+      shownActivity.current !== activity ||
+      (shownEstimate.current !== undefined && shownEstimate.current !== estimated);
 
     firstKey.current = first;
     shownActivity.current = activity;
+    shownEstimate.current = estimated;
 
     if (element !== null) {
       // The item jumped to stays in the middle until the Owner scrolls.
