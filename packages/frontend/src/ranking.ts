@@ -1,7 +1,8 @@
 /**
  * How a query ranks what is listed, in one place, so every list in the composer finds the
  * same things in the same order. A query matches an item's names and its
- * description in four tiers, and is ASCII case-insensitive, reading no locale.
+ * description in four tiers, and is ASCII case-insensitive, reading no locale. It is a small
+ * scorer of its own because uFuzzy sorts with `Intl.Collator`, which reads the locale.
  *
  * @packageDocumentation
  */

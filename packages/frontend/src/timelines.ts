@@ -353,6 +353,8 @@ export const dividerShown = (
  * What one Pane shows: its open Timeline, if any, as the Owner chose it, with its "new"
  * divider, and whether the Timeline or the options show in its place. A Timeline is open in
  * one Pane at most, so its window, where the Owner scrolled, and its divider are that Pane's.
+ * Two Panes at different places in one Timeline would need every rule of reading to say
+ * which Pane wins, for little gain.
  */
 export interface PaneView {
   readonly main: MainView;

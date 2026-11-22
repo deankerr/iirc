@@ -1158,7 +1158,8 @@ const layoutOf = (text: string): Layout | undefined => {
 };
 
 /**
- * YAML parsed, or why it could not be.
+ * YAML parsed, or why it could not be. Effect's YAML parser is quadratic on some text, so a
+ * caller that must stay responsive reads a theme apart from its page, where it can end it.
  * @param text - The text.
  * @returns The data.
  */

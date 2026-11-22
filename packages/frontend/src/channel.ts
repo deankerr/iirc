@@ -356,7 +356,9 @@ export const channelReads = (
       _tag: "Members",
       ...about,
       after: undefined,
-      // Read again, as many as were held, so a list scrolled down keeps its length.
+      // Read again, as many as were held, so a list scrolled down keeps its length. The
+      // Daemon orders members by rank, which any `MODE` can move, so patching the list
+      // would need to know what each Activity means for every member.
       limit: Math.min(largestMembersPage, Math.max(membersPage, roster.members.length)),
       wait: roster.read >= 0,
     });

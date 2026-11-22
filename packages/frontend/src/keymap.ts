@@ -27,7 +27,9 @@ export type KeyName = string & { readonly [keyName]: true };
 
 /**
  * A chord: a key with the modifiers held. `mod` is Cmd on a Mac and Ctrl elsewhere, and
- * `ctrl` and `meta` are those keys on every platform, so a chord can name either.
+ * `ctrl` and `meta` are those keys on every platform, so a chord can name either. A binding
+ * is one chord, never a sequence: no default needs one, and Mod+K alone starts `/go `, so a
+ * sequence beginning with it would make that wait.
  */
 export interface Chord {
   readonly mod: boolean;

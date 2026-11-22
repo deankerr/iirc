@@ -6,9 +6,9 @@ The pure core of the web frontend. It holds what a Frontend shows as plain data 
 
 - **State is plain data.** Every state survives `structuredClone`, so it can be compared and kept.
 - **A reducer takes events:** what the Owner did, what the runtime asked, and what the API answered. The runtime does all the I/O and decides all the timing.
-- **The core says which reads to make.** Functions such as `wanted`, `channelReads`, `searchWanted`, and `nicksWanted` give the requests to make now, and never one already in flight.
-- **An answer is taken only by what asked for it.** A read names the generation or request it was made for, so an answer that lands after what it was for was replaced changes nothing.
-- **Text is parsed, or refused in words.** `Parsed<A>` is a value or `Invalid { message }`. Nothing here throws on what was typed, kept, or received.
+- **The core says which reads to make.** Functions such as `wanted`, `channelReads`, and `searchWanted` give the requests to make now, and never one already in flight.
+- **An answer is taken only by what asked for it.** One that lands after what it was for was replaced changes nothing.
+- **Text is parsed, or refused in words.** Nothing here throws on what was typed, kept, or received.
 - **A command never does anything.** It gives intents, plain data the runtime carries out.
 - **What a Network wrote stays text.** Every string is for a text node, with controls shown as symbols and bidirectional formatting closed.
 
@@ -16,80 +16,106 @@ Each module below is imported as `@iirc/frontend/<module>`.
 
 ## Sign-in
 
-A reducer over what the Frontend asked and what the API answered. The state is `Unknown`, `SignedOut`, or `SignedIn`, each with one attempt that is idle, waiting, or failed with a reason. `explain` says a failure in words.
+A reducer over what the Frontend asked and what the API answered, which says whether the page is signed in. `explain` says a failure in words.
 
-- **It holds no key.** A key goes from the Owner's form to the API in one request. No state here has room for one.
-- **Signed in only when the Daemon said so:** by an authorized read that was answered, or a sign-in that succeeded. A read answered `Unauthorized` later signs the page out.
+- **It holds no Key.** A Key goes from the Owner's form to the API in one request, and no state here has room for one.
+- **Signed in only when the Daemon said so:** by an authorized read that was answered, or a sign-in that succeeded.
+- **A read answered `Unauthorized` signs the page out.**
 - **An answer that does not fit the state is ignored,** so requests that overlap cannot put it somewhere the Daemon never said.
-- **A failure comes from the API's structure, never its text:** a wrong key, a cross-origin request, a sign-in the Daemon could not save, a Daemon that did not answer, or an answer that could not be read.
+- **A failure comes from the API's structure, never its text:** a wrong Key, a cross-origin request, a Sign-in the Daemon could not save, a Daemon that did not answer, or an answer that could not be read.
 
 ## Timelines
 
-Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News: the Daemon does that, and this keeps what was read up to date.
+Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News.
 
-For each Network it holds its Timelines, its connection, whether Self is away, and which Direct Message partners are on it. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a Sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, a Timeline or a view of iirc's own, and `rowsOf` a window as rows: its items, its Gaps, the "new" divider, and, given a time zone, a Day where the day changes, with each Message that continues a run marked.
+For each Network it holds its Timelines, its life, its connection, Self's nick, whether Self is away, and which Direct Message partners are on it, and for each Timeline a Pane has open, a window. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as the Sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows.
 
 ### Reading and following
 
-- **It reads everything, then follows.** The Network list and every Network's Timelines are read first. The stream is then followed after the smallest `through` among them, and the Network list is read once more, so a Network configured meanwhile is not missed. A window is read only once the stream is followed.
-- **One rule decides whether an answer is current:** nothing that invalidates it happened after its read began. That is a reset, or an overflow that touched what it is of. An answer that is not current is asked for again.
+- **It reads everything, then follows.** The Network list and every Network's Timelines are read first. The stream is then followed after the smallest `through` among them, and the Network list is read once more, so a Network configured meanwhile is not missed.
+- **A window is read only once the stream is followed.**
+- **An answer is current only if nothing that invalidates it happened after its read began:** a reset, an overflow that touched what it is of, or more than 5000 changes while it was in flight, which the stream no longer remembers. An answer that is not current is asked for again.
 - **No change is lost or applied twice.** A Timeline is kept by its id and an item by its position, so a change given again changes nothing. A read that lands after the stream passed it is brought up to date from what the stream gave.
-- **What is held of a Network is of one life,** the one the API names by the sequence of the `Configured` that began it. Whatever names a life, the Network list, a page of its Timelines, its Session, the changes, or the Daemon's answer to removing it, changes nothing of the life held when it names an older one, applies when it names the same, and replaces what is held when it names a newer one, which is then read. A removal applies only to the life it names, a life over with its Timelines dropped never comes back, and a life once kept stays kept. A newer life is taken from any of these, a Network not held included, and a Session item of an older life's Timeline says nothing of the connection.
+- **What is held of a Network is of one life,** named by the sequence of the `Configured` that began it. Whatever names a life, the Network list, a page of its Timelines, its Session, the changes, or a removal's answer, changes nothing when it names an older life, applies when it names the same, and replaces what is held when it names a newer one, which is then read.
+- **A removal applies only to the life it names.** A life over with its Timelines dropped never comes back, and a life once kept stays kept.
+- **A Session item of an older life's Timeline says nothing of the connection.**
 - **`UnknownNetwork` names no life, so it lets nothing go.** The Network list is read again, and a Network it does not name, whose life began before it was asked, is over.
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
-- **A Network's connection, Self's away, Self's nick, and which partners are on it are derived, never polled.** They come from `known`, and then from the Session items the changes carry. Self's nick is the one `known` gave, a `SessionBegan`'s, or, after a change of nick in the Network's own Timeline, where the Client routes Self's and no one else's, that one, whichever is latest. It is kept when the Session ends, so history read while offline still says which items are Self's. `known` is read again when Self's away changes, when a partner comes, goes, quits, or changes nick in their Direct Message Timeline, and when one is opened. A partner shows as there or gone only while connected and as `known` says, and as neither otherwise. Whether a Session carries tags is `known`'s alone to say, so a `SessionBegan` leaves it unknown and has `known` read again, and `carriesTags` is true only once it says so.
-- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for `/go`, and gives it with the rest while a Pane has it open, so one opened by `/go` or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, which follows the order shown, the one that calls most, and the page's title count only what the Sidebar lists.
-- **A removed Network is derived too.** One removed with its Timelines kept is named `Kept` by the Network list, which names every Network, live or kept, in one read, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
-- **A dropped Timeline is let go of at once.** The changes name it, or name its Network as removed without keeping its Timelines, which reaches a Network that never had one too. Its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. A Network the changes name as removed with its Timelines kept is only read from then on. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, for the life it ended.
+- **A Network's connection, Self's away, Self's nick, and which partners are on it are derived, never polled.** They come from `known`, and then from the Session items the changes carry.
+- **Self's nick is the latest of `known`'s, a `SessionBegan`'s, or a change of nick in the Network's own Timeline.** It is kept when the Session ends, so history read while offline still says which items are Self's.
+- **`known` is read again** when Self's away changes, when a partner comes, goes, quits, or changes nick in their Direct Message Timeline, when one is opened, and after a `SessionBegan`.
+- **A partner shows as there or gone only while connected,** as `known` says, and as neither otherwise.
+- **`carriesTags` is true only once `known` says the Session carries tags.**
+- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for `/go`, and with the rest while a Pane has it open.
+- **Moving to the next Timeline, the one that calls most, and the page's title count only what the Sidebar lists.**
+- **A removed Network is derived.** The Network list names one removed with its Timelines kept as `Kept`, its Timelines are flagged `removed`, and `isRemoved` reads both.
+- **A removed Network's Timelines are read and searched as any other,** but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
+- **A dropped Timeline is let go of at once,** when the changes name it, or name its Network as removed without keeping its Timelines. Its window and its place among the closed go, a Pane that showed it shows nothing, and the search begins again.
+- **`NetworkRemoved`, the Daemon's answer to a removal, applies ahead of the stream,** for the life it ended.
 
 ### Windows
 
 - **A window holds at most `windowCap` items, 1000.** `earlier` and `later` are true exactly when something lies beyond, so everything dropped can be read again.
-- **Only the windows of Timelines open in a Pane, and of the four closed most recently, are kept.** Any other is dropped and read again when opened.
-- **A new item lands only where it belongs by position:** in place of the item it updates, between the items held, or past the end when nothing more lies beyond. A Gap that changes history under a window has it read again.
-- **Only the view says what the Owner has seen.** A window's `seen` is the last item the view's `Following` event said is in view, at the latest or not, so opening a Timeline never makes the core believe anything in it was read.
-- **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
+- **Only the windows of Timelines open in a Pane, and of the `keptClosed` closed most recently, 4, are kept.** Any other is read again when opened.
+- **A new item lands only where it belongs by position:** in place of the item it updates, between the items held, or past the end when nothing more lies beyond.
+- **A Gap that changes history under a window has it read again.**
+- **Only the view says what the Owner has seen.** A window's `seen` is the last item the view's `Following` event said is in view, so opening a Timeline never makes the core believe anything in it was read.
+- **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
-- **Joins, parts, quits, and changes of nick in a row are one row,** derived as a window is read, never stored. `item` is the latest, `key` is the first's, which stays as the run grows, and `folded` holds every item of the run, oldest first, only when there are two or more. A Message, any other Activity, a Kick, a Gap, a Day, or the "new" divider between ends a run, and an item a view hides ends nothing. `churnLine` says the run in words: how many joined, left, quit, and changed nick, then who, up to five, in the order they first appear, and how many more.
-- **Self's own joins, parts, quits, and changes of nick are never folded away,** and split a run in two. No item says which are Self's, so `rowsOf` is given Self's nick now, which `selfOf` gives, and works back from the newest item: a change of nick in the window to Self's nick says Self went by the one before it for every item earlier. With no nick known, as after a reload while the Network has no Session, any could be Self's, so none is folded. Self's changes of nick reach every Channel Self is in, so a window follows back those it holds. One it does not hold, as in an earlier Session or after a window read short of the latest, leaves Self's older nick unknown, and Self's lines under it may fold or be hidden.
-- **A Day is derived as a window is read,** from the items either side of it, and never stored. It stands before each item drawn on a different day from the one drawn before it, and before the first drawn, so a window that begins mid-day says which day it is. A day begins at midnight in the zone `rowsOf` is given, which is the offset from UTC at an instant, since the core reads no zone itself, and an item the zone cannot place starts no day. With no zone there are no Days.
-- **A run is derived as a window is read,** from the rows either side, and never stored. A Message continues one when it is plain speech, from the User who said the row drawn just before it, by the nick as its colour folds it, with no more than five minutes between the two items' own times, and the same `bot` as it, since only a run's head shows the mark, so a bot's Message never stands under an unmarked head. Anything drawn between ends a run, an action or a notice is in none, and an item a view hides ends nothing. The first row continues nothing, so a window that starts mid-run heads it with its first Message.
-- **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
+- **Joins, parts, quits, and changes of nick in a row are one row,** derived as a window is read. Its `key` is the first item's, so it stays as the run grows. A Message, any other Activity, a Kick, a Gap, a Day, or the "new" divider ends a run, and an item a view hides ends nothing.
+- **`churnLine` says a run in words:** how many joined, left, quit, and changed nick, then who, up to five, and how many more.
+- **Self's own joins, parts, quits, and changes of nick are never folded,** and split a run in two. `rowsOf` is given Self's nick now, from `selfOf`, and works back through Self's changes of nick in the window. With no nick known, none is folded.
+- **A change of Self's nick the window does not hold leaves Self's older nick unknown,** so Self's lines under it may fold or be hidden.
+- **A Day stands before each item drawn on a different day from the one drawn before it, and before the first drawn.** A day begins at midnight in the offset from UTC that `rowsOf` is given, an item it cannot place starts no day, and with no offset there are no Days.
+- **A Message continues a run** when it is plain speech from the User of the row drawn just before it, by the nick as its colour folds it, no more than five minutes after it by the items' own times, with the same `bot`. Anything drawn between ends a run, an action or a notice is in none, an item a view hides ends nothing, and the first row continues nothing.
+- **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, is left out of the rows. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows
 
-- **A Timeline is open in one Pane at most.** Opening one that another Pane has open focuses that Pane. Two Panes at different places in one Timeline would need every rule of reading to say which Pane wins, for little gain.
-- **A Pane shows its Timeline, or something in front of it:** the options, the Uploads, the search, or a Direct Message not yet begun. It remembers one step back, which closing shows again. The options, the Uploads, and the search each show in one Pane at most.
-- **A Pane with nothing open shows the Tail,** iirc's own view, so `chosenOf` and `elsewhereOf` name it `Tail`, the first such Pane's number elsewhere, and `paneName` says `iirc`. `TailShown` shows it in the focused Pane by letting go of what that showed, which joins the Timelines closed most recently. It has no step back, and any number of Panes may show it.
-- **A Direct Message not yet begun is a view, not a Timeline.** The API makes a Timeline only when something is said. The draft shows its Timeline as soon as one is listed, matched by the casemapping read when the draft was made, never one held from another time, which could match another User's Timeline.
-- **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
-- **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.unread.markRead latest` nothing is marked read by it until then.
-- **`/date` is a jump to an instant.** It takes a moment as `since:` does, `parseMoment` reads it with no zone, and the runtime gives the instant a day begins. The window is read around `firstAt` that instant, the earliest position there is at it, and `targetKey` lands on the first item row at or after where a jump went, or the last when none is, so a date before a Timeline began shows its beginning and one after its end its latest. The Day row's words offer it, starting `/date` with that day.
-- **`/export [since] [until]` saves the open Timeline as text.** Its moments are read as search's `since:` and `until:` are, through `boundMoment`: a day starts at its beginning for `since` and at the next day's for `until`, so `until` takes the whole day it names, and a time with its zone is exact. The `Export` intent carries those bounds as moments and the runtime places a day in the Owner's time zone. Two days or two instants out of order are refused in words, which `startsBefore` tells; a day against an instant depends on the zone, so the runtime decides it and exports nothing for a range that holds nothing.
-- **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped. A Pane showing the Uploads comes back showing them, and a layout kept before they had a view comes back as it was.
+- **A Timeline is open in one Pane at most.** Opening one that another Pane has open focuses that Pane.
+- **A Pane shows its Timeline, or something in front of it:** the options, the Uploads, the search, or a Direct Message not yet begun. Closing it shows the one step back it remembers.
+- **The options, the Uploads, and the search each show in one Pane at most.**
+- **A Pane with nothing open shows the Tail.** `chosenOf` and `elsewhereOf` name it `Tail`, and `paneName` says `iirc`. Any number of Panes may show it, and it has no step back.
+- **`TailShown` shows the Tail in the focused Pane** by letting go of what it showed, which joins the Timelines closed most recently.
+- **A Direct Message not yet begun is a view, not a Timeline,** since the API makes a Timeline only when something is said. Its draft shows the Timeline as soon as one is listed, matched by the casemapping read when the draft was made.
+- **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, only in the Pane it was said from, and only while the Owner has not moved on.
+- **A jump from the search opens a window read around a position,** which is not at the latest until the Owner moves there, so under `ui.unread.markRead latest` nothing is marked read until then.
+- **`/date` jumps to an instant.** It takes a moment as `since:` does, reads the window around the earliest position at that instant (`firstAt`), and lands on the first item at or after it, or the last when none is.
+- **A Day row offers `/date` with its day.**
+- **`/export [since] [until]` saves the open Timeline as text.** `since` takes a day from its beginning, `until` takes the whole day it names, and a time with its zone is exact (`boundMoment`). The runtime places a day in the Owner's time zone.
+- **An `/export` range of two days or two instants out of order is refused in words** (`startsBefore`). A day against an instant depends on the zone, so the runtime decides it, and exports nothing for a range that holds nothing.
+- **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before it is parsed, and never throws. A Pane whose Timeline is gone is dropped, and a Pane showing the Uploads comes back showing them.
 
 ## Arranging the Sidebar
 
-`@iirc/frontend/arrangement` puts the Owner's order on what `sidebar` gives. The order and the pins are three `ui` options every device shares, `sidebar.networks`, `sidebar.order`, and `sidebar.pinned`, and `arrangementOf` reads them as an `Arrangement`. With none set, `arranged` gives exactly the fixed order `sidebar` gives, so an Owner who sets nothing sees nothing change.
+`@iirc/frontend/arrangement` puts the Owner's order on what `sidebar` gives, from three `ui` options every device shares, `sidebar.networks`, `sidebar.order`, and `sidebar.pinned`, which `arrangementOf` reads.
 
-- **One rule places everything.** The items a list names come in its order, and one it does not name goes right after the one before it in the fixed order, or first when none comes before it. A Timeline that appears later, with no place given, so takes the place the fixed order gives it. The rule orders the Networks, a Network's Timelines, and the pins alike, and an id that names nothing held is ignored.
-- **The Networks are those not removed, then those removed,** each group in the Owner's order. A Network's own Timeline stays first, as its row.
-- **A pinned Timeline leaves its Network for the pinned part above them,** in the order pinned, and a `Pin` says which Network it is of. Only a Timeline the Sidebar lists can be pinned: one closed, gone, or not read shows nothing, and a Network's own Timeline is never pinned. What is closed is left as it was.
-- **`shownOrder` is what `/next` and `/previous` step through:** the pinned, then each Network's Timelines, as shown. The context carries it as `timelines`, given the arrangement, and `/next-unread` breaks a tie in the same order.
-- **`arranging` says what to write for one edit, from what is shown now,** the option and its whole new value, or nothing when nothing would change. `Move` and `Place` of a pinned Timeline reorder the pinned part. Of a Network's own Timeline they move its Network among those as removed as it is. Of any other they move it among its Network's Timelines that are not pinned, and the value keeps the place of every other Network's Timelines and of those closed. None wraps at an edge, and a `Place` onto another part or Network changes nothing. Once every Network's Timelines are read, an id of one that has gone is left out of what is written, so the lists do not grow for ever. `Pin` appends to `sidebar.pinned`, or removes from it, or, saying neither, does whichever the Timeline is not now, and refuses a Network's own Timeline.
-- **`/move up|down` and `/pin` give an `Arrange` intent** with the edit. `/pin` gives a `Pin` that says neither, so whether it pins or unpins is decided from the options read when it is carried out, and the runtime writes what `arranging` gave.
+- **With none set, `arranged` gives exactly the order `sidebar` gives.**
+- **One rule places everything.** The items a list names come in its order, and one it does not name goes right after the one before it in the fixed order, or first when none comes before it. It orders the Networks, a Network's Timelines, and the pins alike, and an id that names nothing held is ignored.
+- **The Networks not removed come first, then those removed,** each group in the Owner's order. A Network's own Timeline stays first, as its row.
+- **A pinned Timeline leaves its Network for the pinned part above them,** in the order pinned. Only a Timeline the Sidebar lists can be pinned, never a Network's own.
+- **`shownOrder` is what `/next` and `/previous` step through:** the pinned, then each Network's Timelines. `/next-unread` breaks a tie in the same order.
+- **`arranging` says what to write for one edit, from what is shown now:** the option and its whole new value, or nothing when nothing would change.
+- **`Move` and `Place` move a Timeline within its part:** a pinned one among the pinned, a Network's own Timeline among the Networks as removed as it is, and any other among its Network's Timelines that are not pinned. None wraps at an edge, and a `Place` onto another part or Network changes nothing.
+- **What is written keeps the place of every other Network's Timelines and of those closed,** and, once every Network's Timelines are read, leaves out an id that has gone.
+- **A `Pin` pins, unpins, or, saying neither, does whichever the Timeline is not now,** and refuses a Network's own Timeline.
+- **`/move up|down` and `/pin` give an `Arrange` intent.** `/pin` says neither, so whether it pins is decided from the options read when it is carried out.
 
 ## Panes
 
 `@iirc/frontend/layout`: the Panes as a split tree in a pure reducer, `reduceLayout`. It knows nothing of what a Pane shows, nor of the screen. A view renders the tree and sends back the ratios the Owner dragged.
 
-- **A layout is well formed, whatever is done to it.** Every Split has two or more children, none a Split along its own axis, with positive ratios that sum to 1. Ids come from a counter, never randomness. The focus is always on a Pane.
-- **A layout is bounded:** at most 64 Panes, Splits at most 16 deep, and no Pane below 1% of its Split. A change past a bound changes nothing, so every layout can be kept and taken back.
-- **A split halves the focused Pane** and focuses the new one. A close gives the place to the sibling, and the last Pane never closes.
-- **The focus moves as the screen lies,** as tmux and i3 move it, to the Pane across the focused Pane's edge, with no wrapping.
-- **A swap moves the focused Pane whole,** its id and view with it, so its content moves and is not drawn afresh.
-- **A zoom shows the focused Pane alone and toggles back to the very layout it was.** A compact screen, as a phone's, shows the focused Pane alone too, with the layout kept as it was.
-- **A layout kept is taken back, or not at all.** `layoutFrom` refuses a tree that is not well formed or within the bounds.
+- **A layout is well formed, whatever is done to it.** Every Split has two or more children, none a Split along its own axis, with positive ratios that sum to 1, and the focus is always on a Pane.
+- **Ids come from a counter, never randomness.**
+- **A layout is bounded:** at most 64 Panes, and Splits at most 16 deep. A change past a bound changes nothing.
+- **No split, drag, grow, or shrink leaves a Pane below 1% of its Split** (`leastShare`). A share that joining a Split into its parent leaves below it stays.
+- **A split halves the focused Pane** and focuses the new one.
+- **A close gives the place to the sibling, and the last Pane never closes.**
+- **The focus moves to the Pane across the focused Pane's edge,** as the screen lies, with no wrapping.
+- **A swap moves the focused Pane whole,** its id and view with it, so its content is not drawn afresh.
+- **A zoom shows the focused Pane alone and toggles back to the very layout it was.**
+- **A compact screen shows the focused Pane alone,** with the layout kept as it was.
+- **A layout kept is taken back whole, or not at all.** `layoutFrom` refuses a bad or repeated id, a view it cannot read, and a tree past the bounds. It repairs the rest: a Split with one child is that child, ratios are scaled to sum to 1, and an unknown focus falls back to the first Pane.
 
 ## Search
 
@@ -104,14 +130,15 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 | `since:<date>`, `until:<date>` | `YYYY-MM-DD`, a day in the Owner's time zone, or an ISO time with its zone |
 
 - **A query never searches something other than what was typed.** A filter no word names, such as `http:` in a link, is refused, saying to quote it, as is anything else that cannot be read.
-- **`in:` is found, never guessed.** A name found on several Networks, or several times on one, says so and does not choose.
-- **The core reads no time zone.** The runtime's `dayStart` gives the instant a day begins, and a time with no zone is refused.
-- **Pages fit together or the search begins again.** A page of another generation is ignored, and a merge, an overflow, or a reset begins it again from the first page. It reads pages of 100 and holds at most 500, then says to narrow the search.
+- **`in:` is found, never guessed.** It looks on the `network:` named, else the focused Pane's Network, else every Network, and a name found several times says so and does not choose.
+- **A day is placed by the runtime's `dayStart`,** and a time with no zone is refused.
+- **Pages fit together or the search begins again.** A page of another generation is ignored, and a merge, an overflow, or a reset begins it again from the first page.
+- **It reads pages of 100 and holds at most 500,** then says to narrow the search.
 - **A match is marked in the text shown, never by markup.** `matchRuns` gives plain text as runs, each a match or not, found as the Daemon folds text.
 
 ## Commands
 
-The one registry of commands, `commands`, as data, behind the Composer's `/commands`, the keymap, and, later, agents. `interpret` reads a line into intents in a `CommandContext`: what the focused Pane shows, whether its Network has a Session or that is not known yet, every Timeline by name, every Timeline in the order the Sidebar shows, and what is unread, and the aliases the Owner made.
+The one registry of commands, `commands`, as data, behind the Composer's `/commands` and the keymap. `interpret` reads a line into intents in a `CommandContext`.
 
 | For | Commands |
 | --- | --- |
@@ -131,22 +158,28 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 - **A line is read one way.** Plain text is `/say` to the open Timeline, `//text` says `/text`, and `/name args` runs the command named. An unknown command sends nothing.
 - **Arguments are parsed into typed values,** or the command says why not, naming its usage. The text after a Target is kept exactly.
-- **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, or not knowing yet whether there is one, a removed Network, whose Timelines are only read, or one Pane with nothing to close.
-- **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
+- **Each command says when it can run,** and an unmet condition says why in words: no Timeline open, no Channel open, no Target, no Session or not knowing yet whether there is one, a removed Network, a list the Network keeps none of by its ISUPPORT, or one Pane with nothing to close.
+- **What depends on the Network is read from the focused Channel's head,** its `PREFIX`, `CHANMODES`, and `CHANTYPES`, as the Client checks it. Before a head is read, a command that needs them says so and does not guess.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/ignore`, `/unignore`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
-- **`/ban -a <nick>` bans a User by their account,** one `BanAccount` of the Channel in focus, where the head says the Network's bans name an account (`accountBan`). It takes one nick and refuses with the usage for none or more, in words where the head is unread, the Network has no ban list, or it names no account, and for a word that is not a nick. Which account the nick has is the Client's to say, and it refuses as the act's reason when it is not known or there is none. A nick never starts with `-`, so the flag is never one, and plain `/ban` is as before.
-- **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, and a mask that does not parse is refused saying why. Masks are compared under the Network's casemapping, and `/ignore` alone opens the options on the Network's `ignores`.
-- **`/query` opens a Timeline by name and never makes one.** It folds the name by the casemapping `known` reports. When `known` cannot be read it opens nothing, since a guessed mapping could open another User's Direct Message.
-- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
-- **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
-- **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
-- **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks. Of two that share a name on one Network, it takes the first, so the list leaves out the other.
-- **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
-- **An alias of the Owner's own is a name for one command line.** `/alias add <name> <line>` makes one, replacing the one of its name, and `/alias remove <name>` takes one away, as `EditAliases` intents the runtime applies to the aliases in force then; `/alias` alone starts `/alias ` with them listed. They are `ui.aliases`, shared by every device, and `CommandContext.aliases` holds them. A name is one word like a theme's, and a line is one command, `/` and a built-in command's name, so an alias never stands for another alias, nor `//`, which says text. A name a built-in command takes, by its name or a fixed alias, is refused, and one that got there anyway never runs and is never listed: a built-in always wins.
-- **An alias expands in one pass, exactly.** `$1` to `$9` are the words typed after it, split on whitespace, `$*` is all of it with its spacing, `$$` is one `$`, and a `$` before anything else is itself. A line that names no `$1` to `$9` and no `$*` has what is typed appended after a space. Too few words for the highest `$n`, or more words than it names without a `$*`, is refused saying how many the line takes, so nothing typed is half-expanded or dropped. What an argument brings in is never read again, so `$2` typed as an argument stays `$2`.
-- **An expanded line runs as a built-in command, under its own conditions.** It is read against the built-in commands alone, so an alias that expands to no command is refused like any unknown one. A line is judged for a Credential as it expands: `/p PASS x` with `p` for `/quote $*` is refused and cleared like `/quote PASS x`, and so is `/alias add` of a line that would be.
+- **`/ban -a <nick>` bans a User by their account,** one `BanAccount` in the Channel in focus, where its head gives `accountBan`. It takes exactly one nick, and refuses in words where the head is unread, the Network has no ban list, or the list names no account.
+- **Which account a nick has is the Client's to say,** and it refuses the act when it is not known or there is none.
+- **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, a mask that does not parse is refused saying why, and masks are compared under the Network's casemapping.
+- **`/ignore` alone opens the options on the Network's `ignores`.**
+- **`/query` opens a Timeline by name and never makes one.** `queried` finds it by the casemapping `known` reports, and with none shows a Direct Message not yet begun.
+- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane. Whether Self is in a Channel is the Daemon's to answer.
+- **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and after an id, `keep` or `drop` to start on. Nothing is removed until the Owner confirms.
+- **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, a raw `PASS`, `AUTHENTICATE`, or `OPER`, and `/oper` are refused, `/oper` naming the `oper` options to set instead.
+- **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks.
+- **Of two Timelines that share a name on one Network, `/go` takes the first.**
+- **`/next-unread` goes to the Timeline that calls most:** Highlights, then Direct Messages, then Messages. Activity alone is not enough.
+- **An alias is the Owner's own name for one command line.** `/alias add <name> <line>` makes or replaces one, `/alias remove <name>` takes one away, and `/alias` alone starts `/alias ` with them listed. They are `ui.aliases`, shared by every device.
+- **An alias's line is one built-in command,** so an alias never stands for another alias, nor for `//`.
+- **A built-in command always wins.** A name a built-in command takes, by its name or a fixed alias, is refused, and an alias that got there anyway never runs and is never listed.
+- **An alias expands in one pass, exactly.** `$1` to `$9` are the words typed after it, `$*` is all of it with its spacing, `$$` is one `$`, and a `$` before anything else is itself. A line that names none of `$1` to `$9` or `$*` has what is typed appended after a space.
+- **An alias refuses too few words for its highest `$n`, or more than it names without a `$*`,** saying how many the line takes. What an argument brings in is never expanded again.
+- **An expanded line runs as a built-in command, under its own conditions,** and is judged for a Credential as it expands, so `/p PASS x`, with `p` for `/quote $*`, is refused and cleared as `/quote PASS x` is. So is `/alias add` of a line that would be.
 - **A new command is one entry.** The Composer's list and the keymap add no actions of their own.
-- **`/focus [text]` focuses the Composer, and with text starts a command in it.** Its intent is `StartCommand`, which focuses the focused Pane's Composer, sets its draft aside, and starts the text with the list open. `/theme` alone, and `-light` or `-dark` alone, give it too, as `/theme ` and `/theme -light `, so the themes are listed where they are chosen.
+- **`/focus [text]` focuses the Composer, and with text starts a command in it** (`StartCommand`), with the draft set aside and the list open. `/theme`, `/theme -light`, and `/theme -dark` alone start themselves so, so the themes are listed where they are chosen.
 
 ## Keymap
 
@@ -175,54 +208,64 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **A key event is the layout's character,** so an AZERTY `é` binds as `é`. The physical key names it only where the character says less, as with a dead key or Option on a Mac.
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
-- **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses, but the formatting keys, as a web editor's do, and those fire only in the Composer, so Mod+R reloads anywhere else. No two defaults share a chord where both can fire.
-- **A key that types goes to the Composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, an overlay holding the focus, or no Composer to write to, leaves the key alone.
-- **Enter in the Composer is not a binding, but `ui.composer.enter`.** `enterPressed` says whether a press sends or begins a new line: under `send`, Enter sends and Shift+Enter begins a line, and under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
-- **A key bound to a command that requires arguments, with none given, starts it.** `mod+k` is bound to `/go` with none, so it resolves to `StartCommand` with `/go `, and `chordsFor` lists `mod+k` beside `/go`. `mod+shift+p` is bound to `/focus` with `/`. Neither has a `when`, so both work from anywhere, with the Composer's list open or not and a Pane with no Timeline included.
-- **The `palette` context key means that the Composer's list is open.** No default binding consults it, but a binding an Owner wrote against it, such as `!palette`, still parses.
-- **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
+- **Most defaults fire while typing in a field.** The formatting keys fire only in the Composer, so Mod+R reloads the page anywhere else. No two defaults share a chord where both can fire.
+- **A key that types goes to the Composer, unless it is bound** (`typesInComposer`). A printable character, a dead key, the start of an input method's composition, a character AltGr or Option types, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not.
+- **A key pressed in a field that takes text, with an overlay holding the focus, or with no Composer to write to, is left alone.**
+- **Enter in the Composer is not a binding, but `ui.composer.enter`** (`enterPressed`). Under `send`, Enter sends and Shift+Enter begins a line. Under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
+- **A key bound to a command that requires arguments, with none given, starts it** in the Composer, and `chordsFor` lists the key beside the command.
+- **`mod+k` and `mod+shift+p` have no `when`,** so they work from anywhere, with the Composer's list open or not, and in a Pane with no Timeline.
+- **The `palette` context key means that the Composer's list is open.** No default binding consults it.
 
 ## Entries
 
-What the Composer's list ranks (`@iirc/frontend/entries`): a command, a Timeline, a Network to remove or, removed with its Timelines kept, to drop them, a theme, a font, and an alias, each as an `Entry` with a key it is remembered by and the words a query matches it by. The entries add no action of their own: picking one only writes the draft, and sending it gives the intents the Composer's `/commands` do. Completion makes them from what the Frontend holds.
+What the Composer's list ranks (`@iirc/frontend/entries`): a command, a Timeline, a Network to remove or to drop the Timelines of, a theme, a font, and an alias, each an `Entry` with a key it is remembered by. Picking one only writes the draft, and sending it gives what the command would.
 
-- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
-- **With no query, the commands run recently come first,** at most 20, newest first. A command run from the Composer is remembered by `remember`, with the keys `submit` gives as `ran`.
-- **A family typed after `font`, such as `font Fira Code`, is listed among the fonts,** when it names a family and no bundled font. `familyNamed` says whether it does.
+- **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale.
+- **With no query, the commands run recently come first,** at most 20, newest first (`remember`, with the keys a submit gives as `ran`).
+- **A family typed after `font`, such as `font Fira Code`, is listed among the fonts** when it names a family and no bundled font (`familyNamed`).
 
 ## Composer
 
 What the Owner is writing in each Timeline, what they sent from it, and why something was not said. `submit` reads the draft through the registry and gives intents. A Composer is at a `Place`: a Timeline, a Direct Message not yet begun, or `Nowhere`, where commands that need no Timeline are typed.
 
 - **Each Timeline has its own draft and its own history,** at most 100 lines, which Up and Down go through.
-- **A draft's text is what is sent,** IRC's formatting codes and all, and is what history keeps and recalls. The Owner sees and edits its plain text: `Edited` carries the plain text, which is merged into the formatting, and `Formatted` puts a format over a range, or with nothing selected, keeps it pending at the caret for what is typed there next, until the text changes.
-- **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
-- **What was sent says which commands it ran,** as `ran`, the keys of their entries, so the Composer's list puts them first. Plain text runs none.
-- **A command started over a draft sets it aside.** `commandStarted` keeps the draft, its codes and what it answers, as its `aside`, whether it is blank or not, and starts the command's text clean. The draft comes back when a submit carries something out, a command run or a Message sent, and on `Restored`, which is Escape and drops the command. A submit that is refused keeps both. It is never sent, never lost, and never enters the history, so Up recalls only what was sent. Over a command already started, the draft set aside stays the one, and `Carried` and `Left` keep it with the text.
+- **A draft's text is what is sent,** IRC's formatting codes and all, and is what history keeps and recalls. The Owner edits its plain text, and `Edited` merges an edit into the formatting.
+- **`Formatted` puts a format over a range,** or, with nothing selected, keeps it pending at the caret until the text changes.
+- **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept.
+- **More than 5 lines wait for the Owner to confirm,** and what is confirmed is exactly what is shown.
+- **What was sent says which commands it ran,** as `ran`, so the Composer's list puts them first.
+- **A command started over a draft sets the draft aside** (`commandStarted`), blank or not, with its codes and what it answers. It comes back when a submit carries something out, on `Restored`, which is Escape, and when the command is edited down to nothing. A refused submit keeps both.
+- **A draft set aside is never sent, never lost, and never enters the history.** Over a command already started, the draft set aside stays the one.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
-- **A draft can answer one Message,** which `replyOf` offers only for a Message with an id a `+reply` tag can carry, on a Network whose Session carries tags. The draft holds it, with the Message as it was, through edits and turning away, until it is dropped or sent, and only the first Say to its Timeline answers it, so a reply of several lines is tagged on its first.
+- **A draft can answer one Message,** which `replyOf` offers only for a Message with an id, on a Network whose Session carries tags. The draft holds it through edits and turning away until it is dropped or sent.
+- **Only the first Say to its Timeline answers it,** so a reply of several lines is tagged on its first.
 - **A refusal is said in words under the Composer it came from,** and nothing after it is sent.
-- **A notice lasts as long as it is true.** One about the text as typed, such as no such command, goes when the text is edited and when the Composer turns to another Timeline. One with an offer stays with its Timeline until taken or dismissed. One of an outcome that arrived later stays until dismissed or the next submit, since an edit must not hide what the Owner may not have read.
-- **What failed says what is safe to do next, and nothing is sent twice.** A Say or an Act that was not journaled may be sent again under the same intent. One that was journaled is never sent again. One with no answer can only be checked again.
+- **A notice about the text as typed,** such as no such command, goes when the text is edited and when the Composer turns to another Timeline.
+- **A notice with an offer stays with its Timeline** until it is taken, dismissed, or replaced by another notice.
+- **A notice of an outcome that arrived later stays until dismissed or the next submit.**
+- **What failed says what is safe to do next, and nothing is sent twice.** A Say or an Act that was not journaled may be sent again under the same intent, one that was is never sent again, and one with no answer can only be checked again.
 
 ## Formatting
 
-A draft's formatting, between its text, with codes, and the plain text the Owner edits. `merged` takes an edit of the plain text back into the codes, `formattedIn` puts a format over a range, `pendingAfter` keeps one at a caret, and `linesIn` gives the lines to draw.
+A draft's formatting, between its text with codes and the plain text the Owner edits. `merged` takes an edit of the plain text back into the codes, `formattedIn` puts a format over a range, `pendingAfter` keeps one at a caret, and `linesIn` gives the lines to draw.
 
-- **Formatting is per line,** as each line is sent as a Message of its own and IRC carries nothing from one to the next. A style over a line break is written again at the start of the next line.
-- **What is written is as the protocol's writer writes it,** so no code stands where nothing follows it, however the text is edited.
-- **Typed text takes the style around it:** the style pending there, else the style of what it was typed over, else of the character before it, or after it at the start of a line. A paste's codes are read as formatting from there. Where the text alone could place an edit in several ways, as a letter typed beside the same letter, the caret places it.
-- **A flag goes off where the whole range has it,** and on otherwise, as a word processor does. A colour is one of the sixteen, `colourNames`, or the default.
+- **Formatting is per line.** A style over a line break is written again at the start of the next line.
+- **No code stands where nothing follows it,** however the text is edited.
+- **Typed text takes the style around it:** the style pending there, else the style of what it was typed over, else of the character before it, or after it at the start of a line.
+- **A paste's codes are read as formatting.**
+- **Where the text alone could place an edit in several ways,** as a letter typed beside the same letter, the caret places it.
+- **A flag goes off where the whole range has it, and on otherwise.**
+- **A colour is chosen from the sixteen, `colourNames`, or the default** (`colourChoices`).
 
 ## Options
 
-Configuration as an option tree. Every option comes from the annotations on the Client's `NetworkConfiguration` Schema, walked once, so nothing lists them by hand and a new field is a new option.
+Configuration as an option tree. Every option comes from the annotations on the Client's `NetworkConfiguration` Schema, so a new field is a new option.
 
 An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. Ids and Channel names may hold dots, so a name is an option only when exactly one way of splitting it is valid.
 
 | Kind               | Text                                                          |
 | ------------------ | ------------------------------------------------------------- |
-| `Toggle`           | `on` or `off`                                                 |
+| `Toggle`           | `on` or `off`, or `true` or `false`                           |
 | `Text`             | The raw text, exactly                                         |
 | `Choice`, `Tagged` | One of the Schema's literals or tags                          |
 | `ChoiceOrText`     | One of the Schema's literals, else the text, trimmed          |
@@ -234,85 +277,103 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Credential`       | Never text: its Credential's name, and whether it is held     |
 | `ChoiceByKey`      | `key=choice`, comma-separated, a choice by its first word too |
 
-- **The syntax reads back what it shows,** for every value the Schema admits. A list shows a space after each comma, which reading one never needs, and `partsOf` gives its text element by element, so a view wraps a line between elements and never inside one.
-- **An option whose kind lists its choices is chosen from a menu** (`menuOf`): a `Choice`, a `Tagged` by its tags, and a `ChoiceOrText` or `IntegerOrChoice`, whose menu ends in "Custom…" for text of the Owner's own. It marks the choice in force, or "Custom…" for a value that is none of them. A `ChoiceByKey` is a list, which no one menu holds.
+- **The syntax reads back what it shows,** for every value the Schema admits.
+- **`partsOf` gives a list's text element by element,** so a view wraps a line between elements and never inside one.
+- **An option whose kind lists its choices is chosen from a menu** (`menuOf`), which for a `ChoiceOrText` or an `IntegerOrChoice` ends in "Custom…". It marks the choice in force, or "Custom…" for a value that is none of them.
 - **An edit is a pure function of the Configuration** (`apply`), parsed again by the Schema, so the runtime applies the same edit again after a conflict.
-- **A change asked for shows at once, until it is answered.** `Asked` holds it, never a copy of the options, and `Answered` lets it go, however it came out. `uiShown`, `ownerShown`, and `configurationShown` derive what shows from what is in force and what is on its way, and `listed` lists that. Nothing is applied before what is in force is read.
-- **The view heads the options** (`grouped`): `ui`, each Network read, and each of the Daemon's own roots, such as `store`, in the order of their names, each heading what every name under it starts with. A heading the filter leaves nothing under is left out, and `listed` gives the options in the same order.
-- **What is still being read is a value of its own, never a default.** An option under `store`, `uploads`, or `previews` is `Reading` until they are read, a Credential's `held` is unknown until the names held are, and `NotKnown` whenever a read of them fails, never the names last read, and `networksReading` names the Networks not listed or not yet read, so a view draws each as a wait.
-- **What a new Network starts with is the Schema's,** and `unset` returns an option to it.
-- **A field members of a union share is one option,** such as `login.account`, set in the member in force when it has the field, and otherwise in the first that does, which it puts in force.
-- **A Credential option is write-only.** Its value is given in the password prompt, and the option only names the Credential, by a name derived from the option's own so that two options never share one.
+- **A change asked for shows at once, until it is answered,** however it came out. `uiShown`, `ownerShown`, and `configurationShown` derive what shows from what is in force and what is on its way.
+- **Nothing is applied before what is in force is read.**
+- **`grouped` heads the options by root:** `ui`, each Network read, and each of the Daemon's own roots, in the order of their names. A heading the filter leaves nothing under is left out, and `listed` gives the options in the same order.
+- **What is still being read is a value of its own, never a default.** An option under the Daemon's own roots is `Reading` until they are read, a Credential's `held` is unknown until the names held are read and `NotKnown` when that read fails, and `networksReading` names the Networks not yet read.
+- **A new Network starts with the Schema's defaults,** and `unset` returns an option to its default.
+- **A field the members of a union share is one option,** such as `login.account`, set in the member in force when it has the field, and otherwise in the first that does, which it puts in force.
+- **A Credential option is write-only.** Its value is given in the password prompt, and the option names the Credential by a name derived from its own, so two options never share one.
 - **Channels are compared as the Daemon reports the Network folds them,** so `/part` never parts more than one entry for a name.
 - **A Channel's prefix is never guessed.** A bare name takes the Network's first `CHANTYPES` character, and is refused while `CHANTYPES` is unknown.
 
 ### The options under `ui`
 
-An option under `ui` is named `ui.<option>`, such as `ui.timeline.timeFormat`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
+An option under `ui` is named `ui.<option>`, such as `ui.timeline.timeFormat`, and is derived from `UiOptions` in `@iirc/api/ui`.
 
-- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on, `ui.unread.muted`, the Timelines the Owner silenced, `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned`, the Owner's one arrangement of the Sidebar, and `ui.tail`, the least level the `iirc` view shows: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
-- **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and for `/set` alike.
+- **Every device shares them, and one may override any for itself with `-device`,** but those the contract marks shared only, such as `ui.previews`, `ui.unread.muted`, and `ui.sidebar.order`, which `-device` refuses. An override a device kept of one of those is dropped.
+- **`effectiveUi` gives the override, else the shared value, else the default.**
+- **A change is written for this device when it overrides the option, and for a font's family always** (`writtenOnDevice`), for the options view and `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
-- **`ui.timeline.activity` changes what is drawn, never what is counted.** `showsIn` works out once for a window which items a Channel's Timeline draws, and shows every item of another kind of Timeline. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`. `spoke` hides the joins, parts, and quits of Users who did not say a Message, of any kind, in that window no more than five minutes before it, measured between the two items' own times in the window's order, and a User is followed across a change of nick. Self's are always shown, as far as `rowsOf` says Self is known, and with Self's nick unknown, every one is. Only the window's Messages count, so one near its start may be hidden though its User spoke just before the window begins.
-- **A font's family the device lacks is said to be not found,** when it is the one in effect. Only the device can find that out, so it hands the families it lacks to `uiOptionsOf`.
+- **`ui.timeline.activity` changes what is drawn, never what is counted.** `showsIn` works out which items a Channel's Timeline draws, and any other Timeline draws every item. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`.
+- **`spoke` hides the joins, parts, and quits of a User who said no Message in the window in the five minutes before,** by the items' own times, following the User across a change of nick. Only the window's Messages count.
+- **Self's joins, parts, and quits always show,** as far as `rowsOf` knows Self, and every one shows while Self's nick is unknown.
+- **A font's family the device lacks is said to be not found** when it is the one in effect. The device hands the families it lacks to `uiOptionsOf`.
 
-### The options under `store`, `uploads`, and `previews`
+### The options under `away`, `store`, `uploads`, and `previews`
 
-An option under `store`, `uploads`, or `previews` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options` the same way. They are listed first, ahead of every Network's.
+An option under `away`, `store`, `uploads`, or `previews` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options`.
 
-- **They are the Owner's, not a device's,** so no device overrides one, and `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
-- **A Credential option names a Credential, `Owner.` and the option's name** until it names another, such as `Owner.store.s3.accessKeyId`. A Network's id starts with a lower-case letter or a digit, so no Network's Credential is ever named so.
+- **They are the Owner's, not a device's,** so `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
+- **A Credential option names `Owner.` and the option's name until it names another,** such as `Owner.store.s3.accessKeyId`. No Network's Credential is ever named so.
 
 ## Uploads
 
-The Uploads view lists the Uploads, newest first, live ones only unless the deleted are shown, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
+The Uploads view's list, newest first, live ones only unless the deleted are shown, as a reducer (`reduceUploads`) over the pages read and the Changes streamed. `through` is the sequence of the last Change folded in, which the stream is followed after.
 
-- **A page only extends the list at its end.** It is folded only when read from where the list stands, the first page into an empty list and each later one from `next`, so one read twice is folded once. The first page sets `through`.
-- **The stream only gives what is newer.** A Change after `through` moves it on. One held is replaced in place, or dropped once deleted. One not held goes first, unless it is deleted, or uploaded before the oldest held while more pages follow, as a rename of an old Upload is. Those are kept aside, and a later page read before the Change but folded after it takes the Upload as the Change left it, so a delete is never undone by a slow page. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
-- **Deleted Uploads are held only while `showDeleted` is on** (`DeletedShown`, off to start). Then a page keeps them, a Change or an answer that deletes one replaces it in place, and a deleted one not held is treated as a live one would be. Switching starts the list over, nothing held and no page read, so it is read again with or without them. `deletedText` says a deletion in a word, `expired` or `deleted`.
-- **Which Uploads are missing is the stream's last word** (`Missing`), the ids of every live Upload whose bytes the Daemon found gone, which replaces the set held whole. Pages, Changes, and answers leave it alone, and switching the deleted or signing out empties it, since a restarted stream sends it again. A row's mark is derived from this set alone, never from an Upload's own `missing`.
-- **The Daemon's answer to a rename, a delete, or a read is folded at once** (`Answered`), into an Upload held only, and moves nothing on, since the stream still gives any Change.
-- **Where an Upload was said is the Daemon's, read again when it may have changed.** Saying a Message makes no Upload Change, so `saidIn` gives the Uploads held whose `/<id>/` a Message of ours among a Timeline change's items holds, by its text or the text the Ircd confirmed, for the runtime to read again and fold in as `Answered`. `saidPlace` says where one was said as its Network and Target.
-- **What the Owner asked of each is beside them** (`reduceUploadEdits`): the Upload a delete is being confirmed for, and each rename or delete waiting on the Daemon or failed, until it is sent again. `nameOf` reads a typed name as the contract takes one, and `editFailureText` says a failure in words.
-- **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
+- **A page only extends the list at its end.** It is folded only when read from where the list stands, so one read twice is folded once. The first page sets `through`.
+- **The stream gives only what is newer.** A Change after `through` moves it on, and one no later than `through`, or before the first page, is passed over, so an Upload is never held twice.
+- **A Change to an Upload held replaces it in place, or drops it once deleted.**
+- **A Change to an Upload not held puts it first,** unless it is deleted, or older than the oldest held while more pages follow. Those are kept aside, so a page that lands later takes the Upload as the Change left it, and a delete is never undone by a slow page.
+- **Deleted Uploads are held only while `showDeleted` is on** (`DeletedShown`, off to start). Switching starts the list over, to be read again with them or without. `deletedText` says a deletion in a word, `expired` or `deleted`.
+- **Which Uploads are missing is the stream's last word** (`Missing`), which replaces the set held whole. Switching the deleted or signing out empties it, and a row's mark is derived from this set alone, never from an Upload's own `missing`.
+- **The Daemon's answer to a rename or a delete is folded at once** (`Answered`), into an Upload held only, and moves nothing on.
+- **Where an Upload was said is read again when it may have changed.** `saidIn` gives the Uploads held whose `/<id>/` a Message of ours in a Timeline change holds, for the runtime to read again. The answer replaces only where it was said (`Said`), so a late read never undoes a Change.
+- **`saidPlace` says where an Upload was said,** as its Network and Target.
+- **What the Owner asked of each is beside them** (`reduceUploadEdits`): the Upload a delete is being confirmed for, and each rename or delete waiting on the Daemon or failed. `nameOf` reads a typed name as the contract takes one, and `editFailureText` says a failure in words.
+- **What is shown is derived, never held.** `linkOf` makes `<publicUrl>/<id>/<safeName>`, or none without a public URL, `thumbnailed` says whether a type is an image every browser draws, `sizeText` gives a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
 
 ## The Tail
 
-The Tail as a Frontend holds it, as a reducer (`reduceTail`): read whole, then each line the stream gave, of one Daemon. Nothing in it is derived from the Journal.
+The Tail as a Frontend holds it, as a reducer (`reduceTail`): read whole, then each line the stream gave, of one Daemon.
 
-- **A line is taken once.** One numbered at or before the last held was given already, as a stream followed again can, and changes nothing. `lastNumber` says where to follow from.
-- **At most `tailCap` lines are held, 4096,** as many as the Daemon keeps, and one more lets go of the oldest.
-- **A stream of another Daemon lets go of the Tail held.** `Opened` with a `started` other than the one held is a Daemon that restarted, so nothing is held until the Tail is read again.
-- **What a view shows is derived.** `linesShown` gives the lines at a least level and above, oldest first, and `atLeast` compares two levels. `leastShown` is the least level each value of `ui.tail` names: `debug` is Debug, `info` Info, `warning` Warn, and `error` Error, under which Fatal shows too.
+- **A line is taken once.** One numbered at or before the last held changes nothing. `lastNumber` says where to follow from.
+- **At most `tailCap` lines are held, 4096,** and one more lets go of the oldest.
+- **A stream of another Daemon lets go of the Tail held.** `Opened` with another `started` is a Daemon that restarted, and nothing is held until the Tail is read again.
+- **`linesShown` gives the lines at a least level and above,** oldest first, and `atLeast` compares two levels. `leastShown` gives the level each value of `ui.tail` names: `debug` Debug, `info` Info, `warning` Warn, and `error` Error, under which Fatal shows too.
 
 ## Uploading
 
-The files added to a Composer, as a reducer (`reduceUploading`) over what the runtime found out, each named by a key the runtime makes, since the core makes no randomness.
+The files added to a Composer, as a reducer (`reduceUploading`) over what the runtime found out, each named by a key the runtime makes.
 
-- **A file's link goes where the caret was when it was added.** It is pending from that moment, before the Daemon is asked whether Uploads are on, so its order among files added at one caret and its anchor are fixed then. Its anchor follows the draft as it changes however it changes (`followed`): an edit wholly after it leaves it, one wholly before moves it, one across it puts it at the end of what replaced it, and text typed exactly at it goes after it, so a caption typed after a pasted screenshot follows its link. Where the Owner typed the edit, the selection just before it and the caret just after say exactly what changed (`editOf`), however the text repeats, and the texts alone are compared only when they do not, as for an undo. A draft carried to its Timeline takes its files with it.
-- **A link is a word of its own.** `insertLink` adds a space on whichever side touches anything but whitespace, and `caretAfter` moves a caret at or after it past it. Files added at one caret land in the order added, whatever order they finish in.
-- **Whether Uploads are on is the Daemon's answer when the files were added, never kept.** Files are checking until it answers. While they are off, those files are let go of, and `offNote` names the options to set. A file over `maxSize` is refused before it is sent. A link of `null`, with no public URL, puts nothing in and notes it the same way.
-- **A draft waits for its links.** While a file added to it is checking or being sent, `heldBack` says to wait for it or cancel it, and nothing is sent. A failed file holds nothing back. What is kept of a send held back is only that it was, per Composer (`HeldBack`), and `heldNoteIn` derives the words from the files still pending, so they name only those and go with the last of them, kept, failed, or cancelled, and never come back.
-- **A draft set aside by a command owns its files.** While a command stands over a draft, the anchors and links are in the draft set aside (`filesTextOf`), `heldBack` holds the command back for none of them, and a link that finishes goes into the draft, never the command. An edit that leaves the command empty puts it away, as Escape does.
-- **A file kept stays listed until its draft is sent** (`Sent`), or it is dismissed, holding nothing back. Renamed, its new link goes into the draft in place of the old (`renamed`), wherever the old now stands, however the Owner edited around it, and every anchor and caret after it moves by the change in length (`relinkedAt`). Where the Owner edited it away, nothing is replaced.
-- **Every failure is said in words** by `failureText`, from the API's typed errors, and a request with no answer says only that whether the file was kept is unknown.
+- **A file's link goes where the caret was when it was added.** It is pending from that moment, before the Daemon is asked whether Uploads are on, so its order and its anchor are fixed then.
+- **Its anchor follows the draft as it changes** (`followed`): an edit wholly after it leaves it, one wholly before moves it, one across it puts it at the end of what replaced it, and text typed exactly at it goes after it, so a caption typed after a pasted screenshot follows its link.
+- **An edit is placed by the selection just before it and the caret just after** (`editOf`), however the text repeats. The texts alone are compared only without them, as for an undo.
+- **A draft carried to its Timeline takes its files with it.**
+- **A link is a word of its own.** `insertLink` adds a space on whichever side touches anything but whitespace, and `caretAfter` moves a caret at or after it past it.
+- **Files added at one caret land in the order added,** whatever order they finish in.
+- **Whether Uploads are on is the Daemon's answer when the files were added, never kept.** Files are checking until it answers. While Uploads are off, those files are let go of, and `offNote` names the options to set.
+- **A file over `maxSize` is refused before it is sent.**
+- **A link of `null`, with no public URL, puts nothing in,** and is noted as Uploads off are.
+- **A draft waits for its links.** While a file added to it is checking or being sent, `heldBack` says to wait for it or cancel it, and nothing is sent. A failed file holds nothing back.
+- **The note on a send held back names only the files still pending** (`heldNoteIn`), and goes with the last of them.
+- **A draft set aside by a command owns its files** (`filesTextOf`). The command is held back for none of them, and a link that finishes goes into the draft, never the command.
+- **An edit that leaves the command empty puts it away,** as Escape does.
+- **A file kept stays listed until its draft is sent** (`Sent`), or it is dismissed, holding nothing back.
+- **A renamed file's new link replaces the old in the draft** (`renamed`), wherever the old now stands, and every anchor and caret after it moves by the change in length (`relinkedAt`). Where the Owner edited it away, nothing is replaced.
+- **Every failure is said in words** by `failureText`, from the API's typed errors. A check with no answer says the file was not sent, and a send with no answer says whether it was kept is unknown.
 
 ## Themes
 
 Every colour a Frontend draws, derived from a terminal's palette of a foreground, a background, and 16 ANSI colours. `drawn` gives the colours and `cssVariables` their names.
 
-- **No palette makes text unreadable.** A colour that falls below its floor on what it is drawn on is moved by the least change of lightness that reaches it, its hue kept. One that reads already is kept exactly.
-- **The floor is WCAG 2's contrast ratio:** 4.5 for text, and 3 for dim text and the focus ring. APCA judges dark themes better, but it is still a draft and its licence restricts its use.
-- **Nicks are spread over 16 slots drawn from the palette's own hues.**
+- **No palette makes text unreadable.** A colour below its floor on what it is drawn on is moved by the least change of lightness that reaches it, its hue kept, or is white or black when none does. One that reads already is kept exactly.
+- **The floor is WCAG 2's contrast ratio:** 4.5 for text, and 3 for dim text and the focus ring.
+- **Nicks are spread over 16 slots,** drawn from the palette's own hues, or from six fixed hues when it has fewer than three of its own.
 - **mIRC's first 16 colours are the theme's ANSI colours, or mIRC's own,** as `ui.timeline.colours` says. Colours 16 to 98 are always mIRC's own.
 - **Themes are built in or imported.** The built-in ones are in `src/builtin-themes.ts`, each with its source and licence. A name that names no theme draws as `system`.
-- **`system` draws `ui.theme.light` or `ui.theme.dark` as the device prefers,** each the built-in one of its name until set, by `/theme -light` or `/theme -dark`, to any theme but `system`. One that names no theme, as one imported and removed since, draws the built-in one again. A theme named in `ui.theme` wins over both.
-- **A theme's name is one word,** such as `tokyo-night`. The names no import may take are the contract's, so the Daemon refuses them too.
-- **Deterministic.** The same palette draws the same colours every time.
+- **`system` draws `ui.theme.light` or `ui.theme.dark` as the device prefers.** Each is the built-in one of its name until `/theme -light` or `/theme -dark` sets it to any theme but `system`, and draws the built-in one again when it names no theme.
+- **A theme named in `ui.theme` wins over both.**
+- **A theme's name is one word,** such as `tokyo-night`. The names no import may take are the contract's.
+- **The same palette draws the same colours every time.**
 
 ## Importing a theme
 
-`importTheme` reads a terminal's theme file into a palette. Real files of each format are in `fixtures/themes`.
+`importTheme` reads a terminal's theme file into a palette. Real files of the formats are in `fixtures/themes`.
 
 | Format           | Told by                                    |
 | ---------------- | ------------------------------------------ |
@@ -325,69 +386,91 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 
 - **The format is told from the text's own structure,** never a file's name.
 - **What is missing or no colour is said by its path,** such as `palette.base0A is missing.`
-- **Nothing is evaluated or followed.** A Kitty `include` and a Ghostty `config-file` are ignored. The plist is read by a small reader of the subset an `.itermcolors` file uses, which refuses a doctype that could declare entities.
-- **Bounded.** Text longer than 256 KB is refused unread, as is a file of more than 4,096 settings. Our own readers are linear, but Effect's YAML parser is quadratic on some text, so the web frontend reads a theme in a Worker it ends after a second.
+- **Nothing is evaluated or followed.** A Kitty `include` and a Ghostty `config-file` are ignored, and the plist reader refuses a doctype that could declare entities.
+- **Text longer than `importLimit`, 256 × 1024 characters, is refused unread.**
+- **A Kitty or Ghostty file of more than 4,096 settings, or a plist of more than 4,096 values, is refused** (`entryLimit`).
 
 ## Who is here
 
-`@iirc/frontend/channel`: what each Pane's Timeline shows at its head, and its Channel's members, as a reducer over what the runtime read from `GET /api/timelines/{id}/channel` and `/members`. The Daemon answers with the Channel as the Client knows it now, so this holds the latest read and says when to read again.
+`@iirc/frontend/channel`: what each Pane's Timeline shows at its head, and its Channel's members, as a reducer over what the runtime read from `GET /api/timelines/{id}/channel` and `/members`.
 
-- **The head is held for each Channel the Sidebar lists or a Pane shows, so one opens with it already read, and the members are read only while they show.** `heldChannels` lists them, the shown first. A removed Network's Channel is read only once a Pane shows it, and a Channel's members are let go of once no Pane shows it. Each join, part or quit in one reads its head again, at most once a second.
-- **What may have changed a Channel is read again, coalesced, never cancelled.** An Activity in it, its Timeline's `head` moved past the one last seen, a Gap, an overflow, or a reset leaves it dirty. `refreshDelay` spaces the reads: 250 ms after the first change, and no more than once a second while changes keep coming.
-- **Members are read again from the start, as many as were held.** The Daemon orders them by rank, which any `MODE` can move, so patching the list would need to know what each Activity means for every member.
-- **The header says what the head said.** A Channel's shows its topic, formatted, with who set it and when, its modes, and its count, and a Direct Message's whether its partner is on the Network. Where Self stands otherwise is in words, such as kicked or joining.
-- **A member shows their highest rank's symbol, from the Network's `PREFIX`, and their account, the one they are logged in to, logged out, or not known, as it was if that is all that is known.** It is a bot when their User said so and that is known now, which a stale or unknown fact is not, and a row's label says `bot`.
+- **The head is held for each Channel the Sidebar lists or a Pane shows,** so one opens with it already read. `heldChannels` lists them, the shown first.
+- **The members are read only while they show,** and let go of once no Pane shows the Channel.
+- **A removed Network's Channel is read only once a Pane shows it.**
+- **What may have changed a Channel is read again, coalesced, never cancelled:** an Activity in it, its Timeline's `head` moved past the one last seen, a Gap, an overflow, or a reset.
+- **`refreshDelay` spaces the reads:** 250 ms after the first change, and no more than once a second while changes keep coming.
+- **Members are read again from the start, as many as were held.**
+- **The header says what the head said.** A Channel's shows its topic, formatted, with who set it and when, its modes, and its count. Where Self stands otherwise is in words, such as kicked or joining.
+- **A Direct Message's header says whether its partner is on the Network,** as `known` says.
+- **A member shows their highest rank's symbol, from the Network's `PREFIX`,** and their account: logged in to one, logged out, or not known, as last known when that is all that is.
+- **A member is a bot only when their User said so and that is known now,** and a row's label then says `bot`.
 
 ## Lookups
 
 What `/whois`, `/whowas`, `/names`, `/who`, `/list`, and a Channel's lists ask, and a card for each Pane showing what came back.
 
 - **A Lookup's nick is read as the Client reads one,** so `/whois #iirc` and `/whois *!*@host` say why in words and send nothing. `fixtures/nicks` holds both readings to the same cases.
-- **A list's command is of the Channel named, or the one in focus.** `/bans`, `/exceptions`, and `/invexes` are not offered where the head of the Channel in focus says the Network keeps no such list. Where it is unread, the Client decides.
-- **`/names` is of the Channel named, or the one in focus,** and outside a Channel with none named it says so and sends nothing, never a bare `NAMES`. **`/who` needs a mask,** one word. Their cards list the members with their prefix symbols, by the `PREFIX` of the head of the Channel in focus or RFC 1459's, and the Users matched as `user@host`, away, and realname. A reply cut short says why, as a list's does.
-- **`/list` takes a mask, a least number of members, both in either order, or neither:** a word of digits alone is the least, at least 1, and any other word the mask, which holds no comma. Its card lists each Channel's name, members, digits grouped the same in every locale, and topic, most members first, each opening its Timeline while `known` says Self is in it, and otherwise starting `/join`, even where a Timeline is kept from before. A reply longer than the Client keeps says how many of how many it shows, and one cut short otherwise says why, as other cards do.
-- **The Network's Channels come a page at a time, and only when asked.** The first page comes with the result, and `nextPage` gives the next to read, by the intent the card's Lookup was asked under, while the Daemon kept more and none is being read. A page folds in only where it follows on from those held, and one that fails can be asked for again.
-- **A mask that bans an account says so.** Where the head of the list's own Channel gives `accountBan`, a mask of it names, on any of the three lists, has the `account` it bans, read by `bannedAccount`, and contained as the mask is. `mask`, and the removal of it, stay the exact mask.
-- **A mask can be removed while Self may,** by the head of the list's own Channel, which is followed as a Pane's Channel's is while the card lasts (`listedChannels`), wherever the card shows: an operator, or a rank above it in `PREFIX`, holds it. A half-operator is not offered it, since whether one may differs by Ircd and ISUPPORT does not say. Removing sends the unset under an intent of its own, and the card hides that mask while it is in flight. The Client refusing it, no answer within the runtime's bound, which never sends it again, or the Ircd refusing it later, an `ActionRefused` item of that intent in the changes stream, shows it again, and so does an overflow or a reset of the stream, which could have hidden that refusal.
+- **A list's command is of the Channel named, or the one in focus.**
+- **`/bans`, `/exceptions`, and `/invexes` are not offered where the head of the Channel in focus says the Network keeps no such list.** Where it is unread, the Client decides.
+- **`/names` is of the Channel named, or the one in focus,** and outside a Channel with none named it says so and sends nothing.
+- **`/who` needs a mask,** one word.
+- **The cards of `/names` and `/who` list the members with their prefix symbols,** by the `PREFIX` of the head of the Channel in focus or RFC 1459's, and the Users matched with `user@host`, away, and realname.
+- **`/list` takes a mask, a least number of members, both in either order, or neither.** A word of digits alone is the least, at least 1, and any other word is the mask, which holds no comma.
+- **A `/list` card lists each Channel's name, members, and topic, most members first,** with digits grouped the same in every locale. A Channel opens its Timeline while `known` says Self is in it, and otherwise starts `/join`, even where a Timeline is kept from before.
+- **A reply longer than the Client keeps says how many of how many it shows.**
+- **The Network's Channels come a page at a time, and only when asked.** `nextPage` gives the next to read, by the card's intent, while the Daemon kept more and none is being read. A page folds in only where it follows on from those held, and one that fails can be asked for again.
+- **A mask that bans an account says so.** Where the head of the list's own Channel gives `accountBan`, a mask of it has the `account` it bans (`bannedAccount`), contained. `mask`, and its removal, stay the exact mask.
+- **A mask can be removed while Self holds operator, or a rank above it in `PREFIX`,** by the head of the list's own Channel, which is followed while the card lasts (`listedChannels`). A half-operator is not offered it.
+- **Removing a mask hides it while its unset is in flight,** under an intent of its own. It shows again when the Client refuses it, when no answer comes within the runtime's bound, which never sends it again, when an `ActionRefused` item of that intent arrives, or on an overflow or a reset of the stream.
 - **One card a Pane.** A new Lookup replaces it, and an answer for a card no Pane holds changes nothing.
 - **A card shows while its Pane has open the Timeline it was asked from,** and lives as long as its Pane.
 - **What a Network wrote is contained and stays text,** in every field of a profile.
 - **A Channel in a profile opens its Timeline, or starts `/join`,** once `known` said how the Network names Channels. Until then it is text.
-- **Times are the caller's.** The core reads no clock or time zone, so the caller formats the sign-on instant and when a mask was set, and one no calendar can hold is said to be unavailable.
-- **What found no User, or no mask, is said in words,** naming the reply's numeric, and a list cut short says so.
+- **Times are the caller's.** The caller formats the sign-on instant and when a mask was set, and one no calendar can hold is said to be unavailable.
+- **What found no User, or no mask, is said in words,** naming the reply's numeric, and a list cut short says why.
 - **A `WARN` or `NOTE`, or a later `FAIL`, the Network gave with its result is a line under it,** by its kind, command, code, context, and description, each contained.
 
 ## The menu on a nick
 
 `@iirc/frontend/nick-menu`: what the menu on a nick offers (`nickEntries`), and whether its User is still in the Channel it was opened in, as a reducer, `reduceNickMenus`, over what the members route answered.
 
-- **Each entry is the command the Composer would run,** by the registry, and is offered only where that command runs. Mention starts the Composer with the nick and `: `.
-- **Operating is offered by one rule, `mayOperate`:** Self holds operator, or a rank above it in `PREFIX`, in the Channel's head, as removing a mask from a Lookup card is.
+- **Each entry is the command the Composer would run,** and is offered only where that command runs. Mention starts the Composer with the nick and `: `.
+- **Operating is offered by one rule, `mayOperate`:** Self holds operator, or a rank above it in `PREFIX`, in the Channel's head.
 - **It acts only on its own Pane's Timeline.** With the focus on another, it offers nothing.
-- **What needs the User there needs them found there.** `presenceWanted` asks the members route for the nicks that start with theirs, and only one that folds as theirs does, by the casemapping the Network's Connection folds names by, says they are there. None, with no more to read, says they are gone, and a failure, or more to read, says nothing. Op, voice, deop, devoice, and kick wait for them to be found, and ban and ban account do not. Ban account, `ban-account`, runs `/ban -a`, so it is offered only where the head gives `accountBan`.
-- **What is still being read is said, not left out.** `coming` counts the operator's entries not offered yet, in a Channel while its head is not read, or while Self may operate and whether the Network has a Session, or whether the User is there, is still being read, so a view can hold their room, ban account counted unless the head, once read, gives no `accountBan`. It is none once the Network is known to have no Session, which no answer would change.
-- **Nothing is offered that the Network would refuse for want of status.** Deop, devoice, and kick are left out of a member who outranks Self, by `outranks`: the highest prefix they hold stands strictly above Self's in `PREFIX`, or which they hold is not known. Equal rank is allowed, since Ircds differ.
+- **A User is there only once found there.** `presenceWanted` asks the members route for the nicks that start with theirs. One that folds as theirs, by the casemapping of the Network's Connection, says they are there, none with no more to read says they are gone, and a failure or more to read says nothing.
+- **Op, voice, deop, devoice, and kick wait for the User to be found there,** and ban and ban account do not.
+- **Ban account runs `/ban -a`,** so it is offered only where the head gives `accountBan`.
+- **`coming` counts the operator's entries not offered yet,** while the head, whether Self may operate, whether the Network has a Session, or whether the User is there is still being read, so a view can hold their room. It is none once the Network is known to have no Session.
+- **Deop, devoice, and kick are left out of a member who outranks Self** (`outranks`): the highest prefix they hold stands strictly above Self's, or which they hold is not known. Equal rank is allowed.
 
 ## Completion
 
 What the Composer can complete, as a reducer, and the list it shows above the Composer, `listOf`. It completes the word that ends at the caret, moves through the candidates, and gives back what was typed on Escape.
 
-- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it: a command's name, then an option after `/set`, a Channel after `/join` or `/part`, or a Timeline, a theme, a font, a Network, or an alias after `/go`, `/theme`, `/set ui.font`, `/network remove`, and `/alias`. Only the first line opens it, and `//` never does. So does a `:name` word on any line, and a command's own completion wins over it. Anything else opens it on Tab, and Tab is taken only when there is a word to complete, so the Composer is no keyboard trap.
-- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel's name after `/join `, `/part `, or a `CHANTYPES` character, an emoji for a word that is `:` and two or more characters of a name, and otherwise a nick.
-- **An emoji is completed from names the Frontend gives,** `emoji` in the sources, none until it has them. A name matches when it starts with what follows the `:`, or a word of it, split at `_`, `+`, or `-`, does, ranked as every list is, with no match by letters in order. Each emoji is listed once, by the name that matched, as `:smile:`, and picking one writes the emoji and a space. A `:` inside a word, as in `12:30` or an address, starts nothing. `emojiWanted` says when the names are needed and not held, which is when a Frontend loads them; until then the list is empty and Tab waits.
-- **Entries are ranked as `Entries` says:** commands, options, and the whole argument of `/go`, a Timeline on any Network, `/theme`, after any flags, a theme, `/set ui.font`, a font or a family typed by name, `/network remove`, a Network, a removed one whose Timelines were kept too, and `/alias`, an alias with its line, which writes `add <name> <line>` to edit it, or after `/alias remove`, only its name. That argument is the rest of the line, its spaces collapsed, and a candidate replaces all of it. Channels and nicks are matched by their start.
-- **A bare `/` lists every command once, by name,** those run recently first, newest first, an alias of the Owner's own among them unless a built-in command takes its name. A command's fixed alias still finds its command.
-- **`/go` writes a name alone where it finds that Timeline from the Composer's Network,** and the Network's id before it where it would not.
-- **Picking from the list only writes the draft.** Only sending it asks for anything, so `/network remove` asks first.
-- **A theme or font highlighted is drawn while it is,** as `previewOf` says, and the one in effect comes back as the highlight moves on, the list closes, or the draft changes or is sent.
-- **Nothing is highlighted while the list only follows what is typed,** and that list is derived from the draft and the sources as they are now. Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent, and the list then holds its order while it is moved through.
-- **A command is listed with what its usage says it takes, what it does, and the chords bound to it.** A Timeline is listed with its Network and its kind, a theme with whether it is built in and in effect, a font with whether it is in effect, and a Network with whether it was removed.
-- **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, never by a Timeline's name.
-- **A nick is asked of the Daemon's members route, not guessed,** and only on Tab. An answer is put in only if the Composer still holds the exact text it was asked for.
+- **A draft that starts with `/` opens the list as it is typed,** and each key narrows it. Only the first line opens it, and `//` never does.
+- **A `:name` word opens the list on any line,** and a command's own completion wins over it.
+- **Anything else opens on Tab, and Tab is taken only when there is a word to complete,** so the Composer is no keyboard trap.
+- **What a word is completed from follows from where it is:** a command after `/` at the start of a line, an option after `/set `, a Channel after `/join `, `/part `, or a `CHANTYPES` character, a Timeline after `/go `, a theme after `/theme `, a font after `/set ui.font `, a Network after `/network remove `, an alias after `/alias `, an emoji after `:` and two or more characters of a name, and otherwise a nick.
+- **An emoji name matches when it, or a word of it split at `_`, `+`, or `-`, starts with what follows the `:`.** Each emoji is listed once, as `:smile:`, and picking one writes the emoji and a space.
+- **A `:` inside a word, as in `12:30` or an address, starts nothing.**
+- **The emoji names are the Frontend's to give** (`emoji` in the sources). `emojiWanted` says when they are needed and not held, and until then the list is empty and Tab waits.
+- **Entries are ranked as `Entries` says,** and Channels and nicks are matched by their start.
+- **The whole argument of `/go`, `/theme`, `/set ui.font`, `/network remove`, and `/alias` is completed as one,** its spaces collapsed, and a candidate replaces all of it. `/theme` completes after any flags.
+- **`/network remove` lists a removed Network whose Timelines were kept too.**
+- **`/alias` lists each alias with its line, and writes `add <name> <line>` to edit it.** After `/alias remove`, it writes only the name.
+- **A bare `/` lists every command once, by name,** those run recently first, and an alias of the Owner's own among them unless a built-in command takes its name. A command's fixed alias still finds its command.
+- **`/go` writes a name alone where it finds that Timeline from the Composer's Network,** the Network's id before it where it would not, and leaves out a Timeline it reaches neither way.
+- **Picking from the list only writes the draft.** Only sending it asks for anything.
+- **A theme or font highlighted is drawn while it is** (`previewOf`), and the one in effect comes back as the highlight moves on, the list closes, or the draft changes or is sent.
+- **Nothing is highlighted while the list only follows what is typed.** Tab, Shift+Tab, or a pick highlights a candidate and writes it into the draft, so the draft always says what will be sent, and the list then holds its order.
+- **A command is listed with its usage, what it does, and the chords bound to it.** A Timeline is listed with its Network and its kind, a theme with whether it is built in and in effect, a font with whether it is in effect, and a Network with whether it was removed.
+- **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, or RFC 2811's `#&+!` while they are unknown, never by a Timeline's name.
+- **A nick in a Channel is asked of the Daemon's members route, only on Tab.** An answer is put in only if the Composer still holds the exact text it was asked for. A Direct Message offers its partner, and a Network's own Timeline no nick.
 - **Who spoke latest comes first,** and Self last.
 - **A nick at the start of a line is followed by `ui.composer.nickSuffix`,** `: ` to start, and anything else by a space.
-- **A list belongs to its place, its draft, and its caret.** Another place, a draft changed other than by completion, or the caret moved without typing shows none. `owns` says whether completion takes Tab, the arrows, Escape, and a press, which is exactly while `listOf` shows a list, or while a nick is asked for.
-- **How many it lists is announced** as it opens, such as `3 completions`, for a screen reader, which the list itself tells which is highlighted.
+- **A list belongs to its place, its draft, and its caret.** Another place, a draft changed other than by completion, or the caret moved without typing shows none.
+- **`owns` says whether completion takes Tab, the arrows, Escape, and a press:** exactly while `listOf` shows a list, or while a nick is asked for.
+- **A list opened as the draft is typed is announced by its count,** such as `3 completions`, and a Tab that finds nothing says `Nothing completes <word>` (`announced`).
 
 ## Rendering
 
@@ -395,72 +478,122 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 
 - **Formatting is data.** mIRC bold, italic, colours, and the rest become styles on runs.
 - **A link is one of `http`, `https`, `irc`, or `ircs`.** Anything else, `javascript:` and `data:` included, stays text.
-- **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end. The work is linear in the text, however hostile.
+- **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end.
+- **The work is linear in the text, however hostile.**
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
-- **A reply's quotation is one plain line:** its sender in their colour slot, how it was said, its text as plain text, and the position it stands at, for a view to go to. A Direct Message's `context`, the Channel it is about, is contained like any name.
-- **A Message line says its sender is a bot** as the Message says it, in `bot`, for a view to mark beside the nick.
-- **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
-- **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
-- **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
-- **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was, and an answer that never left takes the `Refused` tone. One the Owner sent shows whom they asked for what, and a reply to their `PING` shows how long it took, in seconds to the millisecond, as the Daemon journaled the two, never by a clock the page reads. An answer to Self's `OPER` says whether Self is an IRC operator now, a refusal by its numeric in the `Refused` tone. A login says which account a User logged in to, and a logout that they logged out. A change of host says the User's new `user@host`, marked `--`, never as a quit and a join, and a change of real name says the new one as said text. A numeric shows its number dim in the senders' column, where a nick would be, and its parameters as one run of text in the `Numeric` tone, as plain as a Message's, with its links and formatting. The message of the day is its own `Motd` line, not a description: a `summary` that says `Message of the day`, how many lines it has, and `cut short` when it was, and its lines as inlines, formatted and linked as a Message's text is, each with the `- ` that RFC 2812 puts before it dropped, a lone `-` empty, and every other space kept, for a view to draw folded and then in monospace. A netsplit or a netjoin is its own `Split` line, not a description: a `marker` of `<--` or `-->`, a `summary` of parts that says `netsplit` or `netjoin`, the two servers as the batch named them, and how many of the Channel's members `quit` or `joined`, and `nicks`, a `Nick` part for each, in order, for a view to draw folded and then listed. `ui.timeline.activity` treats one as the quits or joins it tells: `quiet` hides it, and `spoke` shows it when any of its nicks said a Message within the span. An invitation says who invited Self to which Channel, then a `Join` part, an offer to join that Channel on its Network, which a view draws as a button that does what `/join` does when pressed.
+- **A reply's quotation is one plain line:** its sender's colour slot, how it was said, its text, and the position it stands at, for a view to go to.
+- **A Direct Message's `context`, the Channel it is about, is contained like any name.**
+- **A Message line says its sender is a bot** in `bot`.
+- **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16.
+- **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`.
+- **A refused action is a line of its own,** such as `Your topic change for #iirc was refused (482)`.
+- **A failed Connection names its Ircd, and hints when TLS looks wrong** (`mismatchedTls`): a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667.
+- **Activity is marked `-->` for a join or a partner coming online, `<--` for a part, a quit, a kick, or a partner going offline, and `--` otherwise.**
+- **A standard reply shows its kind, command, code, context, and description,** and a `FAIL` takes the `Refused` tone.
+- **A CTCP request shows who asked for what, and the answer sent or why none was.** An answer that never left takes the `Refused` tone.
+- **A CTCP request the Owner sent shows whom they asked for what,** and a reply to their `PING` how long it took, in seconds to the millisecond, as the Daemon journaled the two.
+- **An answer to Self's `OPER` says whether Self is an IRC operator now,** and a refusal its numeric in the `Refused` tone.
+- **A login says which account a User logged in to, and a logout that they logged out.**
+- **A change of host says the User's new `user@host`,** marked `--`, never as a quit and a join, and a change of real name says the new one.
+- **A numeric shows its number dim where a nick would be,** and its parameters as one run of text in the `Numeric` tone, with its links and formatting.
+- **The message of the day is a `Motd` line:** a `summary` of how many lines it has and whether it was cut short, and its lines formatted and linked, each with RFC 2812's leading `- ` dropped and every other space kept.
+- **A netsplit or a netjoin is a `Split` line:** a `marker`, a `summary` naming the two servers and how many of the Channel's members quit or joined, and a `Nick` part for each.
+- **`ui.timeline.activity` treats a `Split` as the quits or joins it tells:** `quiet` hides it, and `spoke` shows it when any of its nicks said a Message within the span.
+- **An invitation says who invited Self to which Channel,** with a `Join` part that offers to join it.
 
 ## Previews
 
-What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It is `@iirc/frontend/previews`.
+What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`).
 
-- **Nothing is asked for ahead of the screen.** A Message is asked for only once the view says it came into view, with how many links it holds that may be previewed and whether its Timeline is a Direct Message, only once, and only while the stream is followed, so no change an ask starts is missed. `asksWanted` gives the asks to make.
-- **What the Daemon holds is read ahead of the screen, since it fetches nothing.** A held read of a window's Messages, made at the stream's count (`heldReadOf`), is begun (`Reading`), then answered (`Read`) or let go of (`ReadDropped`). Its ids are each Message's until an ask answers it, and its items are folded in as an answer's are, but a link held nothing of (`NotHeld`), which folds in none. While one is in flight, every change the stream gives is held, so a read that lands after a newer change never undoes it, and a change to any id a read named is held after.
-- **A Timeline's mode is its own choice in `ui.previews.timelines`, else `ui.previews`** (`modeIn`), the shared values alone (`previewsModesOf`), since the Daemon acts on them. Under `off`, or before they are read, nothing of that Timeline's is asked for or shown, and the stream is followed while any Timeline's mode asks (`asksAnywhere`). `choosing` makes or removes one Timeline's choice in the map, which is sent whole.
-- **A link the Daemon holds for a press is pressed once the Owner opens it,** by its index (`pressOf`), and is pending meanwhile. The press's answer is folded in as an ask's is, and a refused press asks its Message again. A Message holding one is asked again once its Timeline chooses a mode that asks, which the Daemon fetches unpressed.
-- **An item is held once, by its id,** so a change the stream gives updates every Message that shows it. An answer is taken only by the ask in flight, and never replaces an item the stream changed after that ask began.
-- **A stream followed again asks again** for each Message still waiting on a Preview, since a Preview is not in the Journal and its stream resumes nothing.
-- **Whether an image moves, and what a press of it does, are rules of the core.** An image that is not animated is always still. An animated one is as the Owner last pressed it, even where the device reduces motion, and until then moves only with `ui.previews.animate` on and no reduced motion (`motionOf`). A press opens a still image large, plays an animated one that is still, and stops one that moves (`pressOn`), so a moving one opens large only from its own control. The view reads the device's motion setting and passes it in.
-- **What a Message shows is derived.** Before its answer, each link `previewableLinksOf` finds as a held read gave it, or a placeholder where none did or it held nothing, and after it, each of those links with the state of its item as it is now, shared by every link with the same id: pending; ready as its card; failed as one line of why, in words (`reasonWords`), never the link again. A link waiting for a press is drawn pending, since it is drawn only while open, which presses it. A link is an anchor only when it reads as one `http` or `https` link, and everything a stranger wrote is contained.
-- **Every Preview is one card,** of up to three parts, in this order, each only when the Preview has it: its `title`, its `description`, and its media. A page is its title and description with its image, drawn `Whole`, under them. A page that names a video file or a listed player is its title and description with its poster, drawn `Poster`, under them. A link that is itself an image, a video, or a sound is its media alone, with no words. A file is its file name as its title, the last part of the path of the link the Preview was read from, percent-decoded where that decodes and as written where it does not, or its host where the path has no last part, and as its description its first lines when it is a text file with some, or else its type and size, either left out when the host gave none, with no media, so it is drawn under `text` as under `on`. A text file's lines are each contained on their own and kept apart by line breaks, a tab is four spaces, and blank lines before the first and after the last are dropped. A size under a thousand bytes is `0 bytes`, `1 byte`, `999 bytes`, and above it `kB`, `MB`, `GB`, or `TB` in powers of a thousand, to one decimal below ten and whole from ten, rounded before the unit is chosen, so 999,999 bytes is `1.0 MB`, the same in every locale. Media is given only while the mode is `on`: an image, with the `dimensions` in pixels the Daemon read from its bytes, or none, its `src` on the Daemon's own origin, and its `alt` the title or else the link; and a video's or a sound's `media`, its kind, its type, and a `src` on the Daemon's stream route, by the Message's Timeline and place. Under `text` a card is its words alone, and a card that would hold nothing is not drawn. The site's name is never drawn. A card read from another host than its Message's link names that host (`hostNamed`), compared in lower case without a leading `www.`, so a shortened link says where it led. Its `name` is its title, or else its link.
-- **Whether a Preview is open, and whether its Message is asked for, are derived.** `isOpen` says whether one of a Message's Previews is open: as the Owner last toggled it, by its `linkKey`, or else as `ui.previews.start` says, except in a Direct Message with no mode of its own, or where the Daemon says a link waits for a press, which start closed. `asksWanted` asks for a Message, which fetches all its links, only while one of its Previews is open, or while its links wait for a press, since the Daemon then answers with what it holds and fetches nothing. `pressesWanted` presses a link that waits only once the Owner opened it, and never twice, unless the press was let go of unanswered (`PressDropped`). A Message shown again with another count of links, as an echo may change its text, is wanted again, and an answer for its old links settles nothing. `togglesIn` says after which run of a Message's text each toggle stands: the first run of each of its links that may be previewed.
-- **A player is where it plays from, and what its frame needs.** Under `on`, a Ready Preview of kind `player` whose host `ui.previews.players` lists now gives `player`: the host of its address, contained, the words `plays from <host>`, its `size` as its page gave it, or none, and `src`, its address with its host's autoplay query parameter set (`autoplay=1` for `www.youtube-nocookie.com` and `player.vimeo.com`, `auto_play=true` for `w.soundcloud.com`), and any other host's as it is. A view loads `src` only once the Owner presses play. Its image is the poster. `playsIn` gives the shape of the one box a poster, the video it plays, and the player it plays share: the player's `size`, else the poster's `dimensions`, else 16 by 9. Under `text` it is its words alone, with no image and no player. One whose host the list no longer names is drawn as a page at once, even from an answer held before.
+- **Nothing is fetched ahead of the screen.** A Message is asked for once, only once the view says it came into view, and only while the stream is followed. `asksWanted` gives the asks to make.
+- **What the Daemon holds is read ahead of the screen** (`heldReadOf`), since a held read fetches nothing. A link held nothing of (`NotHeld`) folds in nothing.
+- **A change the stream gives while a held read is in flight is held,** so a read that lands late never undoes it.
+- **A Timeline's mode is its own in `ui.previews.timelines`, else `ui.previews`** (`modeIn`), from the shared values alone. Under `off`, or before they are read, nothing of it is asked for or shown.
+- **The stream is followed while any Timeline's mode asks** (`asksAnywhere`).
+- **`choosing` makes or removes one Timeline's choice** in the map, which is sent whole.
+- **A link waiting for a press is pressed once the Owner opens it,** by its index (`pressOf`), and is pending meanwhile. A refused press asks its Message again.
+- **A Message holding a link that waits for a press is asked again** once its Timeline chooses a mode that asks, while one of its Previews is open.
+- **An item is held once, by its id,** so a change the stream gives updates every Message that shows it.
+- **An answer is taken only by the ask in flight,** and never replaces an item the stream changed after that ask began.
+- **A stream followed again asks again** for each Message still waiting on a Preview.
+- **An image that is not animated is always still.** An animated one is as the Owner last pressed it, and until then moves only with `ui.previews.animate` on and no reduced motion (`motionOf`). The view passes in the device's motion setting.
+- **A press opens a still image large, plays an animated one that is still, and stops one that moves** (`pressOn`).
+- **Before its answer, a Message shows each link `previewableLinksOf` finds as a held read gave it,** or a placeholder.
+- **After its answer, each link shows its item's state now:** pending, ready as its card, or failed as one line of why (`reasonWords`), never the link again. A link waiting for a press is drawn pending.
+- **A link is an anchor only when it reads as one `http` or `https` link,** and everything a stranger wrote is contained.
+- **Every Preview is one card** of its `title`, its `description`, and its media, in that order, each only when it has it.
+- **A page is its title and description with its image,** drawn `Whole`. A page that names a video file or a listed player is drawn with its poster, `Poster`.
+- **A link that is itself an image, a video, or a sound is its media alone.**
+- **A file is its name, and as its description its first lines when it is a text file, else its type and size.** The name is the last part of the link's path, percent-decoded where that decodes, or its host. A file has no media, so it draws the same under `text` as under `on`.
+- **A text file's lines are each contained,** a tab is four spaces, and blank lines before the first and after the last are dropped.
+- **A file's size is in powers of a thousand, the same in every locale:** `0 bytes` to `999 bytes`, then `kB`, `MB`, `GB`, or `TB`, to one decimal below ten and whole from ten, rounded before the unit is chosen, so 999,999 bytes is `1.0 MB`.
+- **Media is given only while the mode is `on`.** An image has its `dimensions` or none, its `src` on the Daemon's own origin, and its `alt` the title, else the link. A video or a sound has its kind, its type, and a `src` on the Daemon's stream route.
+- **Under `text` a card is its words alone,** and a card that would hold nothing is not drawn.
+- **The site's name is never drawn.**
+- **A card read from another host than its Message's link names that host** (`hostNamed`), compared in lower case without a leading `www.`.
+- **A card's `name` is its title, or else its link.**
+- **`isOpen` says whether a Message's Preview is open:** as the Owner last toggled it (`linkKey`), else as `ui.previews.start` says. One in a Direct Message with no mode of its own, or waiting for a press, starts closed.
+- **`asksWanted` asks for a Message only while one of its Previews is open, or while its links wait for a press.**
+- **`pressesWanted` presses a waiting link once the Owner opened it, and never twice,** unless the press was let go of unanswered (`PressDropped`).
+- **A Message shown again with another count of links is wanted again,** and an answer for its old links settles nothing.
+- **`togglesIn` places each toggle after the first run of each link that may be previewed.**
+- **A player plays only from a host `ui.previews.players` lists now.** Under `on`, a Ready Preview of kind `player` gives `player`: its host, contained, the words `plays from <host>`, its `size` or none, and a `src` with the host's autoplay parameter set (`autoplay=1` for `www.youtube-nocookie.com` and `player.vimeo.com`, `auto_play=true` for `w.soundcloud.com`).
+- **A view loads a player's `src` only once the Owner presses play.**
+- **`playsIn` gives one box for the poster, the video, and the player:** the player's `size`, else the poster's `dimensions`, else 16 by 9.
+- **A player whose host the list no longer names is drawn as a page at once,** even from an answer held before.
 
 ## Activity
 
-What is new, from the counts the Daemon keeps, and when marking a Timeline read is due (`markDue`), by the rule `ui.unread.markRead` gives. It never counts items itself, since a window holds only some of them.
+What is new, from the counts the Daemon keeps, and when marking a Timeline read is due (`markDue`), by the rule `ui.unread.markRead` gives. It never counts items itself.
 
 - **A level ranks what calls for the Owner:** Highlight, then Direct, then Message, then Activity. A Timeline's level is the highest with anything unread.
-- **Activity is a dimmer name, never a number.** Counts and labels say what was said. The page's title counts only Highlights and Direct Messages.
-- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest, as the view said.
-- **A mark is never back, and never past what was shown.** It goes up to the last item the view named, even when the Daemon holds a later one.
-- **A muted Timeline counts nothing but a Highlight.** The Owner mutes it for every device with `/mute` and `/unmute`, which give a `Mute` intent, and the runtime writes `ui.unread.muted`, the whole list, as `muting` gives it: nothing when it already is as wanted, and a refusal in words past `mutedCap`, which `/unmute` never meets. `sidebar` carries the list to each Network as `muted`, and `unreadShown` is the one place it is decided: only a Highlight is kept of the counts, so `activityOf`, `networkActivity`, `titleOf`, `saidLevel`, and `labelOf`, which then ends `muted`, show no number of Messages, Direct Messages, or Activity, and a Highlight there still gives its count and its level. The Daemon still counts it, so `/read all` still marks it, and `/next-unread` passes it over, a Highlight unread there too.
-- **`ui.unread.quietBots` leaves what bots said out of the counts.** `sidebar` carries it to each Network as `quietBots`, and `unreadShown` takes it with the mute: the Daemon counts what a bot said apart, in `botDirect` and `botMessages`, so quiet shows `direct` and `messages` alone, and otherwise each adds its bot count, at most `unreadCap + 1`. The bot counts then read zero, and a Highlight, which no bot count holds, stays. So `activityOf`, `networkActivity`, `titleOf`, `saidLevel`, `labelOf`, and the level `contextOf` gives `/next-unread` all follow it, and a Timeline where only bots spoke is passed over, though `/read all` still marks it, as the Daemon still counts it. Off, and until the options are read, everything counts. A `Divider` says in `bots` that nothing unread when it opened was counted but what bots said, and `dividerShown` drops such a divider while bots are quieted, leaving the state as it was.
-- **A removed Network's Timelines are never marked, and call for nothing.** No Client moves their Read Markers, so what is unread there counts toward neither the title nor `/next-unread`.
+- **Activity is a dimmer name, never a number.**
+- **The page's title counts only Highlights and Direct Messages.**
+- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest.
+- **A mark is never back, and never past what was shown,** even when the Daemon holds a later item.
+- **A muted Timeline counts nothing but a Highlight.** `/mute` and `/unmute` give a `Mute` intent, and the runtime writes `ui.unread.muted` as `muting` gives it, or a refusal past `mutedCap`, 256.
+- **`unreadShown` is the one place the mute is decided,** so every count, level, label, and the title follow it, and a muted Timeline's label ends `muted`.
+- **`/read all` still marks a muted Timeline, and `/next-unread` passes it over** unless a Highlight is unread there.
+- **`ui.unread.quietBots` leaves what bots said out of the counts.** Off, and until the options are read, everything counts. A Timeline where only bots spoke is passed over by `/next-unread`, though `/read all` still marks it.
+- **A divider that only bots' Messages opened is dropped while bots are quieted** (`dividerShown`).
+- **A removed Network's Timelines are never marked, and call for nothing,** neither in the title nor for `/next-unread`.
 
 ## Removing a Network
 
 `@iirc/frontend/removal`: the question asked before a Network is removed, as a reducer, `reduceRemoval`, over what the Owner chose and what the Daemon answered.
 
-- **Nothing is removed until the Owner confirms.** Cancelling sends nothing, and a removal in flight is sent once and takes only its own answer.
-- **The Timelines are kept unless the Owner chooses to drop them,** since kept ones can still be dropped later. A Network removed with them kept is asked about only to drop them, which frees its name.
-- **What failed is said in words from the error's tag.** A removal that stands with its Credentials not all forgotten says so, and closes.
+- **Nothing is removed until the Owner confirms.** Cancelling sends nothing.
+- **A removal in flight is sent once and takes only its own answer.**
+- **A removal names the life of the Network it asked about** (`removalOf`), and removes nothing if the Network was removed or added again since.
+- **The Timelines are kept unless the Owner chooses to drop them.** A Network removed with them kept is asked about only to drop them, which frees its name.
+- **What failed is said in words from the error's tag.**
+- **Three outcomes are told in words in place of the question, not shown as failures:** a removal that stands with its Credentials not all forgotten, a Journal that failed so that whether it stands is unknown, and a Network removed or added again since it was asked about.
 
 ## Closing a Timeline
 
 `@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), and the offer to leave a Channel Self is in instead, as a reducer, `reduceLeaving`.
 
-- **A close shows at once.** `reduceClosing` holds each close asked for (`closedBy` finds its Timeline by the name the Daemon gives, so a Target typed otherwise waits for the answer) until it is answered, or, answered closed, until the Timeline changes after it. `closingShown` derives the Timelines `sidebar` leaves out as closed meanwhile, and a refusal or a failure shows the Timeline again.
-
-- **A Channel Self is in is never closed.** The Daemon decides as it steps the close, and its answer, refused as `Joined`, is what offers to leave it, and names the Channel it checked, so `@#iirc` offers and leaves `#iirc`, so a join just before the close is never missed.
-- **Leaving is sent once, only once the Owner chooses it,** as the edit `/part` sends when the Network's Configuration wants the Channel (`leaveOf`), or it would be joined again, and as the `Part` action when it does not, which the Ircd put Self in or Self joined by hand, and which an edit would refuse. It does not close the Channel, since the part arrives in it.
+- **A close shows at once.** `reduceClosing` holds each close asked for until it is answered, or, answered closed, until the Timeline changes after it, and `closingShown` gives the Timelines `sidebar` leaves out meanwhile. A refusal or a failure shows the Timeline again.
+- **A close is matched to its Timeline by the name the Daemon gives** (`closedBy`), so a Target typed otherwise shows only once answered.
+- **A Channel Self is in is never closed.** The Daemon refuses it as `Joined`, naming the Channel it checked, and that refusal offers to leave it, so `@#iirc` offers and leaves `#iirc`.
+- **Leaving is sent once, only once the Owner chooses it** (`leaveOf`): as the edit `/part` sends when the Network's Configuration wants the Channel, and as the `Part` action when it does not. Leaving does not close the Channel.
 - **Only a Channel's or a Direct Message's Timeline has a Target to close it by.** A Network's own, a Direct Message that no longer follows its partner, and a removed Network's have none.
 
 ## Notifications
 
 `notificationsOf` says which items a change added call for a notification, and what it says.
 
-- **Only what calls for the Owner, and only once:** a Highlight, a Direct Message, or an invitation said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once. In a muted Timeline only a Highlight, which an invitation is, notifies, and a Direct Message does not. With `quietBots` on, a Message a bot said (`content.bot`) notifies only as a Highlight; until the options are read it is off, so nothing a bot said is held back for a switch not yet seen. Until the options are read, what is muted is `NotKnown`, and only a Highlight notifies anywhere, so a Timeline muted on another device never notifies first. The runtime gives the mutes the Daemon holds, never one on its way.
-- **Its words are plain text,** by `plainText`: the Timeline and Network, then the sender and text. A newer one for a Timeline replaces the last.
+- **Only what calls for the Owner notifies, and only once:** a Highlight, a Direct Message, or an invitation, said live, not ours, after its Read Marker, in a Timeline the Owner is not looking at. A step given twice notifies once.
+- **In a muted Timeline only a Highlight notifies,** which an invitation is.
+- **With `quietBots` on, a Message a bot said notifies only as a Highlight.**
+- **Until the options are read, only a Highlight notifies anywhere,** and `quietBots` is off. The runtime gives the mutes the Daemon holds, never one on its way.
+- **Its words are plain text** (`plainText`): the Timeline and Network, then the sender and text.
+- **A newer notification for a Timeline replaces the last.**
 
 ## Not yet
 
-- **One Timeline in two Panes,** at two places, as WeeChat and tmux allow. A Pane opens what no other Pane shows.
-- **A layout kept under `ui`,** shared by every device. It is kept per device, and a phone's screen shows one Pane at a time whatever it holds.
-- **More options under `ui`,** such as overrides of the keymap. `keymapOf` is ready to read them, dropping what does not parse.
-- **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone starts `/go `, so a sequence beginning with it would make that wait.
-- **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens. One left open in a hidden page gathers unread items, which the counts show, but no divider until it is opened again.
+- **One Timeline in two Panes,** at two places.
+- **A layout shared by every device.** It is kept per device.
+- **Overrides of the keymap under `ui`.** `keymapOf` reads them, dropping what does not parse.
+- **Chords in sequence,** such as `mod+k mod+o`.
+- **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens, so one left open in a hidden page gains none until it is opened again.
