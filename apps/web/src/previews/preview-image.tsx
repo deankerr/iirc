@@ -165,9 +165,10 @@ const boxStyle = ({ height, width }: Size, atMost?: number): CSSProperties => {
 /**
  * What holds an image, as big as it will be drawn, so what is drawn and what stands in its
  * place until it loads share one box. Given a `box`, it is reserved at once as that shape;
- * without one, it is a placeholder until it is `loaded`.
+ * without one, it is a placeholder until it is `loaded`, and a `still` picture then takes
+ * the room it has, since it may have no size of its own to be as wide as.
  * @param props - How it is drawn, its box if it has one, whether what is in it has
- *   loaded, what is in it, and how it is found.
+ *   loaded, whether it is a still picture, what is in it, and how it is found.
  * @returns The box.
  */
 const Holder = ({
@@ -176,17 +177,20 @@ const Holder = ({
   loaded,
   reference,
   box,
+  still = false,
 }: {
   readonly children: ReactNode;
   readonly drawn: ImageShown["drawn"];
   readonly loaded: boolean;
   readonly reference: (element: HTMLSpanElement | null) => void;
   readonly box: Size | undefined;
+  readonly still?: boolean;
 }) => (
   <span
     className={styles.whole}
     data-loaded={loaded}
     data-reserved={box !== undefined || undefined}
+    data-still={still || undefined}
     ref={reference}
     style={
       box === undefined ? undefined : boxStyle(box, drawn === "Poster" ? undefined : box.width)
@@ -244,7 +248,7 @@ const StillImage = ({
   }
 
   return (
-    <Holder drawn={image.drawn} loaded={loaded} reference={setElement} box={image.dimensions}>
+    <Holder drawn={image.drawn} loaded={loaded} reference={setElement} box={image.dimensions} still>
       {seen ? (
         <OpensLarger alt={image.alt} large={{ _tag: "Image", src: image.src }} link={link}>
           <AriaButton aria-label={`Open ${image.alt} large`} className={styles.press}>

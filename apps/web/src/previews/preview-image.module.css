@@ -51,6 +51,36 @@
   opacity: 0;
 }
 
+/*
+ * A still picture with no shape to reserve, once loaded. One with no size of its own, as an
+ * SVG with only a `viewBox`, adds nothing to the width of a box as wide as what it holds, so
+ * its box takes the room it has instead, and the picture is as wide as that room where it
+ * has no size and its own size where it has. The picture alone is then what is seen and
+ * pressed, so the room beside it stays empty.
+ */
+.whole[data-still][data-loaded="true"]:not([data-reserved]) {
+  width: auto;
+  background: transparent;
+}
+
+.whole[data-still][data-loaded="true"]:not([data-reserved]) .press {
+  pointer-events: none;
+}
+
+.whole[data-still][data-loaded="true"]:not([data-reserved]) .press[data-focus-visible] {
+  outline: none;
+}
+
+.whole[data-still][data-loaded="true"]:not([data-reserved]) .picture {
+  background: var(--color-surface);
+  pointer-events: auto;
+}
+
+.whole[data-still][data-loaded="true"]:not([data-reserved]) .press[data-focus-visible] .picture {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
 /* A reserved box's picture, and the press around it, fill it. */
 .whole[data-reserved] .press {
   position: absolute;
