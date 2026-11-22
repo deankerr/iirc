@@ -7,7 +7,19 @@
  */
 import type { Client } from "@iirc/client";
 import type { FallbackEncoding } from "@iirc/protocol/line";
-import { Cause, Duration, Effect, Exit, Fiber, Layer, Logger, Option, Scope, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  References,
+  Scope,
+  Stream,
+} from "effect";
 import type { LogLevel } from "effect";
 import { TestClock } from "effect/testing";
 
@@ -28,6 +40,8 @@ export const epoch = 1_767_225_600_000;
 
 /** One line logged. */
 interface Logged {
+  /** The `network` it was annotated with, if any. */
+  readonly network: unknown;
   readonly level: LogLevel.LogLevel;
   readonly message: unknown;
 }
@@ -149,8 +163,12 @@ export const startRuntime = <S>(
 export const runTest = async <A, E>(test: (world: World) => Effect.Effect<A, E>): Promise<A> => {
   const world = await Effect.runPromise(makeWorld());
 
-  const keep = Logger.make(({ logLevel, message }) => {
-    world.logged.push({ level: logLevel, message });
+  const keep = Logger.make(({ fiber, logLevel, message }) => {
+    world.logged.push({
+      level: logLevel,
+      message,
+      network: fiber.getRef(References.CurrentLogAnnotations).network,
+    });
   });
 
   return await Effect.runPromise(

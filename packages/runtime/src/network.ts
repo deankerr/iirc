@@ -1037,7 +1037,9 @@ export const startNetwork = <S>(
     const network = yield* makeNetwork(id, folded);
 
     if (folded._tag === "Broken") {
-      yield* Effect.logError("The Network stopped on restart", { reason: folded.reason });
+      yield* Effect.logError("The Network stopped on restart", { reason: folded.reason }).pipe(
+        Effect.annotateLogs({ network: id })
+      );
       yield* stop(network, `The Client threw: ${folded.reason}`);
 
       return network;
