@@ -74,6 +74,25 @@ export const fontStack = (font: FontShown): string => {
 };
 
 /**
+ * Whether a font is one we name as monospace. A family the device has is not: we cannot
+ * know its pitch.
+ * @param font - The font.
+ * @returns Whether it is.
+ */
+const namedMono = (font: FontShown): boolean => isFontName(font) && fonts[font].kind === "mono";
+
+/**
+ * Whether the Composer draws a draft's formatting in the font's own faces, as a Timeline
+ * does: only in a font named as monospace, whose bold, italic, and monospace formatting are
+ * each as wide as its regular face, so the draft lies letter for letter under the
+ * textarea's plain text. In any other font a wider or narrower face would move the caret
+ * off the letters, so the draft marks its formatting without changing a letter's width.
+ * @param font - The font.
+ * @returns Whether it draws the faces.
+ */
+export const draftInFaces = (font: FontShown): boolean => namedMono(font);
+
+/**
  * The fonts to draw IRC's monospace formatting in, as `--font-mono` takes them: the font's
  * own stack when it is monospace, else the device's own monospace font, so text a sender
  * set apart as fixed pitch stays fixed pitch beside a sans font, or a family whose pitch
@@ -82,4 +101,4 @@ export const fontStack = (font: FontShown): string => {
  * @returns The stack, as CSS.
  */
 export const monoStack = (font: FontShown): string =>
-  isFontName(font) && fonts[font].kind === "mono" ? fontStack(font) : deviceFonts.mono;
+  namedMono(font) ? fontStack(font) : deviceFonts.mono;

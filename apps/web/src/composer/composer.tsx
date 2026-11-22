@@ -37,7 +37,9 @@ import {
 } from "@iirc/frontend/formatting";
 import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { formatted, quotedOf } from "@iirc/frontend/render";
+import type { Style } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
+import { Atom } from "effect/reactivity";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
@@ -45,12 +47,12 @@ import { keyOf } from "../keys/press.ts";
 import { keymapState, platform } from "../keys/state.ts";
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, closeUploads, mainView } from "../options/atoms.ts";
-import { enterShown, spellcheckShown } from "../options/ui.ts";
+import { enterShown, spellcheckShown, uiInEffect } from "../options/ui.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { drawnTheme } from "../theme/atoms.ts";
+import { draftInFaces } from "../theme/fonts.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
-import { Inlines } from "../timelines/inlines.tsx";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import {
@@ -72,11 +74,13 @@ import {
 } from "./atoms.ts";
 import { completionState } from "./completion-state.ts";
 import { completionShown, escapeCompletion, moved, pick, tab, typed } from "./completion.ts";
+import { composerPreview } from "./composer-state.ts";
 import { PendingUploads } from "./pending-uploads.tsx";
 import { caretAsked } from "./uploading-state.ts";
 import { addFiles } from "./uploading.ts";
 
 import styles from "./composer.module.css";
+import draftStyles from "./draft.module.css";
 
 /**
  * What a notice's button says.
@@ -514,9 +518,59 @@ const PendingMark = ({ id, words }: { readonly id: string; readonly words: reado
   );
 
 /**
- * The draft as a Timeline draws it, line by line, as each line is sent, behind the
- * textarea, whose own text is not drawn, so the two lie over each other. A space of no
- * width ends it, so a last line with nothing on it is a line here too, as in the textarea.
+ * Whether the draft is drawn in the font's own faces, by the font drawn: the one the
+ * Composer's list highlights, while one is highlighted, else the one in effect.
+ */
+const inFaces = Atom.make((get) => {
+  const listed = get(composerPreview);
+
+  return draftInFaces((listed?._tag === "Font" ? listed.font : undefined) ?? get(uiInEffect).font);
+});
+
+/**
+ * The classes of a run of the draft, from the draft's own styles.
+ * @param style - Its style.
+ * @returns The class names.
+ */
+const draftClasses = (style: Style) => {
+  const flags: readonly (readonly [boolean, string])[] = [
+    [style.bold, draftStyles.bold],
+    [style.italic, draftStyles.italic],
+    [style.underline, draftStyles.underline],
+    [style.strikethrough, draftStyles.strikethrough],
+    [style.monospace, draftStyles.monospace],
+    [style.reverse, draftStyles.reverse],
+  ];
+
+  return flags.flatMap(([on, name]) => (on ? [name] : [])).join(" ");
+};
+
+/**
+ * One line of the draft, each run a text node in a span whose classes say its style, a
+ * link's text too, with its colours as a Timeline draws them.
+ * @param props - The line, as it is sent.
+ * @returns Its runs.
+ */
+const DraftLine = ({ line }: { readonly line: string }) => {
+  const theme = useAtomValue(drawnTheme);
+
+  return formatted(line).map((inline, index) => (
+    // The runs of one line never move, so their order is their identity.
+    // oxlint-disable-next-line react/no-array-index-key
+    <span
+      className={draftClasses(inline.style)}
+      key={index}
+      style={runColours(inline.style, theme)}
+    >
+      {inline.text}
+    </span>
+  ));
+};
+
+/**
+ * The draft, line by line, as each line is sent, behind the textarea, whose own text is not
+ * drawn, so the two lie over each other. A space of no width ends it, so a last line with
+ * nothing on it is a line here too, as in the textarea.
  * @param props - The draft's text.
  * @returns Its lines.
  */
@@ -527,7 +581,7 @@ const DraftDrawn = ({ text }: { readonly text: string }) => (
       // oxlint-disable-next-line react/no-array-index-key
       <Fragment key={index}>
         {index === 0 ? null : "\n"}
-        <Inlines inlines={formatted(line)} links={false} />
+        <DraftLine line={line} />
       </Fragment>
     ))}
     {"\u200B"}
@@ -535,7 +589,9 @@ const DraftDrawn = ({ text }: { readonly text: string }) => (
 );
 
 /**
- * The draft drawn behind the textarea while it holds formatting, and nothing otherwise.
+ * The draft drawn behind the textarea while it holds formatting, and nothing otherwise: in
+ * the font's own faces in a font named as monospace, and elsewhere with marks that leave
+ * every letter where the textarea puts it.
  * @param props - The draft's text, and the element's ref, which scrolls with the textarea.
  * @returns The backdrop.
  */
@@ -545,12 +601,20 @@ const Backdrop = ({
 }: {
   readonly backdrop: RefObject<HTMLDivElement | null>;
   readonly text: string;
-}) =>
-  hasFormatting(text) ? (
-    <div aria-hidden="true" className={styles.backdrop} data-composer-backdrop="" ref={backdrop}>
+}) => {
+  const faces = useAtomValue(inFaces);
+
+  return hasFormatting(text) ? (
+    <div
+      aria-hidden="true"
+      className={`${styles.backdrop} ${faces ? draftStyles.faces : draftStyles.marks}`}
+      data-composer-backdrop=""
+      ref={backdrop}
+    >
       <DraftDrawn text={text} />
     </div>
   ) : null;
+};
 
 /**
  * The colours offered for the composer's selection, or for what is typed next: the

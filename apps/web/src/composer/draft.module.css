@@ -1,0 +1,65 @@
+/*
+ * A draft's formatting, drawn behind the textarea, whose plain text must lie over it letter
+ * for letter, or the caret drifts from the letters. Nothing here changes a letter's width
+ * but a real face, and real faces are drawn only in a font named as monospace, where every
+ * face is as wide as the regular one.
+ */
+
+/* In a font named as monospace: the faces, as a Timeline draws them. */
+.faces .bold {
+  font-weight: 700;
+}
+
+.faces .italic {
+  font-style: italic;
+}
+
+.faces .monospace {
+  font-family: var(--font-mono);
+}
+
+/* In any other font, bold is the regular face made heavier by a stroke of its own colour. */
+.marks .bold {
+  -webkit-text-stroke: 0.04em currentColor;
+}
+
+/*
+ * And italic is a dotted line at the foot of the run, below where a solid underline stands,
+ * so a run both italic and underlined shows both.
+ */
+.marks .italic {
+  background-image: linear-gradient(to right, currentColor 50%, transparent 50%);
+  background-position: 0 100%;
+  background-repeat: repeat-x;
+  background-size: 0.25em max(1px, 0.07em);
+}
+
+/* Fixed pitch keeps its tint, as a Timeline draws it, in a font named as monospace. */
+.faces .monospace {
+  background-color: var(--color-surface);
+}
+
+/*
+ * In any other font it keeps the Composer's own font, so its tint is all that marks it:
+ * the page's ground, since the Composer's is the surface a Timeline tints it with.
+ */
+.marks .monospace {
+  background-color: var(--color-background);
+}
+
+.underline {
+  text-decoration: underline;
+}
+
+.strikethrough {
+  text-decoration: line-through;
+}
+
+.underline.strikethrough {
+  text-decoration: underline line-through;
+}
+
+.reverse {
+  background-color: var(--color-text);
+  color: var(--color-background);
+}
