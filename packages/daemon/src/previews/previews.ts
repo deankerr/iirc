@@ -638,14 +638,19 @@ interface Claimed {
 }
 
 /**
- * Whether a kept record is served as it is, and if not, whether it is fetched again.
+ * Whether a kept record is fetched again rather than served as it is. One whose image was
+ * evicted is, in any Timeline, since the Owner was shown it once; in a Timeline that waits
+ * for a press, age alone never is.
  * @param kept - The record.
  * @param now - The time, in milliseconds since the epoch.
- * @param waits - Whether it is in a Timeline that waits for a press, which never fetches
- * again.
+ * @param waits - Whether it is in a Timeline that waits for a press.
  * @returns Whether it is stale.
  */
 const stale = (kept: Kept, now: number, waits: boolean): boolean => {
+  if (kept.fetched === null) {
+    return true;
+  }
+
   if (waits) {
     return false;
   }
@@ -863,8 +868,9 @@ export const layerPreviews = Layer.effect(Previews)(
 
     /**
      * Decides what an ask or a press of a link answers and whether it starts a fetch, in one
-     * turn. A link that is being fetched or kept is served as it is, and one not kept in a
-     * Timeline that waits is waiting, unless pressed, which starts its fetch.
+     * turn. A link that is being fetched or kept fresh is served as it is, and one not kept in
+     * a Timeline that waits is waiting, unless pressed, which starts its fetch. A press of a
+     * kept link starts nothing, even of a stale one, which only an ask fetches again.
      * @param key - The link it is kept under.
      * @param waits - Whether its Timeline waits for a press.
      * @param pressed - Whether it is a press rather than an ask.
@@ -889,7 +895,7 @@ export const layerPreviews = Layer.effect(Previews)(
             .shown(key, now)
             .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
 
-          if (Option.isSome(kept) && !stale(kept.value, now, waits)) {
+          if (Option.isSome(kept) && (pressed || !stale(kept.value, now, waits))) {
             return {
               publish: false,
               started: undefined,

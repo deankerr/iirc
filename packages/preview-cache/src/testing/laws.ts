@@ -245,10 +245,10 @@ const imaged = (
   ...overrides,
 });
 
-// What an eviction leaves of a record: no image, and fetched at the epoch.
+// What an eviction leaves of a record: no image, and no time it was fetched.
 const evicted = (kept: Kept): Kept => ({
   ...kept,
-  fetched: 0,
+  fetched: null,
   image: null,
   state:
     kept.state._tag === "Ready"
@@ -342,7 +342,7 @@ const evict: PreviewCacheLaw = {
         Option.some({ ...evicted(first), shown: 5000 })
       );
     }),
-  name: "evict drops an image from every record that holds it, makes them stale, and changes nothing else",
+  name: "evict drops an image from every record that holds it, marks them evicted, and changes nothing else",
 };
 
 /** The laws every Preview cache adapter keeps. */
