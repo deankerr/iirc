@@ -173,7 +173,7 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 - **A held read changes nothing.** It never fetches, claims a flight, writes the cache, or publishes a change, and it does not count as showing a Preview, so it keeps no image from eviction.
 - **A held read answers a link being fetched as its flight's state,** `Pending`, or the old ready Preview while it is fetched again, and a kept one as it is, whatever its age. Otherwise a link is `WaitingForPress` in a Timeline that waits, and `NotHeld` in any other.
 - **A held read sees a link settling meanwhile,** in flight or in the cache.
-- **A Direct Message with no entry in `ui.previews.timelines` waits for a press.** A kept link is served whatever its age, and one being fetched as its fetch. A Direct Message with an entry behaves as a Channel.
+- **A Direct Message with no entry in `ui.previews.timelines` waits for a press.** A kept link is served whatever its age, unless its image was evicted, and one being fetched as its fetch. A press of a kept link is `NotWaiting`. A Direct Message with an entry behaves as a Channel.
 - **A press starts its fetch as an ask would,** under the Timeline's mode, and is decided in the same turn as claiming the fetch, so two presses fetch once.
 - **Each change of a state is published** to every follower of the changes stream, `Pending` as a fetch starts and its outcome as it ends.
 - **A fetch runs in the Daemon's Scope,** so it ends when the Daemon stops.
@@ -200,7 +200,7 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 - **Whatever goes wrong with the image leaves the Preview text only,** with a warning in the log.
 - **A Preview kept before the mode became `on` gains its image when it is next fetched,** and one kept before images carried a size gains its `dimensions` the same way.
 - **Images stay within `previews.maxTotal`,** which counts the bytes the cache refers to, never an Upload's. Before an image is put, the Previews shown least recently lose their images, one hash at a time, until it fits. Images are put one at a time, so the total is exact.
-- **An evicted Preview serves its text,** and its image is fetched again the next time it is asked, in a Timeline that does not wait for a press. An Upload of the same bytes keeps its link.
+- **An evicted Preview serves its text,** and its image is fetched again the next time it is asked, in any Timeline, even one that waits for a press, however recently it was fetched. A held read fetches nothing. An Upload of the same bytes keeps its link.
 - **An image larger than `previews.maxTotal` is not kept,** and evicts nothing.
 - **A cache that cannot be read or written fails the image,** which leaves the Preview text only.
 - **An image is served on the API's own origin,** at `/api/previews/images/<hash>`, so no browser fetches the host it came from.

@@ -23,11 +23,11 @@ export type Settled = typeof Settled.Type;
 
 /**
  * A link's record: what its fetch came to, the hash of the image it holds in the byte store,
- * or `null` for none, when it was fetched, and when it was last shown, each as milliseconds
- * since the epoch.
+ * or `null` for none, when it was fetched, or `null` once its image was evicted, and when it
+ * was last shown, each as milliseconds since the epoch.
  */
 export const Kept = Schema.Struct({
-  fetched: Schema.Int,
+  fetched: Schema.NullOr(Schema.Int),
   image: Schema.NullOr(Sha256),
   link: Schema.String,
   shown: Schema.Int,
@@ -81,10 +81,10 @@ export interface PreviewCacheService {
   readonly images: Effect.Effect<readonly Held[], PreviewCacheFailed>;
   /**
    * Drops the image with this hash from every record that holds it, in one write: the
-   * record's `image` and its Ready Preview's `image` become `null`, and `fetched` becomes `0`,
-   * the epoch, so the record reads as older than any ask would serve and is fetched again,
-   * while what it says of the page is still served. When it was shown, and everything else,
-   * is as it was. A hash no record holds changes nothing.
+   * record's `image` and its Ready Preview's `image` become `null`, and `fetched` becomes
+   * `null`, so whatever asks can tell the record was evicted, however old or new it is, and
+   * fetch it again while what it says of the page is still served. When it was shown, and
+   * everything else, is as it was. A hash no record holds changes nothing.
    */
   readonly evict: (hash: Sha256) => Effect.Effect<void, PreviewCacheFailed>;
 }

@@ -4267,3 +4267,99 @@ describe("what is held of Previews, over a real server", () => {
     expect(result).toStrictEqual({ asked: [], held: [["WaitingForPress"]] });
   });
 });
+
+describe("an evicted Preview in a Direct Message that waits, over a real server", () => {
+  it("fetches an evicted Preview again on an ask in a Direct Message that waits, and not one as old that kept its image", async () => {
+    const images = { aa: tinted(1), bb: tinted(2), cc: tinted(3) };
+
+    // Two links pressed and kept in a Direct Message, with room for one image or for both,
+    // then, two days on, a held read, a press, and an ask of the first, an ask of a link
+    // never pressed, and a press of that one, which shows what the ask of the first began.
+    // The cache is a SQLite file, as the Daemon keeps it.
+    const later = async (room: number) =>
+      await runClocked(
+        Effect.gen(function* () {
+          const dataDir = yield* temporaryDirectory;
+
+          const previews = yield* makeSqlitePreviewCache(`${dataDir}/previews.sqlite`).pipe(
+            Effect.provide(BunFileSystem.layer),
+            Effect.orDie
+          );
+
+          const served = yield* serve(pictured(images), { previews });
+
+          yield* TestClock.setTime(first);
+          yield* setBucket(served);
+          yield* setOption(served, "previews.maxTotal", room);
+          yield* setPreviews(served, "on");
+          yield* talk(
+            served,
+            ["aa", "bb", "cc"].map((name) => `see ${pageOf(name)}`),
+            ["iirc"]
+          );
+          const [a, b, c] = yield* live(messages(served, 3, "Direct"));
+
+          if (a === undefined || b === undefined || c === undefined) {
+            return yield* Effect.die(new Error("a Message is missing"));
+          }
+
+          yield* expecting(press(served, a, 0), 200);
+          yield* live(imaged(served, a));
+          yield* TestClock.adjust(1000);
+          yield* expecting(press(served, b, 0), 200);
+          yield* live(imaged(served, b));
+          yield* TestClock.adjust(2 * day);
+
+          const held = (yield* holds(served, [a]))[0]?.previews ?? [];
+          const pressedAgain = yield* refusal(yield* press(served, a, 0));
+          const asked = yield* asking(served, a);
+          const never = yield* asking(served, c);
+          const again = yield* live(imaged(served, a));
+
+          yield* expecting(press(served, c, 0), 200);
+          yield* live(imaged(served, c));
+
+          return {
+            again: again.map((one) => imageOf(one.state)?.hash),
+            asked: asked.map((one) => [titles([one])[0], imageOf(one.state)?.hash ?? null]),
+            fetched: (yield* served.asked).map(({ link }) => link),
+            held: held.map((one) =>
+              one.state._tag === "Ready" ? (one.state.preview.image?.hash ?? null) : null
+            ),
+            never: never.map(stateOf),
+            pressedAgain,
+          };
+        })
+      );
+
+    const kept = [
+      pageOf("aa"),
+      "https://cdn.example/aa.png",
+      pageOf("bb"),
+      "https://cdn.example/bb.png",
+    ];
+
+    const pressed = [pageOf("cc"), "https://cdn.example/cc.png"];
+
+    const same = {
+      again: [sha256(images.aa)],
+      never: [{ _tag: "WaitingForPress" }],
+      pressedAgain: [409, "NotWaiting"],
+    };
+
+    expect({ evicted: await later(tintedSize), kept: await later(2 * tintedSize) }).toStrictEqual({
+      evicted: {
+        ...same,
+        asked: [["aa", null]],
+        fetched: [...kept, pageOf("aa"), "https://cdn.example/aa.png", ...pressed],
+        held: [null],
+      },
+      kept: {
+        ...same,
+        asked: [["aa", sha256(images.aa)]],
+        fetched: [...kept, ...pressed],
+        held: [sha256(images.aa)],
+      },
+    });
+  });
+});

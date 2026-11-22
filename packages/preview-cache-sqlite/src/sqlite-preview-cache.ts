@@ -16,37 +16,62 @@ import { SqlError } from "effect/sql/SqlError";
  * The version of the file's layout, in SQLite's `user_version`. A file of an earlier version
  * that has a step to this one is brought up to it, and one of any other is made again.
  */
-const layoutVersion = 7;
+const layoutVersion = 8;
 
-// The step from each earlier version that has one to the next, each the layout of this
-// table with Previews as that version wrote them. A file is brought up through every step
-// from its own version. A row that is not JSON is left as it is by each, to fail its own
-// read as it did before.
-const steps = new Map([
+// The step from each earlier version that has one to the next, each the statements that
+// bring this table, with Previews as that version wrote them, to the next. A file is brought
+// up through every step from its own version. A row that is not JSON is left as it is by
+// each, to fail its own read as it did before.
+const steps = new Map<number, readonly string[]>([
   // From 4: each Preview's `media` is its `stream`.
   [
     4,
-    `UPDATE previews SET state = json_set(
+    [
+      `UPDATE previews SET state = json_set(
       json_remove(state, '$.preview.media'),
       '$.preview.stream',
       json_extract(state, '$.preview.media')
     ) WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview.media') IS NOT NULL END`,
+    ],
   ],
   // From 5: a Preview's image, which had no size, has none stated now, until the Preview is
   // fetched again. A row whose image is none is left as it is.
   [
     5,
-    `UPDATE previews SET state = json_set(
+    [
+      `UPDATE previews SET state = json_set(
       state,
       '$.preview.image.dimensions',
       json('null')
     ) WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview.image') = 'object' END`,
+    ],
   ],
   // From 6: a Preview, which was never a file, states no size.
   [
     6,
-    `UPDATE previews SET state = json_set(state, '$.preview.size', json('null'))
+    [
+      `UPDATE previews SET state = json_set(state, '$.preview.size', json('null'))
     WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview') = 'object' END`,
+    ],
+  ],
+  // From 7: `fetched` may be NULL, which SQLite allows only of a table made again. A record
+  // fetched at 0, the epoch, was evicted, so it is NULL now.
+  [
+    7,
+    [
+      `CREATE TABLE previews_next (
+  link TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  image TEXT,
+  fetched INTEGER,
+  shown INTEGER NOT NULL
+) STRICT`,
+      `INSERT INTO previews_next (link, state, image, fetched, shown)
+      SELECT link, state, image, nullif(fetched, 0), shown FROM previews`,
+      "DROP TABLE previews",
+      "ALTER TABLE previews_next RENAME TO previews",
+      "CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL",
+    ],
   ],
 ]);
 
@@ -81,11 +106,12 @@ const isDamage = (error: SqlError) =>
     onSome: ({ errno }) => damaged.has(errno % 256),
   });
 
+// `fetched` is NULL once a record's image was evicted.
 const layout = `CREATE TABLE previews (
   link TEXT PRIMARY KEY,
   state TEXT NOT NULL,
   image TEXT,
-  fetched INTEGER NOT NULL,
+  fetched INTEGER,
   shown INTEGER NOT NULL
 ) STRICT`;
 
@@ -236,7 +262,8 @@ export const makeSqlitePreviewCache = (
               case "Earlier": {
                 return Effect.forEach(
                   [...steps].filter(([from]) => from >= now.version),
-                  ([, step]) => sql.unsafe(step),
+                  ([, step]) =>
+                    Effect.forEach(step, (statement) => sql.unsafe(statement), { discard: true }),
                   { discard: true }
                 ).pipe(Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`)));
               }
@@ -286,7 +313,7 @@ export const makeSqlitePreviewCache = (
         sql`
           UPDATE previews
           SET image = NULL,
-              fetched = 0,
+              fetched = NULL,
               state = json_set(state, '$.preview.image', json('null'))
           WHERE image = ${hash}
         `.pipe(Effect.mapError(failed("cannot drop a Preview's image")), Effect.asVoid),

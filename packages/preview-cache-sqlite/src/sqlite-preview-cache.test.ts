@@ -142,6 +142,43 @@ describe("the SQLite Preview cache", () => {
 });
 
 describe("a file of the layout before", () => {
+  it("reads a record that layout evicted as evicted, one it fetched as it was, and evicts again after", async () => {
+    const other = Schema.decodeSync(Kept.fields.image.members[0])("cd".repeat(32));
+    const plain = { ...kept, link: "https://example.com/plain" };
+
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        // Layout 7 kept `fetched` NOT NULL, and an eviction set it to 0.
+        raw(
+          file,
+          `CREATE TABLE previews (link TEXT PRIMARY KEY, state TEXT NOT NULL, image TEXT,
+             fetched INTEGER NOT NULL, shown INTEGER NOT NULL) STRICT;
+           CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL;
+           INSERT INTO previews VALUES
+             ('${link}', '${JSON.stringify({ _tag: "Ready", preview: page })}', NULL, 0, 2000),
+             ('${plain.link}', '${JSON.stringify(plain.state)}', NULL, 1000, 2000),
+             ('${sized.link}x', '${JSON.stringify(sized.state)}', '${other}', 1500, 2500);
+           PRAGMA user_version = 7`
+        );
+
+        yield* using(file, (cache) =>
+          Effect.gen(function* () {
+            expect(yield* cache.get(link)).toStrictEqual(Option.some({ ...kept, fetched: null }));
+            expect(yield* cache.get(plain.link)).toStrictEqual(Option.some(plain));
+            expect(yield* cache.images).toStrictEqual([{ hash: other, shown: 2500, size: 1234 }]);
+
+            yield* cache.evict(other);
+            expect(
+              (yield* cache.get(`${sized.link}x`)).pipe(Option.map((one) => one.fetched))
+            ).toStrictEqual(Option.some(null));
+          })
+        );
+      })
+    );
+  });
+
   it("reads a Preview kept before files with no size, and a failure as it was", async () => {
     const failure: Kept = {
       ...kept,

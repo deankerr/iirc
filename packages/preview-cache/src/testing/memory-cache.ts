@@ -8,13 +8,13 @@ import { Effect, Option, Ref } from "effect";
 import type { Held, Kept, PreviewCacheService } from "../cache.ts";
 
 /**
- * A record with its image dropped and its time of fetching the epoch.
+ * A record with its image dropped and no time it was fetched.
  * @param kept - The record.
  * @returns The record, as an eviction leaves it.
  */
 const evicted = (kept: Kept): Kept => ({
   ...kept,
-  fetched: 0,
+  fetched: null,
   image: null,
   state:
     kept.state._tag === "Ready"
