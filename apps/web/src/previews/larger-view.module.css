@@ -52,11 +52,12 @@
 /*
  * An image is its own close control, nothing but the image, which a press closes: the
  * control spans the view's width with the image in its middle, and only the image takes a
- * press or shows the control's focus. A video's wrapper is a column, so what it holds
- * shrinks with it where the view is short.
+ * press or shows the control's focus. It and a video's wrapper are columns, so what they
+ * hold shrinks with them where the view is short.
  */
 .closes {
-  display: block;
+  display: flex;
+  flex-direction: column;
   align-self: stretch;
   min-height: 0;
   max-width: 100%;
