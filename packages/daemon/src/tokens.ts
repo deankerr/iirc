@@ -1,7 +1,8 @@
 /**
  * Random bearer tokens, API keys and sign-ins alike: 256 random bits, given out
  * once, and kept only as their SHA-256, which a presented token is compared against in
- * constant time.
+ * constant time. A token of 256 random bits cannot be guessed, so a plain hash keeps it as
+ * well as a password hash would.
  *
  * @packageDocumentation
  */
