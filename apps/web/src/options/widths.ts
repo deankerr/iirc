@@ -1,16 +1,21 @@
 /**
  * The widths the Owner drags, the nick column and the members' panel: each one in effect,
  * or the one a drag holds while it lasts, which is never written, and writing one as a drag
- * ends or a key moves it, as any change of a `ui` option is written.
+ * ends or a key moves it, as any change of a `ui` option is written, or saying in the Composer
+ * why it was not.
  *
  * @packageDocumentation
  */
 import { membersWidthBounds, nickWidthBounds } from "@iirc/api";
+import { placeIn, reduceComposers } from "@iirc/frontend/composer";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
+import type { AtomRegistry } from "effect/reactivity";
 
 import { runtime } from "../app/runtime.ts";
+import { composerState } from "../composer/composer-state.ts";
+import { timelinesState } from "../timelines/atoms.ts";
 import { signedOut } from "./atoms.ts";
 import type { Outcome } from "./atoms.ts";
 import { deviceUi } from "./device.ts";
@@ -57,39 +62,64 @@ export const widthsShown = Atom.make((get): Readonly<Record<WidthOption, number>
 });
 
 /**
- * Writes a width, within its bounds, as a drag ends or a key moves it: this device's own
- * where it overrides the option, else the one every device shares, and nothing where it
- * is already in effect. What the drag held is drawn until the write is over, so the width
- * never steps back while the Daemon answers, and a write refused leaves it as it was.
+ * Lets go of what a drag of an option holds, unwritten, as a drag the browser cancels or
+ * whose grip goes.
+ * @param registry - The registry.
+ * @param option - The option dragged.
  */
-export const resizeWidth = runtime
-  .fn((asked: { readonly option: WidthOption; readonly width: number }, get) =>
-    Effect.gen(function* () {
-      const { registry } = get;
-      const held = registry.get(widthDragged);
+export const dropDrag = (registry: AtomRegistry.AtomRegistry, option: WidthOption) => {
+  if (registry.get(widthDragged)?.option === option) {
+    registry.set(widthDragged, undefined);
+  }
+};
 
-      // A drag begun since holds a width of its own, which this leaves to it.
-      const letGo = Effect.sync(() => {
-        if (registry.get(widthDragged) === held) {
-          registry.set(widthDragged, undefined);
+/**
+ * Writes a width of one option, within its bounds, as a drag ends or a key moves it: this
+ * device's own where it overrides the option, else the one every device shares, and nothing
+ * where it is already in effect. What the drag held is drawn until the write is over, so the
+ * width never steps back while the Daemon answers. A write refused leaves the width as it
+ * was, and the Composer says why. Each option has its own, so a write of one never ends a
+ * write of the other, and a newer write of the same option ends the one before.
+ */
+export const resizeWidth = Atom.family((option: WidthOption) =>
+  runtime
+    .fn((asked: number, get) =>
+      Effect.gen(function* () {
+        const { registry } = get;
+        const held = registry.get(widthDragged);
+
+        // A drag begun since holds a width of its own, which this leaves to it.
+        const letGo = Effect.sync(() => {
+          if (registry.get(widthDragged) === held) {
+            registry.set(widthDragged, undefined);
+          }
+        });
+
+        const width = boundedWidth(option, asked);
+        const overrides = registry.get(deviceUi)[option] !== undefined;
+        const device = writtenOnDevice(option, width, overrides);
+        const unchanged = registry.get(uiInEffect)[option] === width;
+        const done: Outcome = { _tag: "Done" };
+
+        const outcome = yield* (
+          unchanged ? Effect.succeed(done) : changeUi(registry, { device, option, value: width })
+        ).pipe(Effect.ensuring(letGo));
+
+        if (outcome._tag === "SignedOut") {
+          signedOut(registry);
         }
-      });
 
-      const width = boundedWidth(asked.option, asked.width);
-      const overrides = registry.get(deviceUi)[asked.option] !== undefined;
-      const device = writtenOnDevice(asked.option, width, overrides);
-      const unchanged = registry.get(uiInEffect)[asked.option] === width;
-      const done: Outcome = { _tag: "Done" };
-
-      const outcome = yield* (
-        unchanged
-          ? Effect.succeed(done)
-          : changeUi(registry, { device, option: asked.option, value: width })
-      ).pipe(Effect.ensuring(letGo));
-
-      if (outcome._tag === "SignedOut") {
-        signedOut(registry);
-      }
-    })
-  )
-  .pipe(Atom.keepAlive);
+        if (outcome._tag === "NotDone") {
+          registry.set(
+            composerState,
+            reduceComposers(registry.get(composerState), {
+              _tag: "Noticed",
+              message: outcome.message,
+              timeline: placeIn(registry.get(timelinesState)),
+            })
+          );
+        }
+      })
+    )
+    .pipe(Atom.keepAlive)
+);

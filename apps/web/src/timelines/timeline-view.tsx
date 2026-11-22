@@ -20,6 +20,7 @@ import { flushSync } from "react-dom";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown } from "../options/ui.ts";
+import { widthDragged } from "../options/widths.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { ScrollerProvider } from "../previews/near-view.ts";
 import { leaveTarget } from "../search/atoms.ts";
@@ -287,6 +288,7 @@ const Lines = ({
   const size = useAtomValue(sizeShown);
   const leading = useAtomValue(leadingShown);
   const line = useAtomValue(lineShown);
+  const nickDragged = useAtomValue(widthDragged)?.option === "timeline.nickWidth";
   const cap = useAtomValue(windowCapOf);
   // Whether the page before can be read without asking, as scrolling near the top, or a
   // view that cannot be scrolled, reads it. Where it cannot, the view offers to read it on
@@ -890,8 +892,9 @@ const Lines = ({
     }));
   });
 
-  // A log too narrow for columns draws its rows as `inline` does.
-  const drawn = line === "columns" && narrow ? "inline" : line;
+  // A log too narrow for columns draws its rows as `inline` does, but for while the nick
+  // column is dragged, so the grip stays under the pointer until it lets go.
+  const drawn = line === "columns" && narrow && !nickDragged ? "inline" : line;
 
   return (
     <div className={styles.log}>

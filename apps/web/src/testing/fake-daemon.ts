@@ -841,6 +841,8 @@ export const fakeDaemon = () => {
     readFailures: 0,
     /** Each Timeline marked read, as its body said it, in order. */
     reads,
+    /** Whether each change of a `ui` option is refused, as a Journal that cannot record it does. */
+    refuseUi: false,
     /** Each removal of a Network, with whether its Timelines were kept. */
     removals,
     /** Whether `said` answers at all. */
@@ -1562,6 +1564,10 @@ export const fakeDaemon = () => {
     const ifSequence = url.searchParams.get("ifSequence");
 
     uiChanges.push({ ifSequence, route: `${method} ${one.option}` });
+
+    if (daemon.refuseUi) {
+      return json(500, { _tag: "JournalFailed", reason: "the disk is full" });
+    }
 
     if (ifSequence !== null && Number(ifSequence) !== daemon.ui.sequence) {
       return json(409, { _tag: "UiChanged", sequence: daemon.ui.sequence });

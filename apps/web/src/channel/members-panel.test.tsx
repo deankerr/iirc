@@ -590,6 +590,24 @@ describe("a Pane's members", () => {
     });
   });
 
+  // Catches a width the Daemon refused that snaps back with no word of why.
+  it("say in the Composer why a width was not written, and draw the one in force", async () => {
+    const { daemon, registry } = await signedIn();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 800);
+    await press(toggle());
+    await settled(() => grip() !== null);
+    daemon.refuseUi = true;
+    await key(grip(), "ArrowLeft");
+    await settled(() => document.body.textContent.includes("could not record"));
+
+    expect({
+      changes: daemon.uiChanges.map((one) => one.route),
+      now: grip()?.getAttribute("aria-valuenow"),
+    }).toStrictEqual({ changes: ["PUT members.width"], now: "18" });
+  });
+
   // Catches a grip on members that a drag cannot resize: over a narrow Pane, or a sheet.
   it("have no edge to drag over a narrow Pane or as a sheet", async () => {
     const { registry } = await signedIn();

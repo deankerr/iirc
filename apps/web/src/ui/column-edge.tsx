@@ -2,7 +2,8 @@
  * The grip on a width the Owner drags, the nick column's rule or the members' panel's
  * edge, as the Sidebar's edge is dragged: a window splitter that the pointer drags, or that
  * the arrows, Home, and End move once focused. A drag draws the width as it goes, in whole
- * `0`s of the font, and writes the option once, as it ends.
+ * `0`s of the font, and writes the option once, as the pointer lets go. A drag the browser
+ * cancels writes nothing.
  *
  * @packageDocumentation
  */
@@ -12,6 +13,7 @@ import type { KeyboardEvent, PointerEvent } from "react";
 
 import {
   boundedWidth,
+  dropDrag,
   resizeWidth,
   widthBounds,
   widthDragged,
@@ -95,22 +97,22 @@ export const ColumnEdge = ({
   readonly option: WidthOption;
 }) => {
   const width = useAtomValue(widthsShown)[option];
-  const resize = useAtomSet(resizeWidth);
+  const resize = useAtomSet(resizeWidth(option));
   const registry = useContext(RegistryContext);
   const zero = useRef<HTMLSpanElement>(null);
   // Where a drag began. A ref, since a drag is no state anything else derives from.
   const dragged = useRef<Drag | undefined>(undefined);
   const { maximum, minimum } = widthBounds[option];
 
-  // A grip that goes mid-drag, as a Timeline drawn too narrow for columns, ends its drag.
+  // A grip that goes mid-drag lets go of what it held, unwritten.
   useEffect(
     () => () => {
       if (dragged.current !== undefined) {
         dragged.current = undefined;
-        resize({ option, width: registry.get(widthsShown)[option] });
+        dropDrag(registry, option);
       }
     },
-    [option, registry, resize]
+    [option, registry]
   );
 
   const onPointerDown = (event: PointerEvent<HTMLHRElement>) => {
@@ -136,10 +138,19 @@ export const ColumnEdge = ({
     }
   };
 
-  const onPointerEnd = () => {
+  // Letting go writes the width drawn, and nothing else ends a drag but drops it unwritten:
+  // the browser cancelling it, or the capture lost without a release.
+  const onPointerUp = () => {
     if (dragged.current !== undefined) {
       dragged.current = undefined;
-      resize({ option, width: registry.get(widthsShown)[option] });
+      resize(registry.get(widthsShown)[option]);
+    }
+  };
+
+  const onPointerDropped = () => {
+    if (dragged.current !== undefined) {
+      dragged.current = undefined;
+      dropDrag(registry, option);
     }
   };
 
@@ -152,7 +163,7 @@ export const ColumnEdge = ({
 
     if (next !== undefined) {
       event.preventDefault();
-      resize({ option, width: next });
+      resize(next);
     }
   };
 
@@ -169,11 +180,11 @@ export const ColumnEdge = ({
         aria-valuenow={width}
         className={`${styles.edge} ${className}`}
         onKeyDown={onKeyDown}
-        onLostPointerCapture={onPointerEnd}
-        onPointerCancel={onPointerEnd}
+        onLostPointerCapture={onPointerDropped}
+        onPointerCancel={onPointerDropped}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={onPointerEnd}
+        onPointerUp={onPointerUp}
         tabIndex={0}
       />
       <span aria-hidden className={styles.zero} ref={zero} />

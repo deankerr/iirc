@@ -135,6 +135,14 @@
   pointer-events: auto;
 }
 
+/* On a touch screen, the grip takes the room either side of the rule and no more, so a nick
+   and what was said keep their taps. */
+@media (pointer: coarse) {
+  .edgeRow > .edge::before {
+    inset: 0 calc(-1 * var(--space-3));
+  }
+}
+
 .activity,
 .refused,
 .session,

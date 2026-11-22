@@ -2002,6 +2002,55 @@ describe("where the view stands as its rows wrap again", () => {
     expect(following(registry)).toBeTruthy();
   });
 
+  // Catches a nick drag that widens the columns past what the log holds: the rows going
+  // inline took the grip from under the pointer and wrote the width mid-drag.
+  it("stays in columns while the nick column is dragged wider than the log holds, writing the width once the pointer lets go, and nothing for a drag the browser cancels", async () => {
+    const { daemon } = await opened();
+    const grip = nickGrip();
+
+    await act(async () => {
+      grip?.dispatchEvent(at("pointerdown", 200));
+      grip?.dispatchEvent(at("pointermove", 240));
+      await Promise.resolve();
+    });
+    // As wide as the drag made the nick column: too wide for the log.
+    await columnsTake(820);
+
+    const held = {
+      changes: daemon.uiChanges.length,
+      grip: nickGrip() === grip,
+      line: logOf().dataset.line,
+    };
+
+    await act(async () => {
+      grip?.dispatchEvent(at("pointerup", 240));
+      await Promise.resolve();
+    });
+    await settled(() => daemon.ui.options["timeline.nickWidth"] === 21);
+
+    const released = logOf().dataset.line;
+
+    await columnsTake(600);
+    await act(async () => {
+      nickGrip()?.dispatchEvent(at("pointerdown", 200));
+      nickGrip()?.dispatchEvent(at("pointermove", 160));
+      nickGrip()?.dispatchEvent(at("pointercancel", 160));
+      await Promise.resolve();
+    });
+
+    expect({
+      cancelled: nickGrip()?.getAttribute("aria-valuenow"),
+      changes: daemon.uiChanges.map((one) => one.route),
+      held,
+      released,
+    }).toStrictEqual({
+      cancelled: "21",
+      changes: ["PUT timeline.nickWidth"],
+      held: { changes: 0, grip: true, line: undefined },
+      released: "inline",
+    });
+  });
+
   it("stays at the latest as its rows wrap again, though the browser moved the log as its box changed", async () => {
     const { registry } = await opened();
     const bottom = () => layout.content - layout.view;

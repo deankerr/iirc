@@ -26,6 +26,14 @@
   left: calc(-1 * var(--border-width));
 }
 
+/* On a touch screen, the grip reaches a finger's size into the members and no further over
+   the Timeline than its rows' padding, so a row's menu keeps its taps. */
+@media (pointer: coarse) {
+  .beside > .edge::before {
+    inset: 0 calc(-1 * var(--target-size)) 0 calc(-1 * var(--space-3));
+  }
+}
+
 /* Over a narrow Pane's Timeline, under its bar, at its right. */
 .floating {
   position: absolute;
