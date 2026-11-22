@@ -4272,9 +4272,10 @@ describe("an evicted Preview in a Direct Message that waits, over a real server"
   it("fetches an evicted Preview again on an ask in a Direct Message that waits, and not one as old that kept its image", async () => {
     const images = { aa: tinted(1), bb: tinted(2), cc: tinted(3) };
 
-    // Two links pressed and kept in a Direct Message, with room for one image or for both,
-    // then, two days on, a held read, a press, and an ask of the first, an ask of a link
-    // never pressed, and a press of that one, which shows what the ask of the first began.
+    // Two links pressed and kept in a Direct Message, with room for one image or for all,
+    // then, two days on, a held read and a press of the first, an ask and a press of a link
+    // never pressed, whose fetches show the held read and the press began none, and an ask
+    // of the first.
     // The cache is a SQLite file, as the Daemon keeps it.
     const later = async (room: number) =>
       await runClocked(
@@ -4312,12 +4313,12 @@ describe("an evicted Preview in a Direct Message that waits, over a real server"
 
           const held = (yield* holds(served, [a]))[0]?.previews ?? [];
           const pressedAgain = yield* refusal(yield* press(served, a, 0));
-          const asked = yield* asking(served, a);
           const never = yield* asking(served, c);
-          const again = yield* live(imaged(served, a));
 
           yield* expecting(press(served, c, 0), 200);
           yield* live(imaged(served, c));
+          const asked = yield* asking(served, a);
+          const again = yield* live(imaged(served, a));
 
           return {
             again: again.map((one) => imageOf(one.state)?.hash),
@@ -4347,11 +4348,11 @@ describe("an evicted Preview in a Direct Message that waits, over a real server"
       pressedAgain: [409, "NotWaiting"],
     };
 
-    expect({ evicted: await later(tintedSize), kept: await later(2 * tintedSize) }).toStrictEqual({
+    expect({ evicted: await later(tintedSize), kept: await later(3 * tintedSize) }).toStrictEqual({
       evicted: {
         ...same,
         asked: [["aa", null]],
-        fetched: [...kept, pageOf("aa"), "https://cdn.example/aa.png", ...pressed],
+        fetched: [...kept, ...pressed, pageOf("aa"), "https://cdn.example/aa.png"],
         held: [null],
       },
       kept: {
