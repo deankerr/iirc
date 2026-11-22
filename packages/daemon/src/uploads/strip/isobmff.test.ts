@@ -621,6 +621,48 @@ describe("dropping a track a movie does not need", () => {
     expect(reasonOf("movie", movie({ tracks }).bytes)).toBe(reason);
   });
 
+  // A second table of its own kind beside a whole one of the other, so that which is meant is
+  // not known, though the other alone would locate its samples.
+  it.each([
+    [
+      "a second stco beside a co64",
+      (at: readonly number[]) => [
+        fullBox("stco", 0, 0, u(0, 4)),
+        fullBox("co64", 0, 0, u(at.length, 4), ...at.map((offset) => u(offset, 8))),
+      ],
+    ],
+    [
+      "a second stsz beside an stz2",
+      () => [
+        fullBox("stsz", 0, 0, u(0, 4), u(0, 4)),
+        fullBox("stz2", 0, 0, u(0, 3), u(8, 1), u(2, 4), u(18, 1), u(18, 1)),
+      ],
+    ],
+  ] as const)("refuses a dropped track whose sample table has %s", (_, extra) => {
+    const placed = movie({ tracks: [videoTrack, { ...locationTrack, extra: extra([0, 0]) }] });
+    const at = (placed.chunks.get(3) ?? []).map(({ start }) => start);
+    const built = movie({ tracks: [videoTrack, { ...locationTrack, extra: extra(at) }] });
+
+    expect(reasonOf("movie", built.bytes)).toBe(
+      "a dropped track's sample table disagrees with itself"
+    );
+  });
+
+  it("refuses a dropped track whose tkhd names no track", () => {
+    expect(
+      reasonOf("movie", movie({ tracks: [videoTrack, { ...locationTrack, tkhd: false }] }).bytes)
+    ).toBe("a dropped track's tkhd names no track");
+  });
+
+  it("refuses a movie with media and no moov, whose tracks are unknown", () => {
+    const built = movie({ moovLast: true, tracks: [videoTrack, locationTrack] });
+    const mdat = boxAt(built.bytes, "mdat");
+
+    expect(reasonOf("movie", built.bytes.subarray(0, mdat?.end))).toBe(
+      "a movie with media and no moov"
+    );
+  });
+
   it("refuses a fragmented movie whose fragment holds a run of a dropped track", () => {
     const built = movie({ fragmented: true, tracks: [videoTrack, locationTrack] });
 
@@ -964,6 +1006,11 @@ const fixtures = [
     "a movie with a location track",
     movie({ tracks: [videoTrack, soundTrack, locationTrack] }).bytes,
   ],
+  [
+    "movie",
+    "a movie with a location track and moov last",
+    movie({ moovLast: true, tracks: [videoTrack, soundTrack, locationTrack] }).bytes,
+  ],
 ] as const;
 
 describe("walking a file in general", () => {
@@ -976,7 +1023,7 @@ describe("walking a file in general", () => {
 
     expect(
       again.map(({ again: second, once }) => second.every((byte, i) => byte === once[i]))
-    ).toStrictEqual([true, true, true, true, true]);
+    ).toStrictEqual([true, true, true, true, true, true]);
   });
 
   it("never throws, nor keeps planted text, on any prefix of a file", () => {

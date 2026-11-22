@@ -650,6 +650,10 @@ export interface MovieTrack {
   readonly at?: readonly number[];
   /** Whether it has a sample table, as it does unless said. */
   readonly table?: boolean;
+  /** Boxes to put at the end of its sample table, which is how one that is ambiguous is made. */
+  readonly extra?: readonly Uint8Array[];
+  /** Whether it has a `tkhd`, as it does unless said. */
+  readonly tkhd?: boolean;
 }
 
 /** What a movie is built with. */
@@ -657,6 +661,8 @@ export interface MovieOptions {
   readonly tracks: readonly MovieTrack[];
   /** Whether `moov` has an `mvex` with a `trex` for each track. */
   readonly fragmented?: boolean;
+  /** Whether `moov` comes after the `mdat`, as a camera that writes as it records leaves it. */
+  readonly moovLast?: boolean;
   readonly brand?: string;
 }
 
@@ -705,14 +711,15 @@ const sampleTableOf = (track: MovieTrack, offsets: readonly number[]) => {
       0,
       u(offsets.length, 4),
       ...offsets.map((at) => u(at, wide ? 8 : 4))
-    )
+    ),
+    ...(track.extra ?? [])
   );
 };
 
 const trakOf = (track: MovieTrack, offsets: readonly number[]) =>
   box(
     "trak",
-    fullBox("tkhd", 0, 0, u(0, 8), u(track.id, 4), zeros(68)),
+    ...(track.tkhd === false ? [] : [fullBox("tkhd", 0, 0, u(0, 8), u(track.id, 4), zeros(68))]),
     ...(track.references === undefined
       ? []
       : [
@@ -739,6 +746,7 @@ const trakOf = (track: MovieTrack, offsets: readonly number[]) =>
 /**
  * A movie of exactly the tracks a test is about: `ftyp`, `moov` with a `trak` for each, and
  * an `mdat` with their chunks interleaved, the first chunk of each track, then the second.
+ * `moov` comes first unless said.
  * @param options - What it is built with.
  * @returns The file, and where each track's chunks are.
  */
@@ -778,8 +786,12 @@ export const movie = (options: MovieOptions): Movie => {
     );
   };
 
-  const start = ftyp.length + moov(0).length + 8;
-  const bytes = cat(ftyp, moov(start), box("mdat", ...order.map(({ chunk }) => chunk)));
+  const mdat = box("mdat", ...order.map(({ chunk }) => chunk));
+  const start = ftyp.length + (options.moovLast === true ? 0 : moov(0).length) + 8;
+
+  const bytes =
+    options.moovLast === true ? cat(ftyp, mdat, moov(start)) : cat(ftyp, moov(start), mdat);
+
   const chunks = new Map<number, { start: number; end: number }[]>();
   let at = start;
 

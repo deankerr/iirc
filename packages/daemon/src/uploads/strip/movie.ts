@@ -101,6 +101,11 @@ export const droppedTracks = (bytes: Uint8Array, header: number): ReadonlySet<nu
 // Zeroes the samples of a dropped track where they lie, a run for each chunk and runs that
 // touch joined, and retypes its `trak`.
 const dropTrack = (bytes: Uint8Array, sink: Sink, trak: Box, movie: Movie): Unreadable | null => {
+  // A track that cannot be named cannot be told apart in a fragment or a reference.
+  if (readTrack(bytes, trak).id === undefined) {
+    return bad("a dropped track's tkhd names no track");
+  }
+
   const runs = droppedSamples(bytes, trak);
 
   if (runs instanceof Unreadable) {

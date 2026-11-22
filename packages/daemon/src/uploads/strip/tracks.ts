@@ -40,6 +40,27 @@ const only = (bytes: Uint8Array, parent: Box, type: number): Box | undefined => 
   return found.length === 1 ? found[0] : undefined;
 };
 
+const missing = () => bad("a dropped track's sample table is missing");
+
+const disagrees = () => bad("a dropped track's sample table disagrees with itself");
+
+// The one box of either of two types that mean the same thing, such as `stco` and `co64`.
+const oneOf = (bytes: Uint8Array, parent: Box, a: number, b: number): Box | Unreadable => {
+  const children = readBoxes(bytes, parent.start + parent.header, parent.end);
+
+  if (children instanceof Unreadable) {
+    return children;
+  }
+
+  const found = children.filter((child) => child.type === a || child.type === b);
+
+  if (found.length > 1) {
+    return disagrees();
+  }
+
+  return found[0] ?? missing();
+};
+
 /** A track as the walker decides it: its id, if `tkhd` says one, and whether it is kept. */
 export interface Track {
   readonly id: number | undefined;
@@ -73,10 +94,6 @@ export const readTrack = (bytes: Uint8Array, trak: Box): Track => {
   return { id, kept };
 };
 
-const missing = () => bad("a dropped track's sample table is missing");
-
-const disagrees = () => bad("a dropped track's sample table disagrees with itself");
-
 // A full box's entries after its version, flags, and the fields before its count, checked to
 // be inside it.
 const table = (
@@ -97,15 +114,13 @@ const table = (
 };
 
 const chunkOffsets = (bytes: Uint8Array, stbl: Box): readonly number[] | Unreadable => {
-  const stco = only(bytes, stbl, types.stco);
-  const co64 = only(bytes, stbl, types.co64);
-  const found = stco ?? co64;
+  const found = oneOf(bytes, stbl, types.stco, types.co64);
 
-  if (found === undefined || (stco !== undefined && co64 !== undefined)) {
-    return missing();
+  if (found instanceof Unreadable) {
+    return found;
   }
 
-  const width = found === stco ? 4 : 8;
+  const width = found.type === types.stco ? 4 : 8;
   const read = table(bytes, found, 0, (count) => count * width);
 
   return read instanceof Unreadable
@@ -119,17 +134,16 @@ type Sizes =
   | { readonly count: number; readonly at: (n: number) => number };
 
 const sampleSizes = (bytes: Uint8Array, stbl: Box): Sizes | Unreadable => {
-  const stsz = only(bytes, stbl, types.stsz);
-  const stz2 = only(bytes, stbl, types.stz2);
+  const found = oneOf(bytes, stbl, types.stsz, types.stz2);
 
-  if ((stsz === undefined) === (stz2 === undefined)) {
-    return missing();
+  if (found instanceof Unreadable) {
+    return found;
   }
 
-  if (stsz !== undefined) {
-    const p = stsz.start + stsz.header;
-    const each = p + 8 <= stsz.end ? readBe(bytes, p + 4, 4) : 0;
-    const read = table(bytes, stsz, 4, (count) => (each === 0 ? count * 4 : 0));
+  if (found.type === types.stsz) {
+    const p = found.start + found.header;
+    const each = p + 8 <= found.end ? readBe(bytes, p + 4, 4) : 0;
+    const read = table(bytes, found, 4, (count) => (each === 0 ? count * 4 : 0));
 
     if (read instanceof Unreadable) {
       return read;
@@ -140,9 +154,7 @@ const sampleSizes = (bytes: Uint8Array, stbl: Box): Sizes | Unreadable => {
       : { count: read.count, each };
   }
 
-  if (stz2 === undefined) {
-    return missing();
-  }
+  const stz2 = found;
 
   const field =
     stz2.start + stz2.header + 7 < stz2.end ? (bytes[stz2.start + stz2.header + 7] ?? 0) : 0;

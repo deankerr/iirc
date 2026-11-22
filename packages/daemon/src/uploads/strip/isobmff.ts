@@ -182,6 +182,15 @@ export const plan = (layout: Layout, read: Reader, size: number): Effect.Effect<
       return bad("more than one meta at the top of an image");
     }
 
+    // Without a `moov`, which tracks the media holds is unknown, so none of it can be kept.
+    if (
+      layout === "movie" &&
+      scan.mdats.length > 0 &&
+      !scan.walked.some((box) => box.type === moov)
+    ) {
+      return bad("a movie with media and no moov");
+    }
+
     // Every `moov` is read before anything is walked, since which tracks it drops decides
     // what is done with a fragment, wherever it lies.
     const wholes = new Map<Box, Uint8Array>();

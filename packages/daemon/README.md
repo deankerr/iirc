@@ -137,7 +137,7 @@ An image or video is stripped of its metadata, with no way to skip it, by a walk
 - **A JPEG, PNG, GIF, or WebP is stripped in memory,** so stripping one takes up to twice `uploads.maxSize`.
 - **A HEIC, AVIF, MP4, or MOV is patched in place in the staged file,** at the same length, so no video is held whole.
 - **A file that cannot be walked is refused** with 422.
-- **A fragmented MP4 or MOV whose fragments hold samples of a track it would drop is refused,** since zeroing a fragment's samples is not built.
+- **An MP4 or MOV is refused when which of its samples to drop is not known:** media with no `moov`, a dropped track whose sample table is missing or ambiguous, or fragments holding samples of a dropped track, since zeroing a fragment's samples is not built.
 - **A file cut short keeps what was walked whole, once there is an image to keep.** A JPEG cut within its scans, or a PNG, GIF, or WebP cut after its first image data is whole, is kept to there. One cut short earlier, or a HEIC, AVIF, MP4, or MOV with a box cut short or lying about its size, is refused.
 
 ### The Link listener
