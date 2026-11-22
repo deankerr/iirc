@@ -610,7 +610,9 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
  * first reads are in. The place moves with every event, so whenever the stream ends, or
  * gives nothing for longer than three heartbeats, it is followed again from where it left
  * off, and so it is when opening it gives no answer for as long. A refusal signs the page
- * out.
+ * out. It is read with `fetch`, not `EventSource`, which would keep a place of its own apart
+ * from the core's and could not tell a refused sign-in from a network failure. A reload
+ * reads everything again, so the place is never stored.
  * @param registry - The registry.
  * @param changes - The state, each time it changes.
  * @returns The follower, which runs until it is interrupted.
@@ -656,7 +658,10 @@ const follower = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Ti
     );
   });
 
-/** Where this device keeps its layout. */
+/**
+ * Where this device keeps its layout. It is never an option under `ui`, since a phone shows
+ * one Pane at a time anyway.
+ */
 export const layoutKey = "iirc.layout";
 
 /** The layout as this device keeps it, as JSON text, or none while one kept waits. */

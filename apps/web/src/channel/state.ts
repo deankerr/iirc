@@ -25,7 +25,10 @@ export { channelHappened, channelState } from "./channels.ts";
  */
 const narrowBelow = 600;
 
-/** Where this device keeps whether the members show. */
+/**
+ * Where this device keeps whether the members show. It is never an option under `ui`, since
+ * how wide a screen is is the device's own.
+ */
 const membersKey = "iirc.members";
 
 /**

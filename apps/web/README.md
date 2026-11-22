@@ -11,46 +11,252 @@ The core decides and this package draws and does the I/O.
 
 ## What it does
 
-- **Signs in with a key,** given to `POST /api/sign-in` once, for a sign-in the browser holds in an `HttpOnly` cookie. A failure is said in words, with a way to try again.
-- **Lists the Networks and their Timelines in a Sidebar,** as a tree under its first row, `iirc`, which shows the Tail in the focused Pane, is marked as a view's row is, and never shows anything unread. A Network's row is its own Timeline, with how its connection stands, unless connected, as a symbol whose shape and colour both say it, and in words to a screen reader, connected too, and its Channels and Direct Messages are under it. What the focused Pane shows is chosen, in the accent, and what another Pane shows has a dim edge and that Pane's number, as a Pane's status bar is accented with the focus and dim without it. A Network removed with its Timelines kept is listed apart, under Removed. At its foot are rows of their own for the search, the Uploads, and the options, one to a line, each with its keys dim at its end where the pointer is fine, which open their view in the focused Pane and are marked as a Timeline's row is, and Sign out under them, which asks first, in a dialog, since getting back in takes a key.
-- **Puts the Sidebar in the Owner's order, with Timelines pinned above the Networks,** as `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned` say for every device. The pinned are in a part of their own, under Pinned, each with its Network's name dim after its own. A row dragged before or after another of its part moves it there: a pinned one among the pinned, a Network's own among the Networks as removed as it is, and any other among its Network's. A line in the accent says where it goes, and a place where nothing would change takes no drop. Each part is a tree of its own, so the keys stay within it. The keys drag a row by a button ArrowRight reaches past its menu's, and `/move up|down`, on Mod+Alt and an arrow, moves the focused Timeline. Alt and an arrow go to the next and previous Timeline in the order shown. The change shows at once, and is written whole from the options read, once more after a conflict.
-- **Mutes a Timeline,** from its row's menu, `Mute` and `Unmute` beside `Pin`, or `/mute` and `/unmute` for the focused one, a Network's own too, as `ui.unread.muted` says for every device. A muted row counts nothing and its name takes no brightness from what is unread, so it is dim and in italics with a quiet `∅` after it, and its label ends `muted` to a screen reader. A Highlight in it still marks it, as one in any Timeline does, and still notifies. A Network's row and the page's title leave out what a muted Timeline holds but its Highlights, and `/next-unread` passes it over. It shows at once, and is written whole from the options read, once more after a conflict, or refused in words past 256.
-- **Has a menu on every Timeline's row, and every Network's,** opened by a button that shows while the row is hovered or focused, always where the pointer is coarse, or by the context menu, as a right-click, the menu key, or Shift+F10 opens it. It chooses the Timeline's own Previews, `default`, `off`, `text`, or `on`, marking the one in force, as `/previews off|text|on|default` does, by sending `ui.previews.timelines` whole from the options read, once more after a conflict. It pins or unpins a Channel's or Direct Message's Timeline, as `/pin` does. It saves the Timeline whole as a text file, "Export as text", as `/export` with no arguments does. On a Network's row, one with no Timeline of its own yet too, "Remove Network…" asks to remove it, or, removed with its Timelines kept, "Drop Timelines…" asks to drop them.
-- **Replies to a Message from its menu,** where its Network's Session carries tags and the Message has an id, opened by a button at the row's end that shows while the row is hovered or focused, always where the pointer is coarse, or by the context menu anywhere on the row but its nick, as a right-click, the menu key, or Shift+F10 opens it. Elsewhere a Message has no menu. Choosing reply focuses the Composer, which shows `↳ alice: their text` dim above its line, cut to its width, with a button that drops it, as Escape does when there is no notice to dismiss. Only the first Line of what is sent answers it.
-- **Has a menu on every nick shown,** a Message's sender and a nick in an Activity's words, a member, and a User a Lookup card shows, opened by a press, Enter, the context menu, or a long press on a touch screen, which shows no callout of the browser's. It offers `query`, `whois`, `mention`, and `ignore`, and in a Channel where Self holds operator or a rank above it, `ban`, `ban account` where the Network's bans name an account, `op`, `deop`, `voice`, `devoice`, and `kick`, each the command the Composer would run, and only where it would run. It acts on the Channel of the Pane it was opened in, which opening it focuses. While it is open, whether the User is still in that Channel is read from the Daemon's members route, and until they are found there it offers none of `op`, `deop`, `voice`, `devoice`, or `kick`, and it never offers `deop`, `devoice`, or `kick` of a member who outranks Self. While what decides those entries is still being read, a dim `reading…` that cannot be chosen stands where they will go. A member is there already.
-- **Saves a Timeline as text,** from its row's menu or `/export [since] [until]`, by starting a download of the Daemon's export route for the Timeline's id and, with moments given, `since` and `until` as instants, a day placed in the Owner's time zone. The Daemon answers as an attachment named for the Network and the Timeline, which the browser saves, carrying the Sign-in as any request to the page's own origin does.
-- **Closes a Timeline,** from its row's menu or `/close-timeline`. A closed Timeline leaves the Sidebar when the close is asked, and comes back, with why, if the Daemon refuses it or does not answer. It is out of the Sidebar until something arrives in it, and `/go` and the search still find it, which shows it in the Sidebar while a Pane has it open. A Channel Self is in is never closed: the Daemon answers that it is joined, decided as the close is stepped, and a dialog offers to leave the Channel the Daemon named instead, by the edit `/part` sends when the Network's Configuration wants it, and otherwise, for one the Ircd put Self in or Self joined by hand, by parting it. Signing out lets the offer go, and an answer to a close asked before signing out offers nothing. Leaving does not close it, since the part arrives in it as Activity.
-- **Lets the Sidebar be resized and hidden, on this device.** Its edge drags, or takes the arrows, Home, and End once focused, and keeps its width as the window changes. `/sidebar` or Alt+N hides it, and so does the button at its foot, and the focus then goes to the Composer if it was in the Sidebar. While it is hidden, a button before the Composer's prompt brings it back, marked by what is unread.
-- **Shows what is new, calmly.** A row's name is coloured by the highest level unread in it, with small counts beside it, and the page's title counts Highlights and Direct Messages. A Highlight's line is tinted, and a "new" divider stands before the first unread item.
-- **Shows a Timeline live,** as terminal lines: the time, the sender in their colour, and the text with its formatting and links, laid out as `ui.timeline.layout` says, in shared columns, `inline`, where each row is one run of text that wraps under itself, or `stacked`, where a run of Messages from one User has the nick in their colour and the time on a line above it, each Message's text on a line of its own, and everything else is drawn as `inline` draws it. A later Message of a run shows its own time while its row is hovered or focused, and a screen reader reads it. Activity is dimmer, a run of joins, parts, quits, and changes of nick is one dim line that says how many and who, which a press opens to each one's own line and closes again, an Ircd's message of the day is one dim line that says how many lines it has, and that it was cut short, which a press or Enter or Space opens to a block of its lines in the monospace font in any `ui.font`, with every space kept and no line wrapped, scrolling sideways within itself where a line is wider than the Pane, and closes again, a `FAIL` is set apart as a refusal is, a Gap is a divider, so is where the day changes, with the day written as `ui.timeline.dateFormat` says in the device's zone, even under `ui.timeline.timeFormat` `none`, and our own Messages say only when they are sending, not sent, or refused. A reply says what it answers in one dim line above it, `↳ alice: the first of their text`, cut to the line's width, which goes to that Message when pressed or activated from the keyboard, as a jump from the search does, and a reply that answers nothing the Timeline holds is an ordinary Message. A Direct Message that names a Channel it is about says `in #chan`, dim, after its text. Where a Timeline is narrow, as a Pane split a few times is, a row reads as `inline` under either of the others, and `stacked` stays as it is. It opens on the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up. Read back to its start, it draws nothing above its first line, and tells only a screen reader that nothing is before it.
-- **Previews a Message's links, while its Timeline's mode is `text` or `on`,** its own choice in `ui.previews.timelines` or else `ui.previews`, each as a card under its text, several stacked behind one left rule, and updated in place from the stream of Previews. Each of a Message's first three links that may be previewed has a toggle right after it in the text, in every `ui.timeline.layout`: a button, reached by the keyboard, that says whether its Preview is open. Open, its card is drawn under the Message; closed, nothing is, and it takes no room. Each starts as `ui.previews.start` says, `open` unless set, which a device may override, and what the Owner opened or closed is the view's own, kept while a row scrolls away and back and forgotten when the page is loaded again. What the Daemon already holds of a window's Previews is read with the window, and with each page added to it, before any of its rows is drawn, which fetches nothing, so a row whose Previews are all held is drawn whole the first time. A Message is asked for of the Daemon only once it is within a screen's height of the view, above or below, and only while one of its Previews is open, so a link not held is fetched then and an old one refreshed, a Message whose Previews are all closed fetches nothing, and opening one is the ask, with a placeholder until it is answered. The ask is the whole Message's, as the API asks, so opening one of its Previews fetches its other links too, which stay closed until opened. In a Direct Message with no mode of its own, Previews start closed whatever `ui.previews.start` says; the Message is asked for as it comes within a screen's height of the view, which fetches nothing there, so a link the Daemon already holds opens at once, and opening one it does not presses it, so the Daemon fetches that link alone. A Direct Message set to `text` or `on` follows `ui.previews.start`, as any other Timeline does. No toggle is drawn under `off`, or before the modes are read. A card is never wider than 34em, a line's comfortable reading, nor than its Pane, and nothing in it overflows a narrow Pane or a phone. A Preview pulses in its card's place while it is fetched. Once ready, its card is, each only when it has it: the host it was read from when another than its link's, ignoring a leading `www.`, in a small quiet line; its title, two lines at most; its description, three lines at most, which a press shows whole when it was cut; and, while `on`, its media under them. A description's line breaks are drawn as breaks, so a text file's first lines are drawn as lines, and every word is text, never markup. The site's name is never drawn. Under `text` a card is its words alone. A link that is itself an image, a video, or a sound is its media alone, with no words. A link to a file is its file name, with its first lines when it is a text file, or else its type and size, under `text` as under `on`. Media is at most as tall as `ui.previews.mediaHeight`, 160, 260, or 400 pixels. Each of these a device may override. A sound, and a video with no poster, is the browser's own player, which fetches nothing from the Daemon until play is pressed, and a video has a control in its corner that opens it large. A page that names a video file has its poster under its words, a play button over the poster named for the video, and the same control in its corner, where a press of play swaps the poster for the video, already playing in the same place and streaming only then, and the control opens it large, playing there and pausing it here. A player from a host `ui.previews.players` lists has its poster under its words, with a play button over the poster whose name and hover say where it plays from, or, with no poster or one that fails, the button after the words. A poster, the video it plays, and the player it plays share one box, at most as tall as `ui.previews.mediaHeight`, shaped as the player's page gave its size, else as the poster's own dimensions, else 16 by 9, so pressing play moves nothing below it, and a poster that fails to load leaves its video in a box of the same size. Nothing loads from the player's host until the button is pressed, which swaps the poster for the player, already playing, in a sandboxed frame under the words. The frame can run scripts and open a window of its own, and nothing else of the page. An image is the Daemon's own copy, loaded only once it is within a screen's height of the view, above or below. A page's image that fails to load leaves its words, and a link that is itself media that fails leaves nothing. Where the Daemon read the image's dimensions, its box is reserved from them before a byte loads, within `ui.previews.mediaHeight` and the room it has and never larger than the image itself, and is the same box once it has loaded; where it did not, a placeholder stands until the image has loaded, not until it is seen. A press of an image opens it large, over the whole screen, with a link to its page, which Escape or a press anywhere but the link closes, returning focus to the image. A video's larger view leaves a press on the video to its player, and closes from a control in its corner, a press on the dimmed screen around it, or Escape. An animated image is its first frame, taken in the browser from the Daemon's bytes, under a play badge, which a press plays in place and stops, with a control to open it large while it plays. It plays on its own with `ui.previews.animate` on, as it is unless set, which a device may override, unless the device reduces motion, which keeps it still until pressed. A Preview that failed is one quiet line, "No preview:" and why, and never the link again. Under `off`, nothing is asked for or drawn.
-- **Splits into Panes,** as a tiling window manager does. Each Pane has its own status bar, whatever it shows, with its number among several and its name, and its own Timeline, scroll position, and members. The options, the Uploads, and the search stand in front of a Timeline until something else opens in their Pane, or Escape shows what it showed before, and have no close button. A Direct Message not yet begun has one at the bar's right. Among several, the focused Pane is edged in the accent along its top and bottom, and the others' names are dimmed. One Composer under the Panes writes to the focused Pane's Timeline. A Pane with nothing open shows the Tail, and takes commands only.
-- **Says Messages and runs commands from the Composer.** Enter sends and Shift+Enter starts a new line, or, under `ui.composer.enter` `newline`, Enter starts a new line and Mod+Enter sends, with a send button beside the Composer, as a phone's keyboard has no Mod. Up and Down recall what was sent. What it can complete is listed just above its line, the Panes giving it room, ranked as the Owner types: as soon as a draft starts with `/`, a command, or an alias of the Owner's own that every device shares, made with `/alias add` and taken away with `/alias remove`, with what it takes, what it does, and its keys, those run recently first, an option after `/set`, and after `/go`, `/theme`, `/set ui.font`, and `/network remove` what they take, a Timeline of any Network with its Network and kind, a theme, a font or a family typed by name, or a Network, a removed one too, each saying what it is and what is in effect; an emoji, drawn and named as `:smile:`, as soon as a word is `:` and two letters of its name, whose names load the first time one is typed and never with the page; and a nick or a Channel on Tab, a nick at the start of a line followed by `ui.composer.nickSuffix`, `: ` to start. A command run from the Composer is remembered, so the list puts it first. Tab, Shift+Tab, and, while the list is open, Up and Down move through it, writing the one highlighted into the draft, a press on one writes it in, and Escape closes it and gives back what was typed. Enter sends what the draft says. On a phone the list is bounded so the Composer stays in view, and scrolls. Spelling is checked unless `ui.composer.spellcheck` is off. A paste of more than five lines asks first. Why something was not said is shown under it, with a way to dismiss it, and to send or check again when that is safe, and it goes when it stops being true.
-- **Formats what the Composer says.** Mod+B, I, U, and E turn bold, italic, underline, and fixed pitch on or off over the selection, Mod+R reverse, and Mod+Shift+X strikethrough, or with nothing selected, for what is typed next, which is named beside the prompt until then. Mod+Shift+K offers the sixteen colours and the default above the line, chosen by the arrows and Enter or a press. The draft is drawn as a Timeline draws it, behind the textarea, which never holds a formatting code, and what is sent is IRC's codes.
-- **Uploads files from the Composer,** several at once, pasted, dropped on it, chosen with its picker, or, where the button that starts a command shows, taken with the camera. Each file shows above the line as it is added, with a preview of its own bytes for an image every browser draws, its name, size, and how much was sent, and a button that cancels it, aborting its request. Whether Uploads are on is asked then. While they are off, nothing goes in, and a note names the options to set, with a way to the options. A file over `maxSize` is refused before it is sent, with the limit. Once kept, its link goes into the draft where the caret was when it was added, whatever was typed meanwhile, and is said only when the draft is sent, which waits, saying so for as long as any file added to it is still uploading, and naming only those. A kept file stays listed with its link until the draft is sent, or it is dismissed, and can be renamed in place, Enter saving and Escape cancelling, which puts its new link in the draft wherever the old one now stands. A failure is said in words, from the API's typed errors, until dismissed. Signing out lets go of every upload.
-- **Takes what is typed from anywhere.** A character, a dead key, or a paste pressed where nothing takes text, such as a Pane's Timeline, the Sidebar's tree, or the members' list, goes to the Composer, which takes the focus with that very key. A dialog, a popover, or a menu keeps its keys, as does a key the keymap binds.
-- **Marks read where the Owner has seen it, as `ui.unread.markRead` says on this device:** under `latest`, the default, a Timeline at its latest; under `shown`, up to the last item on screen, scrolled up or not; each in a Pane they can see, once that has held for a second. Under `asked`, only `/read` marks it, and nothing is marked until this device or the shared options say which rule holds. The Daemon keeps the Read Marker, so every Frontend sees the counts clear.
-- **Searches the Messages of every Timeline,** newest first, in front of a Pane's Timeline. It searches on Enter, not as the Owner types, since a query half typed would search for something else. Choosing a result opens its Timeline read around it, which under `ui.unread.markRead latest` marks nothing read.
-- **Starts a command from a key,** in the focused Pane's Composer, with its list open: Mod+Shift+P starts `/`, which lists the commands, and Mod+K starts `/go `, which lists every Timeline, closed ones too. Either works from anywhere on the page, a Pane with no Timeline included, and from inside an option's editor, which it commits nothing of. A draft already there is set aside, never sent, never recalled by Up, and brought back when the command runs or Escape puts the command away, one press and the list with it. Where the pointer is coarse, a button beside the Composer starts `/` too. `/theme` alone leaves `/theme ` with the themes listed, and `/set` lists the options as configured when it was started. A `/set` of a `ui` option writes to this device when this device overrides it or the value is one only this device has, a font's family, as the options view does.
-- **Takes keys from anywhere on the page,** by the core's keymap. A key the keymap does not take goes on as it would.
-- **Changes Configuration as an option tree**, by `/set` and its kin or in the options view, which edits each option in place. The view gives each option two lines, its name and value, then, dimmer, its description with its default at the end, as `default: 14`, under a heading for `ui`, each Network, and each of the Daemon's own roots, such as `store`, in the order of their names. A heading stays at the top while its options scroll under it, and the arrows move from option to option across them. A list's value wraps between its elements, each kept whole where it fits. An option whose kind lists its choices opens a menu of them under its value, the one in force marked and focused, where arrows move, Enter chooses, as `/set` with it does, and Escape lets it go. Where it also takes text, the menu ends in "Custom…", which opens the editor, and a value that is none of the choices is marked as "Custom…". A Credential is given only in a password prompt.
-- **Removes a Network after asking,** from `/network remove`, or the menu of its row in the Sidebar. A dialog asks whether its Timelines stay readable, keeping them unless the Owner chooses otherwise. A Pane showing a kept Timeline says its Network was removed, with a button that asks to drop them, and its Composer says nothing can be said there. Adding a Network under a name still held by kept Timelines says why it cannot.
-- **Shares the options under `ui` between devices, and lets one override them** with `-device`.
-- **Lists and sets the Owner's options under `store`, `uploads`, and `previews`** as it does any other, followed from the Daemon while the options or the Uploads show, so another device's change shows. No device overrides them.
-- **Shows the Tail in iirc's own view, labelled `iirc`,** which a Pane with nothing open shows, and which `/tail`, the palette, or the Sidebar's `iirc` row shows in the focused Pane, letting go of what it showed. A banner stands above the oldest line and scrolls with the lines: `iirc` drawn in blocks, in the monospace font whatever `ui.font` is, with the Daemon's version under it, and, while no Network is configured, how to start after it. Then the lines at the level `ui.tail` names and above, Info unless set, oldest first, each its time as `ui.timeline.timeFormat` says, its words, its annotations as `name=value`, dimmer, and its cause, a line of text for each of its lines. A line at Warn and above is in the theme's colour for danger. Everything a line holds is drawn as text, its controls as symbols, never as markup. The view stays at the latest line while the Owner is there, as a Timeline does. The Tail is read whole, then followed after its last line held, at most 4096 held, while a Pane shows it, and followed again when its stream ends or gives nothing for 45 s. A stream of a Daemon that started anew drops what is held and reads the Tail again, so after a restart the view shows the new Tail from its start. A change of `ui.tail` on any device shows at once on every one, a lower level showing the lines already held, each where its time puts it.
-- **Lists the Uploads in a view of their own,** opened by `/uploads` or its row in the Sidebar in the focused Pane, in front of what it showed, and shown in one Pane at most, with a status bar that names it. It lists them newest first, a page at a time with "More", saying it is reading until the first page is, and a row lies on one line where the Pane is wide: an image of a type every browser draws, PNG, JPEG, GIF, WebP, or AVIF, as a thumbnail the browser scales from the `content` route and fetches only near the screen, any other type as an icon, then its name, type, size, and when, where it was said, each Network and Target of a Message of ours that held its link, newest first, which goes to that Message in its Timeline when pressed, and buttons that copy its link, rename it in place, Enter saving and Escape cancelling, and delete it once the Owner confirms in a dialog that says its link stops working at once and a copy already opened cannot be called back. A rename or a delete that fails says why in its row. The link is made from `uploads.publicUrl` as it is now, so a new public URL changes every link copied from then on, and with none set, once the options are read, the view says there is no link to copy. Another device's Upload, rename, or delete shows without a reload, and when a change of the Timelines carries a Message of ours holding an Upload's link, that Upload is read again, so where it was said shows as soon as it is. One whose bytes the Daemon found gone from the Store shows an icon, says `missing` in red where its time would be, as the stream says it, and offers no link, only rename and delete. The deleted ones, and so the expired, are left out until "Show deleted" is on, which reads the list again from its first page with them. Each is muted, says `expired` or `deleted` and when, and has an icon, as its bytes are gone, and nothing to copy, rename, or delete.
-- **Draws in themes made from terminal palettes,** built in or imported from a theme file. Under `system`, the page draws the theme for light or the one for dark, and follows the device the moment it changes. A theme highlighted in the Composer's list, or being imported, previews on the whole page.
-- **Bounds how wide a Timeline's text runs,** by `ui.timeline.maxWidth`: what was said wraps at that many characters, from 40 to 400, each as wide as the font's `0`, so the bound grows with the size, or runs the width of its Pane at `none`, which it starts as. The text stays where it starts, and a Pane narrower than the bound is drawn as without one. The Composer and the Sidebar are never bounded.
-- **Draws text in the size, line height, and font the Owner chooses:** `ui.font.size`, from 10 to 24 pixels, 14 to start, `ui.font.lineHeight`, the line height as a multiple of the size, from 1 to 2, 1.45 to start, and `ui.font`, the device's own monospace font, its own sans font, one of nine it serves itself, five monospace and four sans, below, or any family the device has, by name. A font highlighted in the Composer's list previews on the whole page, and a change draws at once, a shared one before the Daemon has answered.
-- **Shows who is here.** A Pane's status bar is one line: its number, the Timeline's name, a Channel's modes and its topic, cut to the line, or whether a Direct Message's partner is online or offline, said by nothing while it is not known, and the members' toggle, which says how many there are. A press on the topic discloses it in full under the bar. The toggle, `/members`, or Alt+M shows the members under the bar, by rank, and a press, a tap, or Enter on one opens the menu on their nick, Query first, so Enter twice opens their Direct Message. Above its entries the menu says, dimly, `account` and the account the member is logged in to, or `logged out`, and says nothing while it is not known. A member whose User is known to be a bot has a dim, small `bot` after their nick, which the row's label says too, and a Message a bot said has the same beside its sender, before it in a line, after the nick in a stacked run's head. Nothing is added to the Timeline, and a fact gone stale or never learned marks nothing.
-- **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
-- **Looks a User up,** with `/whois` and `/whowas`, and a Channel's bans, exceptions, and invitation masks, with `/bans`, `/exceptions`, and `/invexes`, as a card under the Pane's status bar. While Self is an operator there, each mask has a button that removes it. A ban by account shows as a dim `account`, the account, and its mask, dimly.
-- **Sends a CTCP request to a User,** with `/ctcp <nick> <command> [text]`, or `/ping <nick>`, which shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
-- **Offers to join a Channel Self was invited to,** with a button on the invitation in the Network's Timeline that does what `/join` does. Nothing joins until it is pressed.
-- **Notifies, when the Owner asks,** with `/notify on`: a Highlight, a Direct Message, or an invitation in a Timeline they are not looking at. Under `ui.unread.quietBots` a bot's Message notifies only as a Highlight.
-- **Quiets bots, when the Owner asks,** with `ui.unread.quietBots`, shared by every device: what a bot said leaves a row's count, a Network's, the page's title, `/next-unread`, and the "new" divider when only bots said what was unread, and a Highlight from a bot still counts, marks, and notifies. It shows at once, and is off until the options are read.
-- **Says when the Daemon stopped folding the Timelines,** across the top of the page: that it hit a fatal error, that the Timelines stay behind until it restarts, and what the Daemon said of why. It follows `GET /api/timelines/projection` while signed in, and the notice goes once the Daemon, restarted, says it folds them again.
-- **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the Sidebar's button and the Panes' switcher, the Sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
+### Signing in
+
+- **Signs in with a Key,** given once to `POST /api/sign-in` for a Sign-in the browser holds in an `HttpOnly` cookie. A failure is said in words, with a way to try again.
+- **Sign out asks first,** in a dialog.
+
+### The Sidebar
+
+- **Lists the Networks and their Timelines as a tree.** A Network's row is its own Timeline, with its Channels and Direct Messages under it.
+- **The first row, `iirc`, shows the Tail in the focused Pane,** and never shows anything unread.
+- **A Network's row says how its Connection stands unless connected,** by a symbol whose shape and colour both say it. A screen reader hears it in words, connected too.
+- **The focused Pane's Timeline is chosen in the accent.** One another Pane shows has a dim edge and that Pane's number.
+- **A Network removed with its Timelines kept is listed apart, under Removed.**
+- **Its foot has a row each for the search, the Uploads, and the options,** which open their view in the focused Pane, then Sign out. Where the pointer is fine, a row whose command the keymap binds shows its keys dim at its end.
+- **The Sidebar is in the Owner's order on every device,** as `ui.sidebar.networks`, `ui.sidebar.order`, and `ui.sidebar.pinned` say.
+- **Pinned Timelines are in a part of their own above the Networks,** under Pinned, each with its Network's name dim after its own.
+- **A row dragged before or after another of its part moves it there.** A pinned row moves among the pinned, a Network's own among the Networks as removed as it is, and any other among its Network's. A line in the accent says where it goes, and a place where nothing would change takes no drop.
+- **The keys move a row too.** ArrowRight reaches a drag button past the row's menu button, and `/move up|down`, or Mod+Alt and an arrow, moves the focused Timeline. Each part is a tree of its own, so the tree's keys stay within it.
+- **Alt and an arrow go to the next and previous Timeline** in the order shown.
+- **Every Timeline's and Network's row has a menu,** opened by a button that shows while the row is hovered or focused, always where the pointer is coarse, or by the context menu: a right-click, the menu key, or Shift+F10.
+- **A Timeline's menu sets its own Previews,** `default`, `off`, `text`, or `on`, marking the one in force, as `/previews off|text|on|default` does.
+- **A Timeline's menu also mutes it, pins a Channel's or a Direct Message's, saves it as text, and closes it,** each as its command does.
+- **A Network's menu removes it,** with "Remove Network…", or, removed with its Timelines kept, drops them with "Drop Timelines…". A Network with no Timeline of its own yet has the menu too.
+- **The Sidebar resizes, on this device.** Its edge drags, or takes the arrows, Home, and End once focused, and a double click puts it back as it began. It keeps its width as the window changes, and is never drawn wider than half the window.
+- **`/sidebar`, Alt+N, or the button at its foot hides it,** and the focus goes to the Composer if it was in the Sidebar. While it is hidden, a button before the Composer's prompt brings it back, marked by what is unread.
+
+### What is unread
+
+- **A row's name is coloured by the highest level unread in it,** with small counts beside it.
+- **The page's title counts Highlights and Direct Messages.**
+- **A Highlight's line is tinted, and a "new" divider stands before the first unread item.**
+- **Marks read as `ui.unread.markRead` says on this device,** once what the Owner has seen has held for a second in a Pane they can see. Under `latest`, the default, a Timeline is marked at its latest. Under `shown`, it is marked up to the last item on screen, scrolled up or not.
+- **Under `asked`, only `/read` marks a Timeline read.** Nothing is marked until this device or the shared options say which rule holds.
+- **The Daemon keeps the Read Marker,** so every Frontend sees the counts clear.
+- **Mutes a Timeline,** from its row's menu, or with `/mute` and `/unmute` for the focused one, a Network's own too, as `ui.unread.muted` says on every device. More than 256 is refused in words.
+- **A muted row counts only its Highlights.** It is dim and in italics, with a quiet `∅` after its name and `muted` in its label.
+- **What a muted Timeline holds leaves its Network's row, the page's title, and `/next-unread`,** but for its Highlights, which still mark and notify.
+- **Quiets bots under `ui.unread.quietBots`,** shared by every device. What a bot said leaves the counts, the page's title, `/next-unread`, and the "new" divider, while a bot's Highlight still counts, marks, and notifies. It is off until the options are read.
+- **Notifies after `/notify on`,** of a Highlight, a Direct Message, or an invitation in a Timeline the Owner is not looking at. Under `ui.unread.quietBots` a bot's Message notifies only as a Highlight.
+
+### A Timeline
+
+- **Shows a Timeline live, as terminal lines:** the time, the sender in their colour, and the text with its formatting and links.
+- **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
+- **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
+- **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
+- **A Timeline too narrow for `columns` reads as `inline`,** as a Pane split a few times is.
+- **Activity is dimmer than what was said.** An Ircd's numeric replies are not.
+- **A run of joins, parts, quits, and changes of nick is one dim line** that says how many and who. A press opens it to each one's own line, and closes it again. A netsplit or a netjoin is likewise one dim line that opens to its nicks.
+- **Connections that fail again and again are one row,** with how many and when the first and the latest were.
+- **An Ircd's message of the day is one dim line** that says how many lines it has, and that it was cut short if it was. A press, Enter, or Space opens it to a block in the monospace font with every space kept and no line wrapped, which scrolls sideways within itself.
+- **A `FAIL` is set apart as a refusal is.**
+- **A Gap is a divider, and so is a change of day.** The day is written as `ui.timeline.dateFormat` says in the device's time zone, even under `ui.timeline.timeFormat` `none`, and a press on it starts `/date` for that day in the Composer.
+- **Our own Messages say only when they are sending, not sent, or refused.**
+- **A reply says what it answers in one dim line above it,** `↳ alice: the first of their text`, cut to the line's width. Pressing or activating it goes to that Message, as a jump from the search does.
+- **A reply that answers nothing the Timeline holds is an ordinary Message.**
+- **A Direct Message that names a Channel it is about says `in #chan`, dim, after its text.**
+- **Opens at the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up.**
+- **A view that cannot scroll reads older pages on its own,** as when the latest page is all hidden Activity, up to the window's cap. Past that, "Load older" asks on purpose.
+- **Read back to its start, it draws nothing above its first line,** and tells only a screen reader that nothing is before it.
+- **Bounds how wide a Timeline's text runs by `ui.timeline.maxWidth`,** from 40 to 400 characters, each as wide as the font's `0`, so the bound grows with the size. At `none`, the default, text runs the width of its Pane.
+- **A Pane narrower than the bound is drawn as without one.** The Composer and the Sidebar are never bounded.
+
+### Previews
+
+- **Previews a Message's links while its Timeline's mode is `text` or `on`,** its own in `ui.previews.timelines` or else `ui.previews`. Each is a card under the text, several stacked behind one left rule, and each is updated in place from the stream of Previews.
+- **Each of a Message's first three previewable links has a toggle right after it,** in every layout: a button the keyboard reaches, which says whether its Preview is open. A closed Preview draws nothing and takes no room.
+- **A Preview starts open or closed as `ui.previews.start` says,** `open` unless set. What the Owner opened or closed is kept while a row scrolls away and back, and forgotten when the page is loaded again.
+- **A row whose Previews the Daemon already holds is drawn whole the first time.** What the Daemon holds is read with each window, before its rows are drawn, and fetches nothing.
+- **A Message is asked for only once it is within a screen's height of the view, and only while one of its Previews is open.** So opening one is the ask, with a placeholder until it is answered, and a Message whose Previews are all closed fetches nothing.
+- **Opening one of a Message's Previews fetches its other links too,** which stay closed until opened.
+- **In a Direct Message with no mode of its own, Previews start closed.** A link the Daemon holds opens at once, and opening one it does not hold presses it, so the Daemon fetches that link alone. A Direct Message set to `text` or `on` follows `ui.previews.start`.
+- **Under `off` nothing is asked for or drawn,** and no toggle is drawn before the modes are read.
+- **A card is never wider than 34em, nor than its Pane,** and nothing in it overflows a narrow Pane or a phone.
+- **A Preview pulses in its card's place while it is fetched.**
+- **A ready card shows each of these it has:** the host it was read from, when another than its link's, ignoring a leading `www.`, in a small quiet line; its title, two lines at most; its description, three lines at most, which a press shows whole when it was cut; and, while `on`, its media. The site's name is never drawn.
+- **A description's line breaks are drawn as breaks,** so a text file's first lines are drawn as lines, and every word is text, never markup.
+- **Under `text` a card is its words alone.**
+- **A link that is itself an image, a video, or a sound is its media alone,** with no words.
+- **A link to a file is its file name,** with its first lines when it is a text file, or else its type and size, under `text` as under `on`.
+- **Media is at most as tall as `ui.previews.mediaHeight`,** 160, 260, or 400 pixels.
+- **A sound, and a video with no poster, is the browser's own player,** which fetches nothing from the Daemon until play is pressed. A video has a control in its corner that opens it large.
+- **A page that names a video file has its poster under its words,** with a play button over it named for the video. Play swaps the poster for the video, already playing in place and streaming only then. The control in its corner opens it large, playing there and pausing here.
+- **A player from a host `ui.previews.players` lists has a play button over its poster,** whose name and hover say where it plays from, or after the words with no poster or one that fails.
+- **Nothing loads from a player's host until its button is pressed,** which swaps the poster for the player, already playing, in a sandboxed frame under the words. The frame can run scripts and open a window of its own, and nothing else of the page.
+- **A poster, the video it plays, and the player it plays share one box,** at most as tall as `ui.previews.mediaHeight`. It is shaped as the player's page gave its size, else as the poster's own dimensions, else 16 by 9, so pressing play moves nothing below it, and a poster that fails leaves its video a box of the same size.
+- **An image is the Daemon's own copy,** loaded only once it is within a screen's height of the view.
+- **Where the Daemon read an image's dimensions, its box is reserved before a byte loads,** within `ui.previews.mediaHeight` and the room it has and never larger than the image, and stays the same once it has loaded. Where it did not, a placeholder stands until the image has loaded.
+- **A page's image that fails to load leaves its words,** and a link that is itself media that fails leaves nothing.
+- **A press of an image opens it large over the whole screen,** with a link to its page. Escape or a press anywhere but the link closes it, returning focus to the image.
+- **A video's larger view leaves a press on the video to its player,** and closes from a control in its corner, a press on the dimmed screen around it, or Escape.
+- **An animated image is its first frame under a play badge,** which a press plays in place and stops, with a control to open it large while it plays.
+- **An animated image plays on its own under `ui.previews.animate`,** on unless set, unless the device reduces motion.
+- **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again.
+
+### Panes
+
+- **Splits into Panes, as a tiling window manager does.** Each has its own status bar, Timeline, scroll position, and members.
+- **One Composer under the Panes writes to the focused Pane's Timeline.**
+- **Among several Panes, the focused one is edged in the accent along its top and bottom,** and the others' names are dimmed.
+- **A Pane with nothing open shows the Tail, and takes commands only.**
+- **The options, the Uploads, and the search stand in front of a Pane's Timeline** until something else opens in that Pane, or Escape shows what it showed before. They have no close button. A Direct Message not yet begun has one at its bar's right.
+
+### Who is here
+
+- **A Pane's status bar is one line:** its number among several, the Timeline's name, and for a Channel its modes and its topic cut to the line, and the members' toggle, which says how many there are.
+- **A Direct Message's bar says whether its partner is online or offline,** and nothing while it is not known.
+- **A press on the topic discloses it in full under the bar.**
+- **The toggle, `/members`, or Alt+M shows the members under the bar, by rank.** A press, a tap, or Enter on one opens the menu on their nick, Query first, so Enter twice opens their Direct Message.
+- **A member's menu says, dimly, `account` and the account they are logged in to, or `logged out`,** and nothing while it is not known.
+- **A Pane narrower than 600px shows its members over its Timeline, never beside it.** There the toggle opens them for that Pane alone, and Escape, a press elsewhere, or choosing an action puts them away. The device's choice of a column covers only the Panes wide enough for one.
+- **A User known to be a bot has a dim, small `bot` after their nick,** as a member and beside the sender of a Message they said, and the row's label says it too. A fact gone stale or never learned marks nothing.
+
+### Menus on Messages and nicks
+
+- **A Message has a menu where its Network's Session carries tags and the Message has an id,** and nowhere else. A button at the row's end opens it, shown while the row is hovered or focused and always where the pointer is coarse, as does the context menu anywhere on the row but its nick.
+- **Reply, from a Message's menu, focuses the Composer,** which shows `↳ alice: their text` dim above its line, cut to its width, with a button that drops it. Escape drops it too when there is no notice to dismiss.
+- **Only the first Line of what is sent answers the Message replied to.**
+- **A nick has a menu as a Message's sender, in an Activity's words, as a member, and on a Lookup card.** A press, Enter, the context menu, or a long press on a touch screen opens it, and a long press shows no callout of the browser's.
+- **A nick's menu offers Query, Whois, Mention, and Ignore.** Mention starts the Composer's line with their nick, and the others run their command.
+- **In a Channel where Self holds operator or a rank above it, a nick's menu also offers ban, kick, op, deop, voice, and devoice,** and ban account where the Network's bans name an account, each only where the Composer would run it.
+- **A nick's menu acts on the Channel of the Pane it was opened in,** which opening it focuses.
+- **It offers none of op, deop, voice, devoice, or kick until the User is found in that Channel,** read as the menu opens, and never deop, devoice, or kick of a member who outranks Self. Until it is read, a dim `reading…` that cannot be chosen stands where they will go.
+
+### Saving and closing a Timeline
+
+- **Saves a Timeline as text,** from its row's menu or `/export [since] [until]`, as a file the browser downloads. A day given is placed in the Owner's time zone.
+- **Closes a Timeline,** from its row's menu or `/close-timeline`. It leaves the Sidebar as the close is asked, and comes back, with why, if the Daemon refuses it or the request fails.
+- **A closed Timeline is out of the Sidebar until something arrives in it.** `/go` and the search still find it, and it shows in the Sidebar while a Pane has it open.
+- **A Channel Self is in is never closed.** A dialog offers to leave it instead, by the edit of its Network's Configuration that `/part` sends where the Configuration names it, and otherwise by parting it. Signing out lets the offer go.
+- **Leaving a Channel does not close its Timeline,** since the part arrives in it as Activity.
+
+### The Composer
+
+- **Enter sends and Shift+Enter starts a new line.** Under `ui.composer.enter` `newline`, Enter starts a new line and Mod+Enter sends, with a send button beside the Composer.
+- **Up and Down recall what was sent.**
+- **A draft of more than five lines asks before it is sent.** A blank line does not count.
+- **Spelling is checked unless `ui.composer.spellcheck` is off.**
+- **Why something was not said is shown under it,** with a way to dismiss it, and to send or check again when that is safe. It goes when it stops being true.
+- **Mod+B, I, U, and E turn bold, italic, underline, and fixed pitch on or off, Mod+R reverse, and Mod+Shift+X strikethrough.** They act on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then.
+- **Mod+Shift+K offers the sixteen colours and the default above the line,** chosen by the arrows and Enter or a press.
+- **The draft is drawn as a Timeline draws it,** and what is sent is IRC's formatting codes.
+- **Takes what is typed from anywhere.** A character, a dead key, or a paste where nothing takes text, such as a Timeline, the Sidebar, or the members, goes to the Composer, which takes the focus with that very key. A dialog, a popover, a menu, and a key the keymap binds keep their keys.
+- **Takes keys from anywhere on the page by the core's keymap.** A key the keymap does not take goes on as it would.
+
+### Completing
+
+- **What the Composer can complete is listed just above its line,** ranked as the Owner types, the Panes giving it room. On a phone the list is bounded so the Composer stays in view, and scrolls.
+- **A draft that starts with `/` lists the commands and the Owner's aliases,** each with what it takes, what it does, and its keys, those run recently from the Composer first.
+- **An alias is shared by every device,** made with `/alias add` and taken away with `/alias remove`.
+- **After a command, the list offers what it takes:** an option after `/set`, a Channel after `/join` or `/part`, an alias after `/alias` or `/alias remove`, a Timeline of any Network after `/go`, a theme after `/theme`, a font or a family typed by name after `/set ui.font`, and a Network, a removed one too, after `/network remove`. Each says what it is and what is in effect.
+- **An emoji is offered once a word is `:` and two letters of its name,** drawn and named as `:smile:`. The names load the first time one is typed, never with the page.
+- **Tab completes a nick or a Channel,** a nick at the start of a line followed by `ui.composer.nickSuffix`, `: ` unless set.
+- **Tab, Shift+Tab, and, while the list is open, Up and Down move through it,** writing the one highlighted into the draft. A press on one writes it in, and Escape closes the list and gives back what was typed. Enter sends what the draft says.
+- **Mod+Shift+P starts `/` and Mod+K starts `/go `,** with the list open, in the focused Pane's Composer. Either works from anywhere on the page, a Pane with no Timeline included, and from inside an option's editor, which it commits nothing of. `/go` lists every Timeline, closed ones too.
+- **Where the pointer is coarse, a button beside the Composer starts `/` too.**
+- **A draft already there when a command is started is set aside,** never sent and never recalled by Up. It comes back when the command runs, or when Escape puts the command away, one press and the list with it.
+- **`/theme` alone leaves `/theme ` with the themes listed,** and `/set` lists the options as configured when it was started.
+- **A `/set` of a `ui` option writes to this device** when this device overrides it, or when the value is a font family only this device has, as the options view does.
+
+### Uploading
+
+- **Uploads files from the Composer,** several at once: pasted, dropped on it, chosen with its picker, or, where the button that starts a command shows, taken with the camera.
+- **Each file shows above the line as it is added,** with its name, its size, how much was sent, a preview of its own bytes for an image every browser draws, and a button that cancels it.
+- **While Uploads are off, nothing goes in,** and a note names the options to set, with a way to the options.
+- **A file over `maxSize` is refused before it is sent,** with the limit.
+- **A kept file's link goes into the draft where the caret was when it was added,** whatever was typed meanwhile.
+- **A draft is sent only once its files are uploaded.** It waits, saying so, and names the files still uploading.
+- **A kept file stays listed with its link until the draft is sent or it is dismissed.** It renames in place, Enter saving and Escape cancelling, which puts its new link in the draft wherever the old one stands.
+- **A failure is said in words until dismissed.**
+- **Signing out lets go of every upload.**
+
+### Searching
+
+- **Searches the Messages of every Timeline on Enter,** newest first, in front of a Pane's Timeline.
+- **Choosing a result opens its Timeline read around it,** which under `ui.unread.markRead` `latest` marks nothing read.
+
+### Users, Channels, and Lookups
+
+- **`/query` opens a Direct Message by nick.** While nothing has been said, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
+- **`/whois` and `/whowas` look a User up,** and `/bans`, `/exceptions`, and `/invexes` look up a Channel's lists, each as a card under the Pane's status bar.
+- **While Self is an operator in the Channel, each mask on a card has a button that removes it.**
+- **A ban by account shows as a dim `account`, the account, and its mask, dimly.**
+- **`/ctcp <nick> <command> [text]` sends a CTCP request to a User,** and `/ping <nick>` shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
+- **An invitation in the Network's Timeline has a button that joins the Channel,** as `/join` does. Nothing joins until it is pressed.
+
+### Options
+
+- **Changes Configuration as an option tree,** by `/set` and its kin or in the options view, which edits each option in place.
+- **The options view gives each option two lines:** its name and value, then, dimmer, its description with its default at the end, as `default: 14`.
+- **The options are under a heading for `ui`, each Network, and each of the Daemon's own roots,** such as `store`, in the order of their names. A heading stays at the top while its options scroll under it.
+- **The arrows move from option to option,** across the headings.
+- **A list's value wraps between its elements,** each kept whole where it fits.
+- **An option whose kind lists its choices opens a menu of them under its value,** the one in force marked and focused. The arrows move, Enter chooses as `/set` does, and Escape lets it go.
+- **Where an option with choices also takes text, its menu ends in "Custom…",** which opens the editor and marks a value that is none of the choices.
+- **A Credential is given only in a password prompt.**
+- **Shares the options under `ui` between devices,** and lets one override them with `-device`.
+- **Lists and sets the Owner's options beyond `ui`,** under `store`, `uploads`, `previews`, and `away`, as it does any other. No device overrides them.
+- **Another device's change of an option beyond `ui` shows** while the options or the Uploads show.
+- **Removes a Network after asking,** from `/network remove` or its row's menu, in a dialog that asks whether its Timelines stay readable. They are kept unless the Owner chooses otherwise.
+- **A Pane showing a kept Timeline says its Network was removed,** with a button that asks to drop them, and its Composer says nothing can be said there.
+- **Adding a Network under a name still held by kept Timelines says why it cannot.**
+
+### Themes and fonts
+
+- **Draws in themes made from terminal palettes,** built in or imported from a theme file.
+- **Under `system`, the page draws the theme for light or the one for dark,** and follows the device the moment it changes.
+- **A theme highlighted in the Composer's list, or being imported, previews on the whole page.**
+- **A theme file that takes more than a second to read is refused in words.** A browser that cannot start a Worker says so.
+- **Draws text at `ui.font.size`,** from 10 to 24 pixels, 14 to start, and `ui.font.lineHeight`, a multiple of the size from 1 to 2, 1.45 to start.
+- **`ui.font` is the device's own monospace or sans font, one of nine the page serves, or any family the device has, by name.**
+- **A family the device lacks draws in its own monospace font,** and the options say it was not found on this device.
+- **A font highlighted in the Composer's list previews on the whole page.** A change draws at once, a shared one before the Daemon has answered.
+
+### The Tail
+
+- **Shows the Tail in iirc's own view, labelled `iirc`,** in a Pane with nothing open, or in the focused Pane from `/tail`, the palette, or the Sidebar's `iirc` row.
+- **A banner stands above the oldest line and scrolls with the lines:** `iirc` drawn in blocks in the monospace font, the Daemon's version under it, and, while no Network is configured, how to start.
+- **The lines shown are those at the level `ui.tail` names and above,** Info unless set, oldest first.
+- **Each line is its time as `ui.timeline.timeFormat` says, its words, its annotations as `name=value`, dimmer, and its cause,** a line of text for each of its lines.
+- **A line at Warn and above is in the theme's colour for danger.**
+- **Everything a line holds is drawn as text,** its controls as symbols, never as markup.
+- **The view stays at the latest line while the Owner is there,** as a Timeline does.
+- **At most 4096 lines are held,** followed while a Pane shows the Tail.
+- **After the Daemon restarts, the view shows the new Tail from its start.**
+- **A change of `ui.tail` on any device shows at once on every one,** a lower level showing the lines already held, each where its time puts it.
+
+### The Uploads
+
+- **Lists the Uploads in a view of their own,** opened by `/uploads` or its row in the Sidebar in the focused Pane, and shown in one Pane at most.
+- **The Uploads are listed newest first, a page at a time with "More",** saying it is reading until the first page is.
+- **A row lies on one line where the Pane is wide:** a thumbnail or an icon, its name, type, size, and when, where it was said, and its buttons.
+- **A PNG, JPEG, GIF, WebP, or AVIF is a thumbnail,** fetched only near the screen. Any other type is an icon.
+- **Where it was said is each Network and Target of a Message of ours that held its link,** newest first, which goes to that Message in its Timeline when pressed.
+- **A row's buttons copy its link, rename it in place, and delete it.** Enter saves a rename and Escape cancels it. A delete asks first, in a dialog that says its link stops working at once and a copy already opened cannot be called back.
+- **A rename or a delete that fails says why in its row.**
+- **The link is made from `uploads.publicUrl` in force,** so a new public URL changes every link copied from then on. With none set, the view says there is no link to copy.
+- **Another device's Upload, rename, or delete shows without a reload,** and where an Upload was said shows as soon as the Message is folded.
+- **An Upload whose bytes the Daemon found gone from the Store shows an icon and `missing` in red,** and offers only rename and delete.
+- **"Show deleted" lists the deleted and the expired too,** reading the list again from its first page. Each is muted, says `expired` or `deleted` and when, shows an icon, and has nothing to copy, rename, or delete.
+
+### The page
+
+- **Says across the top of the page when the Daemon stopped folding the Timelines:** that it hit a fatal error, that the Timelines stay behind until it restarts, and why. The notice goes once the Daemon, restarted, folds them again.
+- **A screen 640px wide or less shows the focused Pane alone,** under one slim bar holding the Sidebar's button and the Panes' switcher, with the Sidebar as a drawer and the members as a sheet.
+- **Where the pointer is coarse, every control is at least 44px and every field's text at least 16px,** so iOS Safari does not zoom into it.
+- **Pinch zoom is never turned off.**
 
 ## How it is built
 
@@ -61,7 +267,7 @@ The core decides and this package draws and does the I/O.
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the Sidebar, closing a Timeline, saving one as text, and the Timeline view |
 | `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |
 | `src/composer/` | The Composer, what carries out its intents, its list of completions, and uploading files through the `Uploader` port |
-| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, the options under `ui`, `store`, and `uploads`, and the Uploads view |
+| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, the options under `ui`, `store`, `uploads`, and `previews`, and the Uploads view |
 | `src/search/`, `src/channel/`, `src/lookup/`, `src/tail/` | Each of those views and its atoms |
 | `src/keys/` | The keymap the page holds, and the one key listener |
 | `src/nick/` | The menu on a nick, and its atoms |
@@ -70,111 +276,129 @@ The core decides and this package draws and does the I/O.
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the Sidebar's width and whether it shows |
 | `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
 | `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, and dates |
+| `src/testing/` | The fake Daemon, and the test ports for uploading, notifying, and downloading |
 
 ### The runtime
 
-- **One Effect runtime.** `Atom.runtime` provides `DaemonClient`, which is `HttpApiClient.make(DaemonApi)` over the browser's `fetch` with relative URLs, so every request goes to the origin that served the page and carries its cookie. A test replaces its Layer.
-- **State lives in atoms, not components.** Each atom holds one of the core's states, and everything else is derived from it. Components read atoms and run commands. None fetches.
-- **The core decides what to do, and the runtime does it.** A few loops are mounted once in `src/main.tsx` and run while the browser is signed in. Each watches what the core asks for, does it, and folds the answer back in as an event:
+- **One Effect runtime.** It provides `DaemonClient`, `HttpApiClient.make(DaemonApi)` over the browser's `fetch` with relative URLs, so every request goes to the origin that served the page and carries its cookie. A test replaces its Layer.
+- **State lives in atoms, not components.** Each atom holds one of the core's states, and everything else is derived from it. Components read atoms and run commands, and none fetches.
+- **The core decides what to do, and the runtime does it.** Loops mounted once in `src/main.tsx` run while the browser is signed in. Each does what the core asks for and folds the answer back in as an event:
 
   | Loop | Does |
   | --- | --- |
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui`, which the shell waits on after each sign-in, and forgets them on signing out |
-  | `ownerSync` | Follows the options under `store`, `uploads`, and `previews` while the options or the Uploads show |
-  | `uploadsSync` | Reads the Uploads' first page while a Pane shows the Uploads, again when "Show deleted" is switched, then follows their Changes after it, and after the last one folded in whenever it follows again, and which Uploads' bytes are missing |
-  | `channelSync` | Reads the head of each Channel the Sidebar lists, a Pane shows, or whose list a Lookup card is, and the members of each shown, the heads of those no Pane shows two at a time |
+  | `optionsSync` | Reads every Network's Configuration and the Credentials held each time the options come to show |
+  | `ownerSync` | Follows the options beyond `ui` while the options or the Uploads show |
+  | `uploadsSync` | Reads the Uploads while a Pane shows them, again when "Show deleted" is switched, follows their Changes, and which Uploads' bytes are missing |
+  | `uploadsSignedOut` | Lets go of every upload, aborting its request, on signing out |
+  | `channelSync` | Reads the head of each Channel the Sidebar lists, a Pane shows, or a Lookup card lists, and the members of each shown |
   | `marking` | Marks read what `markDue` says, after a second |
   | `previewsSync` | Follows the stream of Previews while any Timeline's mode asks, and makes each ask the core gives once it is followed |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |
+  | `emojiLoader` | Loads the emoji names once completion first reaches an emoji |
+  | `draftsCarried` | Carries what was typed under an unsent Direct Message to its Timeline's Composer once the Timeline exists |
   | `lookupSync` | Lets go of the Lookup cards of Panes that are gone |
   | `nickMenuSync` | Reads whether the User of the menu open on a nick is in its Channel, from the members route and `known` |
   | `watchPage`, `watchTheme`, called once as the page starts | Keep whether the page is seen and compact, the title, and the theme on the root |
 
 - **A read that fails is asked again,** soon and then up to every 15 s. `Unauthorized` signs the page out. Every failure is decided from the API's structure, never a response's text.
-- **One changes stream for the whole page.** It is followed from the place the core holds, and followed again when it ends or gives nothing for 45 s. It is read with `fetch`, not `EventSource`, which would keep a place of its own apart from the core's and could not tell a refused sign-in from a network failure. A reload reads everything again, so the place is never stored.
+- **One changes stream for the whole page.** It is followed from the place the core holds, and followed again when it ends or gives nothing for 45 s. A reload reads everything again.
 
 ### Saying and changing
 
-- **Nothing is sent twice.** A Say, an Act, or a Lookup is made under an intent the runtime names, `web-` and a random UUID, since the core makes no randomness. After a failure the runtime asks `said` under that intent, and the Composer offers to send again only when the Daemon says it was not journaled. After no answer at all, it offers only to check again.
+- **Nothing is sent twice.** A Say, an Act, or a Lookup is made under an intent the runtime names, `web-` and a random UUID. After a failure the runtime asks `said` under that intent, and the Composer offers to send again only when the Daemon says it was not journaled. After no answer at all, it offers only to check again.
 - **Submissions go one at a time,** in order, and a failure stops the intents after it. What only changes the page, such as opening a Timeline or starting a command, is done at once and never waits behind a Say.
 - **Our own Message appears once, when the Daemon folds it,** never drawn ahead. What became of it is its item's delivery.
-- **A change shows at once, and is made from what was read.** The core derives what shows from what is in force and the changes on their way, and each is let go of once the Daemon has answered and the value read after, so a refusal shows what is in force and says why. A change of Configuration, of an option under `ui`, `store`, or `uploads`, or of the themes reads the value in force, never the one shown, applies the core's edit, and sends the whole with `ifSequence`. A Network's changes are made one at a time, each once the one before it is answered, so an unset made while its set is unanswered is measured against the set and reaches the Daemon. On a conflict it reads again and applies the same edit once more. A second conflict is said in words.
-- **`/msg` opens where the Daemon put its Message.** Once the changes say its step was folded, the runtime reads which Timeline it was placed in. The Frontend never matches a name itself.
-- **A file is sent by `XMLHttpRequest`,** through the `Uploader` port, since `fetch` says nothing of how much of a body was sent. Each file is a fiber of its own, and cancelling it lets it go from what is pending, which interrupts that fiber alone and aborts its request. Its answer is read with the API's own Schemas, never its text, and a refused sign-in signs the page out. A test's `Uploader` hands each file to the fake Daemon and can hold it, say how much was sent, and see it aborted.
-- **A Credential's value goes straight from the password prompt to the Vault,** and the option is then pointed at it, or set to its name under `store`. The prompt's field is the sign-in's, below. A value typed into the Composer is refused and the textarea cleared as Enter is pressed.
+- **A change is made from the value in force, never the one shown.** A change of Configuration, of an option under `ui` or beyond it, or of the themes applies the core's edit to what was read and sends the whole with `ifSequence`.
+- **A conflict is tried once more,** reading again and applying the same edit. A second conflict is said in words.
+- **A Network's changes are made one at a time,** each once the one before it is answered, so an unset made while its set is unanswered reaches the Daemon.
+- **`/msg` opens where the Daemon put its Message.** Once the changes say its step was folded, the runtime reads which Timeline it was placed in, and never matches a name itself.
+- **A file is sent by `XMLHttpRequest` through the `Uploader` port,** each file in its own fiber, so cancelling one aborts its request alone. Its answer is read with the API's own Schemas, and a refused sign-in signs the page out.
+- **A Credential's value goes straight from the password prompt to the Vault,** and the option is then pointed at it, or set to its name under `store`.
+- **A Credential typed into the Composer is refused,** and the textarea cleared, as Enter is pressed.
 - **A Lookup has one deadline,** two minutes from when the Owner asked. Until then a pending one is asked after by its intent.
 
 ### Drawing
 
 - **One key listener for the page.** `Keys` listens on the document after every widget's own handlers, asks the core's `resolve`, and prevents a key's default only when a binding took it.
-- **A key that types is taken before any widget sees it.** The same `Keys` also listens in the capture phase, ahead of React Aria's typeahead, which listens in React's own and would move the focus to a row. When the core says the key types, the Composer's textarea takes the focus synchronously, its caret at the end, and the key is stopped there without preventing its default, so the browser types the character, or pastes, into the Composer.
-- **The core owns the Panes, and `react-resizable-panels` only draws them**. The library has no controlled layout, so each Split pushes the core's ratios with `setLayout`, and only a change the Owner made goes back to the core. Each Pane's content is drawn once, through a portal, into a node that lives as long as the Pane, so a split or a swap moves it and never draws it afresh. The Timeline view puts back the scroll position a move loses.
-- **A row's layout follows its Timeline's own width,** by a container query on the view, since Panes split and the screen's width says nothing of a Pane's. Nothing in a Timeline scrolls sideways: a row breaks what has no place to break, and the view clips what is left.
-- **No width counts characters,** since a count holds only at fixed pitch, yet nothing holds less than it did in monospace. Each Timeline row is a grid of its own, so each sizes its time and sender columns from samples drawn unseen in it, upright and in the font drawn: the times of the format shown, in digits all as wide, which for a 12-hour time is one in each day period since AM and PM can differ in width, and the widest nick monospace showed whole, fourteen of each letter that is the widest a nick can hold in some font, in brackets. The members' column is sized likewise by every common rank's symbol and a nick a letter longer, as eighteen columns of monospace held at the largest size, and is never narrower than those eighteen, unless it lies over a Pane too narrow for them. The Composer's prompt and a Pane's choice in the switcher take up to half their line, or the sixteen columns they had if more. A Pane's choice never takes less, and the Composer's prompt takes less only where the buttons beside it would leave its field no room for a word, as on a phone at a large size. So a sans font cuts no nick that monospace showed whole where there is room, and every row, a refusal's in italic too, lines up in any font.
-- **A Pane narrower than 600px shows its members over its Timeline,** never beside it, since the members beside it would leave too little Timeline. Each Pane is measured with a `ResizeObserver`. There the toggle opens them for that Pane alone, and Escape, a press elsewhere, or choosing an action puts them away, as each does the sheet on a compact screen. The device's choice of a column covers only the Panes wide enough for one.
-- **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page. Where the view stands is kept in refs, never in state. The first row whose top is in view stays still as rows are added above, dropped, hidden by `ui.timeline.activity`, or wrapped again at a new width or text size, and a view at the latest stays there. The view, not the virtualizer, decides which rows measured at a new size move it: those above that row, or at the latest, all of them.
-- **A window's held Previews are read as the window is,** by `sync`, which reads them once the window answers, for the Messages that hold a link that may be previewed, unless their Timeline's mode is known not to ask, since the shared options may be read after the window and the Daemon refuses a read under `off`. It folds them into the core before the window, so its rows are first drawn with them. A held read that fails, or that the Daemon has not answered within `Waits.held`, is let go of, and the window is drawn all the same. A Message's Previews are asked for by an `IntersectionObserver` on their own rows, rooted in the Timeline's scroller with a margin of a screen's height above and below, which tells the core once they come within it, and the log draws at least that many rows beyond its view each way. Before then, a link held nothing of is drawn as a placeholder.
-- **The view tells the core what the Owner has seen.** It says whether it is at the latest and names the last item in view, wherever it stands. It tells a scroll the Owner made from one it made itself, or one the browser made as the log's box changed, so a Timeline opened at a search's result is not at the latest until the Owner goes there. In a box that changed, only input of the Owner's that the view has not yet answered, the wheel, a touch, a key, or a pointer held down, within a second, moves the log further than the box alone would, and the view stands itself in the new box before it makes that move, so a scroll away as the box changes leaves the latest.
-- **A view that cannot scroll reads older pages on its own,** as when the latest page is all hidden Activity, up to the window's cap. Past that, "Load older" asks on purpose.
-- **The theme, and the text's size and font, are custom properties on the root, set through the CSSOM,** which a Content Security Policy allows where it refuses inline styles. `src/ui/theme.css` gives each colour as `light-dark()`, and the defaults' size and font, for the first paint. Rows are measured, so none assumes a size.
-- **A font is fetched only once text is drawn in it.** `src/theme/fonts.css` declares each one's faces from its `@fontsource` package: a regular, a bold, and both italic, or a variable font, in WOFF2 alone, split into the ranges the package gives. The browser fetches a file only for a family drawn with and a character of its range on the page, so the device's own font fetches nothing. Vite emits each as a file of the page's own and never inlines one, which `font-src 'self'` would refuse. While a font loads, if it never does, and for any glyph it lacks, such as box drawing, text is in the device's own font of its kind, monospace or sans. Text a sender set in IRC's monospace formatting is in the font chosen when it is monospace, and in the device's own monospace font beside a sans one.
-- **A family the device has is a device's own.** `/set ui.font Fira Code`, with `-device` or without, or the family typed into the options, which sets it on this device alone, draws in it by name, ahead of the device's own monospace font, since its kind is unknown. Its name becomes CSS in one place, `familyCss`, between double quotes, which the API's parse makes exactly one family. A browser does not say which fonts a device has, and `document.fonts.check` says yes to a family no device has in several, so a family is found by measuring text in a canvas: in the family ahead of each generic family, against that generic family alone. Where every one measures the same, the family is lacked, its text is in the device's own monospace font, and the options say it was not found on this device.
-- **A theme file is read in a Worker, never in the page.** Effect's YAML parser is quadratic on some text, so a read that takes longer than a second is ended and refused in words. A browser that cannot start a Worker says so.
+- **A key that types is taken before any widget sees it,** in the capture phase. The Composer's textarea takes the focus with its caret at the end, and the browser types the character, or pastes, into it.
+- **The core owns the Panes, and `react-resizable-panels` only draws them.** Only a change the Owner made goes back to the core.
+- **A split or a swap never draws a Pane's content afresh,** and the Timeline view puts back the scroll position a move loses.
+- **A row's layout follows its Timeline's own width,** never the screen's. Nothing in a Timeline scrolls sideways: a row breaks what has no place to break, and the view clips what is left.
+- **No width counts characters.** The time and sender columns, the members' column, the Composer's prompt, and a Pane's choice in the switcher are sized from samples drawn in the font, so a sans font cuts no nick that monospace showed whole where there is room, and every row lines up in any font.
+- **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page.
+- **The first row whose top is in view stays still** as rows are added above, dropped, hidden by `ui.timeline.activity`, or wrapped again at a new width or text size, and a view at the latest stays there.
+- **A window's held Previews are read before the window is drawn.** A held read that fails, or is not answered within `Waits.held`, is let go of, and the window is drawn all the same.
+- **The view tells the core what the Owner has seen:** whether it is at the latest, and the last item in view.
+- **Only a scroll the Owner made moves the view off the latest,** never one the view made itself or one the browser made as the log's box changed. So a Timeline opened at a search's result is not at the latest until the Owner goes there.
+- **The theme, and the text's size and font, are custom properties on the root, set through the CSSOM.** `src/ui/theme.css` gives each colour as `light-dark()`, and the defaults' size and font, for the first paint.
+- **A font is fetched only once text is drawn in it,** and only the files for the characters on the page. The device's own font fetches nothing.
+- **Each font is a file of the page's own,** never inlined, which `font-src 'self'` would refuse.
+- **While a font loads, if it never does, and for any glyph it lacks, text is in the device's own font of its kind,** monospace or sans.
+- **Text a sender set in IRC's monospace formatting is in the font chosen when it is monospace,** and in the device's own monospace font beside a sans one.
+- **A family typed into the options is set on this device alone,** and is drawn by name ahead of the device's own monospace font.
+- **A family's name becomes CSS in one place, `familyCss`,** between double quotes, and the API's parse makes it exactly one family.
+- **A family is found on the device by measuring text in a canvas,** in the family ahead of each generic family against that generic family alone.
+- **A theme file is read in a Worker, never in the page.**
 - **Styles are CSS Modules over the theme.** No module names a colour of its own, and each module's class names are declared beside it, so a class that does not exist fails to compile.
-- **Every button is one of one family.** `Button`, `ToggleButton`, and `IconButton` come in four variants, bordered, primary, quiet, and as text, and two sizes, regular in a form and small in a bar. A button's height is one line of its text, its padding, and its border, never its container's, and its padding is in `em` and `ch`, so it keeps its shape at any text size. Only the topic, which is its own text cut to the line, and the tree's chevron, which is part of its row, are drawn otherwise.
-- **An icon is a glyph in the UI's font,** named in `src/ui/icon.tsx` and drawn centred in a box as wide as two digits, hidden from assistive technology. A button that shows only an icon is named, and has React Aria's tooltip saying what it does and its key, where the keymap binds one.
+- **Every button is one of one family.** `Button`, `ToggleButton`, and `IconButton` come in four variants, bordered, primary, quiet, and as text, and two sizes, regular in a form and small in a bar.
+- **A button's height is one line of its text, its padding, and its border,** never its container's, and its padding is in `em` and `ch`, so it keeps its shape at any text size. Only the topic and the tree's chevron are drawn otherwise.
+- **An icon is a glyph in the UI's font,** named in `src/ui/icon.tsx`, drawn centred in a box as wide as two digits, and hidden from assistive technology.
+- **A button that shows only an icon is named,** and has a tooltip saying what it does and its key, where the keymap binds one.
 
 ### Nothing is drawn before it is known
 
 Every view is held to three rules, and a review holds new work to them:
 
-- **What a view needs is held before it can be opened.** What a view draws as it opens comes from what the page already holds, read as the page started or followed since, never from a read that opening it begins. A read as it opens may bring what is held up to date, never fill it for the first time. The page's first frames are a view too: until the shell has what it draws, the page draws a wait, in the theme's defaults.
-- **A change the Owner makes shows at once.** It is drawn as asked the moment it is asked, derived in the core from what is in force and what is on its way, never kept as a second copy in step by hand. Once the Daemon answers, what it holds wins, and a refusal draws what is in force again and says why. A Message is not such a change.
-- **A wait that cannot be avoided is drawn as a wait.** What is truly not known yet, such as a Lookup's answer or the topic of a Channel just joined, draws as on its way, or as nothing only where nothing cannot be read as the answer, never as a default, an empty list, "none", or "not connected", which read as the answer. In the core, not known is a case of its own, such as `Unknown` or `undefined`, and the view never draws it as a default.
+- **What a view needs is held before it can be opened.** What a view draws as it opens comes from what the page already holds, never from a read that opening it begins. A read as it opens may bring what is held up to date, never fill it for the first time. Until the shell has what it draws, the page draws a wait, in the theme's defaults.
+- **A change the Owner makes shows at once.** It is derived in the core from what is in force and what is on its way, never kept as a second copy. Once the Daemon answers, what it holds wins, and a refusal draws what is in force again and says why. A Message is not such a change.
+- **A wait that cannot be avoided is drawn as a wait.** What is not known yet draws as on its way, or as nothing only where nothing cannot be read as the answer, never as a default, an empty list, "none", or "not connected". In the core, not known is a case of its own.
 
 ### What this device keeps
 
-Each is in `localStorage`, read once as the page starts and written as best it can be, since storage can be refused.
+Each is in `localStorage`, read once as the page starts and written as best it can be.
 
-| Key | Holds | Why not under `ui` |
-| --- | --- | --- |
-| `iirc.layout` | The Panes, naming Timelines by id | A phone shows one Pane at a time anyway |
-| `iirc.ui` | This device's overrides of options under `ui` | They are the device's own |
-| `iirc.notify` | Whether this device notifies | A device's own choice |
-| `iirc.members` | Whether the members' column shows beside a Pane wide enough | How wide a screen is is the device's own |
-| `iirc.sidebar` | Whether the Sidebar is hidden, beside the Panes | The same |
-| `iirc.sidebar-width` | How wide the Sidebar is, in CSS pixels | The same |
+| Key                  | Holds                                                       |
+| -------------------- | ----------------------------------------------------------- |
+| `iirc.layout`        | The Panes, naming Timelines by id                           |
+| `iirc.ui`            | This device's overrides of options under `ui`               |
+| `iirc.notify`        | Whether this device notifies                                |
+| `iirc.members`       | Whether the members' column shows beside a Pane wide enough |
+| `iirc.sidebar`       | Whether the Sidebar is hidden, beside the Panes             |
+| `iirc.sidebar-width` | How wide the Sidebar is, in CSS pixels                      |
 
 Anything kept that cannot be read leaves the page starting as new.
 
-Whether the screen is compact is `(max-width: 640px)`, past every phone held upright and short of a tablet. What is sized for touch is decided apart from it, by `(pointer: coarse)`, so a tablet gets a finger's targets with the desktop's layout.
+The screen is compact at `(max-width: 640px)`. What is sized for touch is decided apart from it, by `(pointer: coarse)`.
 
 ## What it guarantees
 
-- **The Frontend never stores a key**. The key field is a plain, uncontrolled `<input type="password">`, so the key is never in React state or props. React Aria's fields keep every keystroke in state, so a secret never goes through one. On submit the value is parsed straight to `Redacted`, the field is set to `""`, which also clears the last value React DOM tracks on every input, and the `Redacted` is wiped once the Daemon answers. No key is written to storage or to a cookie script can read.
-- **The key field is accessible, and a password manager may keep it.** It has a label, says its failure with `aria-describedby`, and its `autocomplete` is `current-password`.
-- **Text a Network sent is only ever a text node.** There is no `innerHTML`, and no markup is built from strings. Each nick, name, and text sits in a `<bdi>`. A link is one the core found, and opens in a new tab with `rel="noopener noreferrer"`.
-- **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. React Aria would inject one inline `<style>` for its pressable elements, so `public/pressable.css` carries the same rule under the id React Aria looks for. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses: the page still works, and only that rule is lost.
-- **An instant out of a `Date`'s range never takes the page down.** A Network can give any integer, so every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
+- **The Frontend never stores a Key.** The Key field is a plain, uncontrolled `<input type="password">`, so the Key is never in React state or props. On submit the value is parsed straight to `Redacted` and the field emptied, and the `Redacted` is wiped once the Daemon answers. No Key is written to storage or to a cookie script can read.
+- **The Key field is accessible, and a password manager may keep it.** It has a label, says its failure with `aria-describedby`, and its `autocomplete` is `current-password`.
+- **Text a Network sent is only ever a text node.** There is no `innerHTML`, and no markup is built from strings. Each nick, name, and text sits in a `<bdi>`.
+- **A link is one the core found,** and opens in a new tab with `rel="noopener noreferrer"`.
+- **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. `public/pressable.css` carries the rule React Aria would inject inline. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses, and the page still works without that rule.
+- **An instant out of a `Date`'s range never takes the page down.** Every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
 - **The Composer is no keyboard trap.** Tab is taken only when there is a word to complete, or while its list is open.
-- **The Composer's list, and its colours, are a listbox its textarea controls,** which keeps the focus: `aria-controls` names the list while it is shown, and `aria-activedescendant` the candidate highlighted as it moves. A textarea takes no `aria-expanded`. The list shows exactly while it owns Tab, the arrows, and Escape, and moving the caret without typing lets go of it.
+- **The Composer's list, and its colours, are a listbox its textarea controls,** which keeps the focus. `aria-controls` names the list while it is shown, and `aria-activedescendant` the candidate highlighted.
+- **The list shows exactly while it owns Tab, the arrows, and Escape,** and moving the caret without typing lets go of it.
 
 ### The fonts
 
-Each is under the SIL Open Font License 1.1, which lets the fonts be served with the page so long as their licence goes with them: the build ships each package's licence as `licences/<font>.txt`. The versions are pinned in `package.json`. A size is of every file of the font, as the build and so the binary carry it. A page fetches only the ones its text needs, such as the Latin regular and italic, 80 kB for JetBrains Mono, and none for the device's own, of either kind.
+Each is under the SIL Open Font License 1.1, and the build ships each package's licence as `licences/<font>.txt`. The versions are pinned in `package.json`.
 
-| `ui.font`                    | Package                                           | Size   |
-| ---------------------------- | ------------------------------------------------- | ------ |
-| `jetbrains-mono`             | `@fontsource-variable/jetbrains-mono`             | 179 kB |
-| `ibm-plex-mono`              | `@fontsource/ibm-plex-mono`, 400 and 700          | 211 kB |
-| `source-code-pro`            | `@fontsource-variable/source-code-pro`            | 173 kB |
-| `commit-mono`                | `@fontsource/commit-mono`, 400 and 700            | 197 kB |
-| `atkinson-hyperlegible-mono` | `@fontsource-variable/atkinson-hyperlegible-mono` | 59 kB  |
-| `ibm-plex-sans`              | `@fontsource-variable/ibm-plex-sans`              | 343 kB |
-| `atkinson-hyperlegible-next` | `@fontsource-variable/atkinson-hyperlegible-next` | 111 kB |
-| `source-sans-3`              | `@fontsource-variable/source-sans-3`              | 306 kB |
-| `inter`                      | `@fontsource-variable/inter`                      | 453 kB |
+| `ui.font`                    | Package                                           |
+| ---------------------------- | ------------------------------------------------- |
+| `jetbrains-mono`             | `@fontsource-variable/jetbrains-mono`             |
+| `ibm-plex-mono`              | `@fontsource/ibm-plex-mono`, 400 and 700          |
+| `source-code-pro`            | `@fontsource-variable/source-code-pro`            |
+| `commit-mono`                | `@fontsource/commit-mono`, 400 and 700            |
+| `atkinson-hyperlegible-mono` | `@fontsource-variable/atkinson-hyperlegible-mono` |
+| `ibm-plex-sans`              | `@fontsource-variable/ibm-plex-sans`              |
+| `atkinson-hyperlegible-next` | `@fontsource-variable/atkinson-hyperlegible-next` |
+| `source-sans-3`              | `@fontsource-variable/source-sans-3`              |
+| `inter`                      | `@fontsource-variable/inter`                      |
 
 ## Development
 
@@ -182,7 +406,7 @@ Each is under the SIL Open Font License 1.1, which lets the fonts be served with
 bun run dev          # in apps/web: Vite on localhost:5173
 ```
 
-The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser sees one origin. The proxy passes the browser's `Host` and `Origin` through unchanged, so the Daemon sees requests as same-origin, and it streams responses, Server-Sent Events included, without buffering. A Daemon that is not running is answered `502`, which the Frontend reads as no answer.
+The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser sees one origin. The proxy passes the browser's `Host` and `Origin` through unchanged, and streams responses without buffering. A Daemon that is not running is answered `502`, which the Frontend reads as no answer.
 
 ## Tests
 
@@ -191,8 +415,8 @@ The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser se
 ## Not yet
 
 - **A view of News.**
-- **Splitting the bundle.** It is one script of about 1.1 MB, 350 kB gzipped, most of it Effect, React Aria, and the Client's types the Timelines' positions bring with them, and Vite warns past 500 kB.
-- **Notifying per Network, or of words of the Owner's own,** which would be options under `ui`. Whether a device notifies is kept in its `localStorage` until then.
-- **A sound, or a badge on an installed app's icon,** with the manifest below.
-- **An installable web app,** with a manifest and an icon.
-- **Moving a Pane by dragging it,** and the Panes' keys from the Sidebar's tree, whose own keys Alt+Shift and an arrow are.
+- **Splitting the bundle.** The page's code is one script, but for the emoji names and the theme reader's Worker.
+- **Notifying per Network, or of words of the Owner's own.** Whether a device notifies is kept in its `localStorage`.
+- **A sound, or a badge on an installed app's icon.**
+- **An installable web app,** with a manifest.
+- **Moving a Pane by dragging it.**
