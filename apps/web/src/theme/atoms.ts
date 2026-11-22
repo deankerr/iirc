@@ -2,7 +2,7 @@
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
  * palette, or one previewed, while the Composer's list highlights a theme or the import
  * dialog reads one, in a Worker through the `ThemeReader` port, one text at a time and for
- * at most a second; the text's size, line height, font, and widest line, or a font the
+ * at most a second; the text's size, line height, font, and widths, or a font the
  * Composer's list highlights; drawing them as CSS custom properties on the document's root; choosing a
  * theme, and importing and removing themes for every device, each made from the options
  * read.
@@ -163,11 +163,12 @@ export const drawnTheme = Atom.make((get) => {
 });
 
 /**
- * The text's size, line height, font, and widest line in effect on this device, as the
- * root's custom properties, with the monospace font IRC's formatting asks for beside it:
- * the font the Composer's list highlights, while one is highlighted, else the one in effect.
- * The widest line is in `ch`, the font's own `0` at the text's size, so it follows both,
- * and no bound is no property at all, which leaves a line as wide as its Pane.
+ * The text's size, line height, font, widest line, nick column, and members' panel in effect
+ * on this device, as the root's custom properties, with the monospace font IRC's formatting
+ * asks for beside it: the font the Composer's list highlights, while one is highlighted,
+ * else the one in effect. The widths are in `ch`, the font's own `0` at the text's size, so
+ * they follow both, and no widest line is no property at all, which leaves a line as wide
+ * as its Pane.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string | undefined])[] => {
   const ui = get(uiInEffect);
@@ -183,6 +184,8 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
       "--widest-line",
       ui["timeline.maxWidth"] === "none" ? undefined : `${ui["timeline.maxWidth"]}ch`,
     ],
+    ["--nick-width", `${ui["timeline.nickWidth"]}ch`],
+    ["--members-width", `${ui["members.width"]}ch`],
   ];
 });
 
@@ -392,7 +395,7 @@ export const saveImport = runtime
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
  * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
- * text's size, line height, font, and widest line are custom properties there too. Whether
+ * text's size, line height, font, and widths are custom properties there too. Whether
  * the device prefers dark is followed, for `system`.
  * @param registry - The registry.
  * @returns How to stop.

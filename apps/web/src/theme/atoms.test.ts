@@ -120,6 +120,11 @@ const lineHeight = () => document.documentElement.style.getPropertyValue("--line
 
 const widestLine = () => document.documentElement.style.getPropertyValue("--widest-line");
 
+const columnWidths = () => ({
+  members: document.documentElement.style.getPropertyValue("--members-width"),
+  nick: document.documentElement.style.getPropertyValue("--nick-width"),
+});
+
 describe("themes", () => {
   it("imports one through the dialog, previewing it, for every device, and another page uses it", async () => {
     const fake = signedIn();
@@ -406,6 +411,28 @@ describe("themes", () => {
     stop();
 
     expect({ before, shared }).toStrictEqual({ before: "", shared: "72ch" });
+  });
+
+  it("draws the nick column and the members' panel on the root in characters, at once", async () => {
+    const { registry, type } = await page(signedIn());
+    const stop = watchTheme(registry);
+    const before = columnWidths();
+
+    await type("/set ui.timeline.nickWidth 24");
+    await type("/set ui.members.width 30");
+    await until(
+      registry,
+      uiInEffect,
+      (ui) => ui["timeline.nickWidth"] === 24 && ui["members.width"] === 30
+    );
+    const set = columnWidths();
+
+    stop();
+
+    expect({ before, set }).toStrictEqual({
+      before: { members: "18ch", nick: "16ch" },
+      set: { members: "30ch", nick: "24ch" },
+    });
   });
 
   it("draws the line height on the root at once", async () => {

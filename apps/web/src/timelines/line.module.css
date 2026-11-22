@@ -13,9 +13,14 @@
  * row reads as one run of text instead.
  *
  * Each row is a grid of its own, as the rows are placed one by one, so each sizes its time
- * and sender columns from the same unseen samples, drawn in the font the text is: the times
- * of the format shown, and the widest nick monospace shows whole. Every row's columns are then
- * as wide as every other's, in any font, and no count of characters decides them.
+ * column from the same unseen sample, the times of the format shown drawn in the font the
+ * text is, and its senders' column from `ui.timeline.nickWidth`, in the font's own `0`. Every
+ * row's columns are then as wide as every other's, in any font.
+ *
+ * The senders' column holds the nick, then room, then a thin rule, which the row draws the
+ * height of itself, so it runs unbroken down the rows, past a reply's line and a Preview.
+ * The column's gap then sets what was said as far past it. A Gap or a Day draws a rule of
+ * its own across.
  */
 .message,
 .highlight,
@@ -28,20 +33,43 @@
 .gap,
 .day {
   display: grid;
-  grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) auto;
+  position: relative;
+  grid-template-columns:
+    max-content calc(var(--nick-width) + var(--space-3) + var(--border-width))
+    minmax(0, 1fr) auto;
   column-gap: var(--space-3);
   padding: 0 var(--space-3);
   line-height: var(--line-height);
 }
 
+.message::after,
+.highlight::after,
+.unsent::after,
+.activity::after,
+.numeric::after,
+.refused::after,
+.session::after,
+.motd::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  grid-column: 2;
+  border-right: var(--border-width) solid var(--color-border);
+  content: "";
+}
+
+/* The nick and an Activity's mark end before the rule and the room beside it. */
+.sender,
+.marker {
+  padding-inline-end: calc(var(--space-3) + var(--border-width));
+}
+
 /*
- * The samples a row's columns are measured by: as wide as they are, and drawn as nothing,
+ * The sample a row's time column is measured by: as wide as it is, and drawn as nothing,
  * in one style whatever the row's, so a refusal's italic moves no column.
  */
-.time::before,
-.sender::before,
-.marker::before,
-.rule::before {
+.time::before {
   display: block;
   height: 0;
   overflow: hidden;
@@ -61,12 +89,26 @@
   content: attr(data-sample);
 }
 
-.sender::before,
-.marker::before,
-.rule::before {
-  white-space: pre;
-  content: "<" var(--nick-sample-upper-w) ">\A<" var(--nick-sample-upper-m) ">\A<"
-    var(--nick-sample-lower-m) ">";
+/*
+ * The least a row in columns takes, as its Timeline measures it: the columns a row has, with
+ * thirty characters for the text, unseen and in no room at all, beside the Timeline, so
+ * nothing in it scrolls and no row's layout changes it.
+ */
+.least {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.leastRow {
+  display: grid;
+  grid-template-columns:
+    max-content calc(var(--nick-width) + var(--space-3) + var(--border-width))
+    30ch 0;
+  column-gap: var(--space-3);
+  width: max-content;
+  padding: 0 var(--space-3);
+  line-height: var(--line-height);
 }
 
 .activity,
@@ -172,7 +214,7 @@
   white-space: nowrap;
 }
 
-/* The sender as said, cut to the column its sample sets, which a longer nick never widens. */
+/* The sender as said, cut to its column, which a longer nick never widens. */
 .said {
   display: block;
   overflow: hidden;
@@ -425,12 +467,15 @@
   padding-inline-end: max(var(--space-3), 100% - var(--space-3) - var(--widest-line, 100%));
 }
 
-/* With no columns, no sample measures one. */
+/* With no columns, no sample measures one, and no rule or room sets a nick apart. */
 :global([data-line]) .time::before,
-:global([data-line]) .sender::before,
-:global([data-line]) .marker::before,
-:global([data-line]) .rule::before {
+:global([data-line])
+  :is(.message, .highlight, .unsent, .activity, .numeric, .refused, .session, .motd)::after {
   display: none;
+}
+
+:global([data-line]) :is(.sender, .marker) {
+  padding-inline-end: 0;
 }
 
 :global([data-line]) .said {

@@ -56,7 +56,8 @@ The core decides and this package draws and does the I/O.
 - **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
-- **A Timeline too narrow for `columns` reads as `inline` from its first frame,** as a Pane split a few times, or a phone, is.
+- **The nick column is `ui.timeline.nickWidth` characters wide,** each as wide as the font's `0`, in any font. A longer nick is cut with an ellipsis. A thin rule stands after it, unbroken down the rows.
+- **A Timeline reads as `inline` where `columns` would leave its text fewer than about thirty characters,** from its first frame, as a Pane split a few times, or a phone, does, and again at once as the font, the text's size, the time's format, or the nick column changes.
 - **Activity is dimmer than what was said.** An Ircd's numeric replies are not.
 - **A run of joins, parts, quits, and changes of nick is one dim line** that says how many and who. A press opens it to each one's own line, and closes it again. A netsplit or a netjoin is likewise one dim line that opens to its nicks.
 - **Connections that fail again and again are one row,** with how many and when the first and the latest were.
@@ -119,6 +120,7 @@ The core decides and this package draws and does the I/O.
 - **A Direct Message's bar says whether its partner is online or offline,** and nothing while it is not known.
 - **A press on the topic discloses it in full under the bar.**
 - **The toggle, `/members`, or Alt+M shows the members under the bar, by rank.** A press, a tap, or Enter on one opens the menu on their nick, Query first, so Enter twice opens their Direct Message.
+- **The members beside a Timeline are `ui.members.width` characters wide,** each as wide as the font's `0`. Over a narrow Pane they are as wide, up to four fifths of the Pane, and on a compact screen they are a sheet the screen's width. A longer nick is cut with an ellipsis.
 - **A member's menu says, dimly, `account` and the account they are logged in to, or `logged out`,** and nothing while it is not known.
 - **A Pane narrower than 600px shows its members over its Timeline, never beside it.** There the toggle opens them for that Pane alone, and Escape, a press elsewhere, or choosing an action puts them away. The device's choice of a column covers only the Panes wide enough for one.
 - **A User known to be a bot has a dim, small `bot` after their nick,** as a member and beside the sender of a Message they said, and the row's label says it too. A fact gone stale or never learned marks nothing.
