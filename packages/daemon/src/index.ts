@@ -20,6 +20,8 @@ export { Projector, layerProjector } from "./projector.ts";
 
 export { UiChangedSince, UiConfiguration, layerUiConfiguration } from "./ui.ts";
 
+export { OptionsChangedSince, OwnerConfiguration, layerOwnerConfiguration } from "./options.ts";
+
 export type { Progress, ProjectorStatus } from "./projector.ts";
 
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";
