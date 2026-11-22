@@ -157,7 +157,7 @@ The core decides and this package draws and does the I/O.
 - **Why something was not said is shown under it,** with a way to dismiss it, and to send or check again when that is safe. It goes when it stops being true.
 - **Mod+B, I, U, and E turn bold, italic, underline, and fixed pitch on or off, Mod+R reverse, and Mod+Shift+X strikethrough.** They act on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then.
 - **Mod+Shift+K offers the sixteen colours and the default above the line,** chosen by the arrows and Enter or a press.
-- **The draft is drawn as a Timeline draws it,** and what is sent is IRC's formatting codes.
+- **The draft is drawn with its formatting,** and what is sent is IRC's formatting codes. In a font named as monospace it is drawn as a Timeline draws it. In any other font, a family the device has among them, bold is a stroke of the text's own colour, italic a dotted line under the run, and fixed pitch only its tint, so every letter stays where the caret expects it.
 - **Takes what is typed from anywhere.** A character, a dead key, or a paste where nothing takes text, such as a Timeline, the Sidebar, or the members, goes to the Composer, which takes the focus with that very key. A dialog, a popover, a menu, and a key the keymap binds keep their keys.
 - **Takes keys from anywhere on the page by the core's keymap.** A key the keymap does not take goes on as it would.
 

@@ -128,6 +128,16 @@ export const plainOf = (text: string): string => stripFormatting(text);
 export const linesIn = (text: string): readonly string[] => text.split(/\r\n|\r|\n/u);
 
 /**
+ * A line of a draft as its runs, each with its characters exactly as the Owner wrote them,
+ * a tab or another control among them, so a run drawn lies under the same characters in
+ * the field the Owner edits. A Network's text is drawn otherwise, with its controls shown
+ * as symbols.
+ * @param line - One line of the draft, with its codes.
+ * @returns Its runs, in order.
+ */
+export const runsIn = (line: string): readonly Span[] => parseFormatting(line);
+
+/**
  * The style text put in at `at` takes: the character's before it, but at the start of a
  * line, the character's after it on that line, and on a line of its own, the line break's
  * before it, which goes on in the style of the line before.

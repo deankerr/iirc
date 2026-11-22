@@ -22,7 +22,7 @@ import { completer, emojiLoader } from "./completion.ts";
 import { composerState } from "./composer-state.ts";
 import { emojiState } from "./sources.ts";
 
-import inlineStyles from "../timelines/inlines.module.css";
+import draftStyles from "./draft.module.css";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -1092,10 +1092,36 @@ const backdropOf = (container: HTMLElement) =>
  */
 const drawnRuns = (container: HTMLElement) =>
   [...(backdropOf(container)?.querySelectorAll("span") ?? [])].map((span) => ({
-    bold: span.classList.contains(inlineStyles.bold),
+    bold: span.classList.contains(draftStyles.bold),
     coloured: span.style.color !== "",
     text: span.textContent,
   }));
+
+/**
+ * How the backdrop marks a draft with one word bold, in a font, the page unmounted after.
+ * @param font - The font.
+ * @returns Whether it draws the font's faces, and whether it draws marks.
+ */
+const marking = async (font: "inter" | "jetbrains-mono") => {
+  const { container } = await signedIn({ font });
+
+  await typeIn(container, "a b c");
+  await select(container, 2, 3);
+  await chordIn(container, "b");
+
+  const backdrop = backdropOf(container);
+
+  const classes = {
+    faces: backdrop?.classList.contains(draftStyles.faces),
+    marks: backdrop?.classList.contains(draftStyles.marks),
+  };
+
+  for (const unmount of mounted.splice(0)) {
+    act(unmount);
+  }
+
+  return classes;
+};
 
 describe("the Composer's formatting", () => {
   afterEach(() => {
@@ -1140,6 +1166,25 @@ describe("the Composer's formatting", () => {
       selection: [2, 3],
       shown: "a b c",
     });
+  });
+
+  it("draws a formatted draft in the font's faces in a font named as monospace, and with marks in a sans one", async () => {
+    expect({ mono: await marking("jetbrains-mono"), sans: await marking("inter") }).toStrictEqual({
+      mono: { faces: true, marks: false },
+      sans: { faces: false, marks: true },
+    });
+  });
+
+  it("draws a formatted draft's characters as the textarea holds them, a tab and a bell among them", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "a\tb \u0007c");
+    await select(container, 2, 3);
+    await chordIn(container, "b");
+
+    expect(backdropOf(container)?.textContent?.replace("\u200B", "")).toBe(
+      composerOf(container).value
+    );
   });
 
   it("with nothing selected, says the style pending and types it next", async () => {

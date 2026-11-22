@@ -4,7 +4,7 @@ import { FontFamily, fontNames } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { fontStack, monoStack } from "./fonts.ts";
+import { draftInFaces, fontStack, monoStack } from "./fonts.ts";
 
 // Vitest hands a stylesheet to a test as nothing, even with `?raw`, so it is read as a file.
 const fontFaces = readFileSync(new URL("fonts.css", import.meta.url), "utf-8");
@@ -69,6 +69,24 @@ describe("the fonts", () => {
       ['"Noto Sans CJK JP", var(--font-device)', "var(--font-device)"],
       ['"a;b)}", var(--font-device)', "var(--font-device)"],
     ]);
+  });
+
+  it("let the Composer draw a draft in real faces only in a font named as monospace", () => {
+    const family = Schema.decodeSync(FontFamily);
+
+    expect({
+      deviceMono: draftInFaces("system"),
+      deviceSans: draftInFaces("system-sans"),
+      family: draftInFaces(family("Fira Code")),
+      namedMono: draftInFaces("jetbrains-mono"),
+      namedSans: draftInFaces("inter"),
+    }).toStrictEqual({
+      deviceMono: true,
+      deviceSans: false,
+      family: false,
+      namedMono: true,
+      namedSans: false,
+    });
   });
 
   it("each have a regular, a bold, and both italic, declared once per range, in WOFF2 alone, swapped in as they load", () => {

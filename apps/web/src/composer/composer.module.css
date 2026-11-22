@@ -79,7 +79,7 @@
 
 /*
  * Where it writes: the textarea, and behind it, while the draft holds formatting, the draft
- * drawn as a Timeline draws it, in the same cell, so the two are the same size.
+ * drawn with its formatting, in the same cell, so the two are the same size.
  */
 .field {
   display: grid;
