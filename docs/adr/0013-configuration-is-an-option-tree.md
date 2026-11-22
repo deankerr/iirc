@@ -4,7 +4,7 @@ Every piece of Configuration is an option with a dotted name, such as `network.l
 
 ## Consequences
 
-- The web frontend has two generic ways in: `/set`, `/unset`, and `/set <pattern>` from the composer or the palette, and an options pane that filters as you type and edits each value in place.
+- The web frontend has two generic ways in: `/set`, `/unset`, and `/set <pattern>` from the Composer or the palette, and an options Pane that filters as you type and edits each value in place.
 - A write changes one option and sends the whole Configuration, as [ADR 0004](0004-configuration-lives-in-the-journal.md) and the Client already require. It names the sequence it was read at, and the Daemon refuses it if the Configuration has changed since, so two Frontends editing at once cannot silently overwrite each other.
 - A Credential option is write-only. Setting it holds the value in the Vault, and it shows as held, never as its value.
 - Options for Frontends, such as the theme, the keymap, and how times are shown, live in the same tree under `ui`. They are Changes shared by every device, and a device may override any of them for itself.

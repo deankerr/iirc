@@ -54,7 +54,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now iirc
 ```
 
-Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from the composer, such as `/network add libera irc.libera.chat my-nick`, over TLS on 6697, or `/network add home irc.example.net/6667 plain my-nick` for plaintext. `journalctl --user -u iirc` shows the log. A user service runs only while its user has a session, so for one that starts at boot and stays on after logging out, run `loginctl enable-linger` once. To upgrade, build again, copy the executable over the old one, and `systemctl --user restart iirc`.
+Then open `http://127.0.0.1:7667`, sign in with the key, and add a Network from the Composer, such as `/network add libera irc.libera.chat my-nick`, over TLS on 6697, or `/network add home irc.example.net/6667 plain my-nick` for plaintext. `journalctl --user -u iirc` shows the log. A user service runs only while its user has a session, so for one that starts at boot and stays on after logging out, run `loginctl enable-linger` once. To upgrade, build again, copy the executable over the old one, and `systemctl --user restart iirc`.
 
 `systemd/iirc.service` runs `~/.local/bin/iirc daemon --data-dir ~/.local/share/iirc --web` on the default `127.0.0.1:7667`, and holds no secret.
 

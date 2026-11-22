@@ -109,10 +109,6 @@ A Connection still open when shutdown's bound ran out is over, and the `Started`
 
 Every log goes through `Effect.log*`, annotated with the Network. A Connection's life is logged at INFO, so a service log says why a Network is not on without the Journal: `Dialling` with its Connection id and Ircd, `Connected as <nick>` when the Client reports a Session's start, and `Connection closed` once for each Connection, as its `Closed` is stepped, with its `connection` id, the Ircd's `host`, `port`, and `tls`, the `reason` the Transport gave (`Ended`, `Reset`, `Refused`, `Unreachable`, `TimedOut`, `Tls`, or `HungUp`), and, from the News of that step, `ended`, the Client's own reason, such as `Silent` or `LoginFailed` behind a `HungUp`, and `session`, whether a Session had begun. The Transport says only `Tls` of a TLS failure, so no finer kind of it is logged.
 
-### Not yet
-
-- **Expiry, and pacing per Network.** A Line waits in its Outbox until it leaves or its Connection ends, and every Connection is paced alike.
-
 The Owner API is `@iirc/api`, and the composition root that wires the production adapters to the Runtime is `@iirc/daemon`, whose end-to-end runs drive it against private Ircds. This package's tests run the real Client on the in-memory ports, on a `TestClock`.
 
 | Port | Its job | Imports | In-memory adapter |
