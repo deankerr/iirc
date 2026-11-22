@@ -299,7 +299,8 @@ export const refold = <S>(
 /**
  * The News of every Network, derived from the Journal: each Network's Inputs are folded
  * from `initial`, as `refold` folds them, and what each step after `after` made happen is
- * given, in Journal order, and then live as Inputs are appended.
+ * given, in Journal order, and then live as Inputs are appended. Each reader folds from
+ * the start, which is simple, and costs time only on a long Journal.
  * @param client - The Client.
  * @param journal - The Journal.
  * @param after - The last sequence the reader has, if any.

@@ -125,7 +125,8 @@ export interface Saying {
    * its own knows it before the `Say` is stepped, so after a `NetworkStopped` it can ask
    * `said` rather than say it again. It must be unique for the Network across its whole
    * Journal, calls in flight included: the Runtime correlates by it, and never
-   * deduplicates.
+   * deduplicates, since refusing a duplicate exactly would mean holding every intent the
+   * Network was ever given.
    */
   readonly intent?: IntentId | undefined;
 }

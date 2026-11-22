@@ -13,7 +13,8 @@ import type { Effect, Stream } from "effect";
 /**
  * The version of the records below. An adapter that finds a Journal of another version
  * refuses it with {@link JournalVersionMismatch}. Nothing is migrated until the shape
- * has settled.
+ * has settled. A change an earlier Journal would not decode bumps it, and one that only
+ * widens what a record can be does not.
  */
 export const journalVersion = 1;
 

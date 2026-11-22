@@ -471,7 +471,8 @@ const drive = <S>(
     const live = (connection: ConnectionId) =>
       Effect.map(Ref.get(links), (held) => held.get(connection));
 
-    // The value is revealed when the Line's turn comes, and filled. The filled Lines stay
+    // The value is revealed when the Line's turn comes, not when it is queued, so it is
+    // held for as short a time as it can be, and filled. The filled Lines stay
     // with the pump, which paces them and lets go of them once sent. Nothing here logs or
     // journals them, and a refusal names only the reason, and is queued to be stepped as
     // `Unfilled`.
@@ -693,7 +694,8 @@ const drive = <S>(
       );
 
     // Queues a Line for its Connection, and wakes the pump without waiting for it. A Line
-    // the Outbox refuses as full is given back, to be stepped as `Unsent`.
+    // the Outbox refuses as full is given back, to be stepped as `Unsent`. A Line for a
+    // Connection no longer held is dropped: the Client judges stale Connections itself.
     const enqueue = (line: UnsentLine): Effect.Effect<readonly UnsentLine[]> =>
       Effect.gen(function* () {
         const held = yield* live(line.connection);
