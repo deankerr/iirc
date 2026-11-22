@@ -998,6 +998,11 @@ export const News = Schema.TaggedUnion({
     kind: SayKind,
     live: Schema.Boolean,
     ours: Schema.NullOr(Schema.Struct({ echo: Schema.Boolean, intent: IntentId })),
+    /**
+     * The symbol of the highest prefix its sender held in the Channel when it was said, by
+     * `PREFIX`, or none.
+     */
+    prefix: Schema.NullOr(Untrusted),
     /** Whether Self said it: ours, Self's echo, or Self said elsewhere, as from another IRC client. */
     self: Schema.Boolean,
     sender: Untrusted,
@@ -1395,6 +1400,11 @@ export const ItemContent = Schema.TaggedUnion({
     kind: SayKind,
     live: Schema.Boolean,
     ours: Schema.NullOr(Schema.Struct({ delivery: Delivery, intent: IntentId })),
+    /**
+     * The symbol of the highest prefix its sender held in the Channel when it was said, by
+     * `PREFIX`, or none.
+     */
+    prefix: Schema.NullOr(Untrusted),
     sender: Untrusted,
     tags: Schema.Array(Tag),
     target: Untrusted,

@@ -123,6 +123,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
     kind: "Privmsg",
     live: true,
     ours: ours ? { delivery: { _tag: "Unconfirmed" }, intent: "web-1" } : null,
+    prefix: null,
     sender,
     tags: [],
     target: "#iirc",

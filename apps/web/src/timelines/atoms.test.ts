@@ -60,6 +60,7 @@ const message = (sequence: number, text = `line ${sequence}`): typeof TimelineIt
     kind: "Privmsg",
     live: true,
     ours: null,
+    prefix: null,
     sender: "peer",
     tags: [],
     target: "#iirc",

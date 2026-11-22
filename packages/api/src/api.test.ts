@@ -1392,6 +1392,7 @@ describe("the contract", () => {
         kind: "Privmsg",
         live: true,
         ours: null,
+        prefix: null,
         sender: "pal",
         tags: [{ key: "+reply", value: "m1" }],
         target: "iirc",

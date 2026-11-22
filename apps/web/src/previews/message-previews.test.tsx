@@ -72,6 +72,7 @@ const message = (sequence: number, text: string): typeof TimelineItem.Encoded =>
     kind: "Privmsg",
     live: true,
     ours: null,
+    prefix: null,
     sender: "peer",
     tags: [],
     target: "#iirc",

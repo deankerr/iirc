@@ -131,7 +131,7 @@ describe("the first Features on the recorded Ircds", () => {
     );
     expect(played.transcript).toContain(">> @label=l1 PRIVMSG #iirc :hello from iirc");
     expect(played.transcript).toContain(
-      "?? message Privmsg iirc_ #iirc at=ours:t+1s in=channel:#iirc ours=i1 echo :hello from iirc"
+      '?? message Privmsg iirc_ #iirc at=ours:t+1s prefix="@" in=channel:#iirc ours=i1 echo :hello from iirc'
     );
     expect(played.transcript).toContain("?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello from iirc");
     expect(played.transcript).toContain("?? confirmed i2 at=ircd:t+2s id=ircd:m6 :psst back");
@@ -174,7 +174,7 @@ describe("the first Features on the recorded Ircds", () => {
       client.known(played.state).channels.get("#iirc")?.members.get("iirc_")?.prefixes
     ).toMatchObject({ _tag: "Known", value: new Set(["o"]) });
     expect(played.transcript).toContain(
-      "?? message Privmsg iirc_ #iirc at=ours:t+5s in=channel:#iirc ours=i1 :hello from iirc"
+      '?? message Privmsg iirc_ #iirc at=ours:t+5s prefix="@" in=channel:#iirc ours=i1 :hello from iirc'
     );
   });
 });

@@ -147,6 +147,7 @@ const said = ({
     kind,
     live,
     ours: ours ? { delivery: { _tag: "Unconfirmed" }, intent: "web-1" } : null,
+    prefix: null,
     sender,
     tags: [],
     target: "#iirc",

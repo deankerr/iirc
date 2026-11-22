@@ -19,6 +19,7 @@ const message: Extract<News, { readonly _tag: "Message" }> = {
   kind: "Privmsg",
   live: true,
   ours: undefined,
+  prefix: undefined,
   self: false,
   sender: "peer",
   tags: new Map(),

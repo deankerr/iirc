@@ -329,6 +329,7 @@ const said = (
     kind,
     live: true,
     ours: null,
+    prefix: null,
     sender,
     tags: [],
     target: "#iirc",

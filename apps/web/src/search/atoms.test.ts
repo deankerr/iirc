@@ -59,6 +59,7 @@ const message = (
     kind: "Privmsg",
     live: true,
     ours: null,
+    prefix: null,
     sender,
     tags: [],
     target: "#iirc",

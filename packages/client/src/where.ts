@@ -15,6 +15,7 @@ import { isHighlight } from "./highlight.ts";
 import { ignoredBy } from "./ignores.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
+import { rulesOf } from "./modes.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import { isNetworkOnly, isPresenceChange, isUserChange } from "./news.ts";
@@ -30,7 +31,8 @@ import type {
 } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
-import { sessionOf } from "./views.ts";
+import type { Member } from "./state.ts";
+import { openOf, sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
 
@@ -364,6 +366,63 @@ const activityWhere = (run: Run, activity: Activity, live: boolean): readonly Wh
   );
 };
 
+// The modes a member is known to hold, as far as it is known: what is complete, what is
+// known in part, or what was known before it went stale.
+const heldBy = (fact: Member["prefixes"]): ReadonlySet<string> => {
+  switch (fact._tag) {
+    case "Known": {
+      return fact.value;
+    }
+
+    case "Partial": {
+      return fact.atLeast;
+    }
+
+    case "Stale": {
+      return fact.was;
+    }
+
+    case "Unknown": {
+      return new Set();
+    }
+
+    default: {
+      return fact satisfies never;
+    }
+  }
+};
+
+/**
+ * The symbol of the highest prefix a User holds in a Channel now, by the order of
+ * `PREFIX`: for a Message said there, what its sender held as it was said. A Target that
+ * is no one Channel, a Channel Self is not in, and a sender who is no member hold none.
+ * @param run - The step, before the Message is folded in.
+ * @param sender - Who said it, by nick.
+ * @param target - The Target, as said.
+ * @returns The symbol, or `undefined` for none.
+ */
+const prefixOfSender = (run: Run, sender: string, target: string): string | undefined => {
+  const channelName = parseChannel(namingNow(run), target);
+
+  if (channelName === undefined) {
+    return undefined;
+  }
+
+  const fold = folder(run.state);
+  const { phase } = run.state.channels.get(fold(channelName)) ?? {};
+
+  const member = phase?._tag === "Joined" ? phase.members.get(fold(sender)) : undefined;
+
+  if (member === undefined) {
+    return undefined;
+  }
+
+  const held = heldBy(member.prefixes);
+
+  return rulesOf(openOf(run.state)?.isupport ?? new Map()).prefix.find(({ mode }) => held.has(mode))
+    ?.symbol;
+};
+
 /**
  * A Message read from a Line, with where it belongs.
  * @param run - The step, before the Message is folded in.
@@ -381,6 +440,7 @@ export const routeMessage = (
   return {
     ...message,
     highlight: isHighlight(run, message, fromUser),
+    prefix: fromUser ? prefixOfSender(run, message.sender, message.target) : undefined,
     self: fromUser && isSelf(run, message.sender),
     where: messageWhere(run, message.sender, fromUser, message.target),
     ...stamped(run, source),
@@ -396,6 +456,7 @@ export const routeMessage = (
 export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews => ({
   ...message,
   highlight: false,
+  prefix: prefixOfSender(run, message.sender, message.target),
   self: true,
   where: messageWhere(run, message.sender, true, message.target),
 });

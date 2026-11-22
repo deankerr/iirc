@@ -23,6 +23,7 @@ const message = (text: string, ours?: Extract<Content, { _tag: "Message" }>["our
   kind: "Privmsg",
   live: true,
   ours,
+  prefix: undefined,
   sender: "PeerÄ",
   tags: [],
   target: "#a",

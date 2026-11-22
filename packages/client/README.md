@@ -102,7 +102,7 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, Self's, or said as a `bot`, the masks its sender matched as `ignored`, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
+| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, Self's, or said as a `bot`, the `prefix` its sender held in the Channel, the masks its sender matched as `ignored`, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
 | `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
 | `Activity` | Something that changed, with its time, id, whether it is `live`, the masks the User behind it matched as `ignored`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
@@ -120,6 +120,7 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 
 - **Our own Messages are News when we send them.** With `ours.echo`, a `Confirmed` follows when the Ircd echoes it, and the echo is not a second Message. If its Line never left, a `Refused` `Unsent` follows.
 - **History arrives late,** with `live` false, and a Message may come live and again from history under the same id.
+- **A Message in a Channel carries its sender's `prefix`,** the symbol of the highest prefix they held there as the Line was folded, by the order of `PREFIX`, and none for a Direct Message, a sender who is no member, or one who holds none. Self's own, said by a `Say`, carries it too. It is fixed when said: a later `MODE` leaves it as it was.
 - **A Message is `self` when Self said it,** from here or from another IRC client, and is never a `highlight`.
 
 ### Where News belongs
