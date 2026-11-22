@@ -8,4 +8,4 @@ Journaling each page a stranger links would grow the Journal with things that ne
 
 - What a Preview needs to be shown again, such as its text and its failure, lives in the cache, keyed by the normalised link. Emptying the cache changes no Timeline, only what is fetched next.
 - Which links a Message carries is still derived from the Journal, as the Message is. Only what the Daemon fetched of them is outside it.
-- A Preview's media will be held in the Uploads store as references that may be evicted, never as Uploads. The store keeps one copy of each hash, and a Preview's reference does not keep it once the store needs room.
+- A Preview's images are held in the Store as references that may be evicted, never as Uploads. The Store keeps one copy of each hash, and a Preview's reference does not keep it once the Store needs room.

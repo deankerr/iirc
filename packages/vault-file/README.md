@@ -53,7 +53,7 @@ The file itself holds the values in plain text. That is the deliberate cost, bel
 
 ## What it deliberately does not do
 
-ADR 0006 puts the threat in hostile Networks and hostile text, not the Owner's own software, and says that where there is no keyring, Credentials "sit in a plain `credentials.json` with mode `0600`". So this adapter has:
+ADR 0006 puts the threat in hostile Networks and hostile text, not the Owner's own software, and says Credentials "sit in a plain `credentials.json` with mode `0600`". So this adapter has:
 
 - **No encryption at rest.** A key stored beside the file protects nothing the file mode does not, and one stored anywhere else is a key the Owner has to manage.
 - **No keyring.** A keyring adapter is a different Vault adapter, with the same port and the same laws.

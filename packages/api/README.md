@@ -110,7 +110,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **An Upload's bytes are served on the API's own origin too,** under a key or a sign-in, for a Frontend whose page allows only its own origin. They carry exactly the headers its link does, so they act no more in a browser here than there, and `StoreUnavailable` for them carries `Cache-Control: no-store`.
 - **Upload Changes resume exactly.** Each `changed` event is one Upload, whole, as it is now, with its link from the public URL in force as it is sent, and its id is the sequence of the Change. A Frontend keeps each Upload by its id and takes the latest. It resumes with `after` or `Last-Event-ID`, which wins, and is sent every Upload changed since, then live, with nothing missed and nothing twice. Without either, it is sent only what changes from now.
 - **Missing is a fact about the store, learnt by reading it.** A live Upload is `missing` once a read of its link or its bytes found them gone, and answered 404, never while the store cannot be reached, which is 503. Its record can still be deleted. Uploading the same bytes again, or a read that finds them, takes the mark away, so its link works again. A deleted Upload's link stays 404 whatever the store holds. Nothing marks one after a restart until a read finds its bytes gone again. The `missing` event carries the ids of every missing Upload, whole, as the stream opens and each time they change, with no id, so it moves no `Last-Event-ID`.
-- **Uploading, renaming, and deleting need what saying needs, and reading needs a read.** Key scopes do not exist yet, so every key and sign-in may do all of them, and each write by cookie must come from the Daemon's own origin, as every write must.
+- **Uploading, renaming, and deleting need what saying needs, and reading needs a read.** Every key and sign-in may do all of them, and each write by cookie must come from the Daemon's own origin, as every write must.
 
 ### The Tail
 
@@ -245,7 +245,6 @@ A body over 1 MiB is refused with 413 before it is read, on every route but an u
 
 ## Not yet
 
-- **Key scopes,** such as `read`, `chat`, and `admin`. Every key can do everything for now.
 - **Managing keys through the API.** A key is made with `iirc key create` while the Daemon is stopped.
 - **Ending sign-ins other than by signing out.** A sign-in lasts until it is signed out or its key is no longer held. It does not expire, and there is no listing or revoking the sign-ins of a key.
 - **A search of several terms.** `text` is one run of characters, as a phrase. Terms that must all appear belong in a Frontend's query syntax, and then here.

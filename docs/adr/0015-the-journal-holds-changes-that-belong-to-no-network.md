@@ -4,7 +4,7 @@ Some Configuration belongs to the Owner rather than to any Network, such as how 
 
 ## Consequences
 
-- `JournalRecord` gains `Change { change }`, which the Runtime never steps through a Client. The Daemon folds Changes into the Owner's Configuration, as a projection, and the API reads and sets it as options under `ui`.
+- `JournalRecord` has `Change { change }`, which the Runtime never steps through a Client. The Daemon folds Changes into the Owner's Configuration, as a projection, and the API reads and sets it as options under `ui`.
 - The `ui` options' Schema lives in the contract, `@iirc/api`, so every Frontend reads the same options, and the Daemon parses a value before it is journaled. A Frontend may still keep a per-device override, which it never sends.
 - A Change is the whole value of one option, so applying it twice is applying it once, and the latest for an option wins.
-- Keys and sign-ins may move into Changes later. They stay in their files for now.
+- Keys and Sign-ins are not Changes. They stay in their files.

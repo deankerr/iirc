@@ -1,6 +1,6 @@
 # Configuration is an option tree
 
-Every piece of Configuration is an option with a dotted name, such as `network.libera.nick`, and its type, default, and description come from the annotations on the contract's Schemas. Any Frontend can then list, read, and set any option without a form built for it, much as WeeChat's `/set` and `/fset` do. A new field becomes a new option with no work in any Frontend. The Owner never edits a file or sets an environment variable for common Configuration: the Daemon's only flags are its data directory and the address it listens on.
+Every piece of Configuration is an option with a dotted name, such as `network.libera.nick`, and its type, default, and description come from the annotations on the contract's Schemas. Any Frontend can then list, read, and set any option without a form built for it, much as WeeChat's `/set` and `/fset` do. A new field becomes a new option with no work in any Frontend. The Owner never edits a file or sets an environment variable for Configuration: a flag of the Daemon says only how it runs, such as where its data directory is.
 
 ## Consequences
 

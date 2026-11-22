@@ -30,7 +30,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Link listener**: The Daemon's second address, which answers a request for an Upload's link and nothing else, and is all of iirc the Owner puts on the internet. _Avoid_: Public listener, second listener, file server
 
-**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads and a Preview's images. _Avoid_: Bucket (for the role), storage, byte store, blob store
+**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads and a Preview's images. _Avoid_: Bucket (for the role), storage, blob store
 
 **Key**: A secret the Owner makes so a Frontend can use the API, held by a script or agent or traded by a browser for a Sign-in. Not a Credential, which the Daemon uses on the Owner's behalf. _Avoid_: Token, API token, password
 
