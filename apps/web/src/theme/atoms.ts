@@ -67,7 +67,10 @@ const closedDraft: ImportDraft = {
 /** The import dialog's draft. */
 export const importDraft = Atom.make(closedDraft).pipe(Atom.keepAlive);
 
-/** How long a theme's text may take to read before its Worker is ended and it is refused. */
+/**
+ * How long a theme's text may take to read before its Worker is ended and it is refused.
+ * Effect's YAML parser is quadratic on some text, so a read is bounded, and kept off the page.
+ */
 const readLimit = "1 second";
 
 /** Why text that took longer than `readLimit` to read was not imported, in words. */

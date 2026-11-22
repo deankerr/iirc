@@ -11,7 +11,9 @@ import { Atom } from "effect/reactivity";
 
 /**
  * The widest screen that is compact, as a phone's is, showing one Pane at a time. The
- * shell's styles lay the page out for it at the same width.
+ * shell's styles lay the page out for it at the same width, past every phone held upright
+ * and short of a tablet. What is sized for touch is decided apart from it, by
+ * `(pointer: coarse)`, so a tablet gets a finger's targets with the desktop's layout.
  */
 export const compactQuery = "(max-width: 640px)";
 

@@ -117,7 +117,10 @@ export const showSearch = Atom.fnSync((query: string | undefined, get) => {
   registry.set(searchFocus, registry.get(searchFocus) + 1);
 }).pipe(Atom.keepAlive);
 
-/** Searches what the field holds, as Enter in it does. */
+/**
+ * Searches what the field holds, as Enter in it does. Nothing searches as the Owner types,
+ * since a query half typed would search for something else.
+ */
 export const submitSearch = Atom.fnSync((_, get) => {
   get.registry.set(showSearch, get.registry.get(searchState).query);
 }).pipe(Atom.keepAlive);
