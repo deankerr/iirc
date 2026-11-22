@@ -203,6 +203,8 @@ export {
   Themes,
   TimeShown,
   WidestLine,
+  MembersWidth,
+  NickWidth,
   UiInForce,
   UiOptionName,
   UiOptions,

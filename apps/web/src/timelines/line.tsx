@@ -28,7 +28,7 @@ import { churnLine, lineOf, quotedOf } from "@iirc/frontend/render";
 import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 import { Fragment, useMemo, useRef, useState } from "react";
-import type { MouseEvent, ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, Ref, RefObject } from "react";
 import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
 
 import { chooseReply, perform } from "../composer/atoms.ts";
@@ -46,6 +46,25 @@ import { tagsOn } from "./atoms.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
+
+/**
+ * The least a row in columns takes, laid out unseen: its time column, as wide as the format
+ * shown makes it, the nick column, and about thirty characters of text, each in the text's
+ * own font and size, so a Timeline narrower than it draws its rows as one run of text.
+ * @param props - Where the row is given.
+ * @returns The row, unseen and taking no room.
+ */
+export const ColumnsLeast = ({ ref }: { readonly ref: Ref<HTMLDivElement> }) => {
+  const sample = sampleOf(useAtomValue(timeShown));
+
+  return (
+    <div aria-hidden className={styles.least}>
+      <div className={styles.leastRow} ref={ref}>
+        <span className={styles.time} data-sample={sample} />
+      </div>
+    </div>
+  );
+};
 
 /**
  * A time as the line shows it, as `ui.timeline.timeFormat` says, or nothing for `none`.

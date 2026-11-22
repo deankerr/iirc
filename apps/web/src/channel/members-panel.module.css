@@ -1,44 +1,17 @@
 /*
  * The members: a column beside the Timeline, over it in a narrow Pane, or a sheet. The
- * column is as wide as its unseen reference row, a rank's symbol and the widest nick it
- * shows whole, in the font drawn, and nothing else in it widens it. It is never narrower
- * than the eighteen columns it was in monospace, so it holds all it held there at any size.
+ * column is as wide as `ui.members.width` says, in the font's own `0`, and nothing in it
+ * widens it.
  */
 .panel {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: max-content;
-  min-width: 18ch;
+  width: var(--members-width);
   min-height: 0;
   border-left: var(--border-width) solid var(--color-border);
   background: var(--color-background);
   outline: none;
-}
-
-.panel > * {
-  contain: inline-size;
-}
-
-/* A member's row, as wide as the widest nick shown whole, and drawn as nothing, upright. */
-.panel > .reference {
-  display: flex;
-  height: 0;
-  overflow: hidden;
-  padding: 0 var(--space-3);
-  font-style: normal;
-  font-weight: normal;
-  visibility: hidden;
-  white-space: nowrap;
-  contain: none;
-}
-
-/* A letter more than a Timeline's: what eighteen columns of monospace held after the
-   symbol, its gap, and the padding, at the largest text size. */
-.reference::after {
-  white-space: pre;
-  content: var(--nick-sample-upper-w) "W\A" var(--nick-sample-upper-m) "M\A"
-    var(--nick-sample-lower-m) "m";
 }
 
 /* Over a narrow Pane's Timeline, under its bar, at its right. */
@@ -46,8 +19,7 @@
   position: absolute;
   inset: 0 0 0 auto;
   z-index: 2;
-  /* Its eighteen columns too, but never past the Pane's width, which bounds it here. */
-  min-width: min(18ch, 80%);
+  /* As wide as beside a Timeline, but never past most of the Pane, which bounds it here. */
   max-width: 80%;
   box-shadow: 0 0 var(--space-5) var(--color-shadow);
 }

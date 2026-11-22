@@ -17,6 +17,8 @@ declare const styles: {
   readonly headNick: string;
   readonly highlight: string;
   readonly later: string;
+  readonly least: string;
+  readonly leastRow: string;
   readonly line: string;
   readonly marker: string;
   readonly menu: string;

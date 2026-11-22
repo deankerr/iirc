@@ -343,12 +343,14 @@ const dayLines = () =>
  * and how tall what it holds is, which a test changes to scroll back, how tall each row is,
  * and how wide the view is, which a test changes to wrap the rows again: `width` as the DOM
  * rounds it, `exact` its box's, unrounded, when the two differ, as a ResizeObserver
- * reports it, and `gutter` how much of it a scrollbar takes.
+ * reports it, and `gutter` how much of it a scrollbar takes; and `least`, how wide a row in
+ * columns is at least, in the font, size, and nick column in force.
  */
 interface Laid {
   content: number;
   exact: number | undefined;
   gutter: number;
+  least: number;
   row: number;
   top: number;
   view: number;
@@ -359,6 +361,7 @@ const layout: Laid = {
   content: 0,
   exact: undefined,
   gutter: 0,
+  least: 576,
   row: 20,
   top: 0,
   view: 0,
@@ -366,6 +369,14 @@ const layout: Laid = {
 };
 
 const isLog = (element: Element) => element.getAttribute("role") === "log";
+
+/**
+ * Whether an element is the least row in columns, which the view lays out unseen beside its log.
+ * @param element - The element.
+ * @returns Whether it is.
+ */
+const isLeast = (element: Element) =>
+  element.parentElement?.previousElementSibling?.getAttribute("role") === "log";
 
 /**
  * Gives the log its size: the virtualizer reads its view from its box, and the view reads
@@ -387,7 +398,11 @@ const layOut = () => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
     get(this: HTMLElement) {
-      return isLog(this) ? layout.width : 0;
+      if (isLog(this)) {
+        return layout.width;
+      }
+
+      return isLeast(this) ? layout.least : 0;
     },
   });
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
@@ -614,6 +629,7 @@ describe("what the view says it shows", () => {
     layout.content = 0;
     layout.exact = undefined;
     layout.gutter = 0;
+    layout.least = 576;
     layout.row = 20;
     layout.top = 0;
     layout.view = 500;
@@ -1666,6 +1682,37 @@ const wrapAgain = async (row: number) => {
 };
 
 /**
+ * Lays the least row in columns out again, as a browser does once the font, the text's size,
+ * the time's format, or the nick column changed, and tells each observer of it.
+ * @param least - How wide it is now.
+ */
+const columnsTake = async (least: number) => {
+  layout.least = least;
+
+  await act(async () => {
+    for (const { report, watched } of observers) {
+      const entries = [...watched].flatMap((target) =>
+        target.isConnected && isLeast(target)
+          ? [
+              {
+                borderBoxSize: [{ blockSize: 0, inlineSize: least }],
+                contentRect: new DOMRect(0, 0, least, 0),
+                target,
+              },
+            ]
+          : []
+      );
+
+      if (entries.length > 0) {
+        report(entries);
+      }
+    }
+
+    await Promise.resolve();
+  });
+};
+
+/**
  * The first row whose top is in view, by what it says, and how far below the top it starts.
  * @returns It.
  */
@@ -1860,6 +1907,25 @@ describe("where the view stands as its rows wrap again", () => {
       scrollbar: undefined,
       wide: undefined,
     });
+  });
+
+  it("draws its rows as one run of text once the columns would leave its text too little room, whatever widens them, and in columns again once they narrow", async () => {
+    const { registry } = await opened();
+    const columns = logOf().dataset.line;
+
+    // A wider nick column, a larger size, or another font: the log's own box is as it was.
+    await columnsTake(820);
+    const wider = logOf().dataset.line;
+
+    await columnsTake(600);
+    const narrower = logOf().dataset.line;
+
+    expect({ columns, narrower, wider }).toStrictEqual({
+      columns: undefined,
+      narrower: undefined,
+      wider: "inline",
+    });
+    expect(following(registry)).toBeTruthy();
   });
 
   it("stays at the latest as its rows wrap again, though the browser moved the log as its box changed", async () => {

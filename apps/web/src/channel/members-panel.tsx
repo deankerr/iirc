@@ -61,17 +61,6 @@ const Member = ({ row }: { readonly row: MemberRow }) => (
 );
 
 /**
- * What sizes the members' column: a member's row, unseen, with a symbol of every common rank
- * and the widest nick monospace shows whole, in the font drawn.
- * @returns The row.
- */
-const Reference = () => (
-  <span aria-hidden className={styles.reference}>
-    <span className={styles.symbol} />
-  </span>
-);
-
-/**
  * A member's account, in a dim line, or nothing while it is not known.
  * @param props - The account.
  * @returns The line, or nothing.
@@ -275,7 +264,6 @@ const Floating = ({
 
   return (
     <Dialog aria-label="Members" className={`${styles.panel} ${styles.floating}`} ref={panel}>
-      <Reference />
       {children}
     </Dialog>
   );
@@ -381,7 +369,6 @@ const Shown = ({ pane }: { readonly pane: string }) => {
 
   return (
     <section aria-label="Members" className={styles.panel}>
-      <Reference />
       {body}
     </section>
   );

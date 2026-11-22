@@ -36,7 +36,7 @@ import {
   selfNick,
   windowCapOf,
 } from "./atoms.ts";
-import { Line } from "./line.tsx";
+import { ColumnsLeast, Line } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
 
@@ -93,27 +93,19 @@ interface LaidOut {
 const visible = (element: HTMLDivElement) => element.isConnected && element.clientHeight > 0;
 
 /**
- * The widest a Timeline is, in its own text's em, and still too narrow for columns, so that
- * every row reads as one run of text. The columns take up to seventeen em in monospace and
- * twenty-one in the widest sans font, so thirty-six em, sixty characters of monospace, leaves
- * the text at least fifteen em, some thirty characters, beside them.
- */
-const narrowest = 36;
-
-/**
  * Whether a log is too narrow for columns: its own width, not the screen's, as Panes split,
- * against its own text's size, so this holds at any size. The width is its border box's,
- * which, as the log has no border or padding, is what a container query on it measured: a
- * scrollbar's gutter counts.
+ * against the least a row in columns takes, as {@link ColumnsLeast} lays it out in the text's
+ * own font and size, so this holds whatever the font, the size, the time's format, and the
+ * nick column. The width is its border box's, which, as the log has no border or padding,
+ * is what a container query on it measured: a scrollbar's gutter counts.
  * @param element - The log.
  * @param width - Its border box's width, unrounded, as its ResizeObserver last reported it,
  * or none before it has, when its rounded width stands in until the observer reports.
+ * @param least - The least row in columns.
  * @returns Whether it is.
  */
-const tooNarrow = (element: HTMLElement, width: number | undefined) =>
-  (width ?? element.offsetWidth) <=
-  // A computed font size is always in pixels.
-  narrowest * Number(getComputedStyle(element).fontSize.replace(/px$/u, ""));
+const tooNarrow = (element: HTMLElement, width: number | undefined, least: HTMLElement | null) =>
+  least !== null && (width ?? element.offsetWidth) < least.offsetWidth;
 
 /** Where an item stands. */
 type Position = TimelineItem["position"];
@@ -331,6 +323,8 @@ const Lines = ({
   const [narrow, setNarrow] = useState(false);
   // The log's width as its ResizeObserver last reported it: the DOM's, not state.
   const logWidth = useRef<number | undefined>(undefined);
+  // The least a row in columns takes, laid out unseen beside the log.
+  const least = useRef<HTMLDivElement>(null);
 
   const attach = useCallback((element: HTMLDivElement | null) => {
     scroller.current = element;
@@ -803,7 +797,7 @@ const Lines = ({
             logWidth.current = entries.at(-1)?.borderBoxSize[0]?.inlineSize ?? logWidth.current;
             // Drawn before the frame is painted, so no frame shows the rows in columns.
             flushSync(() => {
-              setNarrow(tooNarrow(element, logWidth.current));
+              setNarrow(tooNarrow(element, logWidth.current, least.current));
             });
             restand.current(element);
           });
@@ -817,15 +811,34 @@ const Lines = ({
     };
   }, []);
 
-  // Too narrow for columns from the first frame, and again as the text's size changes, which
-  // changes no box the observer watches.
+  // Too narrow for columns from the first frame, and again as what the columns take changes,
+  // with the text's font or size, the time's format, or the nick column, none of which
+  // changes the log's box.
   useLayoutEffect(() => {
     const element = scroller.current;
+    const measured = least.current;
 
     if (element !== null) {
-      setNarrow(tooNarrow(element, logWidth.current));
+      setNarrow(tooNarrow(element, logWidth.current, measured));
     }
-  }, [size]);
+
+    const observer =
+      element === null || measured === null || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(() => {
+            flushSync(() => {
+              setNarrow(tooNarrow(element, logWidth.current, measured));
+            });
+          });
+
+    if (measured !== null) {
+      observer?.observe(measured);
+    }
+
+    return () => {
+      observer?.disconnect();
+    };
+  }, []);
 
   // A Pane's node moved into another Panel loses its scroll position: put it back.
   useLayoutEffect(() => {
@@ -881,78 +894,81 @@ const Lines = ({
   const drawn = line === "columns" && narrow ? "inline" : line;
 
   return (
-    // Keys, a press, a touch, and the wheel only say the Owner moved the log themselves.
-    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
-    <div
-      aria-label={label}
-      className={styles.scroller}
-      // The rows' CSS reads this, so every row is one run of text, as `inline` and a log too
-      // narrow for columns draw it, and under stacked, a run's Messages are drawn under one nick.
-      data-line={drawn === "columns" ? undefined : drawn}
-      onScroll={(event) => {
-        const element = event.currentTarget;
+    <>
+      {/* Keys, a press, a touch, and the wheel only say the Owner moved the log themselves. */}
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <div
+        aria-label={label}
+        className={styles.scroller}
+        // The rows' CSS reads this, so every row is one run of text, as `inline` and a log too
+        // narrow for columns draw it, and under stacked, a run's Messages are drawn under one nick.
+        data-line={drawn === "columns" ? undefined : drawn}
+        onScroll={(event) => {
+          const element = event.currentTarget;
 
-        // The log's box changed before the view stood itself in it again: it does so now,
-        // and keeps no more of the move than the Owner's fresh input made.
-        if (reboxed(element)) {
-          const owned = restandIn(element);
+          // The log's box changed before the view stood itself in it again: it does so now,
+          // and keeps no more of the move than the Owner's fresh input made.
+          if (reboxed(element)) {
+            const owned = restandIn(element);
 
-          tell(element, owned);
+            tell(element, owned);
 
-          if (!owned) {
-            return;
+            if (!owned) {
+              return;
+            }
+          } else {
+            remember(element);
+            tell(element, scrolledByOwner(element));
           }
-        } else {
-          remember(element);
-          tell(element, scrolledByOwner(element));
-        }
 
-        const nearEnd = element.scrollHeight - element.scrollTop - element.clientHeight < nearTop;
+          const nearEnd = element.scrollHeight - element.scrollTop - element.clientHeight < nearTop;
 
-        if (element.scrollTop < nearTop && window.earlier) {
-          readOlder();
-        } else if (nearEnd && window.later && !window.reading) {
-          askNewer(timeline);
-        }
-      }}
-      onKeyDown={(event) => {
-        if (scrollKeys.has(event.key)) {
+          if (element.scrollTop < nearTop && window.earlier) {
+            readOlder();
+          } else if (nearEnd && window.later && !window.reading) {
+            askNewer(timeline);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (scrollKeys.has(event.key)) {
+            moved();
+          }
+        }}
+        onPointerDown={() => {
+          pressed.current = true;
           moved();
-        }
-      }}
-      onPointerDown={() => {
-        pressed.current = true;
-        moved();
-      }}
-      onTouchMove={moved}
-      onWheel={moved}
-      ref={attach}
-      role="log"
-      // The log scrolls by keyboard, as any page does.
-      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-      tabIndex={0}
-    >
-      <ScrollerProvider value={scrollerElement}>
-        <div className={styles.rows} style={{ height: total }}>
-          {items.map((item) => {
-            const row = rows[item.index];
+        }}
+        onTouchMove={moved}
+        onWheel={moved}
+        ref={attach}
+        role="log"
+        // The log scrolls by keyboard, as any page does.
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+      >
+        <ScrollerProvider value={scrollerElement}>
+          <div className={styles.rows} style={{ height: total }}>
+            {items.map((item) => {
+              const row = rows[item.index];
 
-            return row === undefined ? null : (
-              <div
-                className={row.key === target ? `${styles.row} ${styles.target}` : styles.row}
-                data-index={item.index}
-                data-target={row.key === target ? "" : undefined}
-                key={item.key}
-                ref={virtualizer.measureElement}
-                style={{ transform: `translateY(${item.start}px)` }}
-              >
-                <ShownRow row={row} timeline={timeline} />
-              </div>
-            );
-          })}
-        </div>
-      </ScrollerProvider>
-    </div>
+              return row === undefined ? null : (
+                <div
+                  className={row.key === target ? `${styles.row} ${styles.target}` : styles.row}
+                  data-index={item.index}
+                  data-target={row.key === target ? "" : undefined}
+                  key={item.key}
+                  ref={virtualizer.measureElement}
+                  style={{ transform: `translateY(${item.start}px)` }}
+                >
+                  <ShownRow row={row} timeline={timeline} />
+                </div>
+              );
+            })}
+          </div>
+        </ScrollerProvider>
+      </div>
+      <ColumnsLeast ref={least} />
+    </>
   );
 };
 

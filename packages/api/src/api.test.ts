@@ -36,6 +36,8 @@ import {
   AliasName,
   Aliases,
   FontShown,
+  MembersWidth,
+  NickWidth,
   UiInForce,
   UiOptionName,
   UiOptions,
@@ -500,6 +502,7 @@ describe("the contract", () => {
         font: "system",
         "font.lineHeight": 1.45,
         "font.size": 14,
+        "members.width": 18,
         previews: "off",
         "previews.animate": true,
         "previews.mediaHeight": "medium",
@@ -526,6 +529,7 @@ describe("the contract", () => {
         "timeline.dateFormat": "full",
         "timeline.layout": "columns",
         "timeline.maxWidth": "none",
+        "timeline.nickWidth": 16,
         "timeline.timeFormat": "HH:mm",
         "unread.markRead": "latest",
         "unread.muted": [],
@@ -539,6 +543,7 @@ describe("the contract", () => {
         "font",
         "font.lineHeight",
         "font.size",
+        "members.width",
         "previews",
         "previews.animate",
         "previews.mediaHeight",
@@ -558,6 +563,7 @@ describe("the contract", () => {
         "timeline.dateFormat",
         "timeline.layout",
         "timeline.maxWidth",
+        "timeline.nickWidth",
         "timeline.timeFormat",
         "unread.markRead",
         "unread.muted",
@@ -788,6 +794,20 @@ describe("the contract", () => {
     });
   });
 
+  it("takes the nick column and the members' panel each as a whole count of characters within its bounds, and no other", () => {
+    const tried = [10, 11, 16, 18, 40, 41, 13, 14, 16.5, Number.NaN, "16", null];
+    const nick = Schema.decodeUnknownOption(NickWidth);
+    const members = Schema.decodeUnknownOption(MembersWidth);
+
+    expect({
+      members: tried.map((each) => Option.getOrNull(members(each))),
+      nick: tried.map((each) => Option.getOrNull(nick(each))),
+    }).toStrictEqual({
+      members: [null, null, 16, 18, 40, null, null, 14, null, null, null, null],
+      nick: [null, 11, 16, 18, 40, null, 13, 14, null, null, null, null],
+    });
+  });
+
   it("takes the widest line as none or a whole count of characters from 40 to 400, and no other", () => {
     const widest = Schema.decodeUnknownOption(WidestLine);
 
@@ -909,12 +929,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
+        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickWidth":16,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
         event: "changed",
         id: "9",
       },

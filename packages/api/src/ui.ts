@@ -312,6 +312,48 @@ export const WidestLine = Schema.Union([
 export type WidestLine = typeof WidestLine.Type;
 
 /**
+ * The least and the most characters a Timeline's nick column may be. At eleven it holds the
+ * longest nick RFC 2812 allows, nine characters, whole between `<` and `>`; at forty it is
+ * half a line of eighty, so the columns beside a Timeline's text never take most of it.
+ */
+const nickWidthBounds = { maximum: 40, minimum: 11 } as const;
+
+/**
+ * How wide a Timeline's nick column is under `columns`, in characters, a whole number within
+ * {@link nickWidthBounds}, with what marks the nick as said, such as `<` and `>`. A nick
+ * longer is cut. A character is the font's own `0` at the text's size, so the column holds
+ * as much at any size and in any font.
+ */
+export const NickWidth = Schema.Int.check(Schema.isBetween(nickWidthBounds)).annotate({
+  default: 16,
+  description: `How many characters wide a Timeline's nick column is, from ${nickWidthBounds.minimum} to ${nickWidthBounds.maximum}, with the < and > around a nick. A longer nick is cut. A character is as wide as the font's 0.`,
+});
+
+/** The decoded form of {@link NickWidth}. */
+export type NickWidth = typeof NickWidth.Type;
+
+/**
+ * The least and the most characters the members' panel may be. At fourteen it holds the
+ * longest nick RFC 2812 allows, nine characters, whole after a rank's symbol and with the
+ * room at its edges, which are pixels and so take more characters at the smallest text; at
+ * forty, as the nick column, it leaves a Pane to its Timeline.
+ */
+const membersWidthBounds = { maximum: 40, minimum: 14 } as const;
+
+/**
+ * How wide the members' panel is beside its Timeline, in characters, a whole number within
+ * {@link membersWidthBounds}, its rank symbols and the room at its edges included. A nick
+ * longer is cut. A character is the font's own `0` at the text's size.
+ */
+export const MembersWidth = Schema.Int.check(Schema.isBetween(membersWidthBounds)).annotate({
+  default: 18,
+  description: `How many characters wide the members' panel is beside its Timeline, from ${membersWidthBounds.minimum} to ${membersWidthBounds.maximum}, with each member's rank. A longer nick is cut. A character is as wide as the font's 0.`,
+});
+
+/** The decoded form of {@link MembersWidth}. */
+export type MembersWidth = typeof MembersWidth.Type;
+
+/**
  * The fonts text can be drawn in. Two are the device's own, which need nothing fetched:
  * `system`, its monospace font, and `system-sans`, its sans font. The rest are freely
  * licensed fonts the Frontend serves itself: five monospace, then four sans.
@@ -784,6 +826,7 @@ export const UiOptions = Schema.Struct({
   font: FontShown,
   "font.lineHeight": Leading,
   "font.size": TextSize,
+  "members.width": MembersWidth,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
   "previews.mediaHeight": PreviewsMediaHeight,
@@ -803,6 +846,7 @@ export const UiOptions = Schema.Struct({
   "timeline.dateFormat": DayShown,
   "timeline.layout": LineLayout,
   "timeline.maxWidth": WidestLine,
+  "timeline.nickWidth": NickWidth,
   "timeline.timeFormat": TimeShown,
   "unread.markRead": ReadRule,
   "unread.muted": TimelinesMuted,
