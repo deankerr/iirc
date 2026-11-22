@@ -654,6 +654,8 @@ export interface MovieTrack {
   readonly extra?: readonly Uint8Array[];
   /** Whether it has a `tkhd`, as it does unless said. */
   readonly tkhd?: boolean;
+  /** The version of its `tkhd`, 0 unless said, though its fields are laid out as version 0's. */
+  readonly tkhdVersion?: number;
 }
 
 /** What a movie is built with. */
@@ -719,7 +721,9 @@ const sampleTableOf = (track: MovieTrack, offsets: readonly number[]) => {
 const trakOf = (track: MovieTrack, offsets: readonly number[]) =>
   box(
     "trak",
-    ...(track.tkhd === false ? [] : [fullBox("tkhd", 0, 0, u(0, 8), u(track.id, 4), zeros(68))]),
+    ...(track.tkhd === false
+      ? []
+      : [fullBox("tkhd", track.tkhdVersion ?? 0, 0, u(0, 8), u(track.id, 4), zeros(68))]),
     ...(track.references === undefined
       ? []
       : [

@@ -648,10 +648,14 @@ describe("dropping a track a movie does not need", () => {
     );
   });
 
-  it("refuses a dropped track whose tkhd names no track", () => {
-    expect(
-      reasonOf("movie", movie({ tracks: [videoTrack, { ...locationTrack, tkhd: false }] }).bytes)
-    ).toBe("a dropped track's tkhd names no track");
+  it.each([
+    ["no tkhd", { ...locationTrack, tkhd: false }],
+    ["a tkhd of a version nobody here has heard of", { ...locationTrack, tkhdVersion: 2 }],
+    ["a tkhd naming track 0", { ...locationTrack, id: 0 }],
+  ] as const)("refuses a dropped track with %s", (_, track) => {
+    expect(reasonOf("movie", movie({ tracks: [videoTrack, track] }).bytes)).toBe(
+      "a dropped track's tkhd names no track"
+    );
   });
 
   it("refuses a movie with media and no moov, whose tracks are unknown", () => {

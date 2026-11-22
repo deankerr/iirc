@@ -61,7 +61,7 @@ const oneOf = (bytes: Uint8Array, parent: Box, a: number, b: number): Box | Unre
   return found[0] ?? missing();
 };
 
-/** A track as the walker decides it: its id, if `tkhd` says one, and whether it is kept. */
+/** A track as the walker decides it: its id, if a `tkhd` it can read says one, and whether it is kept. */
 export interface Track {
   readonly id: number | undefined;
   readonly kept: boolean;
@@ -80,11 +80,14 @@ export const readTrack = (bytes: Uint8Array, trak: Box): Track => {
   const hdlr = mdia === undefined ? undefined : only(bytes, mdia, types.hdlr);
   let id: number | undefined;
 
-  if (tkhd !== undefined) {
-    const p = tkhd.start + tkhd.header;
-    const at = p + ((bytes[p] ?? 0) === 1 ? 20 : 12);
+  // Only versions 0 and 1 are laid out as known, and 0 names no track.
+  const version = tkhd === undefined ? undefined : bytes[tkhd.start + tkhd.header];
 
-    id = at + 4 <= tkhd.end ? readBe(bytes, at, 4) : undefined;
+  if (tkhd !== undefined && (version === 0 || version === 1)) {
+    const at = tkhd.start + tkhd.header + (version === 1 ? 20 : 12);
+    const named = at + 4 <= tkhd.end ? readBe(bytes, at, 4) : 0;
+
+    id = named === 0 ? undefined : named;
   }
 
   // The handler type follows the version, the flags, and QuickTime's component type.
