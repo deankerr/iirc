@@ -122,7 +122,7 @@ const sasl = (
 const told = ({ login, oper }: NetworkConfiguration) => [
   ...(login._tag === "Service"
     ? [
-        `>> {Identify credential=${login.credential} account=${login.account} service=${login.service}}`,
+        `>> {Identify credential=${login.credential}${login.account === undefined ? "" : ` account=${login.account}`} service=${login.service}}`,
       ]
     : []),
   ...(oper._tag === "Login" ? [`>> {Oper credential=${oper.credential} name=${oper.name}}`] : []),
@@ -134,7 +134,7 @@ const identified = (configuration: NetworkConfiguration, nick: string, server: s
 
   return login._tag === "Service"
     ? [
-        `<< :${server} 900 ${nick} ${nick}!${configuration.username}@iirc.test ${login.account} :You are now logged in as ${login.account}`,
+        `<< :${server} 900 ${nick} ${nick}!${configuration.username}@iirc.test ${login.account ?? nick} :You are now logged in as ${login.account ?? nick}`,
       ]
     : [];
 };

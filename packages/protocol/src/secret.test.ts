@@ -94,6 +94,18 @@ describe(fillSecret, () => {
     ).toStrictEqual(["PRIVMSG [Nick_Serv]^`{|}-2 :IDENTIFY a.b-c é!#@\r\n"]);
   });
 
+  it("tells a service the password alone when there is no account", () => {
+    const alone: FilledLine = { _tag: "Identify", credential, service: "NickServ" };
+
+    expect(wires(fillSecret(alone, Redacted.make("hunter2")))).toStrictEqual([
+      "PRIVMSG NickServ :IDENTIFY hunter2\r\n",
+    ]);
+    expect(fillSecret(alone, Redacted.make("a b"))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+  });
+
   it("ends a response that fills its last chunk exactly with +", () => {
     // 300 bytes of response are 400 of base64.
     const lines = wires(fillSecret(plain("u"), Redacted.make("p".repeat(297))));
@@ -139,7 +151,7 @@ describe(fillSecret, () => {
       "pw",
       "InvalidParameter",
     ],
-    ["an identify with no account", identify("NickServ", ""), "pw", "InvalidParameter"],
+    ["an identify with an empty account", identify("NickServ", ""), "pw", "InvalidParameter"],
     ["an identify too long to fit", identify("NickServ"), "x".repeat(600), "TooLong"],
     ["an identify to a STATUSMSG Target", identify("@#staff"), "pw", "InvalidTarget"],
     ["an identify to a nick with a !", identify("NickServ!s@h"), "pw", "InvalidTarget"],

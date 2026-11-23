@@ -751,19 +751,43 @@ describe("editing", () => {
       },
       fromSasl: {
         _tag: "Service",
-        account: "dean",
         credential: "libera.login.credential",
         service: "NickServ",
         wait: 10,
       },
       service: {
         _tag: "Service",
-        account: "dean",
         credential: "libera.login.credential",
         service: "NickServ",
         wait: 5,
       },
       tooLong: "Invalid",
+    });
+  });
+
+  it("unsets a service login's account to none, and a SASL login's to the first nick", () => {
+    const service = valueOf(set(libera, plain, ["login"], "service"));
+    const named = valueOf(set(libera, service, ["login", "account"], "other"));
+    const unnamed = valueOf(unset(libera, named, ["login", "account"]));
+
+    const account = (configuration: Configuration) =>
+      optionsOf(libera, configuration, new Set()).find(
+        (option) => option.name === "network.libera.login.account"
+      );
+
+    expect({
+      sasl: valueOf(
+        unset(libera, valueOf(set(libera, full, ["login", "account"], "other")), [
+          "login",
+          "account",
+        ])
+      ).login,
+      service: unnamed.login,
+      shown: [account(unnamed)?.starts, account(unnamed)?.value],
+    }).toStrictEqual({
+      sasl: full.login,
+      service: service.login,
+      shown: ["unset", { _tag: "Unset" }],
     });
   });
 

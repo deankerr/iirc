@@ -295,7 +295,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 - **`grouped` heads the options by root:** `ui`, each Network read, and each of the Daemon's own roots, in the order of their names. A heading the filter leaves nothing under is left out, and `listed` gives the options in the same order.
 - **What is still being read is a value of its own, never a default.** An option under the Daemon's own roots is `Reading` until they are read, a Credential's `held` is unknown until the names held are read and `NotKnown` when that read fails, and `networksReading` names the Networks not yet read.
 - **A new Network starts with the Schema's defaults,** and `unset` returns an option to its default.
-- **A field the members of a union share is one option,** such as `login.account`, set in the member in force when it has the field, and otherwise in the first that does, which it puts in force.
+- **A field the members of a union share is one option,** such as `login.account`, set, unset, and shown as the member in force has the field, and otherwise set in the first member that has it, which it puts in force. A service login's account starts unset and a SASL login's as the first nick.
 - **A Credential option is write-only.** Its value is given in the password prompt, and the option names the Credential by a name derived from its own, so two options never share one.
 - **Channels are compared as the Daemon reports the Network folds them,** so `/part` never parts more than one entry for a name.
 - **A Channel's prefix is never guessed.** A bare name takes the Network's first `CHANTYPES` character, and is refused while `CHANTYPES` is unknown.

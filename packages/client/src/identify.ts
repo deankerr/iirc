@@ -64,12 +64,14 @@ export const identify = (run: Run): void => {
     return;
   }
 
-  sendSecret(run, {
-    _tag: "Identify",
-    account: login.account,
-    credential: login.credential,
-    service: login.service,
-  });
+  const { account, credential, service } = login;
+
+  sendSecret(
+    run,
+    account === undefined
+      ? { _tag: "Identify", credential, service }
+      : { _tag: "Identify", account, credential, service }
+  );
   waitUntil(run, login.wait === 0 ? undefined : Instant.make(run.at + login.wait * 1000));
 };
 

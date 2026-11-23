@@ -107,6 +107,33 @@ describe("a service login", () => {
     expect.assertions(0);
   });
 
+  it("tells the service the password alone when the login names no account, and waits as with one", () => {
+    play(client, {
+      configuration: configured({
+        channels: service.channels,
+        login: {
+          _tag: "Service",
+          credential: CredentialName.make("pw"),
+          service: "NickServ",
+          wait: 5,
+        },
+      }),
+      transcript: [
+        opened,
+        lines(
+          "<< :irc.test 001 iirc :Welcome",
+          "?? session-began iirc",
+          ">> {Identify credential=pw service=NickServ}",
+          "+4s"
+        ),
+        lines("+1s"),
+        joins,
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("joins at once when the Credential cannot be filled", () => {
     play(client, {
       configuration: service,
