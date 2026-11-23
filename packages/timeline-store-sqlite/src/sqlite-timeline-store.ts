@@ -38,6 +38,7 @@ import {
   delivered,
   emptyDirectory,
   foldForSearch,
+  foldSenderForSearch,
   levels,
   searchFolding,
   searchableOf,
@@ -1740,7 +1741,7 @@ export const makeSqliteTimelineStore = (
               : sql`AND items.timeline = coalesce(
                   (SELECT into_id FROM tombstones WHERE id = ${each.timeline}), ${each.timeline})`
           }
-          ${each.from === undefined ? sql`` : sql`AND items.sender = ${foldForSearch(each.from)}`}
+          ${each.from === undefined ? sql`` : sql`AND items.sender = ${foldSenderForSearch(each.from)}`}
           ${since === undefined ? sql`` : sql`AND items.cursor >= ${cursorsFrom(since)}`}
           ${until === undefined ? sql`` : sql`AND items.cursor < ${cursorsFrom(until)}`}
           ${

@@ -343,7 +343,7 @@ export interface Search {
   readonly network?: string | undefined;
   /** Only this Timeline's, or, for a merged id, the Timeline it went to. */
   readonly timeline?: TimelineId | undefined;
-  /** Only those said by this nick, compared folded by `foldForSearch`. */
+  /** Only those said by this nick, compared folded by `foldSenderForSearch`. */
   readonly from?: string | undefined;
   /** Only those whose position's time is at or after this instant. */
   readonly since?: Instant | undefined;

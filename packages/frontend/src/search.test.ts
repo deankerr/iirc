@@ -451,6 +451,66 @@ describe("the search", () => {
 });
 
 describe("marking what was found", () => {
+  it.each<readonly [string, string, string, readonly (readonly [string, boolean])[]]>([
+    [
+      "a decomposed caf\u00E9, its accent and all",
+      "un cafe\u0301 noir",
+      "cafe",
+      [
+        ["un ", false],
+        ["cafe\u0301", true],
+        [" noir", false],
+      ],
+    ],
+    [
+      "a composed caf\u00E9 by a decomposed one",
+      "un caf\u00E9 noir",
+      "cafe\u0301",
+      [
+        ["un ", false],
+        ["caf\u00E9", true],
+        [" noir", false],
+      ],
+    ],
+    [
+      "a match that spans a dropped mark",
+      "re\u0301sume\u0301s",
+      "resumes",
+      [["re\u0301sume\u0301s", true]],
+    ],
+    [
+      "an expanded ligature, whole",
+      "Encyclop\u00E6dia",
+      "paedia",
+      [
+        ["Encyclo", false],
+        ["p\u00E6dia", true],
+      ],
+    ],
+    [
+      "a ligature that a match starts within, whole",
+      "Encyclop\u00E6dia",
+      "edia",
+      [
+        ["Encyclop", false],
+        ["\u00E6dia", true],
+      ],
+    ],
+    [
+      "a sharp s",
+      "Stra\u00DFe 5",
+      "strasse",
+      [
+        ["Stra\u00DFe", true],
+        [" 5", false],
+      ],
+    ],
+  ])("marks %s", (_, text, sought, runs) => {
+    expect(matchRuns(text, sought)).toStrictEqual(
+      runs.map(([run, match]) => ({ colour: undefined, match, text: run }))
+    );
+  });
+
   it("marks each run that holds what was searched for, folded as the Daemon folds it", () => {
     expect([
       matchRuns("Hello WORLD, hello world", "hello"),

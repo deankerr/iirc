@@ -422,6 +422,52 @@ describe("reopening the file", () => {
       searched: 1,
     });
   });
+
+  it("folds an index folded under the lower-case scheme again, and finds a letter whatever its accent", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, (store) =>
+          Effect.gen(function* () {
+            yield* store.reset(1);
+
+            for (const each of steps.slice(0, 1)) {
+              yield* store.apply({ ...each, directory: directoryAt(each.through) });
+            }
+
+            yield* store.apply({
+              changes: [heard(2, "Caf\u00E9 cr\u00E8me")],
+              directory: directoryAt(2),
+              through: 2,
+            });
+          })
+        );
+
+        // The index and senders as the lower-case scheme kept them, accents and all.
+        const database = new Database(file);
+
+        database.run("UPDATE folded SET folding = 'simple-lower/17.0'");
+        database.run("INSERT INTO search (search) VALUES ('delete-all')");
+
+        for (const { id } of database
+          .query<{ id: number }, []>("SELECT id FROM items WHERE sender IS NOT NULL")
+          .all()) {
+          database.run("INSERT INTO search (rowid, text) VALUES (?, 'caf\u00E9 cr\u00E8me')", [id]);
+        }
+
+        database.close();
+
+        const found = yield* using(file, (store) =>
+          store.search({ limit: 10, text: SearchText.make("cafe creme") })
+        );
+
+        return found.map((item) => (item.content._tag === "Message" ? item.content.text : ""));
+      })
+    );
+
+    expect(result).toStrictEqual(["Caf\u00E9 cr\u00E8me"]);
+  });
 });
 
 // Applies every step, spoils the file while it is closed, and opens it again: what it reads

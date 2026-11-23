@@ -900,22 +900,64 @@ export interface MatchRun {
 }
 
 /**
- * Whether what was sought, folded, stands at a place in text, folded, character by
- * character.
- * @param folded - The text's characters, folded.
- * @param needle - What was sought, folded, by character.
+ * Whether what was sought, folded, stands at a place in text, folded.
+ * @param folded - The text, folded, by code point.
+ * @param needle - What was sought, folded, by code point.
  * @param at - Where to look.
  * @returns Whether it stands there.
  */
 const foundAt = (folded: readonly string[], needle: readonly string[], at: number): boolean =>
-  needle.length > 0 &&
-  at + needle.length <= folded.length &&
   needle.every((character, index) => folded[at + index] === character);
 
 /**
+ * The spans of characters that hold what was sought, both folded. Text folds a character
+ * at a time, and a character may fold to none, as a combining accent does, or to more than
+ * one, as `æ` does, so the fold is searched whole and each match given back as the
+ * characters it came from: from the one its first folded character came from, through the
+ * one its last came from and any after that fold to nothing, the accents on that letter.
+ * Matches never overlap, and a character is marked whole, even when a match starts or
+ * ends within what it folds to.
+ * @param characters - The text, by character.
+ * @param sought - What was sought.
+ * @returns For each character, whether a match holds it.
+ */
+const matchedCharacters = (characters: readonly string[], sought: string): readonly boolean[] => {
+  const needle = codePoints(foldForSearch(sought));
+  const folds = characters.map((character) => codePoints(foldForSearch(character)));
+  const folded = folds.flat();
+  // The character each folded one came from.
+  const from = folds.flatMap((fold, index) => fold.map(() => index));
+  const matched = characters.map(() => false);
+  let at = 0;
+
+  while (needle.length > 0 && at + needle.length <= folded.length) {
+    if (!foundAt(folded, needle, at)) {
+      at += 1;
+      continue;
+    }
+
+    const first = from[at] ?? 0;
+    let last = from[at + needle.length - 1] ?? first;
+
+    while (folds[last + 1]?.length === 0) {
+      last += 1;
+    }
+
+    matched.fill(true, first, last + 1);
+
+    // The next match starts at a character after this one's last.
+    while (at < folded.length && (from[at] ?? 0) <= last) {
+      at += 1;
+    }
+  }
+
+  return matched;
+};
+
+/**
  * A Message's text as plain text, in runs, each that holds what was searched for marked:
- * found as the Daemon finds it, each character lower-cased by `foldForSearch`, one code
- * point to one, so a run's characters are the text's own. The text is the plain text a
+ * found as the Daemon finds it, folded by `foldForSearch`, and marked on the text's own
+ * characters, a match taking whole each character it reaches and the accents after it. The text is the plain text a
  * notification shows, with formatting stripped and controls dropped, and nothing here is
  * markup: a view puts each run in a text node. A run that a Timeline draws as a nick has
  * the slot of that nick as the text wrote it, so one that a link holds or a mIRC colour
@@ -933,8 +975,7 @@ export const matchRuns = (
 ): readonly MatchRun[] => {
   const kept = plainWithOffsets(text);
   const characters = kept.map(({ character }) => character);
-  const folded = characters.map((character) => foldForSearch(character));
-  const needle = codePoints(foldForSearch(sought));
+  const matched = matchedCharacters(characters, sought);
   const named = drawnNicks(text, nicks);
   const runs: MatchRun[] = [];
 
@@ -958,17 +999,8 @@ export const matchRuns = (
     }
   };
 
-  let at = 0;
-
-  while (at < characters.length) {
-    const match = foundAt(folded, needle, at);
-    const length = match ? needle.length : 1;
-
-    for (let index = at; index < at + length; index += 1) {
-      push(characters[index] ?? "", match, colourAt(index));
-    }
-
-    at += length;
+  for (const [index, character] of characters.entries()) {
+    push(character, matched[index] ?? false, colourAt(index));
   }
 
   return runs;

@@ -27,6 +27,7 @@ export {
   SearchText,
   foldForSearch,
   searchTextMaximum,
+  foldSenderForSearch,
   searchFolding,
   searchTextMinimum,
   searchableOf,
