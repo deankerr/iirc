@@ -35,6 +35,7 @@ declare const styles: {
   readonly prompt: string;
   readonly quote: string;
   readonly row: string;
+  readonly rowName: string;
   readonly status: string;
   readonly swatch: string;
   readonly thumbnail: string;

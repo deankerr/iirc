@@ -18,10 +18,15 @@ import type { Colour, Span, Style } from "@iirc/protocol/format";
 /** A style that is on or off. */
 export type Flag = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "reverse";
 
-/** What can be put over some text: a flag turned over, or a foreground colour, none for the default. */
+/**
+ * What can be put over some text: a flag turned over, the text's colour, or its background,
+ * each colour none for the default. A colour leaves the background as it was, and a
+ * background leaves the colour.
+ */
 export type Format =
   | { readonly _tag: "Toggle"; readonly flag: Flag }
-  | { readonly _tag: "Colour"; readonly colour: Colour | undefined };
+  | { readonly _tag: "Colour"; readonly colour: Colour | undefined }
+  | { readonly _tag: "Background"; readonly colour: Colour | undefined };
 
 /**
  * A style the Owner chose at a caret, with nothing selected, for what is typed there next,
@@ -313,10 +318,25 @@ export const merged = (text: string, value: string, { caret, pending }: Hint): s
  * @param on - Whether a flag is turned on.
  * @returns The style after.
  */
-const putOver = (style: Style, format: Format, on: boolean): Style =>
-  format._tag === "Toggle"
-    ? { ...style, [format.flag]: on }
-    : { ...style, foreground: format.colour };
+const putOver = (style: Style, format: Format, on: boolean): Style => {
+  switch (format._tag) {
+    case "Toggle": {
+      return { ...style, [format.flag]: on };
+    }
+
+    case "Colour": {
+      return { ...style, foreground: format.colour };
+    }
+
+    case "Background": {
+      return { ...style, background: format.colour };
+    }
+
+    default: {
+      return format satisfies never;
+    }
+  }
+};
 
 /**
  * A range of a draft's plain text, in order and within it.
@@ -471,6 +491,14 @@ export const colourName = (colour: Colour | undefined): string => {
     : `#${colour.hex}`;
 };
 
+/**
+ * A background's name: its colour's, or the default.
+ * @param colour - The colour, none for the default.
+ * @returns Its name.
+ */
+export const backgroundName = (colour: Colour | undefined): string =>
+  colour === undefined ? "default background" : `${colourName(colour)} background`;
+
 const flagNames: Readonly<Record<Flag, string>> = {
   bold: "bold",
   italic: "italic",
@@ -482,7 +510,8 @@ const flagNames: Readonly<Record<Flag, string>> = {
 
 /**
  * What a style pending changes from the style in force at its caret, in words, for a view
- * to show before anything is typed: each flag turned on, or `not` it, and the colour.
+ * to show before anything is typed: each flag turned on, or `not` it, the colour, and the
+ * background.
  * @param text - The draft's text.
  * @param pending - The style pending, if any.
  * @returns The words, none with nothing pending.
@@ -500,7 +529,13 @@ export const pendingWords = (text: string, pending: Pending | undefined): readon
       : [pending.style[flag] ? flagNames[flag] : `not ${flagNames[flag]}`]
   );
 
-  return sameColour(pending.style.foreground, inForce.foreground)
-    ? changed
-    : [...changed, colourName(pending.style.foreground)];
+  const colour = sameColour(pending.style.foreground, inForce.foreground)
+    ? []
+    : [colourName(pending.style.foreground)];
+
+  const background = sameColour(pending.style.background, inForce.background)
+    ? []
+    : [backgroundName(pending.style.background)];
+
+  return [...changed, ...colour, ...background];
 };

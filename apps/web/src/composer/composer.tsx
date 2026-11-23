@@ -29,6 +29,7 @@ import { fontDescription, networkDescription, themeDescription } from "@iirc/fro
 import { keyInList, listedFlags } from "@iirc/frontend/format-list";
 import type { Highlight } from "@iirc/frontend/format-list";
 import {
+  backgroundName,
   colourChoices,
   colouredStyle,
   colourName,
@@ -42,7 +43,7 @@ import {
 import type { Format, Pending } from "@iirc/frontend/formatting";
 import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { quotedOf } from "@iirc/frontend/render";
-import type { Style } from "@iirc/frontend/render";
+import type { Colour, Style } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
 import { Atom } from "effect/reactivity";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
@@ -622,9 +623,76 @@ const Backdrop = ({
 };
 
 /**
+ * A row of the formatting list's colours, the default and the sixteen, for the text or for
+ * its background, its name shown before it and said by a screen reader, each swatch drawn as
+ * a Timeline draws a run in that colour or over that background.
+ * @param props - The list's id, the row's place and name, what it puts over the text, whether
+ * a swatch is highlighted, and what picking does.
+ * @returns The row.
+ */
+const ColourRow = ({
+  format,
+  id,
+  lit,
+  name,
+  onPick,
+  row,
+}: {
+  readonly format: "Colour" | "Background";
+  readonly id: string;
+  readonly lit: (column: number) => boolean;
+  readonly name: string;
+  readonly onPick: (format: Format) => void;
+  readonly row: number;
+}) => {
+  const theme = useAtomValue(drawnTheme);
+  const nameId = `${id}-${row}-name`;
+  const named = format === "Colour" ? colourName : backgroundName;
+
+  // Each swatch is the colour as a run is drawn in it: as its text, or as its background.
+  const fill = (colour: Colour | undefined) =>
+    format === "Colour"
+      ? runColours(colouredStyle(colour), theme).color
+      : runColours({ ...colouredStyle(undefined), background: colour }, theme).backgroundColor;
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of that listbox.
+    <div aria-labelledby={nameId} className={styles.row} role="group">
+      <span className={styles.rowName} id={nameId}>
+        {name}
+      </span>
+      {colourChoices.map((colour, column) => (
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
+        <div
+          aria-label={named(colour)}
+          aria-selected={lit(column)}
+          className={styles.swatch}
+          id={itemId(id, { column, row })}
+          // oxlint-disable-next-line react/no-array-index-key
+          key={column}
+          onClick={() => {
+            onPick({ _tag: format, colour });
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
+          role="option"
+          style={{ backgroundColor: fill(colour) }}
+          tabIndex={-1}
+          title={named(colour)}
+        >
+          {colour === undefined ? "A" : null}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/**
  * The formatting list over the composer's selection, or what is typed next: a row of the
- * formats, each its letter drawn in it and marked while the range has it, and a row of the
- * default and the sixteen colours, each a swatch drawn as a Timeline draws the colour. The
+ * formats, each its letter drawn in it and marked while the range has it, and a row each of
+ * the default and the sixteen colours for the text and for its background. The
  * textarea keeps the focus and its keys, as it does from the completion list.
  * @param props - The list's id, the draft and the list open over it, and what picking does.
  * @returns The listbox.
@@ -697,33 +765,22 @@ const FormatList = ({
           );
         })}
       </div>
-      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of that listbox. */}
-      <div aria-label="Colours" className={styles.row} role="group">
-        {colourChoices.map((colour, column) => (
-          // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
-          <div
-            aria-label={colourName(colour)}
-            aria-selected={lit(1, column)}
-            className={styles.swatch}
-            id={itemId(id, { column, row: 1 })}
-            // oxlint-disable-next-line react/no-array-index-key
-            key={column}
-            onClick={() => {
-              onPick({ _tag: "Colour", colour });
-            }}
-            onMouseDown={(event) => {
-              event.preventDefault();
-            }}
-            // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
-            role="option"
-            style={{ backgroundColor: runColours(colouredStyle(colour), theme).color }}
-            tabIndex={-1}
-            title={colourName(colour)}
-          >
-            {colour === undefined ? "A" : null}
-          </div>
-        ))}
-      </div>
+      <ColourRow
+        format="Colour"
+        id={id}
+        lit={(column) => lit(1, column)}
+        name="Text colours"
+        onPick={onPick}
+        row={1}
+      />
+      <ColourRow
+        format="Background"
+        id={id}
+        lit={(column) => lit(2, column)}
+        name="Backgrounds"
+        onPick={onPick}
+        row={2}
+      />
     </div>
   );
 };
