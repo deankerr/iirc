@@ -568,47 +568,51 @@ const clashes = (texts: readonly BindingText[]) => {
   );
 };
 
+/**
+ * What Mod+R does while typing in the composer.
+ * @param platform - The platform.
+ * @returns Its intents, or none.
+ */
+const reload = (platform: Platform) =>
+  resolve(
+    defaultKeymap,
+    at({ editing: true, inComposer: true, platform }),
+    press("r", "KeyR", platform === "Mac" ? { meta: true } : { ctrl: true })
+  );
+
 describe("the formatting keys", () => {
-  it("resolve to formatting the composer while typing in it, with its list open too, but not in another field or outside one", () => {
-    const chord = (key: string, shift = false) =>
-      resolve(
-        defaultKeymap,
-        at({ editing: true, inComposer: true }),
-        press(shift ? key.toUpperCase() : key, `Key${key.toUpperCase()}`, { ctrl: true, shift })
-      );
+  it("open the formatting list on Mod+Shift+K while typing in the composer, with its list open too, but not in another field or outside one", () => {
+    const list = (more: Partial<Omit<KeyContext, "command">>) =>
+      resolve(defaultKeymap, at(more), press("K", "KeyK", { ctrl: true, shift: true }));
 
     expect({
-      bold: chord("b"),
-      colour: chord("k", true),
-      italic: chord("i"),
+      composer: list({ editing: true, inComposer: true }),
       mac: resolve(
         defaultKeymap,
         at({ editing: true, inComposer: true, platform: "Mac" }),
-        press("b", "KeyB", { meta: true })
+        press("K", "KeyK", { meta: true, shift: true })
       ),
-      monospace: chord("e"),
-      open: resolve(
-        defaultKeymap,
-        at({ editing: true, inComposer: true, palette: true }),
-        press("b", "KeyB", { ctrl: true })
-      ),
-      otherField: resolve(defaultKeymap, at({ editing: true }), press("r", "KeyR", { ctrl: true })),
-      outside: resolve(defaultKeymap, at({}), press("r", "KeyR", { ctrl: true })),
-      reverse: chord("r"),
-      strikethrough: chord("x", true),
-      underline: chord("u"),
+      open: list({ editing: true, inComposer: true, palette: true }),
+      otherField: list({ editing: true }),
+      outside: list({}),
     }).toStrictEqual({
-      bold: [{ _tag: "Format", format: "bold" }],
-      colour: [{ _tag: "ChooseColour" }],
-      italic: [{ _tag: "Format", format: "italic" }],
-      mac: [{ _tag: "Format", format: "bold" }],
-      monospace: [{ _tag: "Format", format: "monospace" }],
-      open: [{ _tag: "Format", format: "bold" }],
+      composer: [{ _tag: "ChooseFormat" }],
+      mac: [{ _tag: "ChooseFormat" }],
+      open: [{ _tag: "ChooseFormat" }],
       otherField: undefined,
       outside: undefined,
-      reverse: [{ _tag: "Format", format: "reverse" }],
-      strikethrough: [{ _tag: "Format", format: "strikethrough" }],
-      underline: [{ _tag: "Format", format: "underline" }],
+    });
+  });
+
+  it("bind no format to Mod and a letter, so the browser keeps Mod+R wherever the focus is", () => {
+    const formats = defaultBindings.filter(
+      ({ command }) => command.startsWith("format.") && command !== "format.open"
+    );
+
+    expect({ formats, mac: reload("Mac"), other: reload("Other") }).toStrictEqual({
+      formats: [],
+      mac: undefined,
+      other: undefined,
     });
   });
 });

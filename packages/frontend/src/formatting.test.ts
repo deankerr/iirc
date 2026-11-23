@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { linesOf } from "./composer.ts";
 import {
+  flagOn,
   formattedIn,
   hasFormatting,
   linesIn,
@@ -260,5 +261,26 @@ describe("a style pending, in words", () => {
       words("\u000304hi", [uncoloured]),
       words("hi", []),
     ]).toStrictEqual([["italic", "red"], ["not bold"], ["default colour"], []]);
+  });
+});
+
+describe("whether a flag is on where a format would go", () => {
+  it.each([
+    ["the whole selection has it", "a \u0002bc\u0002 d", 2, 4, true],
+    ["only some of the selection has it", "a \u0002b\u0002c d", 2, 4, false],
+    ["none of the selection has it", "a bc d", 2, 4, false],
+    ["at a caret in it", "a \u0002bc\u0002 d", 3, 3, true],
+    ["at a caret outside it", "a \u0002bc\u0002 d", 1, 1, false],
+  ])("%s", (_, text, start, end, on) => {
+    expect(flagOn(text, undefined, start, end, "bold")).toBe(on);
+  });
+
+  it("is what is pending at a caret, over what is in force there", () => {
+    const pending = pendingAfter("hello", undefined, 5, bold);
+
+    expect({
+      elsewhere: flagOn("hello", pending, 2, 2, "bold"),
+      here: flagOn("hello", pending, 5, 5, "bold"),
+    }).toStrictEqual({ elsewhere: false, here: true });
   });
 });

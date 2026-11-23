@@ -1078,6 +1078,39 @@ const chordIn = async (container: HTMLElement, letter: string, shift = false) =>
 };
 
 /**
+ * Opens the formatting list on Mod+Shift+K and presses a format's letter in it.
+ * @param container - The page.
+ * @param letter - The letter.
+ * @returns Whether the letter was left to the browser.
+ */
+const formatIn = async (container: HTMLElement, letter: string) => {
+  await chordIn(container, "k", true);
+
+  return await pressIn(container, letter);
+};
+
+/**
+ * The formatting list open over the composer, if it is.
+ * @param container - The page.
+ * @returns It, or none.
+ */
+const formatListOf = (container: HTMLElement) =>
+  container.querySelector('[role="listbox"][aria-label="Formatting"]') ?? undefined;
+
+/**
+ * The names of the items in one row of the formatting list, as a screen reader says them.
+ * @param container - The page.
+ * @param row - The row's name.
+ * @returns The names.
+ */
+const namesIn = (container: HTMLElement, row: "Formats" | "Colours") =>
+  [
+    ...(formatListOf(container)?.querySelectorAll(
+      `[role="group"][aria-label="${row}"] [role="option"]`
+    ) ?? []),
+  ].map((one) => one.getAttribute("aria-label"));
+
+/**
  * The backdrop behind the composer, if one is drawn.
  * @param container - The page.
  * @returns It, or none.
@@ -1107,7 +1140,7 @@ const marking = async (font: "inter" | "jetbrains-mono") => {
 
   await typeIn(container, "a b c");
   await select(container, 2, 3);
-  await chordIn(container, "b");
+  await formatIn(container, "b");
 
   const backdrop = backdropOf(container);
 
@@ -1130,7 +1163,7 @@ describe("the Composer's formatting", () => {
     }
   });
 
-  it("bolds the selection on Mod+B, draws it bold behind the text, and sends the codes", async () => {
+  it("bolds the selection by B in the formatting list, draws it bold behind the text, and sends the codes", async () => {
     const { container, daemon } = await signedIn();
 
     await typeIn(container, "a b c");
@@ -1139,7 +1172,8 @@ describe("the Composer's formatting", () => {
 
     await select(container, 2, 3);
 
-    const left = await chordIn(container, "b");
+    const left = await formatIn(container, "B");
+    const gone = formatListOf(container);
     const drawn = drawnRuns(container);
     const shown = composerOf(container).value;
     const selection = [composerOf(container).selectionStart, composerOf(container).selectionEnd];
@@ -1150,6 +1184,7 @@ describe("the Composer's formatting", () => {
     expect({
       before,
       drawn,
+      gone,
       left,
       said: daemon.says.map((one) => one.text),
       selection,
@@ -1161,6 +1196,7 @@ describe("the Composer's formatting", () => {
         { bold: true, coloured: false, text: "b" },
         { bold: false, coloured: false, text: " c" },
       ],
+      gone: undefined,
       left: false,
       said: ["a \u0002b\u0002 c"],
       selection: [2, 3],
@@ -1180,7 +1216,7 @@ describe("the Composer's formatting", () => {
 
     await typeIn(container, "a\tb \u0007c");
     await select(container, 2, 3);
-    await chordIn(container, "b");
+    await formatIn(container, "b");
 
     expect(backdropOf(container)?.textContent?.replace("\u200B", "")).toBe(
       composerOf(container).value
@@ -1191,7 +1227,7 @@ describe("the Composer's formatting", () => {
     const { container, daemon } = await signedIn();
 
     await typeIn(container, "hello ");
-    await chordIn(container, "b");
+    await formatIn(container, "b");
 
     const pending = container.querySelector("[data-composer-pending]")?.textContent;
 
@@ -1209,22 +1245,19 @@ describe("the Composer's formatting", () => {
     });
   });
 
-  it("offers the colours on Mod+Shift+K, and colours the selection with the one chosen", async () => {
+  it("offers the formats and the colours on Mod+Shift+K, and colours the selection with the one chosen as on main", async () => {
     const { container, daemon } = await signedIn();
 
     await typeIn(container, "a b c");
     await select(container, 2, 3);
     await chordIn(container, "k", true);
 
-    const colours = container.querySelector('[role="listbox"][aria-label="Colours"]');
+    const formats = namesIn(container, "Formats");
+    const colours = namesIn(container, "Colours");
 
-    const offered = [...(colours?.querySelectorAll('[role="option"]') ?? [])].map((one) =>
-      one.getAttribute("aria-label")
-    );
-
-    // From the default, past white, black, blue, and green, to red, and back from brown.
+    // From the default, past white, black, blue, green, and red, to brown, and back to red.
     await pressIn(container, "ArrowRight");
-    await pressIn(container, "ArrowDown");
+    await pressIn(container, "ArrowRight");
     await pressIn(container, "ArrowRight");
     await pressIn(container, "ArrowRight");
     await pressIn(container, "ArrowRight");
@@ -1233,26 +1266,137 @@ describe("the Composer's formatting", () => {
     await pressIn(container, "Enter");
 
     const drawn = drawnRuns(container);
-    const gone = container.querySelector('[aria-label="Colours"]');
+    const gone = formatListOf(container);
 
     await pressIn(container, "Enter");
     await settled(() => daemon.says.length === 1);
 
     expect({
+      colours: [colours.length, colours[0], colours[5]],
       drawn,
+      formats,
       gone,
-      offered: [offered.length, offered[0], offered[5]],
       said: daemon.says.map((one) => one.text),
     }).toStrictEqual({
+      colours: [17, "default colour", "red"],
       drawn: [
         { bold: false, coloured: false, text: "a " },
         { bold: false, coloured: true, text: "b" },
         { bold: false, coloured: false, text: " c" },
       ],
-      gone: null,
-      offered: [17, "default colour", "red"],
+      formats: ["bold", "italic", "underline", "fixed pitch", "reverse", "strikethrough"],
+      gone: undefined,
       said: ["a \u000304b\u000399 c"],
     });
+  });
+
+  it("reaches the formats by Up from the colours, applies the one highlighted on Enter, and then shows it on", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+    await pressIn(container, "ArrowUp");
+    await pressIn(container, "ArrowRight");
+
+    const active = composerOf(container).getAttribute("aria-activedescendant") ?? "";
+
+    const highlighted = formatListOf(container)
+      ?.querySelector(`[id="${active}"]`)
+      ?.getAttribute("aria-label");
+
+    await pressIn(container, "Enter");
+
+    const drawn = drawnRuns(container).map(({ text }) => text);
+
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+
+    expect({ drawn, formats: namesIn(container, "Formats"), highlighted }).toStrictEqual({
+      drawn: ["a ", "b", " c"],
+      formats: ["bold", "italic, on", "underline", "fixed pitch", "reverse", "strikethrough"],
+      highlighted: "italic",
+    });
+  });
+
+  it("turns off by its letter a format the whole selection has", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 0, 5);
+    await formatIn(container, "u");
+    await select(container, 2, 3);
+    await formatIn(container, "U");
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect(daemon.says.map((one) => one.text)).toStrictEqual(["\u001Fa \u001Fb\u001F c"]);
+  });
+
+  it("applies an item pressed with the pointer, and puts the list away", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+
+    await act(async () => {
+      formatListOf(container)
+        ?.querySelector<HTMLElement>('[role="option"][aria-label="strikethrough"]')
+        ?.click();
+      await Promise.resolve();
+    });
+
+    const gone = formatListOf(container);
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({ gone, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      gone: undefined,
+      said: ["a \u001Eb\u001E c"],
+    });
+  });
+
+  it("puts the list away once a command started on Mod+K replaces the draft, so a letter after it is typed", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+    await chordIn(container, "k");
+
+    const gone = formatListOf(container);
+    const typed = await pressIn(container, "b");
+
+    expect({ gone, shown: composerOf(container).value, typed }).toStrictEqual({
+      gone: undefined,
+      shown: "/go ",
+      typed: true,
+    });
+  });
+
+  it("puts the list away on Escape with the draft unchanged, and leaves Mod+R to the browser", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+    await pressIn(container, "ArrowUp");
+
+    const escaped = await pressIn(container, "Escape");
+    const gone = formatListOf(container);
+    const reload = await chordIn(container, "r");
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      escaped,
+      gone,
+      reload,
+      said: daemon.says.map((one) => one.text),
+    }).toStrictEqual({ escaped: false, gone: undefined, reload: true, said: ["a b c"] });
   });
 });
 

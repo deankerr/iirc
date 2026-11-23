@@ -157,8 +157,7 @@ The core decides and this package draws and does the I/O.
 - **A draft of more than five lines asks before it is sent.** A blank line does not count.
 - **Spelling is checked unless `ui.composer.spellcheck` is off.**
 - **Why something was not said is shown under it,** with a way to dismiss it, and to send or check again when that is safe. It goes when it stops being true.
-- **Mod+B, I, U, and E turn bold, italic, underline, and fixed pitch on or off, Mod+R reverse, and Mod+Shift+X strikethrough.** They act on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then.
-- **Mod+Shift+K offers the sixteen colours and the default above the line,** chosen by the arrows and Enter or a press.
+- **Mod+Shift+K, or `/format`, opens the formatting list above the line:** a row of the formats, each its letter, B, I, U, M for fixed pitch, R for reverse, and S for strikethrough, marked while the selection has it, and a row of the default and the sixteen colours. A format's letter turns it over, the arrows and Enter choose any item, as a press does, and Escape puts the list away. One choice is made each time it opens, on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then. No format has a key of its own, so Mod+R reloads the page wherever the focus is.
 - **The draft is drawn with its formatting,** and what is sent is IRC's formatting codes. In a font named as monospace it is drawn as a Timeline draws it. In any other font, a family the device has among them, bold is a stroke of the text's own colour, italic a dotted line under the run, and fixed pitch only its tint, so every letter stays where the caret expects it.
 - **Takes what is typed from anywhere.** A character, a dead key, or a paste where nothing takes text, such as a Timeline, the Sidebar, or the members, goes to the Composer, which takes the focus with that very key. A dialog, a popover, a menu, and a key the keymap binds keep their keys.
 - **Takes keys from anywhere on the page by the core's keymap.** A key the keymap does not take goes on as it would.
@@ -389,7 +388,7 @@ The screen is compact at `(max-width: 640px)`. What is sized for touch is decide
 - **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. `public/pressable.css` carries the rule React Aria would inject inline. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses, and the page still works without that rule.
 - **An instant out of a `Date`'s range never takes the page down.** Every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
 - **The Composer is no keyboard trap.** Tab is taken only when there is a word to complete, or while its list is open.
-- **The Composer's list, and its colours, are a listbox its textarea controls,** which keeps the focus. `aria-controls` names the list while it is shown, and `aria-activedescendant` the candidate highlighted.
+- **The Composer's list, and its formatting list, are a listbox its textarea controls,** which keeps the focus. `aria-controls` names the list while it is shown, `aria-activedescendant` the item highlighted, and a format's name says whether it is on.
 - **The list shows exactly while it owns Tab, the arrows, and Escape,** and moving the caret without typing lets go of it.
 
 ### The fonts

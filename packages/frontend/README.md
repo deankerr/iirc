@@ -152,7 +152,7 @@ The one registry of commands, `commands`, as data, behind the Composer's `/comma
 | Arranging | `/move`, `/pin`, `/mute`, `/unmute` |
 | Reading | `/read`, `/read all`, `/close-timeline`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
-| Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/colour` |
+| Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/format` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the Composer's list shows.
 
@@ -199,16 +199,14 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 | `alt+shift+arrows`                     | Move between Panes                               |
 | `alt+shift+s`, `alt+shift+d`           | Split side by side, or down                      |
 | `alt+shift+w`, `z`, `e`, `g`, `r`      | Close, zoom, equalize, grow, shrink              |
-| `mod+b`, `i`, `u`, `e`, `r`            | Bold, italic, underline, fixed pitch, reverse    |
-| `mod+shift+x`                          | Strikethrough                                    |
-| `mod+shift+k`                          | Choose a colour                                  |
+| `mod+shift+k`                          | Open the formatting list                         |
 
 - **A chord is parsed.** `formatChord` writes one so that it parses back the same. A binding that does not parse, or names no command, is dropped, so a keymap holds only bindings that can fire.
 - **`mod` is Cmd on a Mac and Ctrl elsewhere.** `showChord` writes a chord as the platform does.
 - **A key event is the layout's character,** so an AZERTY `é` binds as `é`. The physical key names it only where the character says less, as with a dead key or Option on a Mac.
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
-- **Most defaults fire while typing in a field.** The formatting keys fire only in the Composer, so Mod+R reloads the page anywhere else. No two defaults share a chord where both can fire.
+- **Most defaults fire while typing in a field.** Mod+Shift+K, for the formatting list, fires only in the Composer, and no format has a key of its own, so Mod and a letter, such as Mod+R to reload, stays the browser's. No two defaults share a chord where both can fire.
 - **A key that types goes to the Composer, unless it is bound** (`typesInComposer`). A printable character, a dead key, the start of an input method's composition, a character AltGr or Option types, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not.
 - **A key pressed in a field that takes text, with an overlay holding the focus, or with no Composer to write to, is left alone.**
 - **Enter in the Composer is not a binding, but `ui.composer.enter`** (`enterPressed`). Under `send`, Enter sends and Shift+Enter begins a line. Under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
@@ -257,6 +255,16 @@ A draft's formatting, between its text with codes and the plain text the Owner e
 - **Where the text alone could place an edit in several ways,** as a letter typed beside the same letter, the caret places it.
 - **A flag goes off where the whole range has it, and on otherwise.**
 - **A colour is chosen from the sixteen, `colourNames`, or the default** (`colourChoices`).
+- **`flagOn` says whether a flag is on where a format would go,** by the rule turning it over follows: over a range where all of it has it, and at a caret in the style pending there or else in force.
+
+## The formatting list
+
+The one list a draft's formatting is chosen from, as data for a view to draw: `formatRows`, the formats by their letters in `listedFlags`, then the default and the sixteen colours. `keyInList` reads each key pressed while it is open, and the view carries out what it says.
+
+- **A format's letter, in either case and with no modifier, chooses it,** and is not typed.
+- **Left and right move along a row, round past either end, and up and down move between the rows,** stopping at the first and the last. The highlight starts on the default colour (`firstHighlight`).
+- **Enter chooses what is highlighted, and Escape puts the list away.** A choice is one `Format`, so one is made each time the list opens.
+- **Any other key, and any key with Mod, Ctrl, Meta, or Alt, is not the list's.**
 
 ## Options
 

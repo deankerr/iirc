@@ -304,8 +304,8 @@ export interface Act {
  *   intent the runtime names, and show what came back in a card over the Pane that asked.
  * - `Format`: turn a flag over in the composer's selection, or, with none, for what is
  *   typed next at its caret.
- * - `ChooseColour`: offer the colours for the composer's selection, or for what is typed
- *   next at its caret.
+ * - `ChooseFormat`: open the formatting list for the composer's selection, or for what is
+ *   typed next at its caret.
  */
 export type Intent =
   | Say
@@ -370,7 +370,7 @@ export type Intent =
   | { readonly _tag: "Search"; readonly query: string | undefined }
   | Look
   | { readonly _tag: "Format"; readonly format: Flag }
-  | { readonly _tag: "ChooseColour" }
+  | { readonly _tag: "ChooseFormat" }
   | { readonly _tag: "Arrange"; readonly edit: ArrangeEdit };
 
 /** A value parsed, or why it could not be, in words. */
@@ -3193,12 +3193,12 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "None",
     description:
-      "Choose a colour for the text selected in the composer, or for what is typed next.",
-    id: "format.colour",
-    intents: () => [{ _tag: "ChooseColour" }],
-    name: "colour",
-    parse: nothingAfter("colour"),
-    usage: "/colour",
+      "Choose a format or a colour for the text selected in the composer, or for what is typed next.",
+    id: "format.open",
+    intents: () => [{ _tag: "ChooseFormat" }],
+    name: "format",
+    parse: nothingAfter("format"),
+    usage: "/format",
     when: [],
   }),
   unfocused({
