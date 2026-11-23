@@ -16,6 +16,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@iirc/protocol": "workspace:*",
     "vitest": "catalog:"
   }
 }

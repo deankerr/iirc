@@ -15,7 +15,7 @@ import { getCACertificates } from "node:tls";
 import * as BunSocket from "@effect/platform-bun/BunSocket";
 import type { CloseReason, IrcdAddress } from "@iirc/client";
 import { maxReceivedBytes, Transport } from "@iirc/runtime/transport";
-import type { Link, LinkEvent, TransportService } from "@iirc/runtime/transport";
+import type { ClientCertificate, Link, LinkEvent, TransportService } from "@iirc/runtime/transport";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
 import type { Duration } from "effect";
 import type * as Socket from "effect/socket/Socket";
@@ -201,7 +201,10 @@ export const makeBunTransport = (options: BunTransportOptions = {}): TransportSe
   // Read once per Transport rather than once per dial.
   const roots = [...systemRoots(), ...(options.trust ?? [])];
 
-  const dial = (address: IrcdAddress): Effect.Effect<Link, never, Scope.Scope> =>
+  const dial = (
+    address: IrcdAddress,
+    certificate?: ClientCertificate
+  ): Effect.Effect<Link, never, Scope.Scope> =>
     Effect.gen(function* () {
       // The Connection's resources live in their own Scope, so it can end before the dial's.
       const connection = yield* Scope.fork(yield* Scope.Scope);
@@ -244,7 +247,7 @@ export const makeBunTransport = (options: BunTransportOptions = {}): TransportSe
         const opening = yield* Deferred.make<Duplex>();
 
         const socket = yield* BunSocket.fromDuplex(
-          openSocket({ address, connectTimeout, handshakeTimeout, roots, route }).pipe(
+          openSocket({ address, certificate, connectTimeout, handshakeTimeout, roots, route }).pipe(
             Effect.tap((open) => Deferred.succeed(opening, open))
           )
         );

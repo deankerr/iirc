@@ -66,7 +66,7 @@ describe("the format", () => {
       "!! read t-1s",
       "!! configure highlights=release,iirc highlights=",
       "!! configure ignores=spam!*@*,*!*@bad.test ignores=",
-      "!! configure login=service,NickServ,iirc,pw,5 login=none",
+      "!! configure login=service,NickServ,iirc,pw,5 login=none login=external,required",
       "!! configure oper=admin,operpw oper=none",
       "?? read-marker t+5s in=channel:#iirc",
       "+60s",

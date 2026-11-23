@@ -1,10 +1,11 @@
 /**
- * `sasl` with `PLAIN`: logging in before registration ends, and what a failed login
+ * `sasl` with `PLAIN` and `EXTERNAL`: logging in before registration ends, and what a failed login
  * means, as the Configuration says.
  */
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
+import type { IrcdAddress } from "../configuration.ts";
 import { client } from "../core.ts";
 import { FeatureName } from "../ids.ts";
 import { configured, play, registered } from "../testing/index.ts";
@@ -132,6 +133,151 @@ describe("logging in", () => {
     const played = play(client, { configuration: optional, transcript: registered(optional) });
 
     expect(client.known(played.state).self?.account).toStrictEqual({ _tag: "Unknown" });
+  });
+});
+
+// The Credential each Dial names, in order, or none for a Dial that names none.
+const certificates = (played: ReturnType<typeof play>) =>
+  played.steps.flatMap((step) =>
+    step.outputs.flatMap((output) => (output._tag === "Dial" ? [output.certificate] : []))
+  );
+
+describe("presenting a client certificate", () => {
+  const cert = CredentialName.make("cert");
+
+  const certified = (...ircds: readonly [IrcdAddress, ...IrcdAddress[]]) =>
+    configured({ ircds, tls: { _tag: "Certificate", certificate: cert } });
+
+  it("names it on a Dial over TLS, and on none in plaintext", () => {
+    const tls = { host: "irc.test", port: 6697, tls: true };
+    const plain = { host: "irc.test", port: 6667, tls: false };
+
+    const played = play(client, {
+      configuration: certified(plain, tls),
+      transcript: [
+        lines("!! configure", "-> dial irc.test:6667", "== opened"),
+        lines(">> CAP LS 302", ">> NICK iirc", ">> USER iirc 0 * iirc"),
+        lines("== closed Reset", "?? connection-failed Closed Reset", "+2s"),
+        lines("-> dial irc.test:6697 tls"),
+      ],
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined, cert]);
+  });
+
+  it("names it on the TLS Dial an STS policy upgrades a plaintext Ircd to", () => {
+    const played = play(client, {
+      configuration: certified({ host: "irc.test", port: 6667, tls: false }),
+      transcript: [
+        lines("!! configure", "-> dial irc.test:6667", "== opened"),
+        lines(">> CAP LS 302", ">> NICK iirc", ">> USER iirc 0 * iirc"),
+        lines("<< :irc.test CAP * LS :sts=port=6697", "-> hangup", "== closed HungUp"),
+        lines("-> dial irc.test:6697 tls"),
+      ],
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined, cert]);
+  });
+
+  it("names none without a certificate in the Configuration", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: lines("!! configure", "-> dial irc.test:6697 tls"),
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined]);
+  });
+});
+
+const external = (required: boolean) =>
+  configured({
+    login: { _tag: "External", required },
+    tls: { _tag: "Certificate", certificate: CredentialName.make("cert") },
+  });
+
+describe("logging in with EXTERNAL", () => {
+  // Up to `AUTHENTICATE EXTERNAL`, with the Ircd offering `sasl` with this value.
+  const askedExternal = (value: string) =>
+    opened +
+    lines(
+      `<< :irc.test CAP * LS :sasl${value}`,
+      ">> CAP REQ sasl",
+      "<< :irc.test CAP * ACK :sasl",
+      ">> AUTHENTICATE EXTERNAL"
+    );
+
+  const answered =
+    askedExternal("=PLAIN,EXTERNAL") + lines("<< AUTHENTICATE +", ">> AUTHENTICATE +");
+
+  // The mechanism is offered when the cap lists it in any case, or lists nothing.
+  it.each(["=EXTERNAL", "=PLAIN,external", ""])(
+    "logs in before CAP END, with the Ircd listing %j",
+    (value) => {
+      play(client, {
+        configuration: external(true),
+        transcript: [
+          askedExternal(value),
+          lines(
+            "<< AUTHENTICATE +",
+            ">> AUTHENTICATE +",
+            "<< :irc.test 903 iirc :SASL authentication successful"
+          ),
+          goesOn,
+        ],
+      });
+
+      expect.assertions(0);
+    }
+  );
+
+  it("does not try when the Ircd lists mechanisms without EXTERNAL, and a required login gives up", () => {
+    const listing = lines(
+      opened.trimEnd(),
+      "<< :irc.test CAP * LS :sasl=PLAIN,SCRAM-SHA-256",
+      ">> CAP REQ sasl",
+      "<< :irc.test CAP * ACK :sasl"
+    );
+
+    play(client, { configuration: external(false), transcript: [listing, goesOn] });
+    play(client, { configuration: external(true), transcript: [listing, givesUp] });
+
+    expect.assertions(0);
+  });
+
+  // Each row is a failure the Ircd answers the exchange with, as PLAIN's are.
+  it.each(["902", "904", "905", "906", "907"])("fails the login on %s", (numeric) => {
+    play(client, {
+      configuration: external(false),
+      transcript: [answered, lines(`<< :irc.test ${numeric} * :failed`), goesOn],
+    });
+    play(client, {
+      configuration: external(true),
+      transcript: [answered, lines(`<< :irc.test ${numeric} * :failed`), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when 001 comes before 903, and takes up no Session", () => {
+    const played = play(client, {
+      configuration: external(true),
+      transcript: [answered, lines("<< :irc.test 001 iirc :Welcome", ">> AUTHENTICATE *"), givesUp],
+    });
+
+    expect(began(played)).toStrictEqual([]);
+  });
+
+  it("aborts with AUTHENTICATE * on a challenge that is not +", () => {
+    play(client, {
+      configuration: external(true),
+      transcript: [
+        askedExternal("=EXTERNAL"),
+        lines("<< AUTHENTICATE Zm9vYmFy", ">> AUTHENTICATE *"),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
   });
 });
 

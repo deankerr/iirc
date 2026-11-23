@@ -58,7 +58,9 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 `NetworkConfiguration` is the Schema of what `Configured` carries. It is also exported alone from `@iirc/client/configuration`, as pure data a Frontend may import.
 
 - **A Frontend derives every option from the Schema alone.** Each field has a description and its default, and each Credential field is marked as one.
-- **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its login's, its operator login's, and each Channel's key.
+- **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its login's, its client certificate's, its operator login's, and each Channel's key.
+- **`tls` says whether to present a client certificate,** `none` or `certificate` with the Credential holding it. An `Output.Dial` names that Credential as `certificate` when the address dialled is TLS, an STS upgrade included, and names none for a plaintext one. A `Configured` written before `tls` existed decodes as `none`.
+- **An `External` login needs `tls` to be `certificate`.** A Configuration with one and no certificate does not decode.
 - **`userModes` and `lines` are sent as each Session begins,** after the welcome and any service login and before any Channel is joined: `userModes` as one `MODE` on Self, then each Line in order, with no intent.
 - **Each of `lines` is parsed by the rule `/quote` applies,** in `src/quoted.ts`. One that `/quote` would refuse at that moment is `Ignored` as `Unsendable`.
 - **A field added later decodes old Journals as the Client behaved before it,** so an old Journal replays as it happened. `answerCtcp` and `whoOnJoin` start on and decode as off. `bot` starts and decodes as off.
@@ -336,7 +338,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 | --- | --- | --- | --- |
 | Cap negotiation | caps from the Ircd | Asks for each Feature's caps, whole or not at all. Only what the Ircd acknowledges is enabled. `CAP NEW` and `CAP DEL` are followed for the rest of the Connection. | `caps.test.ts` |
 | Cap notify | `cap-notify` | Asks for the cap, so an Ircd that keeps to the rules before 302 sends `CAP NEW` and `CAP DEL`. | `caps.test.ts` |
-| SASL | `sasl`, and a SASL login in the Configuration | Logs in with `PLAIN`, holding registration until `903`. A failed login goes on when it is optional, and gives up the Connection with `LoginFailed` when it is required. | `sasl.test.ts`, `login.test.ts` |
+| SASL | `sasl`, and a SASL login in the Configuration | Logs in with `PLAIN` for a `Sasl` login, or `EXTERNAL`, by the client certificate, for an `External` one, holding registration until `903`. A mechanism the cap's value lists without it is not tried. A failed login goes on when it is optional, and gives up the Connection with `LoginFailed` when it is required. | `sasl.test.ts`, `login.test.ts` |
 | Message tags | `message-tags` | A Line's `msgid` is its Message's id. Client-only tags are reported with the Message, and `+reply` and `+channel-context` are read, ignored where their specs say. A `Say` that `answers` a Message carries `+reply` where the Session has `message-tags`, and is still said without it. Knowledge says which, as `tags`. | `tags.test.ts`, `replies.test.ts` |
 | Server time | `server-time` | A Line's `time` tag is when it happened. Without it, or when malformed, the time is when the Line arrived. | `tags.test.ts` |
 | Batches | `batch` | Tracks open batches, nested or interleaved. Lines are read as they arrive, never held back. A split holds only its News. | `batch.test.ts` |

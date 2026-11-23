@@ -1,7 +1,8 @@
 /**
  * The Vault port: hold Credentials, and give one's value at the last moment. A value is
- * always `Redacted`, so it cannot be logged or journaled by accident, and only
- * `fillSecret` in `@iirc/protocol` unwraps it.
+ * always `Redacted`, so it cannot be logged or journaled by accident. It is unwrapped
+ * only where it is used: `fillSecret` in `@iirc/protocol` for a `SecretLine`, and the
+ * Transport adapter, which hands a client certificate's key to TLS.
  *
  * @packageDocumentation
  */
@@ -25,7 +26,7 @@ export class VaultFailed extends Schema.TaggedError<
 
 /** What a Vault adapter provides. */
 export interface VaultService {
-  /** A Credential's value, for the Runtime to fill a `SecretLine` with and then let go of. */
+  /** A Credential's value, for the Runtime to fill a `SecretLine` with or give the Transport as a client certificate, and then let go of. */
   readonly reveal: (
     name: CredentialName
   ) => Effect.Effect<Redacted.Redacted, CredentialMissing | VaultFailed>;

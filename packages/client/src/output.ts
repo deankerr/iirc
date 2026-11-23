@@ -1,4 +1,4 @@
-import { OutboundLine, SecretLine } from "@iirc/protocol/line";
+import { CredentialName, OutboundLine, SecretLine } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { IrcdAddress } from "./configuration.ts";
@@ -32,8 +32,14 @@ export const Output = Schema.TaggedUnion({
    * Open a new Connection, numbered by the Client. The address is worked out, not copied:
    * while an STS policy holds for the host, it is TLS on the policy's port, whatever
    * Configuration says. A failed TLS Connection is never retried in plaintext.
+   * `certificate` names the Credential holding the client certificate to present, on a
+   * TLS Connection whose Configuration names one.
    */
-  Dial: { connection: ConnectionId, ircd: IrcdAddress },
+  Dial: {
+    certificate: Schema.optionalKey(CredentialName),
+    connection: ConnectionId,
+    ircd: IrcdAddress,
+  },
   /** End a Connection. The Client still waits for its `Closed`. */
   Hangup: { connection: ConnectionId },
   /**
