@@ -103,6 +103,18 @@ const marking = <A>(
     const unknown = new TimelineUnknown({ timeline: summary.id });
     const route = routeOf(summary, yield* livingOf(network));
 
+    // A Client step that failed finds the Network again: removed keeping the Timeline, it is
+    // marked by a Change, still live in its life, the failure stands, and otherwise the
+    // Timeline is unknown.
+    const afterFailing = (failure: MarkingFailed) =>
+      Effect.flatMap(livingOf(network), (living): Effect.Effect<A, MarkingFailed, Journal> => {
+        if (living === undefined || living.life !== summary.life) {
+          return Effect.fail(unknown);
+        }
+
+        return living._tag === "Kept" ? byChange(summary, network) : Effect.fail(failure);
+      });
+
     switch (route._tag) {
       case "Unknown": {
         return yield* unknown;
@@ -115,22 +127,8 @@ const marking = <A>(
       case "Client": {
         return yield* byClient(network, route.target).pipe(
           Effect.catchTags({
-            NetworkStopped: (stopped) =>
-              Effect.flatMap(
-                livingOf(network),
-                (living): Effect.Effect<A, MarkingFailed, Journal> =>
-                  living?._tag === "Kept" && living.life === summary.life
-                    ? byChange(summary, network)
-                    : Effect.fail(stopped)
-              ),
-            UnknownNetwork: () =>
-              Effect.flatMap(
-                livingOf(network),
-                (living): Effect.Effect<A, MarkingFailed, Journal> =>
-                  living?._tag === "Kept" && living.life === summary.life
-                    ? byChange(summary, network)
-                    : Effect.fail(unknown)
-              ),
+            NetworkStopped: (stopped) => afterFailing(stopped),
+            UnknownNetwork: () => afterFailing(unknown),
           })
         );
       }
