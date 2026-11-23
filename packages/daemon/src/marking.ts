@@ -17,7 +17,7 @@ import { TimelineId } from "@iirc/timelines";
 import { Effect, Schema } from "effect";
 
 /** No Timeline has the id: it was never given, or its Network was removed and it was dropped. */
-export class TimelineUnknown extends Schema.TaggedError<
+class TimelineUnknown extends Schema.TaggedError<
   TimelineUnknown,
   { readonly brand: unique symbol }
 >()("TimelineUnknown", { timeline: TimelineId }) {}
