@@ -276,8 +276,9 @@ export interface Feature<Own = undefined> {
    */
   readonly expired?: (context: Context<Own>) => Effects<Own>;
   /**
-   * While it holds registration, a `SecretLine` could not be filled, so nothing was sent,
-   * such as SASL's `AuthenticatePlain` with no Credential. The Feature decides what follows.
+   * While it is on, a `SecretLine` could not be filled, so nothing was sent, such as SASL's
+   * `AuthenticatePlain` with no Credential. The Feature decides what follows, and whether
+   * the Line was its own.
    */
   readonly unfilled?: (line: SecretLine, context: Context<Own>) => Effects<Own>;
   readonly tags?: (arrival: Arrival, context: Context<Own>) => Refined<Arrival, Own>;

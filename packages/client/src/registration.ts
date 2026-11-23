@@ -594,8 +594,8 @@ export const expire = (run: Run): void => {
 };
 
 /**
- * A `SecretLine` could not be filled: each Feature holding registration that has an
- * `unfilled` hook decides what follows.
+ * A `SecretLine` could not be filled: each Feature on that has an `unfilled` hook decides
+ * what follows, whether or not it holds registration.
  * @param run - The step.
  * @param line - The Line that was not sent.
  * @returns Whether any Feature heard it.
@@ -609,7 +609,7 @@ export const unfilled = (run: Run, line: SecretLine): boolean => {
   }
 
   const hearing = onNow(run.registry, run.state).filter(
-    (feature) => feature.unfilled !== undefined && open.seam.holding.has(feature.name)
+    (feature) => feature.unfilled !== undefined
   );
 
   if (hearing.length === 0) {

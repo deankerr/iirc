@@ -423,22 +423,6 @@ describe("an Ircd that does not keep to the exchange", () => {
     expect(played.steps.at(-1)).toMatchObject({ news: [] });
   });
 
-  it("does not log in again when sasl is new after registration", () => {
-    const played = play(client, {
-      configuration: optional,
-      transcript: [
-        registered(optional, { offered: ["cap-notify"] }),
-        lines(
-          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
-          ">> CAP REQ sasl",
-          "<< :irc.test CAP iirc ACK :sasl"
-        ),
-      ],
-    });
-
-    expect(client.inspect(played.state).features).toContain("sasl");
-  });
-
   it("takes a new cap offered mid-exchange, and ends negotiation once both are done", () => {
     const played = play(client, {
       configuration: optional,
@@ -619,6 +603,178 @@ describe("PLAIN withdrawn mid-exchange", () => {
           "<< AUTHENTICATE +",
           ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
         ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+describe("sasl offered anew during a Session", () => {
+  // A Session that began without a login: the Ircd offered no sasl.
+  const loggedOut = registered(optional, { offered: ["cap-notify"] });
+
+  const offeredAnew = lines(
+    "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+    ">> CAP REQ sasl",
+    "<< :irc.test CAP iirc ACK :sasl",
+    ">> AUTHENTICATE PLAIN",
+    "<< AUTHENTICATE +",
+    ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
+  );
+
+  // A required login that happened, then a logout, so no account is known for Self.
+  const loggedOutSince = lines(
+    "<< :irc.test 901 iirc iirc!iirc@iirc.test :You are now logged out",
+    "<< :irc.test CAP iirc DEL :sasl"
+  );
+
+  it("logs in with no account known, and 900 makes the account known", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        offeredAnew,
+        lines(
+          "<< :irc.test 900 iirc iirc!iirc@iirc.test iirc :You are now logged in as iirc",
+          "<< :irc.test 903 iirc :SASL authentication successful"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).self?.account).toMatchObject({
+      _tag: "Known",
+      value: "iirc",
+    });
+  });
+
+  it("logs in by EXTERNAL when the login names it", () => {
+    play(client, {
+      configuration: external(false),
+      transcript: [
+        registered(external(false), { offered: ["cap-notify"] }),
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=EXTERNAL",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE EXTERNAL",
+          "<< AUTHENTICATE +",
+          ">> AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("sends nothing with an account known", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        registered(optional, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        lines(
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect(played.steps.at(-1)).toMatchObject({ news: [] });
+  });
+
+  it("reports a 904 in the Network's Timeline, and keeps the Connection, even for a required login", () => {
+    const played = play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        offeredAnew,
+        lines(
+          "<< :irc.test 904 iirc :SASL authentication failed",
+          "?? activity Numeric 904 in=network :SASL authentication failed",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).session._tag).toBe("Registered");
+  });
+
+  it("does not try a mechanism the Ircd does not list, and keeps the Connection", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=EXTERNAL",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("aborts when the Credential cannot be filled, and keeps the Connection", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        offeredAnew,
+        lines(
+          "== unfilled Missing",
+          ">> AUTHENTICATE *",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("ends the exchange without a login when sasl is deleted mid-exchange", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< AUTHENTICATE +",
+          "<< :irc.test 903 iirc :SASL authentication successful"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).self?.account).toStrictEqual({ _tag: "Unknown" });
+  });
+
+  it("begins anew when sasl is offered again after a deleted exchange", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl"
+        ),
+        offeredAnew,
       ],
     });
 

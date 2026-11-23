@@ -1,8 +1,9 @@
 /**
- * `sasl`: Self logs in to its account before registration ends, with the mechanism the
- * Configuration's login names: `PLAIN` for a `Sasl` login, or `EXTERNAL` for an `External`
- * one, by the client certificate the Transport presented. While the exchange runs, this
- * Feature holds registration open, so `CAP END` waits for it.
+ * `sasl`: Self logs in to its account before registration ends, or during a Session when
+ * the cap is offered anew, with the mechanism the Configuration's login names: `PLAIN` for
+ * a `Sasl` login, or `EXTERNAL` for an `External` one, by the client certificate the
+ * Transport presented. While the exchange runs during registration, this Feature holds
+ * registration open, so `CAP END` waits for it.
  *
  * - It begins when the cap turns on during registration and the Configuration names a
  *   login, unless the cap's value lists mechanisms and the login's is not among them. Then
@@ -21,8 +22,13 @@
  *   the Feature is off, and `absent` gives up the Connection. So does `001` before `903`.
  * - `900` and `901`, which say Self's account, are the core's, whoever logged in.
  *
- * A `CAP NEW` for `sasl` after registration does not log in again, and a `CAP DEL` after
- * `903` changes nothing: Self is logged in, and the account stays known.
+ * During a Session, the cap turning on again, as a `CAP NEW` that offers it is
+ * acknowledged, begins the same exchange when no account is known for Self, and does
+ * nothing when one is. It holds nothing open, and a failed login ends nothing, required or
+ * not: the Session has begun. Its numeric is the Network's to show. A `CAP DEL` mid-exchange
+ * turns the Feature off, so it hears nothing more, and the next `CAP NEW` begins anew.
+ *
+ * A `CAP DEL` after `903` changes nothing: Self is logged in, and the account stays known.
  *
  * @packageDocumentation
  */
@@ -79,23 +85,43 @@ const offers = (attempt: Attempt, value: string | undefined): boolean =>
   value === "" ||
   value.split(",").some((mechanism) => upperCaseAscii(mechanism) === mechanismOf(attempt));
 
-// No login: go on without one, or give up when the Configuration requires it.
-const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Effects<Exchange> => ({
-  own: notLoggedIn,
-  registration: saslRequired(context.configuration.login)
-    ? { _tag: "Abandon", reason: { _tag: "LoginFailed" } }
-    : { _tag: "Continue" },
-  send,
-});
+// No login. While registering, go on without one, or give up when the Configuration
+// requires it. During a Session, nothing more: the Session has already begun.
+const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Effects<Exchange> => {
+  if (context.known.session._tag !== "Registering") {
+    return { own: notLoggedIn, send };
+  }
+
+  return {
+    own: notLoggedIn,
+    registration: saslRequired(context.configuration.login)
+      ? { _tag: "Abandon", reason: { _tag: "LoginFailed" } }
+      : { _tag: "Continue" },
+    send,
+  };
+};
 
 const running = (exchange: Exchange): boolean =>
   exchange._tag === "Asked" || exchange._tag === "Sent";
 
-// Begins a login, while registering, if the Configuration names one and its mechanism is offered.
+// Whether Self's account is known this Session, by whatever said it.
+const hasAccount = (context: Context<Exchange>): boolean => {
+  const account = context.known.self?.account;
+
+  return account?._tag === "Known" && account.value !== null;
+};
+
+// Begins a login the Configuration names, if its mechanism is offered: while registering,
+// holding registration open, or during a Session with no account known, holding nothing.
 const begin = (context: Context<Exchange>): Effects<Exchange> => {
   const attempt = attemptOf(context.configuration.login);
+  const session = context.known.session._tag;
 
-  if (attempt === undefined || context.known.session._tag !== "Registering") {
+  if (
+    attempt === undefined ||
+    (session !== "Registering" && session !== "Registered") ||
+    (session === "Registered" && hasAccount(context))
+  ) {
     return {};
   }
 
@@ -103,11 +129,12 @@ const begin = (context: Context<Exchange>): Effects<Exchange> => {
     return failed(context);
   }
 
-  return {
+  const asked: Effects<Exchange> = {
     own: { _tag: "Asked", mechanism: mechanismOf(attempt) },
-    registration: { _tag: "Hold" },
     send: line(mechanismOf(attempt)),
   };
+
+  return session === "Registering" ? { ...asked, registration: { _tag: "Hold" } } : asked;
 };
 
 /** The `sasl` Feature, with `PLAIN` or `EXTERNAL`. */

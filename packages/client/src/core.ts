@@ -723,7 +723,7 @@ const consumedBy = (state: State, input: Input): TimerId | undefined =>
 
 // The Transport
 
-// A `SecretLine` a holding Feature sent could not be filled. With none to hear it, it
+// A `SecretLine` a Feature sent could not be filled. With none to hear it, it
 // changes nothing.
 const unfilledHeld = (run: Run, line: SecretLine): void => {
   const was = before(run);
