@@ -3,6 +3,7 @@
 .icon {
   display: inline-flex;
   flex: none;
+  align-items: center;
   justify-content: center;
   inline-size: 2ch;
   font-style: normal;
@@ -10,4 +11,11 @@
   /* Drawn as text, never as a colour emoji. */
   font-variant-emoji: text;
   line-height: 1;
+}
+
+/* A drawing, as tall and wide as the text, in the middle of its box. */
+.drawing {
+  display: block;
+  inline-size: 1em;
+  block-size: 1em;
 }

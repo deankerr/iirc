@@ -1,8 +1,8 @@
 /*
- * A Message's Previews: under its text, in the text's column, as wide as its text may run,
- * marked by one rule at their start, each a card stacked under the last, far enough apart
- * that two cards never read as one. A row pending is one line. Nothing in it scrolls sideways. Its media is as tall as
- * `--preview-media-height` at most, which the view sets from the option.
+ * A Message's Previews: under its text, in the text's column, with room above and below, as
+ * wide as its text may run, each a card stacked under the last, far enough apart that two
+ * cards never read as one. A row pending is one line. Nothing in it scrolls sideways. Its
+ * media is as tall as `--preview-media-height` at most, which the view sets from the option.
  */
 .previews {
   display: flex;
@@ -11,10 +11,9 @@
   gap: var(--space-3);
   min-width: 0;
   max-width: var(--widest-line, none);
-  margin: var(--space-1) 0;
-  padding: 0 0 0 var(--space-3);
+  margin: var(--space-3) 0;
+  padding: 0;
   list-style: none;
-  box-shadow: inset var(--edge-width) 0 0 var(--color-border);
   color: var(--color-muted);
   font-size: 0.93em;
   white-space: normal;
@@ -29,6 +28,16 @@
 .row {
   min-width: 0;
   max-width: min(34em, 100%);
+}
+
+/*
+ * A row with words, a card's or a failure's, or a pulse standing for them, stands behind a
+ * rule and an indent. A link that is itself media, an image, a video, or a sound, is a card
+ * with no title and no description, its media alone, flush with the text.
+ */
+.row:not(:has(> .card[data-bare])) {
+  padding-left: var(--space-3);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-border);
 }
 
 /* A row whose card holds nothing, as a link that is itself media that failed, takes no room. */
@@ -172,29 +181,32 @@
 }
 
 /*
- * The toggle after a link that may be previewed: one quiet glyph in the Message's text,
- * brighter while hovered or open, which opens or closes the Preview under the Message.
+ * The toggle after a link that may be previewed: a bare caret in the Message's text, as a
+ * Network's row in the Sidebar has, which opens or closes the Preview under the Message.
+ * Closed it is quiet and open it is the text's colour, and either takes the accent while
+ * hovered. Its press reaches past the caret's own box on the far side from the link.
  */
 .toggle {
   display: inline-block;
-  min-width: 1.4em;
-  margin: 0 0 0 0.15em;
-  padding: 0 0.2em;
-  border: var(--border-width) solid var(--color-border);
+  margin: 0;
+  padding: 0 0.3em 0 0;
+  border: 0;
   border-radius: var(--radius);
   background: transparent;
   color: var(--color-muted);
   font: inherit;
-  font-size: 0.85em;
-  line-height: 1.2;
+  line-height: inherit;
   text-align: center;
   vertical-align: baseline;
   cursor: default;
 }
 
-.toggle[aria-expanded="true"],
-.toggle[data-hovered] {
+.toggle[aria-expanded="true"] {
   color: var(--color-text);
+}
+
+.toggle[data-hovered] {
+  color: var(--color-accent);
 }
 
 .toggle[data-focus-visible] {

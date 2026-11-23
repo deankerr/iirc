@@ -80,8 +80,8 @@ The core decides and this package draws and does the I/O.
 
 ### Previews
 
-- **Previews a Message's links while its Timeline's mode is `text` or `on`,** its own in `ui.previews.timelines` or else `ui.previews`. Each is a card under the text, several stacked behind one left rule, and each is updated in place from the stream of Previews.
-- **Each of a Message's first three previewable links has a toggle right after it,** in every layout: a button the keyboard reaches, which says whether its Preview is open. A closed Preview draws nothing and takes no room.
+- **Previews a Message's links while its Timeline's mode is `text` or `on`,** its own in `ui.previews.timelines` or else `ui.previews`. Each is a card under the text, with room above and below, and each is updated in place from the stream of Previews.
+- **Each of a Message's first three previewable links has a toggle right after it,** in every layout: a bare caret, as a Network's row in the Sidebar has, and a button the keyboard reaches, which says whether its Preview is open. Its press reaches past the caret, away from the link. A closed Preview draws nothing and takes no room.
 - **A Preview starts open or closed as `ui.previews.start` says,** `open` unless set. What the Owner opened or closed is kept while a row scrolls away and back, and forgotten when the page is loaded again.
 - **A row whose Previews the Daemon already holds is drawn whole the first time.** What the Daemon holds is read with each window, before its rows are drawn, and fetches nothing.
 - **A Message is asked for only once it is within a screen's height of the view, and only while one of its Previews is open.** So opening one is the ask, with a placeholder until it is answered, and a Message whose Previews are all closed fetches nothing.
@@ -93,7 +93,7 @@ The core decides and this package draws and does the I/O.
 - **A ready card shows each of these it has:** the host it was read from, when another than its link's, ignoring a leading `www.`, in a small quiet line; its title, two lines at most; its description, three lines at most, which a press shows whole when it was cut; and, while `on`, its media. The site's name is never drawn.
 - **A description's line breaks are drawn as breaks,** so a text file's first lines are drawn as lines, and every word is text, never markup.
 - **Under `text` a card is its words alone.**
-- **A link that is itself an image, a video, or a sound is its media alone,** with no words.
+- **A card with a title or a description stands behind a left rule and an indent.** A link that is itself an image, a video, or a sound is its media alone, with no words but the host it was read from, flush with the text.
 - **A link to a file is its file name,** with its first lines when it is a text file, or else its type and size, under `text` as under `on`.
 - **Media is at most as tall as `ui.previews.mediaHeight`,** 160, 260, or 400 pixels.
 - **A sound, and a video with no poster, is the browser's own player,** which fetches nothing from the Daemon until play is pressed. A video has a control in its corner that opens it large.
@@ -104,8 +104,9 @@ The core decides and this package draws and does the I/O.
 - **An image is the Daemon's own copy,** loaded only once it is within a screen's height of the view.
 - **Where the Daemon read an image's dimensions, its box is reserved before a byte loads,** within `ui.previews.mediaHeight` and the room it has and never larger than the image, and stays the same once it has loaded. Where it did not, a placeholder stands until the image has loaded, which is then drawn at its own size within the same limits, or, with no size of its own, as an SVG with only a `viewBox`, as large as they allow at its own proportions.
 - **A page's image that fails to load leaves its words,** and a link that is itself media that fails leaves nothing.
-- **A press of an image opens it large over the whole screen,** with a link to its page. Escape or a press anywhere but the link closes it, returning focus to the image.
+- **A press of a still image opens it large over the whole screen,** as the pointer over it says, with a link to its page. Escape or a press anywhere but the link closes it, returning focus to the image.
 - **A video's larger view leaves a press on the video to its player,** and closes from a control in its corner, a press on the dimmed screen around it, or Escape.
+- **The control that opens media large and the one that closes a video's larger view are the same square,** a finger's size on a touch screen, with their icon in the middle in any font.
 - **An animated image is its first frame under a play badge,** which a press plays in place and stops, with a control to open it large while it plays.
 - **An animated image plays on its own under `ui.previews.animate`,** on unless set, unless the device reduces motion.
 - **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again.
@@ -351,7 +352,7 @@ The core decides and this package draws and does the I/O.
 - **Styles are CSS Modules over the theme.** No module names a colour of its own, and each module's class names are declared beside it, so a class that does not exist fails to compile.
 - **Every button is one of one family.** `Button`, `ToggleButton`, and `IconButton` come in four variants, bordered, primary, quiet, and as text, and two sizes, regular in a form and small in a bar.
 - **A button's height is one line of its text, its padding, and its border,** never its container's, and its padding is in `em` and `ch`, so it keeps its shape at any text size. Only the topic and the tree's chevron are drawn otherwise.
-- **An icon is a glyph in the UI's font,** named in `src/ui/icon.tsx`, drawn centred in a box as wide as two digits, and hidden from assistive technology.
+- **An icon is a glyph in the UI's font, or a drawing in the text's colour,** named in `src/ui/icon.tsx`, drawn centred in a box as wide as two digits, and hidden from assistive technology. The icons drawn over media, `enlarge`, `close`, and `play`, are drawings, which sit the same in any font.
 - **A button that shows only an icon is named,** and has a tooltip saying what it does and its key, where the keymap binds one.
 
 ### Nothing is drawn before it is known

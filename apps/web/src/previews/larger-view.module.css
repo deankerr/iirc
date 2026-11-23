@@ -118,34 +118,49 @@ video.large {
 }
 
 /*
+ * A control drawn over media: the one that opens it large and the one that closes the larger
+ * view, the same square at the text's own size wherever it is drawn, its icon in the middle,
+ * and a finger's size on a touch screen.
+ */
+.control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: calc(2 * var(--font-size));
+  block-size: calc(2 * var(--font-size));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: default;
+  font: inherit;
+  font-size: var(--font-size);
+  line-height: 1;
+}
+
+.control[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+@media (pointer: coarse) {
+  .control {
+    inline-size: var(--target-size);
+    block-size: var(--target-size);
+  }
+}
+
+/*
  * The close control in a video's corner, clear of the player's controls along its foot, on
  * the page's own colour, as the link is, so it reads on any frame.
  */
 .close {
   position: absolute;
   inset: var(--space-2) var(--space-2) auto auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2em;
-  min-height: 2em;
-  padding: var(--space-1);
-  border: 0;
-  border-radius: var(--radius);
   background: var(--color-background);
   color: var(--color-text);
-  cursor: default;
-  font: inherit;
-  font-size: 1.25em;
-  line-height: 1;
 }
 
 .close[data-hovered] {
   background: var(--color-surface);
-}
-
-.close[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
 }
 
 /* The link sits on the page's own colour, so it reads on any image or scrim. */
@@ -171,11 +186,6 @@ a.page:focus-visible {
 }
 
 @media (pointer: coarse) {
-  .close {
-    min-width: var(--target-size);
-    min-height: var(--target-size);
-  }
-
   .page {
     display: flex;
     align-items: center;

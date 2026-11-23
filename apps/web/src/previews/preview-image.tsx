@@ -25,6 +25,7 @@ import { PlayButton } from "./play-button.tsx";
 import type { Play } from "./play-button.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
 
+import larger from "./larger-view.module.css";
 import styles from "./preview-image.module.css";
 
 /**
@@ -218,7 +219,7 @@ export const EnlargeControl = ({
   readonly onOpen?: (() => void) | undefined;
 }) => (
   <OpensLarger alt={name} large={large} link={link} onOpen={onOpen}>
-    <AriaButton aria-label={`Open ${name} large`} className={styles.enlarge}>
+    <AriaButton aria-label={`Open ${name} large`} className={`${larger.control} ${styles.enlarge}`}>
       <Icon name="enlarge" />
     </AriaButton>
   </OpensLarger>

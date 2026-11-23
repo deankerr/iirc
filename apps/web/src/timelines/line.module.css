@@ -432,7 +432,7 @@
   color: inherit;
   font: inherit;
   line-height: inherit;
-  cursor: pointer;
+  cursor: default;
 }
 
 .dayGo[data-hovered] {

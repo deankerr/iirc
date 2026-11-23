@@ -2,6 +2,7 @@
 declare const styles: {
   readonly close: string;
   readonly closes: string;
+  readonly control: string;
   readonly dialog: string;
   readonly large: string;
   readonly modal: string;

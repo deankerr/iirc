@@ -74,7 +74,11 @@ export const OpensLarger = ({
                 poster={large.poster}
                 src={large.src}
               />
-              <Button aria-label="Close" className={styles.close} slot="close">
+              <Button
+                aria-label="Close"
+                className={`${styles.control} ${styles.close}`}
+                slot="close"
+              >
                 <Icon name="close" />
               </Button>
             </span>
