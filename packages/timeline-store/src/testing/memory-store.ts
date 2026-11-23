@@ -5,6 +5,7 @@ import {
   delivered,
   emptyDirectory,
   foldForSearch,
+  foldSenderForSearch,
   searchableOf,
   unreadCap,
 } from "@iirc/timelines";
@@ -840,7 +841,7 @@ const ranged = (items: readonly Item[], { after, limit, since, until }: Range) =
  */
 const searched = (memory: Memory, search: Search): readonly Item[] => {
   const text = foldForSearch(search.text);
-  const from = search.from === undefined ? undefined : foldForSearch(search.from);
+  const from = search.from === undefined ? undefined : foldSenderForSearch(search.from);
 
   const timeline =
     search.timeline === undefined

@@ -1,3 +1,4 @@
+import { casefold } from "@iirc/protocol/casemapping";
 /**
  * What an item is found by when Timelines are searched, and the text a search looks for.
  * Every store folds text this one way, so they all find the same items.
@@ -7,6 +8,7 @@
 import { Schema } from "effect";
 
 import type { Content } from "./content.ts";
+import { decompositionEntries } from "./decompositions.ts";
 import { lowerCaseRuns, lowerCaseUnicode } from "./lower-case.ts";
 
 // Each code point that lower-cases to another, and what to. Built once from the pinned runs.
@@ -21,18 +23,54 @@ for (let index = 0; index + 3 < lowerCaseRuns.length; index += 4) {
 }
 
 /**
- * How a search folds text, which changes whenever folding does: the scheme, and the
- * Unicode version of the table it folds by. A store that keeps folded text keeps this with
- * it, and folds again what it kept under another.
+ * The letters a search takes to a base of its own, which no decomposition gives: a letter
+ * with a stroke to the letter, and a ligature to its letters. Each is lower-case, as a
+ * search lower-cases first, so its capital folds the same way.
  */
-export const searchFolding = `simple-lower/${lowerCaseUnicode}`;
+const ownBases = new Map([
+  ["\u00F8", "o"],
+  ["\u0142", "l"],
+  ["\u0111", "d"],
+  ["\u0127", "h"],
+  ["\u0131", "i"],
+  ["\u00E6", "ae"],
+  ["\u0153", "oe"],
+  ["\u00DF", "ss"],
+]);
+
+// Each code point a search takes to something other than itself once lower-cased, and
+// what to. Built once from the pinned entries, and the letters of our own after them.
+const baseOf = new Map<number, string>();
+
+for (let index = 0; index + 1 < decompositionEntries.length;) {
+  const [code = 0, count = 0] = decompositionEntries.slice(index, index + 2);
+  const base = String.fromCodePoint(...decompositionEntries.slice(index + 2, index + 2 + count));
+
+  baseOf.set(code, Array.from(base, (each) => ownBases.get(each) ?? each).join(""));
+  index += 2 + count;
+}
+
+for (const [letter, base] of ownBases) {
+  baseOf.set(letter.codePointAt(0) ?? 0, base);
+}
 
 /**
- * Text as a search compares it: each code point lower-cased by Unicode's simple mapping,
- * one code point to one, from a table pinned to one Unicode version, never the runtime's
- * tables or a locale's. So `İ` folds to `i`, and folding keeps the count of code points.
- * Nothing is composed or decomposed: `é` written whole and `e` with a combining accent are
- * different text, and diacritics are kept, so `café` does not find `cafe`.
+ * How a search folds text, which changes whenever folding does: the scheme, and the
+ * Unicode version of the tables it folds by. A store that keeps folded text keeps this
+ * with it, and folds again what it kept under another.
+ */
+export const searchFolding = `lower-base/${lowerCaseUnicode}`;
+
+/**
+ * Text as a search compares it, from tables pinned to one Unicode version, never the
+ * runtime's tables or a locale's. Each code point is lower-cased by Unicode's simple
+ * mapping, so `İ` folds to `i`, then decomposed by its canonical decomposition, with every
+ * mark of the Combining Diacritical Marks block dropped, so `é` written whole and `e` with
+ * a combining accent both fold to `e`. A letter with a stroke folds to its letter, and
+ * `æ`, `œ` and `ß` to `ae`, `oe` and `ss`. Nothing else is taken off: a mark of another
+ * block is kept, and a compatibility decomposition, or a Hangul syllable's, is not
+ * followed. Text folds a code point at a time, so the fold of text is the folds of its
+ * code points, joined, though not one code point to one.
  * @param text - Any text.
  * @returns It folded.
  */
@@ -41,13 +79,22 @@ export const foldForSearch = (text: string): string => {
 
   for (const character of text) {
     const code = character.codePointAt(0) ?? 0;
-    const lower = lowerOf.get(code);
+    const lower = lowerOf.get(code) ?? code;
 
-    folded += lower === undefined ? character : String.fromCodePoint(lower);
+    folded += baseOf.get(lower) ?? String.fromCodePoint(lower);
   }
 
   return folded;
 };
+
+/**
+ * A nick as a search kept to one sender compares it: folded by {@link foldForSearch}, and
+ * then by `rfc1459`'s mapping, whatever the Network's own, so `[a` finds `{a`.
+ * @param nick - A nick, as said or as sought.
+ * @returns It folded.
+ */
+export const foldSenderForSearch = (nick: string): string =>
+  casefold("rfc1459", foldForSearch(nick));
 
 // How many code points text holds.
 const codePointsIn = (text: string): number => text.match(/./gsu)?.length ?? 0;
@@ -68,8 +115,8 @@ export const searchTextMaximum = 510;
  * {@link searchTextMaximum} code points once folded.
  */
 export const SearchText = Schema.String.check(
-  // Two code units are the most a code point takes, so longer text is refused unread.
-  Schema.isMaxLength(searchTextMaximum * 2),
+  // Nothing bounds the text before it folds: a combining accent folds to nothing, so text
+  // of any length may fold within the bounds.
   Schema.makeFilter(
     (text: string) => !/[\0\r\n]/u.test(text) || "must not hold a line break or NUL"
   ),
@@ -95,8 +142,8 @@ export interface Searchable {
 }
 
 /**
- * What an item is found by: a Message's text, as the Ircd confirmed it when it did, and its
- * sender, each folded. Nothing else is searched.
+ * What an item is found by: a Message's text, as the Ircd confirmed it when it did, folded
+ * by {@link foldForSearch}, and its sender, folded by {@link foldSenderForSearch}. Nothing else is searched.
  * @param content - The item's content.
  * @returns What it is found by, or `undefined` for anything but a Message.
  */
@@ -108,7 +155,7 @@ export const searchableOf = (content: Content): Searchable | undefined => {
   const delivery = content.ours?.delivery;
 
   return {
-    sender: foldForSearch(content.sender),
+    sender: foldSenderForSearch(content.sender),
     text: foldForSearch(delivery?._tag === "Confirmed" ? delivery.text : content.text),
   };
 };

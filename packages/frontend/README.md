@@ -134,7 +134,7 @@ The Owner's query read into the filters of `GET /api/search` by `parseQuery`, th
 - **A day is placed by the runtime's `dayStart`,** and a time with no zone is refused.
 - **Pages fit together or the search begins again.** A page of another generation is ignored, and a merge, an overflow, or a reset begins it again from the first page.
 - **It reads pages of 100 and holds at most 500,** then says to narrow the search.
-- **A match is marked in the text shown, never by markup.** `matchRuns` gives plain text as runs, each a match or not, found as the Daemon folds text.
+- **A match is marked in the text shown, never by markup.** `matchRuns` gives plain text as runs, each a match or not, found as the Daemon folds text, and marked on whole characters, a letter's accents with it.
 
 ## Commands
 

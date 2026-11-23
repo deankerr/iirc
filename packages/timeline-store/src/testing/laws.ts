@@ -1004,6 +1004,7 @@ const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
           added(2, channel, position(7, 2, 4), said("cafe\u0301 noir")),
           added(2, network, position(8, 2, 5), { _tag: "SessionBegan", at: at(8), nick: "iirc" }),
           added(2, channel, position(9, 2, 6), spoken("someone", "iirc")),
+          added(2, channel, position(4, 2, 7), said("the cafe")),
         ]);
 
         yield* same("by its text, newest first", yield* searchFor(store, { text: "iirc" }), [
@@ -1015,15 +1016,12 @@ const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
           "Hello IIRC world",
         ]);
         yield* same("beyond ASCII", yield* searchFor(store, { text: "über" }), ["Über alles"]);
-        // Nothing is composed, so a letter written whole and one written with a combining
-        // accent are different text.
-        yield* same("composed", yield* searchFor(store, { text: "CAF\u00C9" }), [
-          "caf\u00E9 au lait",
-        ]);
-        yield* same("decomposed", yield* searchFor(store, { text: "CAFE\u0301" }), [
-          "cafe\u0301 noir",
-        ]);
-        yield* same("diacritics kept", yield* searchFor(store, { text: "cafe " }), []);
+        // A letter is found whatever its accent, written whole or with a combining accent.
+        const cafes = ["cafe\u0301 noir", "caf\u00E9 au lait", "the cafe"];
+
+        yield* same("without its accent", yield* searchFor(store, { text: "cafe" }), cafes);
+        yield* same("composed", yield* searchFor(store, { text: "CAF\u00C9" }), cafes);
+        yield* same("decomposed", yield* searchFor(store, { text: "CAFE\u0301" }), cafes);
         yield* same("anywhere in it", yield* searchFor(store, { text: "c w" }), [
           "Hello IIRC world",
         ]);
@@ -1032,7 +1030,7 @@ const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
         ]);
         yield* same("nothing", yield* searchFor(store, { text: "nowhere" }), []);
       }),
-    name: "finds the Messages whose text holds the search's, lower-cased, newest first",
+    name: "finds the Messages whose text holds the search's, folded, newest first",
   },
   {
     check: (store) =>
@@ -1097,6 +1095,33 @@ const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
         );
       }),
     name: "filters by Network, Timeline, sender, and time",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(1, 2, 0), spoken("hello one", "[a]")),
+          added(2, channel, position(2, 2, 1), spoken("hello two", "{A}")),
+          added(2, channel, position(3, 2, 2), spoken("hello three", "\u00C9\\^")),
+          added(2, channel, position(4, 2, 3), spoken("hello four", "a")),
+        ]);
+
+        const text = "hello";
+
+        yield* same("[a] as {a}", yield* searchFor(store, { from: "[a]", text }), [
+          "hello two",
+          "hello one",
+        ]);
+        yield* same("{a} as [a]", yield* searchFor(store, { from: "{a}", text }), [
+          "hello two",
+          "hello one",
+        ]);
+        yield* same("folded for search first", yield* searchFor(store, { from: "e|~", text }), [
+          "hello three",
+        ]);
+      }),
+    name: "keeps a sender's as rfc1459 compares nicks, whatever the Network's casemapping",
   },
   {
     check: (store) =>
