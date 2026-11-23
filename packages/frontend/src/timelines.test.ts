@@ -5743,7 +5743,8 @@ const said = (
   at: number,
   sender = "alice",
   kind: "Privmsg" | "Action" | "Notice" = "Privmsg",
-  bot = false
+  bot = false,
+  prefix: string | null = null
 ) =>
   decodeItem({
     answered: null,
@@ -5758,7 +5759,7 @@ const said = (
       kind,
       live: true,
       ours: null,
-      prefix: null,
+      prefix,
       sender,
       tags: [],
       target: "#c",
@@ -5861,6 +5862,19 @@ describe("a run of Messages under one nick", () => {
         said(4, at + 3 * minute),
       ])
     ).toStrictEqual([1, 2, "+3", 4]);
+  });
+
+  // Catches a Message said after its sender lost or gained a prefix left under a head that
+  // shows the one they held before, as when the mode's Activity is not drawn.
+  it("ends when the prefix its sender held changes, either way", () => {
+    expect(
+      runRows([
+        said(1, at, "alice", "Privmsg", false, "@"),
+        said(2, at + minute, "alice", "Privmsg", false, "@"),
+        said(3, at + 2 * minute),
+        said(4, at + 3 * minute, "alice", "Privmsg", false, "+"),
+      ])
+    ).toStrictEqual([1, "+2", 3, 4]);
   });
 
   it("ends when another User speaks", () => {

@@ -13,9 +13,8 @@ import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import { isHighlight } from "./highlight.ts";
 import { ignoredBy } from "./ignores.ts";
-import { isSelf, namingNow, serverName } from "./meaning.ts";
+import { isSelf, namingNow, rulesNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
-import { rulesOf } from "./modes.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import { isNetworkOnly, isPresenceChange, isUserChange } from "./news.ts";
@@ -31,8 +30,8 @@ import type {
 } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
-import type { Member } from "./state.ts";
-import { openOf, sessionOf } from "./views.ts";
+import type { Joined, Member } from "./state.ts";
+import { sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
 
@@ -393,6 +392,32 @@ const heldBy = (fact: Member["prefixes"]): ReadonlySet<string> => {
 };
 
 /**
+ * A member of a Channel as last said: by a `NAMES` listing still arriving, which is kept up
+ * to date as the Channel's members are and so is the fresher, its latest part first, or
+ * else by the Channel's members.
+ * @param phase - The Channel, joined.
+ * @param folded - The member's folded nick.
+ * @returns The member, or `undefined` for none.
+ */
+const memberNow = (phase: Joined, folded: string): Member | undefined => {
+  const { listing } = phase;
+
+  if (listing === undefined || !inListing(listing, folded)) {
+    return phase.members.get(folded);
+  }
+
+  for (let index = listing.parts.length - 1; index >= 0; index -= 1) {
+    const found = listing.parts[index]?.find(([key]) => key === folded);
+
+    if (found !== undefined) {
+      return found[1];
+    }
+  }
+
+  return listing.members.get(folded);
+};
+
+/**
  * The symbol of the highest prefix a User holds in a Channel now, by the order of
  * `PREFIX`: for a Message said there, what its sender held as it was said. A Target that
  * is no one Channel, a Channel Self is not in, and a sender who is no member hold none.
@@ -410,8 +435,7 @@ const prefixOfSender = (run: Run, sender: string, target: string): string | unde
 
   const fold = folder(run.state);
   const { phase } = run.state.channels.get(fold(channelName)) ?? {};
-
-  const member = phase?._tag === "Joined" ? phase.members.get(fold(sender)) : undefined;
+  const member = phase?._tag === "Joined" ? memberNow(phase, fold(sender)) : undefined;
 
   if (member === undefined) {
     return undefined;
@@ -419,8 +443,7 @@ const prefixOfSender = (run: Run, sender: string, target: string): string | unde
 
   const held = heldBy(member.prefixes);
 
-  return rulesOf(openOf(run.state)?.isupport ?? new Map()).prefix.find(({ mode }) => held.has(mode))
-    ?.symbol;
+  return rulesNow(run).prefix.find(({ mode }) => held.has(mode))?.symbol;
 };
 
 /**

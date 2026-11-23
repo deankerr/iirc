@@ -148,3 +148,23 @@ describe("a Message's sender prefix", () => {
     expect.assertions(0);
   });
 });
+
+describe("a Message said while a NAMES listing is still arriving", () => {
+  it("carries the prefix the listing has already shown", () => {
+    run([
+      registered(base, { isupport, offered: ["multi-prefix"] }),
+      lines(
+        "!! configure +#iirc",
+        ">> JOIN #iirc",
+        "<< :iirc!~iirc@iirc.test JOIN #iirc",
+        ">> MODE #iirc",
+        "<< :irc.test 353 iirc = #iirc :iirc @peer",
+        "<< :peer!u@h PRIVMSG #iirc :hi",
+        '?? message Privmsg peer #iirc prefix="@" in=channel:#iirc :hi',
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list."
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
