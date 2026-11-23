@@ -1,14 +1,17 @@
 /**
  * The projector: keeps the Timeline store folded up to the Journal, by following the
- * Runtime's News as any other reader does and stepping the Timelines fold over it.
+ * Runtime's News as any other reader does and stepping the Timelines fold over it, with
+ * each Change that marks a Timeline by its id folded in its place among the steps.
  *
  * @packageDocumentation
  */
 import { Runtime } from "@iirc/runtime";
+import type { Happening } from "@iirc/runtime";
 import { Sequence } from "@iirc/runtime/journal";
 import type { JournalFailed } from "@iirc/runtime/journal";
 import { TimelineStore, TimelineStoreFailed } from "@iirc/timeline-store";
-import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
+import { TimelineId, emptyDirectory, projectionVersion, step, stepMarking } from "@iirc/timelines";
+import type { Directory, Marking, Stepped } from "@iirc/timelines";
 import { Cause, Context, Effect, Layer, Option, Schema, Stream, SubscriptionRef } from "effect";
 
 /**
@@ -49,6 +52,55 @@ export class Projector extends Context.Service<
 
 const decodeAfter = Schema.decodeUnknownEffect(Schema.UndefinedOr(Sequence));
 
+const timelineOf = Schema.decodeUnknownOption(TimelineId);
+
+/**
+ * A Change that marks a Timeline by its id, as the fold takes it, or `undefined` for any
+ * other Change, or one whose id is no Timeline's, which marks nothing.
+ * @param happening - A Change, and its sequence.
+ * @returns The marking.
+ */
+const markingOf = (
+  happening: Extract<Happening, { readonly _tag: "Changed" }>
+): Marking | undefined => {
+  const { change, sequence } = happening;
+
+  if (change._tag !== "TimelineRead" && change._tag !== "TimelineClosed") {
+    return undefined;
+  }
+
+  return Option.getOrUndefined(
+    Option.map(timelineOf(change.timeline), (timeline): Marking =>
+      change._tag === "TimelineRead"
+        ? { _tag: change._tag, network: change.network, read: change.read, sequence, timeline }
+        : { _tag: change._tag, network: change.network, sequence, timeline }
+    )
+  );
+};
+
+/**
+ * What one happening gives the store: a step's News folded, or a Change that marks a
+ * Timeline folded, with the sequence it folds through, or `undefined` for a Change the
+ * Timelines take no part in.
+ * @param before - The directory before it.
+ * @param happening - What happened.
+ * @returns The fold's result and its sequence.
+ */
+const folding = (
+  before: Directory,
+  happening: Happening
+): { readonly stepped: Stepped; readonly through: number } | undefined => {
+  if (happening._tag === "Stepped") {
+    return { stepped: step(before, happening.happened), through: happening.happened.sequence };
+  }
+
+  const marking = markingOf(happening);
+
+  return marking === undefined
+    ? undefined
+    : { stepped: stepMarking(before, marking), through: happening.sequence };
+};
+
 /**
  * Where folding starts: after the last step the store folded, with the directory it kept,
  * or from the start, empty, when the store was built by another projection version or none.
@@ -77,37 +129,37 @@ const resume = Effect.gen(function* () {
 });
 
 /**
- * Folds each step the Runtime's News gives into the store, for as long as it runs, and
- * says how far it has folded: once it has resumed or reset the store, and once each step is kept.
- * @param folded - Where it says how far it has folded, and by which version.
+ * Folds each step the Runtime's News gives, and each Change that marks a Timeline, into the
+ * store in Journal order, for as long as it runs, and says how far it has folded: once it
+ * has resumed or reset the store, and once each is kept.
+ * @param progress - Where it says how far it has folded, and by which version.
  * @returns The fold, which never ends but by failing or being interrupted.
  */
-const project = (folded: SubscriptionRef.SubscriptionRef<Progress>) =>
+const project = (progress: SubscriptionRef.SubscriptionRef<Progress>) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime;
     const store = yield* TimelineStore;
     const { after, directory } = yield* resume;
 
     // Resumed, or reset to the version and folding from the start.
-    yield* SubscriptionRef.set(folded, { through: after, version: projectionVersion });
-    yield* runtime.news({ after }).pipe(
+    yield* SubscriptionRef.set(progress, { through: after, version: projectionVersion });
+    yield* runtime.happenings({ after }).pipe(
       Stream.runFoldEffect(
         () => directory,
-        (before, happened) => {
-          const stepped = step(before, happened);
+        (before, happening) => {
+          const folded = folding(before, happening);
+
+          if (folded === undefined) {
+            return Effect.succeed(before);
+          }
+
+          const { stepped, through } = folded;
 
           return store
-            .apply({
-              changes: stepped.changes,
-              directory: stepped.directory,
-              through: happened.sequence,
-            })
+            .apply({ changes: stepped.changes, directory: stepped.directory, through })
             .pipe(
               Effect.andThen(
-                SubscriptionRef.set(folded, {
-                  through: happened.sequence,
-                  version: projectionVersion,
-                })
+                SubscriptionRef.set(progress, { through, version: projectionVersion })
               ),
               Effect.as(stepped.directory)
             );

@@ -17,6 +17,7 @@ import type {
   NetworkConfiguration,
   News,
   RefusedReason,
+  Resolved,
   SayKind,
   SendableMessageId,
   TimerTable,
@@ -67,8 +68,8 @@ import type {
   Ports,
   ConfigurationChanged,
 } from "./network.ts";
-import { fresh, lookedUp, newsAfter, refold } from "./replay.ts";
-import type { Happened, InForce } from "./replay.ts";
+import { fresh, happeningsAfter, lookedUp, newsAfter, refold } from "./replay.ts";
+import type { Happened, Happening, InForce } from "./replay.ts";
 import { Transport } from "./transport.ts";
 import { Vault } from "./vault.ts";
 import type { VaultFailed } from "./vault.ts";
@@ -77,7 +78,7 @@ export { ConfigurationChanged, NetworkStopped } from "./network.ts";
 
 export type { ConfiguredAt, HeldConnection, NetworkStatus } from "./network.ts";
 
-export type { Happened, InForce } from "./replay.ts";
+export type { Happened, Happening, InForce } from "./replay.ts";
 
 /** No Network by this id has been configured, or it was removed. */
 export class UnknownNetwork extends Schema.TaggedError<
@@ -183,8 +184,11 @@ export type LookOutcome =
 
 /** How far the Owner has read a Timeline. */
 export interface Reading {
-  /** The Channel or Direct Message partner, named as a `Say`'s Target is, or `null` for the Network's own. */
-  readonly target: string | null;
+  /**
+   * The Channel or Direct Message partner, named as a `Say`'s Target is, the Timeline as a
+   * projection holds it, or `null` for the Network's own.
+   */
+  readonly target: string | Resolved | null;
   /** The instant read up to. */
   readonly read: Instant;
 }
@@ -451,14 +455,15 @@ export interface RuntimeService {
   ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /**
    * Journals a `CloseTimeline`: the Owner closed the Timeline of a Target, a Channel or a
-   * Direct Message partner named as a `Say`'s Target is. It waits until it is stepped, and
-   * answers with what that step decided: `Closed`, or `Refused` with `Joined` when Self is
-   * in that Channel as it is stepped, or `NoTimeline` when the Target names no one Timeline.
-   * The Client keeps nothing of it.
+   * Direct Message partner named as a `Say`'s Target is, or the Timeline as a projection
+   * holds it. It waits until it is stepped, and answers with what that step decided:
+   * `Closed`, or `Refused` with `Joined` when Self is in that Channel as it is stepped, or
+   * `NoTimeline` when the Target names no one Timeline, or names the Network's own. The
+   * Client keeps nothing of it.
    */
   readonly close: (
     network: NetworkId,
-    target: string
+    target: string | Resolved
   ) => Effect.Effect<CloseOutcome, UnknownNetwork | NetworkStopped>;
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
@@ -492,6 +497,15 @@ export interface RuntimeService {
   readonly news: (from?: {
     readonly after?: Sequence | undefined;
   }) => Stream.Stream<Happened, JournalFailed>;
+  /**
+   * What happened in the Journal, as `news` gives it, with each Change in its place among
+   * the steps: from just after `after`, or from the start, then live, in Journal order. A
+   * reader that folds Changes and News together, such as a projection, folds them in the
+   * order they were journaled. It never ends.
+   */
+  readonly happenings: (from?: {
+    readonly after?: Sequence | undefined;
+  }) => Stream.Stream<Happening, JournalFailed>;
 }
 
 /** The Runtime. */
@@ -950,6 +964,7 @@ export const makeRuntime = <S>(
             Fiber.join
           )
         ),
+      happenings: (from = {}) => happeningsAfter(client, ports.journal, from.after),
       inspect: (id) =>
         Effect.gen(function* () {
           const network = yield* find(id);

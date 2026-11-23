@@ -13,6 +13,7 @@ import type { IgnoreMask } from "@iirc/protocol/mask";
 
 import { isHighlight } from "./highlight.ts";
 import { ignoredBy } from "./ignores.ts";
+import type { Resolved } from "./input.ts";
 import { isSelf, namingNow, rulesNow, serverName } from "./meaning.ts";
 import { inListing, memberLookup } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
@@ -572,19 +573,47 @@ export const routeConfirmed = (run: Run, echo: Unrouted<ConfirmedNews>): Confirm
 export const saidWhere = (run: Run, target: string): readonly Where[] =>
   messageWhere(run, sessionOf(run.state)?.nick ?? "", true, target);
 
+// A Timeline already resolved is taken as it is: nothing is parsed or folded again.
+const resolvedWhere = (resolved: Resolved): Marked => {
+  switch (resolved._tag) {
+    case "Network": {
+      return { _tag: "Network" };
+    }
+
+    case "Channel": {
+      return { _tag: "Channel", key: resolved.key, name: resolved.name };
+    }
+
+    case "Direct": {
+      return { _tag: "Direct", existing: true, key: resolved.key, name: resolved.name };
+    }
+
+    default: {
+      return resolved satisfies never;
+    }
+  }
+};
+
 /**
- * The Timeline an Owner's `Read` marks: the Network's own for no Target, else the one
- * Target's, read as a `Say`'s is, with a Direct Message partner's `existing`, since
- * marking read starts no Timeline. A list, a mask, or anything else that names no one
- * Timeline marks none. Any `,` makes a list, before any item is read, so `#a,`, `,#a`,
- * and `#a,,` name no one Timeline, though only `#a` is in each.
+ * The Timeline an Owner's `Read` or `CloseTimeline` names: the Network's own for no
+ * Target, one already resolved as it is, else the one Target's, read as a `Say`'s is, with
+ * a Direct Message partner's `existing`, since marking read starts no Timeline. A list, a
+ * mask, or anything else that names no one Timeline names none. Any `,` makes a list,
+ * before any item is read, so `#a,`, `,#a`, and `#a,,` name no one Timeline, though only
+ * `#a` is in each.
  * @param run - The step.
- * @param target - The Target, as the Owner named it, or `null` for the Network's own.
+ * @param target - The Target, as the Owner named it, a Timeline already resolved, or
+ *   `null` for the Network's own.
  * @returns The Timeline, or `undefined` for none.
  */
-export const markedBy = (run: Run, target: string | null): Marked | undefined => {
+export const markedBy = (run: Run, target: string | Resolved | null): Marked | undefined => {
   if (target === null) {
     return { _tag: "Network" };
+  }
+
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the decoded Input's Target and a Timeline already resolved are told apart by their type.
+  if (typeof target !== "string") {
+    return resolvedWhere(target);
   }
 
   if (target.includes(",")) {

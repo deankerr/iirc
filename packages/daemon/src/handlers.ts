@@ -58,7 +58,7 @@ import { IntentId } from "@iirc/client";
 import { Runtime } from "@iirc/runtime";
 import type { NetworkStopped as RuntimeNetworkStopped } from "@iirc/runtime";
 import { NetworkId, Sequence } from "@iirc/runtime/journal";
-import type { JournalFailed as RuntimeJournalFailed } from "@iirc/runtime/journal";
+import type { Journal, JournalFailed as RuntimeJournalFailed } from "@iirc/runtime/journal";
 import { Vault } from "@iirc/runtime/vault";
 import type { VaultFailed as RuntimeVaultFailed } from "@iirc/runtime/vault";
 import { TimelineStore } from "@iirc/timeline-store";
@@ -93,6 +93,8 @@ import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 import { Following } from "./away-when-closed.ts";
 import { exportDisposition, exportLine } from "./export.ts";
 import { ApiKeys } from "./keys.ts";
+import { closeTimeline, readTimeline } from "./marking.ts";
+import type { MarkingFailed } from "./marking.ts";
 import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
 import type { OptionsChangedSince } from "./options.ts";
@@ -197,6 +199,31 @@ const unknownNetwork = (error: { readonly network: NetworkId }) =>
 
 const timelinesFailed = (error: TimelineStoreFailed) =>
   new TimelinesFailed({ reason: error.reason });
+
+// Why a Timeline could not be marked or closed by its id, as the contract says it.
+const markingFailed = (error: MarkingFailed) => {
+  switch (error._tag) {
+    case "TimelineUnknown": {
+      return new UnknownTimeline({ timeline: error.timeline });
+    }
+
+    case "NetworkStopped": {
+      return networkStopped(WireNetworkId.make(error.network), error);
+    }
+
+    case "TimelineStoreFailed": {
+      return timelinesFailed(error);
+    }
+
+    case "JournalFailed": {
+      return journalFailed(error);
+    }
+
+    default: {
+      return error satisfies never;
+    }
+  }
+};
 
 // 128 bits from Effect's Random, as hex. An intent id is unique, not secret. The Daemon
 // names it rather than the Runtime, so a `NetworkStopped` can say which to ask `said` about.
@@ -771,6 +798,8 @@ const timelines = HttpApiBuilder.group(
     const store = yield* TimelineStore;
     const projector = yield* Projector;
     const page = yield* ChangesPage;
+    // What marking a Timeline by its id reads and writes.
+    const marking = yield* Effect.context<Runtime | TimelineStore | Journal>();
 
     // A Network removed with its Timelines kept is still known to them.
     const known = (network: WireNetworkId) =>
@@ -1090,6 +1119,19 @@ const timelines = HttpApiBuilder.group(
             version: versionOf(read.version),
           };
         })
+      )
+      .handle("read", ({ params, payload }) =>
+        readTimeline(params.timeline, payload.read).pipe(
+          Effect.map((sequence) => ({ sequence })),
+          Effect.mapError(markingFailed),
+          Effect.provideContext(marking)
+        )
+      )
+      .handle("close", ({ params }) =>
+        closeTimeline(params.timeline).pipe(
+          Effect.mapError(markingFailed),
+          Effect.provideContext(marking)
+        )
       )
       .handle("projection", () =>
         followed(

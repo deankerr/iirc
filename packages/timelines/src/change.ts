@@ -32,8 +32,10 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   items move into `into`, by the same rule as `Added`, and `from` is left as a tombstone
  *   that says where it went.
  * - `Gap`: a period when the Network was not on, from `from`, to `to` once it is back on.
- * - `ReadMarker`: the Owner has read `timeline` up to `read`, which is always later than
- *   any Read Marker it had. What stands after it counts as unread.
+ * - `ReadMarker`: the Owner has read `timeline` up to `read`. It is later than any Read
+ *   Marker the directory holds for it, but for a Timeline the directory no longer holds,
+ *   detached or a removed Network's, the store keeps the later of the two. What stands
+ *   after it counts as unread.
  * - `Closed`: the Owner closed `timeline`. It stays closed until an item is added to it
  *   at a later sequence than this one, which a store derives: nothing is cleared.
  * - `HeadChanged`: what the Client knows of the Channel or Direct Message partner `timeline`

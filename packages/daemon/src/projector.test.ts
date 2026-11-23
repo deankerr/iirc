@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 
 import { BunFileSystem } from "@effect/platform-bun";
-import { client } from "@iirc/client";
+import { Instant, client } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
 import { Runtime, layerRuntime } from "@iirc/runtime";
@@ -13,7 +13,7 @@ import type { Item, TimelineStoreService } from "@iirc/timeline-store";
 import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { makeMemoryTimelineStore } from "@iirc/timeline-store/testing";
 import { emptyDirectory, projectionVersion, step, timelineIdOf } from "@iirc/timelines";
-import { Effect, Fiber, Layer, Logger, Option, Ref, Stream } from "effect";
+import { Effect, Equal, Fiber, Layer, Logger, Option, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -208,6 +208,14 @@ const foldedAfresh = (through: number) =>
 
     return fresh;
   });
+
+// How a Network's Timeline named `name` stands: closed, read, removed, and its counts.
+const summaryOf = (from: TimelineStoreService, name: string) =>
+  Effect.map(from.timelines(libera), (all) =>
+    all
+      .filter((one) => one.name === name)
+      .map(({ closed, read, removed, unread }) => ({ closed, read, removed, unread }))
+  );
 
 describe("the projector", () => {
   it("resumes after the last step it folded when the Daemon restarts, folding nothing twice", async () => {
@@ -450,6 +458,93 @@ describe("the projector", () => {
     expect(result.items).toStrictEqual(["Activity", "after"]);
     expect(result.same.dropped).toHaveLength(2);
     expect(result.same).toStrictEqual(result.want);
+  });
+
+  it("folds a Timeline marked by a Change in its place, across a restart and when folded again from nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const world = yield* makeWorld();
+        const store = yield* makeMemoryTimelineStore;
+
+        const before = yield* Effect.gen(function* () {
+          const runtime = yield* Runtime;
+          const call = yield* joinFloor(world);
+
+          yield* say(call, ":peer!u@h PRIVMSG iirc :psst");
+          yield* eventually(holds(store, "peer", "psst"));
+
+          const peer =
+            (yield* store.timelines(libera)).find((one) => one.name === "peer")?.id ?? "";
+
+          const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: true }));
+
+          for (let turn = 0; turn < 200; turn += 1) {
+            yield* Effect.yieldNow;
+          }
+
+          yield* TestClock.adjust(5000);
+          yield* Fiber.join(removing);
+
+          // A removed Network's Timeline, which no Client can name, read, read less far, and closed.
+          for (const change of [
+            {
+              _tag: "TimelineRead",
+              network: libera,
+              read: Instant.make(epoch + 60_000),
+              timeline: peer,
+            },
+            { _tag: "TimelineRead", network: libera, read: Instant.make(epoch), timeline: peer },
+            { _tag: "TimelineClosed", network: libera, timeline: peer },
+          ] as const) {
+            yield* world.journal.append({ _tag: "Change", change });
+          }
+
+          const last = yield* lastSequence(world);
+
+          yield* eventually(store.folded.pipe(Effect.map(({ through }) => through === last)));
+
+          return yield* summaryOf(store, "peer");
+        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
+
+        const last = yield* lastSequence(world);
+        const rebuilt = yield* makeMemoryTimelineStore;
+
+        const again = yield* Effect.gen(function* () {
+          yield* eventually(rebuilt.folded.pipe(Effect.map(({ through }) => through === last)));
+
+          return yield* summaryOf(rebuilt, "peer");
+        }).pipe(Effect.provide(layerDaemonish(world, rebuilt)), Effect.scoped);
+
+        const resumed = yield* Effect.gen(function* () {
+          yield* eventually(store.folded.pipe(Effect.map(({ through }) => through === last)));
+
+          return yield* summaryOf(store, "peer");
+        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
+
+        return {
+          again,
+          before,
+          resumed,
+          same: Equal.equals(yield* everything(store), yield* everything(rebuilt)),
+        };
+      })
+    );
+
+    const none = {
+      activity: 0,
+      botDirect: 0,
+      botMessages: 0,
+      direct: 0,
+      highlights: 0,
+      messages: 0,
+    };
+
+    expect(result.before).toStrictEqual([
+      { closed: true, read: epoch + 60_000, removed: true, unread: none },
+    ]);
+    expect(result.resumed).toStrictEqual(result.before);
+    expect(result.again).toStrictEqual(result.before);
+    expect(result.same).toBeTruthy();
   });
 
   it("stops folding when the store fails, says so, and leaves the Network running", async () => {

@@ -22,7 +22,7 @@ import type { IgnoreMask } from "@iirc/protocol/mask";
 import type { Change } from "./change.ts";
 import type { Content, Level } from "./content.ts";
 import type { Position } from "./position.ts";
-import { timelineIdOf } from "./timeline.ts";
+import { isNetworkOwn, timelineIdOf } from "./timeline.ts";
 import type { Kind, TimelineId } from "./timeline.ts";
 
 /**
@@ -81,6 +81,25 @@ export interface Directory {
 
 /** The directory before any step. */
 export const emptyDirectory: Directory = { networks: new Map() };
+
+/**
+ * A Timeline marked by its id, by a Change no Client steps: read up to `read`, or closed.
+ * It names the Network the Timeline is one of, and the sequence of the Change.
+ */
+export type Marking =
+  | {
+      readonly _tag: "TimelineRead";
+      readonly network: string;
+      readonly sequence: number;
+      readonly timeline: TimelineId;
+      readonly read: Instant;
+    }
+  | {
+      readonly _tag: "TimelineClosed";
+      readonly network: string;
+      readonly sequence: number;
+      readonly timeline: TimelineId;
+    };
 
 /** What one step gives: the directory after it, and the changes for a store, in order. */
 export interface Stepped {
@@ -867,4 +886,72 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
   }
 
   return { changes, directory: { networks } };
+};
+
+// A Timeline the directory holds no Read Marker of, as a store applies one: only forward.
+const markedById = (marking: Extract<Marking, { readonly _tag: "TimelineRead" }>): Change => ({
+  _tag: "ReadMarker",
+  network: marking.network,
+  read: marking.read,
+  sequence: marking.sequence,
+  timeline: marking.timeline,
+});
+
+/**
+ * Folds a Timeline marked by its id. One the directory holds, the Network's own or a keyed
+ * one, is marked as a Client's News marks it: its Read Marker moves only forward, and the
+ * Network's own is never closed. One it does not hold, detached or a removed Network's, is
+ * told to the store by its id, which moves a Read Marker only forward and changes nothing
+ * of a Timeline it never described. The Network's own Timeline is told apart by its id, so
+ * even a removed Network's is never closed. It opens nothing, and moves no Network's last step.
+ * @param directory - The directory before it.
+ * @param marking - The Timeline, and what was done to it.
+ * @returns The directory after it, and the changes for a store.
+ */
+export const stepMarking = (directory: Directory, marking: Marking): Stepped => {
+  const known = directory.networks.get(marking.network);
+  const own = known?.timeline === marking.timeline || isNetworkOwn(marking.timeline);
+
+  if (marking._tag === "TimelineClosed") {
+    return {
+      changes: own
+        ? []
+        : [
+            {
+              _tag: "Closed",
+              network: marking.network,
+              sequence: marking.sequence,
+              timeline: marking.timeline,
+            },
+          ],
+      directory,
+    };
+  }
+
+  if (known === undefined) {
+    return { changes: [markedById(marking)], directory };
+  }
+
+  const entry = known.keyed.get(marking.timeline);
+
+  if (known.timeline !== marking.timeline && entry === undefined) {
+    return { changes: [markedById(marking)], directory };
+  }
+
+  const held = entry === undefined ? known.read : entry.read;
+
+  if (later(held, marking.read) === held) {
+    return { changes: [], directory };
+  }
+
+  const networks = new Map(directory.networks);
+
+  networks.set(
+    marking.network,
+    entry === undefined
+      ? { ...known, read: marking.read }
+      : { ...known, keyed: new Map(known.keyed).set(entry.id, { ...entry, read: marking.read }) }
+  );
+
+  return { changes: [markedById(marking)], directory: { networks } };
 };

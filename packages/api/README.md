@@ -39,6 +39,8 @@ Every route is under `/api`. Every one but signing a browser in and out, and ask
 | `GET /api/news?after=` | Server-Sent Events of News, then live | `happened` and `heartbeat` events | `JournalFailed`, in the stream |
 | `GET /api/networks/{network}/timelines?after=&limit=` | A page of the Network's Timelines, merged ones aside, in the order they were opened, and whether they are being folded | `{ projection, version, through, timelines, more }` | `UnknownNetwork`, `TimelinesFailed` |
 | `GET /api/timelines/{timeline}?before=\|after=\|around=&limit=` | A window of a Timeline, from at most one cursor, the latest without one | `{ timeline, network, items, earlier, later, gaps, version, through }` | `UnknownTimeline`, `TimelinesFailed` |
+| `POST /api/timelines/{timeline}/read` | Marks the Timeline read up to `{ read }`, an instant, whatever its Network or whether it is detached | `{ sequence }` | `UnknownTimeline`, `NetworkStopped`, `TimelinesFailed`, `JournalFailed` |
+| `POST /api/timelines/{timeline}/close` | Closes the Timeline, whatever its Network or whether it is detached | `Closed`, or `Refused` with `Joined` or `NoTimeline`, each with `sequence` | `UnknownTimeline`, `NetworkStopped`, `TimelinesFailed`, `JournalFailed` |
 | `GET /api/timelines/{timeline}/channel` | A Channel's head, as the Client knows it now: its name, topic, modes, and count of members, where Self stands with it, and what the Network says of its modes | `{ timeline, network, name, topic, modes, standing, held, members, ranks, chanmodes, chantypes, lists, accountBan }` | `UnknownTimeline`, `NotAChannel`, `TimelinesFailed` |
 | `GET /api/timelines/{timeline}/members?after=&limit=&prefix=` | A page of a Channel's members, the most privileged first, then by nick, and with `prefix`, only those whose nick starts with it | `{ timeline, network, members, more, next }` | `UnknownTimeline`, `NotAChannel`, `NotInChannel`, `TimelinesFailed` |
 | `GET /api/networks/{network}/at/{sequence}?after=&limit=` | A page of the items a step made, wherever they stand now, for links and search results | `{ items, more, next, version, through }` | `UnknownNetwork`, `TimelinesFailed` |
@@ -162,9 +164,10 @@ Every route can also answer `InvalidRequest` (400), and every route behind the K
 - **A Lookup waits for its result, up to 35 s.** Past that it is `Pending`: ask again by its intent. A Lookup changes nothing on the Network, so it can be asked again freely.
 - **A Lookup says how it ended.** A list the Network does not keep, by its ISUPPORT, is `Refused` as `NotOffered`, a refusal from the Network is `Failed`, `cut` says why a list stopped short, and `notes` holds any `WARN` or `NOTE` its reply held.
 - **A directory of Channels is paged.** The Daemon keeps the 1000 with the most members, and a result is one page of them, most members first, with `total` how many were kept and `seen` how many matched.
-- **A Read Marker only moves forward, and every Frontend shares it.**
-- **A closed Timeline comes back by itself,** with its counts, when something arrives in it. A `close` is journaled, and deletes nothing.
-- **A Channel Self is in is never closed.** Its `close` answers `Refused` with `Joined`, decided in the step that took it, and a Target that names no one Timeline answers `NoTimeline`.
+- **A Read Marker only moves forward, and every Frontend shares it,** whether it is marked by a Target or by a Timeline's id.
+- **A Timeline is marked read, or closed, by its id as well as by a Target.** One a Network's Client can name, of a Network not removed, is given to that Client as the Timeline is, so it answers as its Target would, and needs no Session: a Channel only `CHANTYPES` makes one is reached while its Network is offline. A detached Direct Message Timeline, or one a removed Network kept, is marked by a Change no Client takes, and never answers `UnknownNetwork`. A merged id acts on the Timeline it went to, and an id never given, or a dropped Timeline's, is `UnknownTimeline`.
+- **A closed Timeline comes back by itself,** with its counts, when something arrives in it. A `close` is journaled, and deletes nothing. A detached Timeline, which nothing arrives in, stays closed, and is still found by search and read by its id.
+- **A Channel Self is in is never closed, and neither is the Network's own.** A `close` of the first answers `Refused` with `Joined`, decided in the step that took it, and of the second, or of a Target that names no one Timeline, `NoTimeline`.
 
 ### News
 

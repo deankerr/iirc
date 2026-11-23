@@ -36,6 +36,7 @@ export {
   Input,
   Lookup,
   ModeRequest,
+  Resolved,
   SayKind,
   UnfilledReason,
   UnsentLine,

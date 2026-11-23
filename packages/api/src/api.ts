@@ -332,13 +332,13 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
       success: SearchResults,
     }),
     HttpApiEndpoint.post("read", "/timelines/:timeline/read", {
-      error: [UnknownTimeline, NetworkStopped, TimelinesFailed],
+      error: [UnknownTimeline, NetworkStopped, TimelinesFailed, JournalFailed],
       params: { timeline: TimelineId },
       payload: TimelineReadRequest,
       success: Journaled,
     }),
     HttpApiEndpoint.post("close", "/timelines/:timeline/close", {
-      error: [UnknownTimeline, NetworkStopped, TimelinesFailed],
+      error: [UnknownTimeline, NetworkStopped, TimelinesFailed, JournalFailed],
       params: { timeline: TimelineId },
       success: Closed,
     })

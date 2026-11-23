@@ -2440,6 +2440,283 @@ const everyPage = (
     return pages;
   });
 
+const noneUnread = {
+  activity: 0,
+  botDirect: 0,
+  botMessages: 0,
+  direct: 0,
+  highlights: 0,
+  messages: 0,
+};
+
+// Every record the Journal holds after a sequence.
+const recordsAfter = (world: World, sequence: number) =>
+  world.journal.read({}).pipe(
+    Stream.filter((entry) => entry.sequence > sequence),
+    Stream.map(({ record }) => record),
+    Stream.runCollect
+  );
+
+// Each of the Network's Timelines as a Frontend lists it, by what tells them apart here.
+const listedOf = (api: Effect.Success<typeof makeClient>) =>
+  api.timelines.list({ params: { network: libera }, query: {} }).pipe(
+    Effect.map((listed) =>
+      listed.timelines.map(({ closed, detached, id, name, read, unread }) => ({
+        closed,
+        detached,
+        id,
+        name,
+        read,
+        unread,
+      }))
+    )
+  );
+
+// An instant some milliseconds after the epoch.
+const sinceEpoch = (millis: number) => Instant.make(epoch + millis);
+
+describe("a Timeline by its id", () => {
+  it("marks a live Channel read as its Target does, through its Client, and only forward", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, []);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
+        yield* settle;
+
+        const channel = yield* timelineNamed(api, "#iirc");
+        const own = yield* timelineNamed(api, "libera");
+
+        const first = yield* api.timelines.read({
+          params: { timeline: channel },
+          payload: { read: sinceEpoch(5000) },
+        });
+
+        const byTarget = yield* api.networks.read({
+          params: { network: libera },
+          payload: { read: sinceEpoch(8000), target: "#iirc" },
+        });
+
+        const behind = yield* api.timelines.read({
+          params: { timeline: channel },
+          payload: { read: sinceEpoch(3000) },
+        });
+
+        const network = yield* api.timelines.read({
+          params: { timeline: own },
+          payload: { read: sinceEpoch(1000) },
+        });
+
+        const stream = yield* api.news.follow({
+          headers: {},
+          query: { after: first.sequence - 1 },
+        });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) => event.event === "happened" && event.data.sequence === network.sequence
+          ),
+          Stream.runCollect
+        );
+
+        yield* settle;
+
+        return {
+          answers: [first, byTarget, behind, network].map(({ sequence }) => sequence),
+          inputs: (yield* recordsAfter(world, first.sequence - 1)).flatMap((record) =>
+            record._tag === "Input" && record.input._tag === "Read"
+              ? [[record.input.read - epoch, record.input.target]]
+              : []
+          ),
+          listed: (yield* listedOf(api)).map(({ name, read }) => [name, read]),
+          news: happenings(events).flatMap((event) =>
+            event.data.news.filter((one) => one._tag === "ReadMarker")
+          ),
+        };
+      })
+    );
+
+    expect(new Set(result.answers).size).toBe(4);
+    expect(result.inputs).toStrictEqual([
+      [5000, { _tag: "Channel", key: "#iirc", name: "#iirc" }],
+      [8000, "#iirc"],
+      [3000, { _tag: "Channel", key: "#iirc", name: "#iirc" }],
+      [1000, { _tag: "Network" }],
+    ]);
+    // The same News by id as by Target, and none for the one behind.
+    expect(result.news).toStrictEqual([
+      {
+        _tag: "ReadMarker",
+        read: epoch + 5000,
+        where: { _tag: "Channel", key: "#iirc", name: "#iirc" },
+      },
+      {
+        _tag: "ReadMarker",
+        read: epoch + 8000,
+        where: { _tag: "Channel", key: "#iirc", name: "#iirc" },
+      },
+      { _tag: "ReadMarker", read: epoch + 1000, where: { _tag: "Network" } },
+    ]);
+    expect(result.listed).toStrictEqual([
+      ["libera", epoch + 1000],
+      ["#iirc", epoch + 8000],
+    ]);
+  });
+
+  it("closes by id as by Target, but never the Network's own nor a Channel Self is in", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, ["psst"]);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* settle;
+
+        const close = (name: string) =>
+          Effect.flatMap(timelineNamed(api, name), (timeline) =>
+            api.timelines.close({ params: { timeline } })
+          );
+
+        const answers = [yield* close("libera"), yield* close("#iirc"), yield* close("peer")];
+
+        yield* settle;
+
+        return {
+          answers: answers.map((answer) =>
+            answer._tag === "Refused" ? answer.reason : answer._tag
+          ),
+          closed: (yield* listedOf(api)).map(({ closed, name }) => [name, closed]),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      answers: [{ _tag: "NoTimeline" }, { _tag: "Joined", channel: "#iirc" }, "Closed"],
+      closed: [
+        ["libera", false],
+        ["peer", true],
+        ["#iirc", false],
+      ],
+    });
+  });
+
+  it("marks a detached Direct Message Timeline read and closes it by a Change, which keeps it closed and found", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, ["psst"]);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, ":irc.test 353 iirc = #iirc :iirc peer pal");
+        yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+        yield* say(call, ":pal!u@h PRIVMSG iirc :hey there");
+        yield* say(call, ":pal!u@h QUIT :bye");
+        // `peer` takes the nick, so the Timeline `pal` had is detached.
+        yield* say(call, ":peer!u@h NICK pal");
+        yield* settle;
+
+        const detached = (yield* listedOf(api)).find((each) => each.detached);
+
+        if (detached === undefined) {
+          return yield* Effect.die(new Error("no Timeline was detached"));
+        }
+
+        const timeline = { timeline: detached.id };
+
+        const read = yield* api.timelines.read({
+          params: timeline,
+          payload: { read: Instant.make(epoch + 60_000) },
+        });
+
+        yield* api.timelines.read({ params: timeline, payload: { read: Instant.make(epoch) } });
+        yield* settle;
+        const marked = (yield* listedOf(api)).find(({ id }) => id === detached.id);
+
+        const closed = yield* api.timelines.close({ params: timeline });
+        yield* say(call, ":pal!u@h PRIVMSG iirc :not for that one");
+        yield* settle;
+
+        const found = yield* api.timelines.search({ query: { text: SearchText.make("hey") } });
+
+        return {
+          before: detached.unread,
+          changes: (yield* recordsAfter(world, read.sequence - 1)).flatMap((record) =>
+            record._tag === "Change" ? [record.change._tag] : []
+          ),
+          closed: closed._tag,
+          found: found.items.map((item) => [item.timeline === detached.id, textOf(item)]),
+          listed: (yield* listedOf(api)).find(({ id }) => id === detached.id),
+          marked,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      // What `pal` said, and their quit.
+      before: { ...noneUnread, activity: 1, direct: 1 },
+      changes: ["TimelineRead", "TimelineRead", "TimelineClosed"],
+      closed: "Closed",
+      found: [[true, "hey there"]],
+      listed: { closed: true, read: epoch + 60_000, unread: noneUnread },
+      marked: { read: epoch + 60_000, unread: noneUnread },
+    });
+  });
+
+  it("acts on the Timeline a merged id went to, and refuses an id never given", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, []);
+
+        yield* say(call, ":irc.test 005 iirc CASEMAPPING=ascii :are supported by this server");
+        yield* say(call, ":a[!u@h PRIVMSG iirc :first");
+        yield* say(call, ":a{!u@h PRIVMSG iirc :second");
+        yield* settle;
+
+        const merged = yield* timelineNamed(api, "a{");
+
+        yield* say(call, ":irc.test 005 iirc -CASEMAPPING :are supported by this server");
+        yield* settle;
+
+        const read = yield* api.timelines.read({
+          params: { timeline: merged },
+          payload: { read: Instant.make(epoch + 60_000) },
+        });
+
+        yield* settle;
+
+        const never = TimelineId.make("00000000000fff-00000000-00000001");
+
+        return {
+          input: (yield* recordsAfter(world, read.sequence - 1)).flatMap((record) =>
+            record._tag === "Input" && record.input._tag === "Read" ? [record.input.target] : []
+          ),
+          listed: (yield* listedOf(api)).map(({ name, unread }) => [name, unread]),
+          unknown: [
+            yield* outcome(
+              api.timelines.read({
+                params: { timeline: never },
+                payload: { read: Instant.make(epoch) },
+              })
+            ),
+            yield* outcome(api.timelines.close({ params: { timeline: never } })),
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      input: [{ _tag: "Direct", key: "a{", name: "a[" }],
+      listed: [
+        ["libera", { ...noneUnread, activity: 1 }],
+        ["a[", noneUnread],
+      ],
+      unknown: ["UnknownTimeline", "UnknownTimeline"],
+    });
+  });
+});
+
 describe("a Channel's head and members", () => {
   it("gives a Channel's head: its name, topic, modes, Self's standing, how many, and PREFIX", async () => {
     const result = await run((world, api) =>
@@ -3083,6 +3360,68 @@ describe("removing a Network", () => {
       was: result.was,
     });
     expect(result.was).toHaveLength(2);
+  });
+
+  it("marks its kept Timelines read and closes them by id, with no Client, and none once dropped", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* directly(world, api, ["kept words"]);
+        const peer = yield* timelineNamed(api, "peer");
+        const own = yield* timelineNamed(api, "libera");
+
+        yield* removing(api, true);
+
+        const at = Instant.make(epoch + 60_000);
+
+        const read = yield* api.timelines.read({
+          params: { timeline: peer },
+          payload: { read: at },
+        });
+
+        yield* api.timelines.read({ params: { timeline: own }, payload: { read: at } });
+
+        const closes = [
+          yield* api.timelines.close({ params: { timeline: peer } }),
+          yield* api.timelines.close({ params: { timeline: own } }),
+        ];
+
+        yield* settle;
+        const listed = yield* listedOf(api);
+
+        yield* api.networks.remove({
+          params: { network: libera },
+          query: { keep: false, life: firstLife },
+        });
+        yield* settle;
+
+        return {
+          closes: closes.map((answer) =>
+            answer._tag === "Refused" ? answer.reason._tag : answer._tag
+          ),
+          dropped: [
+            yield* outcome(
+              api.timelines.read({ params: { timeline: peer }, payload: { read: at } })
+            ),
+            yield* outcome(api.timelines.close({ params: { timeline: peer } })),
+          ],
+          inputs: (yield* recordsAfter(world, read.sequence - 1)).flatMap((record) =>
+            record._tag === "Change" ? [record.change._tag] : [record._tag]
+          ),
+          listed: listed.map(({ closed, name, unread }) => [name, closed, unread]),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      closes: ["Closed", "NoTimeline"],
+      dropped: ["UnknownTimeline", "UnknownTimeline"],
+      // No Client takes any of them, and the removal that drops them comes after.
+      inputs: ["TimelineRead", "TimelineRead", "TimelineClosed", "TimelineClosed", "Input"],
+      listed: [
+        ["libera", false, noneUnread],
+        ["peer", true, noneUnread],
+      ],
+    });
   });
 
   it("spares a Credential an option under store names, as the bucket's keys", async () => {
