@@ -1312,6 +1312,10 @@ describe("the Composer's formatting", () => {
 
     const backgrounds = namesIn(container, "Backgrounds");
 
+    const swatch = formatListOf(container)?.querySelector<HTMLElement>(
+      '[role="option"][aria-label="red background"]'
+    )?.style.backgroundColor;
+
     // Down to the default background, then past white, black, blue, and green, to red.
     await pressIn(container, "ArrowDown");
 
@@ -1326,6 +1330,10 @@ describe("the Composer's formatting", () => {
     const drawn = drawnRuns(container);
     const gone = formatListOf(container);
 
+    const applied = [...(backdropOf(container)?.querySelectorAll("span") ?? [])].find(
+      (span) => span.textContent === "b"
+    )?.style.backgroundColor;
+
     await pressIn(container, "Enter");
     await settled(() => daemon.says.length === 1);
 
@@ -1334,6 +1342,7 @@ describe("the Composer's formatting", () => {
       drawn,
       gone,
       said: daemon.says.map((one) => one.text),
+      swatchIsApplied: swatch !== undefined && swatch !== "" && swatch === applied,
     }).toStrictEqual({
       backgrounds: [17, "default background", "red background"],
       drawn: [
@@ -1343,6 +1352,7 @@ describe("the Composer's formatting", () => {
       ],
       gone: undefined,
       said: ["a \u000399,04b\u000399,99 c"],
+      swatchIsApplied: true,
     });
   });
 

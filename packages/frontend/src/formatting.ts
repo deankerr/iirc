@@ -333,7 +333,7 @@ const putOver = (style: Style, format: Format, on: boolean): Style => {
     }
 
     default: {
-      return style;
+      return format satisfies never;
     }
   }
 };

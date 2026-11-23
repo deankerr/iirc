@@ -43,7 +43,7 @@ import {
 import type { Format, Pending } from "@iirc/frontend/formatting";
 import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { quotedOf } from "@iirc/frontend/render";
-import type { Style } from "@iirc/frontend/render";
+import type { Colour, Style } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
 import { Atom } from "effect/reactivity";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
@@ -625,7 +625,7 @@ const Backdrop = ({
 /**
  * A row of the formatting list's colours, the default and the sixteen, for the text or for
  * its background, its name shown before it and said by a screen reader, each swatch drawn as
- * a Timeline draws the colour.
+ * a Timeline draws a run in that colour or over that background.
  * @param props - The list's id, the row's place and name, what it puts over the text, whether
  * a swatch is highlighted, and what picking does.
  * @returns The row.
@@ -648,6 +648,12 @@ const ColourRow = ({
   const theme = useAtomValue(drawnTheme);
   const nameId = `${id}-${row}-name`;
   const named = format === "Colour" ? colourName : backgroundName;
+
+  // Each swatch is the colour as a run is drawn in it: as its text, or as its background.
+  const fill = (colour: Colour | undefined) =>
+    format === "Colour"
+      ? runColours(colouredStyle(colour), theme).color
+      : runColours({ ...colouredStyle(undefined), background: colour }, theme).backgroundColor;
 
   return (
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of that listbox.
@@ -672,7 +678,7 @@ const ColourRow = ({
           }}
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
           role="option"
-          style={{ backgroundColor: runColours(colouredStyle(colour), theme).color }}
+          style={{ backgroundColor: fill(colour) }}
           tabIndex={-1}
           title={named(colour)}
         >
