@@ -186,11 +186,6 @@ a.page:focus-visible {
 }
 
 @media (pointer: coarse) {
-  .close {
-    min-width: var(--target-size);
-    min-height: var(--target-size);
-  }
-
   .page {
     display: flex;
     align-items: center;

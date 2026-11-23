@@ -93,7 +93,7 @@ The core decides and this package draws and does the I/O.
 - **A ready card shows each of these it has:** the host it was read from, when another than its link's, ignoring a leading `www.`, in a small quiet line; its title, two lines at most; its description, three lines at most, which a press shows whole when it was cut; and, while `on`, its media. The site's name is never drawn.
 - **A description's line breaks are drawn as breaks,** so a text file's first lines are drawn as lines, and every word is text, never markup.
 - **Under `text` a card is its words alone.**
-- **A card with words stands behind a left rule and an indent.** A link that is itself an image, a video, or a sound is its media alone, with no words, flush with the text.
+- **A card with a title or a description stands behind a left rule and an indent.** A link that is itself an image, a video, or a sound is its media alone, with no words but the host it was read from, flush with the text.
 - **A link to a file is its file name,** with its first lines when it is a text file, or else its type and size, under `text` as under `on`.
 - **Media is at most as tall as `ui.previews.mediaHeight`,** 160, 260, or 400 pixels.
 - **A sound, and a video with no poster, is the browser's own player,** which fetches nothing from the Daemon until play is pressed. A video has a control in its corner that opens it large.

@@ -33,7 +33,7 @@
 /*
  * A row with words, a card's or a failure's, or a pulse standing for them, stands behind a
  * rule and an indent. A link that is itself media, an image, a video, or a sound, is a card
- * with no words, its media alone, flush with the text.
+ * with no title and no description, its media alone, flush with the text.
  */
 .row:not(:has(> .card[data-bare])) {
   padding-left: var(--space-3);

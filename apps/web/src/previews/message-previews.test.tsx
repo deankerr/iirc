@@ -1067,6 +1067,24 @@ describe("a Message's Previews", () => {
     });
   });
 
+  it("draws a link that is itself an image read from another host as bare media, naming the host", async () => {
+    const image = readyWithImage("image");
+
+    const { daemon } = await opened(
+      "on",
+      catsItem({ ...image, preview: { ...image.preview, link: "https://cdn.example.org/c.png" } })
+    );
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect({ bare: card()?.dataset.bare, words: words() }).toStrictEqual({
+      bare: "true",
+      words: ["cdn.example.org"],
+    });
+  });
+
   it("draws a link that is itself a video as a player that fetches nothing until pressed", async () => {
     const { daemon } = await opened("on", catsItem(readyMedia("video")));
 

@@ -263,13 +263,13 @@ const Description = ({
 };
 
 /**
- * Whether a card has words: a host, a title, or a description. One with none is a link that
- * is itself media.
+ * Whether a card is a link that is itself media: one with no title and no description,
+ * though it may name the host it was read from.
  * @param shown - The card.
- * @returns Whether it has words.
+ * @returns Whether it is its media alone.
  */
-const hasWords = ({ description, host, title }: CardShown): boolean =>
-  host !== undefined || title !== undefined || description !== undefined;
+const isBare = ({ description, title }: CardShown): boolean =>
+  title === undefined && description === undefined;
 
 /**
  * A card's words, each only when it has it: the host it was read from, its title, and its
@@ -288,7 +288,7 @@ const CardWords = ({
 }) => {
   const { description, host, title } = shown;
 
-  if (!hasWords(shown)) {
+  if (host === undefined && isBare(shown)) {
     return null;
   }
 
@@ -532,7 +532,7 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
 
     case "Ready": {
       return (
-        <div className={styles.card} data-bare={!hasWords(shown) || undefined} data-preview="ready">
+        <div className={styles.card} data-bare={isBare(shown) || undefined} data-preview="ready">
           <Card shown={shown} />
         </div>
       );
