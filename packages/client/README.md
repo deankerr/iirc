@@ -102,8 +102,8 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, Self's, or said as a `bot`, the `prefix` its sender held in the Channel, the masks its sender matched as `ignored`, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
-| `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
+| `Message` | Something said, with its time, id, whether it is `live`, a `highlight`, Self's, or said as a `bot`, the `prefix` its sender held in the Channel, the `nicks` its text names, the masks its sender matched as `ignored`, and `where` it belongs. One we said carries `ours`: its intent, and whether the Ircd will echo it. It `answers` the id a `+reply` tag names, or the one Self's `Say` answered, and a Direct Message carries the Channel a `+channel-context` tag names as its `context`. |
+| `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text, and the `nicks` that text names. |
 | `Activity` | Something that changed, with its time, id, whether it is `live`, the masks the User behind it matched as `ignored`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration: why, the Ircd dialled, and whether it had opened. |
@@ -121,6 +121,7 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 - **Our own Messages are News when we send them.** With `ours.echo`, a `Confirmed` follows when the Ircd echoes it, and the echo is not a second Message. If its Line never left, a `Refused` `Unsent` follows.
 - **History arrives late,** with `live` false, and a Message may come live and again from history under the same id.
 - **A Message in a Channel carries its sender's `prefix`,** the symbol of the highest prefix they held there as the Line was folded, by the order of `PREFIX`, and none for a Direct Message, a sender who is no member, or one who holds none. Self's own, said by a `Say`, carries it too. It is fixed when said: a later `MODE` leaves it as it was.
+- **A Message carries the `nicks` its text names,** spans of UTF-16 offsets into its text with formatting stripped, in order and never overlapping, each a whole word, by a Highlight's word rule, that is the nick of a User who counts, compared by the Network's casemapping. In a Channel Self is in, those who count are its members as known as the Line was folded, a `NAMES` listing still arriving included. In a Direct Message they are the partner and Self, and in the Network's own Timeline, from the Ircd or another server, or to a Channel Self is not in, none. A list of Targets counts the union. A nick that holds a character which ends a word is never found. Self's own Messages carry them, and so does a `Confirmed`, for the Ircd's text and the Target it was said to. They are fixed when said, and a Message from history is read the same way.
 - **A Message is `self` when Self said it,** from here or from another IRC client, and is never a `highlight`.
 
 ### Where News belongs

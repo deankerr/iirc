@@ -67,6 +67,7 @@ const said = (sequence: number, sender: string): typeof TimelineItem.Encoded => 
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender,

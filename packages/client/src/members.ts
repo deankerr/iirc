@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import type { Listing, Member } from "./state.ts";
+import type { Joined, Listing, Member } from "./state.ts";
 
 /** The most members kept for one Channel, so a hostile Ircd cannot grow the State without bound. */
 const maxMembers = 100_000;
@@ -135,6 +135,20 @@ export const inListing = (listing: Listing, folded: string): boolean => {
   }
 
   return added.has(folded);
+};
+
+/**
+ * Whether a User is a member of a Channel Self is in as last said, as {@link inListing}
+ * and the Channel's members tell it: a `NAMES` listing still arriving counts. The lookup
+ * folds the listing's parts once, so asking for many nicks is linear in what is known.
+ * @param phase - The Channel, joined.
+ * @returns Whether a folded nick is a member.
+ */
+export const memberLookup = (phase: Joined): ((folded: string) => boolean) => {
+  const { listing, members } = phase;
+  const listed = listing === undefined ? undefined : listedMembers(listing);
+
+  return (folded) => members.has(folded) || listed?.has(folded) === true;
 };
 
 /**

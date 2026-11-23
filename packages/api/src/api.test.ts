@@ -1393,6 +1393,7 @@ describe("the contract", () => {
         id: { _tag: "Unknown" },
         kind: "Privmsg",
         live: true,
+        nicks: [{ end: 2, start: 0 }],
         ours: null,
         prefix: null,
         sender: "pal",

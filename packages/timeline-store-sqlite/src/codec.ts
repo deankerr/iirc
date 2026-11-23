@@ -165,8 +165,15 @@ const EndReason = Schema.TaggedUnion({
   Upgrading: { port: Int },
 });
 
+const NickSpan = Schema.Struct({ end: Int, start: Int });
+
 const Delivery = Schema.TaggedUnion({
-  Confirmed: { at: Fact(Instant), id: Fact(MessageId), text: Schema.String },
+  Confirmed: {
+    at: Fact(Instant),
+    id: Fact(MessageId),
+    nicks: Schema.Array(NickSpan),
+    text: Schema.String,
+  },
   Pending: {},
   Rejected: { reply: Schema.String },
   Unconfirmed: {},
@@ -212,6 +219,7 @@ const Content = exactly<Content>()(
       id: Fact(MessageId),
       kind: SayKind,
       live: Schema.Boolean,
+      nicks: Schema.Array(NickSpan),
       ours: Schema.UndefinedOr(Schema.Struct({ delivery: Delivery, intent: IntentId })),
       prefix: Schema.UndefinedOr(Schema.String),
       sender: Schema.String,

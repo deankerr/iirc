@@ -53,6 +53,7 @@ The core decides and this package draws and does the I/O.
 ### A Timeline
 
 - **Shows a Timeline live, as terminal lines:** the time, the sender in their colour, and the text with its formatting and links.
+- **A name in a Message's text that the Client found to be a User is drawn in that nick's colour,** as a search result's text is, unless the sender's own mIRC colour covers it.
 - **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.

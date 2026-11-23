@@ -59,6 +59,7 @@ export type {
   Named,
   NamesEntry,
   News,
+  NickSpan,
   OtherReply,
   Ours,
   PartialReason,

@@ -15,6 +15,7 @@ import type {
   EndReason,
   ItemContent,
   NetworkId,
+  NickSpan,
 } from "@iirc/api";
 import type { IrcdAddress } from "@iirc/client/configuration";
 import { casefold } from "@iirc/protocol/casemapping";
@@ -33,11 +34,19 @@ export type { Colour, Style } from "@iirc/protocol/format";
 export { contained } from "./contained.ts";
 
 /**
- * A run of text in one style: plain text, or a link a view may open. A link's `href` is
- * always `http`, `https`, `irc`, or `ircs`, as the URL parser wrote it.
+ * A run of text in one style: plain text, text that names a User who counts, or a link a
+ * view may open. A link's `href` is always `http`, `https`, `irc`, or `ircs`, as the URL
+ * parser wrote it. A `Nick`'s `colour` is the slot of the nick as the whole text wrote it,
+ * so the parts of one name that formatting splits share it.
  */
 export type Inline =
   | { readonly _tag: "Text"; readonly text: string; readonly style: Style }
+  | {
+      readonly _tag: "Nick";
+      readonly text: string;
+      readonly style: Style;
+      readonly colour: number;
+    }
   | { readonly _tag: "Link"; readonly text: string; readonly href: string; readonly style: Style };
 
 /** The schemes a link may have. Anything else stays text. */
@@ -67,28 +76,39 @@ const dropped = (code: number): boolean =>
   isolates.has(code) ||
   code === popIsolate;
 
+/** A character plain text keeps, and where it stood in the text with formatting stripped. */
+export interface PlainCharacter {
+  readonly character: string;
+  /** Its UTF-16 offset in the stripped text. */
+  readonly offset: number;
+}
+
 /**
- * The characters of text a Network sent, as plain text shows them: mIRC formatting
- * stripped, every control, bidirectional formatting character, and lone surrogate dropped,
- * and line and paragraph separators made spaces. Each is one code point.
+ * The characters of text a Network sent, as plain text shows them, each with where it
+ * stood: mIRC formatting stripped, every control, bidirectional formatting character, and
+ * lone surrogate dropped, and line and paragraph separators made spaces. Each is one code
+ * point.
  * @param text - The text, as the Network sent it.
  * @param limit - How many are needed: reading stops one past it.
  * @returns The characters.
  */
-export const plainCharacters = (
+export const plainWithOffsets = (
   text: string,
   limit = Number.POSITIVE_INFINITY
-): readonly string[] => {
-  const kept: string[] = [];
+): readonly PlainCharacter[] => {
+  const kept: PlainCharacter[] = [];
+  let offset = 0;
 
   for (const character of stripFormatting(text)) {
     const code = character.codePointAt(0) ?? 0;
 
     if (code === 0x20_28 || code === 0x20_29) {
-      kept.push(" ");
+      kept.push({ character: " ", offset });
     } else if (!dropped(code)) {
-      kept.push(character);
+      kept.push({ character, offset });
     }
+
+    offset += character.length;
 
     // One past the limit says it is cut, and nothing further is needed.
     if (kept.length > limit) {
@@ -98,6 +118,17 @@ export const plainCharacters = (
 
   return kept;
 };
+
+/**
+ * The characters of text a Network sent, as plain text shows them.
+ * @param text - The text, as the Network sent it.
+ * @param limit - How many are needed: reading stops one past it.
+ * @returns The characters.
+ */
+export const plainCharacters = (
+  text: string,
+  limit = Number.POSITIVE_INFINITY
+): readonly string[] => plainWithOffsets(text, limit).map(({ character }) => character);
 
 /**
  * Text a Network sent as plain text for somewhere that shows no formatting, such as a
@@ -114,44 +145,6 @@ export const plainText = (text: string, limit = plainLimit): string => {
 
   return `${firstStrongIsolate}${cut}${popDirectionalIsolate}`;
 };
-
-/**
- * One run of formatted text, split into text and links.
- * @param text - The run's text, with no formatting codes left.
- * @param style - Its style.
- * @returns Its inlines.
- */
-const linked = (text: string, style: Style): readonly Inline[] => {
-  const inlines: Inline[] = [];
-  let from = 0;
-
-  const textUpTo = (end: number) => {
-    if (end > from) {
-      inlines.push({ _tag: "Text", style, text: contained(text.slice(from, end)) });
-    }
-  };
-
-  for (const link of linksInRun(text)) {
-    textUpTo(link.index);
-    inlines.push({ _tag: "Link", href: link.href, style, text: link.text });
-    from = link.index + link.text.length;
-  }
-
-  textUpTo(text.length);
-
-  return inlines;
-};
-
-/**
- * Text a Network sent, as a view draws it: mIRC formatting read into styles, links found in
- * each run, control characters shown as symbols, and bidirectional formatting closed at
- * the end of each run. Links are found in each run of one style on its own, so a link
- * that formatting splits is a link only up to the split.
- * @param text - The text, as it arrived.
- * @returns Its inlines, in order.
- */
-export const formatted = (text: string): readonly Inline[] =>
-  parseFormatting(text).flatMap((span) => linked(span.text, span.style));
 
 // Nick colours.
 
@@ -175,6 +168,154 @@ export const nickColour = (nick: string, slots = nickSlots): number => {
   }
 
   return hash % slots;
+};
+
+/** A span of text that names a User, as the slot its nick as written is given. */
+export interface NickRun {
+  readonly start: number;
+  readonly end: number;
+  readonly colour: number;
+}
+
+/**
+ * The spans a Client found in some text, ready to draw: each with the slot of the nick as
+ * the text wrote it, in order and never overlapping, the Daemon being trusted to have
+ * sent them so. A span past the end of the text is cut to it, and one that is empty, or
+ * starts before the last one ended, is skipped.
+ * @param text - The text, as it arrived.
+ * @param nicks - The spans, as UTF-16 offsets into the text with formatting stripped.
+ * @returns The spans, with their slots.
+ */
+export const nickRuns = (text: string, nicks: readonly NickSpan[]): readonly NickRun[] => {
+  if (nicks.length === 0) {
+    return [];
+  }
+
+  const plain = stripFormatting(text);
+  const runs: NickRun[] = [];
+  let from = 0;
+
+  for (const nick of nicks) {
+    const end = Math.min(nick.end, plain.length);
+
+    if (nick.start >= from && nick.start < end) {
+      runs.push({ colour: nickColour(plain.slice(nick.start, end)), end, start: nick.start });
+      from = end;
+    }
+  }
+
+  return runs;
+};
+
+/**
+ * Whether a mIRC colour covers text, which the sender chose and a nick's colour leaves
+ * alone: a foreground or a background, or the reversal of the two.
+ * @param style - The style in force.
+ * @returns Whether it does.
+ */
+const coloured = (style: Style): boolean =>
+  style.foreground !== undefined || style.background !== undefined || style.reverse;
+
+/**
+ * Some text of one run, split at the spans that name a User, which are `Nick`s unless a
+ * mIRC colour covers them.
+ * @param text - The part of the run to split.
+ * @param style - The run's style.
+ * @param at - Where `text` begins, as an offset into the stripped text.
+ * @param nicks - The spans, as {@link nickRuns} gives them.
+ * @returns Its inlines.
+ */
+const nicked = (
+  text: string,
+  style: Style,
+  at: number,
+  nicks: readonly NickRun[]
+): readonly Inline[] => {
+  const textOf = (from: number, to: number): Inline[] =>
+    to > from ? [{ _tag: "Text", style, text: contained(text.slice(from, to)) }] : [];
+
+  if (coloured(style)) {
+    return textOf(0, text.length);
+  }
+
+  const inlines: Inline[] = [];
+  let from = 0;
+
+  for (const nick of nicks) {
+    const start = Math.max(nick.start - at, from);
+    const end = Math.min(nick.end - at, text.length);
+
+    if (end > start) {
+      inlines.push(...textOf(from, start), {
+        _tag: "Nick",
+        colour: nick.colour,
+        style,
+        text: contained(text.slice(start, end)),
+      });
+      from = end;
+    }
+  }
+
+  return [...inlines, ...textOf(from, text.length)];
+};
+
+/**
+ * One run of formatted text, split into text, nicks, and links.
+ * @param text - The run's text, with no formatting codes left.
+ * @param style - Its style.
+ * @param at - Where the run begins, as an offset into the stripped text.
+ * @param nicks - The spans that name a User.
+ * @returns Its inlines.
+ */
+const linked = (
+  text: string,
+  style: Style,
+  at: number,
+  nicks: readonly NickRun[]
+): readonly Inline[] => {
+  const inlines: Inline[] = [];
+  let from = 0;
+
+  const textUpTo = (end: number) => {
+    if (end > from) {
+      inlines.push(...nicked(text.slice(from, end), style, at + from, nicks));
+    }
+  };
+
+  for (const link of linksInRun(text)) {
+    textUpTo(link.index);
+    inlines.push({ _tag: "Link", href: link.href, style, text: link.text });
+    from = link.index + link.text.length;
+  }
+
+  textUpTo(text.length);
+
+  return inlines;
+};
+
+/**
+ * Text a Network sent, as a view draws it: mIRC formatting read into styles, links found in
+ * each run, control characters shown as symbols, and bidirectional formatting closed at
+ * the end of each run. Links are found in each run of one style on its own, so a link
+ * that formatting splits is a link only up to the split. A span that names a User is a
+ * `Nick` in the colour of the nick as written, unless a link holds it, which stays a
+ * link, or a mIRC colour covers it, which the sender chose.
+ * @param text - The text, as it arrived.
+ * @param nicks - The spans of it that name a User who counts, as UTF-16 offsets into the
+ * text with formatting stripped.
+ * @returns Its inlines, in order.
+ */
+export const formatted = (text: string, nicks: readonly NickSpan[] = []): readonly Inline[] => {
+  const runs = nickRuns(text, nicks);
+  let at = 0;
+
+  return parseFormatting(text).flatMap((span) => {
+    const inlines = linked(span.text, span.style, at, runs);
+
+    at += span.text.length;
+
+    return inlines;
+  });
 };
 
 // Lines.
@@ -1148,7 +1289,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
       const delivery = content.ours?.delivery;
 
       // The Ircd's own text for one of ours it confirmed, which may differ from what we said.
-      const text = delivery?._tag === "Confirmed" ? delivery.text : content.text;
+      const { nicks, text } = delivery?._tag === "Confirmed" ? delivery : content;
 
       return {
         _tag: "Message",
@@ -1160,7 +1301,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
         kind: content.kind,
         nick: contained(content.sender),
         prefix: content.prefix === null ? undefined : contained(content.prefix),
-        text: formatted(text),
+        text: formatted(text, nicks),
       };
     }
 

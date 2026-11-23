@@ -10,6 +10,7 @@
  */
 import type {
   NetworkId,
+  NickSpan,
   SearchQuery,
   SearchResults,
   Timeline,
@@ -26,7 +27,7 @@ import {
 import { Option, Schema } from "effect";
 
 import type { Parsed, SayKind } from "./commands.ts";
-import { nickColour, plainCharacters } from "./render.ts";
+import { nickColour, nickRuns, plainCharacters, plainWithOffsets } from "./render.ts";
 
 /** How many results a page of a search asks for. */
 export const searchPage = 100;
@@ -888,10 +889,14 @@ export const capped = (search: Search): boolean =>
 
 // What a result shows.
 
-/** A run of a result's text: whether it is what was searched for, and its characters. */
+/**
+ * A run of a result's text: whether it is what was searched for, the colour slot of the
+ * nick its characters name if they do, and the characters.
+ */
 export interface MatchRun {
   readonly text: string;
   readonly match: boolean;
+  readonly colour: number | undefined;
 }
 
 /**
@@ -912,41 +917,58 @@ const foundAt = (folded: readonly string[], needle: readonly string[], at: numbe
  * found as the Daemon finds it, each character lower-cased by `foldForSearch`, one code
  * point to one, so a run's characters are the text's own. The text is the plain text a
  * notification shows, with formatting stripped and controls dropped, and nothing here is
- * markup: a view puts each run in a text node.
+ * markup: a view puts each run in a text node. A run that names a User who counts has the
+ * slot of that nick as the text wrote it, whatever formatting there was, since a result
+ * draws none.
  * @param text - The Message's text, as the Network sent it.
  * @param sought - What was searched for.
+ * @param nicks - The spans of the text that name a User, as UTF-16 offsets into it with
+ * formatting stripped.
  * @returns The runs, in order, adjacent runs never alike.
  */
-export const matchRuns = (text: string, sought: string): readonly MatchRun[] => {
-  const characters = plainCharacters(text);
+export const matchRuns = (
+  text: string,
+  sought: string,
+  nicks: readonly NickSpan[] = []
+): readonly MatchRun[] => {
+  const kept = plainWithOffsets(text);
+  const characters = kept.map(({ character }) => character);
   const folded = characters.map((character) => foldForSearch(character));
   const needle = codePoints(foldForSearch(sought));
+  const named = nickRuns(text, nicks);
   const runs: MatchRun[] = [];
 
-  const push = (run: string, match: boolean) => {
+  const colourAt = (index: number): number | undefined => {
+    const offset = kept[index]?.offset ?? 0;
+
+    return named.find((nick) => offset >= nick.start && offset < nick.end)?.colour;
+  };
+
+  const push = (run: string, match: boolean, colour: number | undefined) => {
     const last = runs.at(-1);
 
     if (run === "") {
       return;
     }
 
-    if (last?.match === match) {
-      runs[runs.length - 1] = { match, text: last.text + run };
+    if (last?.match === match && last.colour === colour) {
+      runs[runs.length - 1] = { colour, match, text: last.text + run };
     } else {
-      runs.push({ match, text: run });
+      runs.push({ colour, match, text: run });
     }
   };
 
   let at = 0;
 
   while (at < characters.length) {
-    if (foundAt(folded, needle, at)) {
-      push(characters.slice(at, at + needle.length).join(""), true);
-      at += needle.length;
-    } else {
-      push(characters[at] ?? "", false);
-      at += 1;
+    const match = foundAt(folded, needle, at);
+    const length = match ? needle.length : 1;
+
+    for (let index = at; index < at + length; index += 1) {
+      push(characters[index] ?? "", match, colourAt(index));
     }
+
+    at += length;
   }
 
   return runs;
@@ -977,7 +999,7 @@ export const foundOf = (item: TimelineItem, sought: string): Found | undefined =
   }
 
   const delivery = content.ours?.delivery;
-  const text = delivery?._tag === "Confirmed" ? delivery.text : content.text;
+  const { nicks, text } = delivery?._tag === "Confirmed" ? delivery : content;
 
   return {
     colour: nickColour(content.sender),
@@ -985,6 +1007,6 @@ export const foundOf = (item: TimelineItem, sought: string): Found | undefined =
     key: resultKey(item),
     kind: content.kind,
     nick: plainCharacters(content.sender).join(""),
-    runs: matchRuns(text, sought),
+    runs: matchRuns(text, sought, nicks),
   };
 };

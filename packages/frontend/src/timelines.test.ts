@@ -386,9 +386,10 @@ const wireContent = (item: ModelItem): (typeof TimelineItem.Encoded)["content"] 
         id: unknown,
         kind: "Privmsg",
         live: true,
+        nicks: [],
         ours: {
           delivery: item.confirmed
-            ? { _tag: "Confirmed", at: unknown, id: unknown, text: "said" }
+            ? { _tag: "Confirmed", at: unknown, id: unknown, nicks: [], text: "said" }
             : { _tag: "Pending" },
           intent: `i${item.spot.sequence}`,
         },
@@ -1392,6 +1393,7 @@ const message = (timeline: string, at: number, sequence: number, changed = seque
       id: unknown,
       kind: "Privmsg",
       live: true,
+      nicks: [],
       ours: null,
       prefix: null,
       sender: "peer",
@@ -5758,6 +5760,7 @@ const said = (
       id: unknown,
       kind,
       live: true,
+      nicks: [],
       ours: null,
       prefix,
       sender,

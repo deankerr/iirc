@@ -1,7 +1,9 @@
 import { NetworkId, SearchResults, Timeline, TimelineItem } from "@iirc/api";
+import type { Delivery } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { nickColour } from "./render.ts";
 import {
   capped,
   foundOf,
@@ -250,7 +252,13 @@ describe("reading a query", () => {
 
 // The search.
 
-const message = (sequence: number, text: string, sender = "peer") =>
+const message = (
+  sequence: number,
+  text: string,
+  sender = "peer",
+  nicks: readonly { start: number; end: number }[] = [],
+  delivery?: typeof Delivery.Encoded
+) =>
   decodeItem({
     answered: null,
     changed: sequence,
@@ -263,7 +271,8 @@ const message = (sequence: number, text: string, sender = "peer") =>
       id: { _tag: "Unknown" },
       kind: "Privmsg",
       live: true,
-      ours: null,
+      nicks,
+      ours: delivery === undefined ? null : { delivery, intent: "i1" },
       prefix: null,
       sender,
       tags: [],
@@ -450,18 +459,18 @@ describe("marking what was found", () => {
       matchRuns("aaaa", "aa"),
     ]).toStrictEqual([
       [
-        { match: true, text: "Hello" },
-        { match: false, text: " WORLD, " },
-        { match: true, text: "hello" },
-        { match: false, text: " world" },
+        { colour: undefined, match: true, text: "Hello" },
+        { colour: undefined, match: false, text: " WORLD, " },
+        { colour: undefined, match: true, text: "hello" },
+        { colour: undefined, match: false, text: " world" },
       ],
       [
-        { match: true, text: "\u0130STANBUL" },
-        { match: false, text: " and " },
-        { match: true, text: "istanbul" },
+        { colour: undefined, match: true, text: "\u0130STANBUL" },
+        { colour: undefined, match: false, text: " and " },
+        { colour: undefined, match: true, text: "istanbul" },
       ],
-      [{ match: false, text: "nothing here" }],
-      [{ match: true, text: "aaaa" }],
+      [{ colour: undefined, match: false, text: "nothing here" }],
+      [{ colour: undefined, match: true, text: "aaaa" }],
     ]);
   });
 
@@ -477,11 +486,47 @@ describe("marking what was found", () => {
     }).toStrictEqual({
       nick: "peer",
       runs: [
-        { match: false, text: "evil <b>" },
-        { match: true, text: "WoRd" },
-        { match: false, text: "</b> <img src=x onerror=alert(1)>" },
+        { colour: undefined, match: false, text: "evil <b>" },
+        { colour: undefined, match: true, text: "WoRd" },
+        { colour: undefined, match: false, text: "</b> <img src=x onerror=alert(1)>" },
       ],
     });
+  });
+
+  it("gives each run the slot of the nick it names, found or not, and a nick split by a match in two runs", () => {
+    // `\u0002` stripped and `\u0007` dropped: offsets are the stripped text's, so the span
+    // after the control still lines up.
+    const found = foundOf(
+      message(3, "\u0002hi\u0002 \u0007alice and bob", "peer", [
+        { end: 9, start: 4 },
+        { end: 17, start: 14 },
+      ]),
+      "lic"
+    );
+
+    expect(found?.runs).toStrictEqual([
+      { colour: undefined, match: false, text: "hi " },
+      { colour: nickColour("alice"), match: false, text: "a" },
+      { colour: nickColour("alice"), match: true, text: "lic" },
+      { colour: nickColour("alice"), match: false, text: "e" },
+      { colour: undefined, match: false, text: " and " },
+      { colour: nickColour("bob"), match: false, text: "bob" },
+    ]);
+  });
+
+  it("finds the spans of the confirmed text for one of ours the Ircd confirmed", () => {
+    const item = message(4, "hello", "iirc", [], {
+      _tag: "Confirmed",
+      at: { _tag: "Unknown" },
+      id: { _tag: "Unknown" },
+      nicks: [{ end: 5, start: 0 }],
+      text: "alice!",
+    });
+
+    expect(foundOf(item, "zzz")?.runs).toStrictEqual([
+      { colour: nickColour("alice"), match: false, text: "alice" },
+      { colour: undefined, match: false, text: "!" },
+    ]);
   });
 
   it("shows a sender as plain text, a bidirectional override dropped", () => {

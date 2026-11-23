@@ -545,6 +545,7 @@ const message = (
           _tag: "Confirmed" as const,
           at: { _tag: "Unknown" as const },
           id: { _tag: "Unknown" as const },
+          nicks: [],
           text: confirmed,
         };
 
@@ -560,6 +561,7 @@ const message = (
       id: { _tag: "Unknown" },
       kind: "Privmsg",
       live: true,
+      nicks: [],
       ours: ours ? { delivery, intent: "web-1" } : null,
       prefix: null,
       sender: ours ? "iirc" : "peer",

@@ -330,6 +330,7 @@ const said = (
     id: unknown,
     kind,
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender,

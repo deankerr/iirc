@@ -22,6 +22,7 @@ const message = (text: string, ours?: Extract<Content, { _tag: "Message" }>["our
   id: { _tag: "Unknown" },
   kind: "Privmsg",
   live: true,
+  nicks: [],
   ours,
   prefix: undefined,
   sender: "PeerÄ",
@@ -85,6 +86,7 @@ describe("folding", () => {
           _tag: "Confirmed",
           at: { _tag: "Unknown" },
           id: { _tag: "Unknown" },
+          nicks: [],
           text: "HELLO",
         } as const,
       ].map((delivery) => searchableOf(message("helo", { delivery, intent }))?.text)

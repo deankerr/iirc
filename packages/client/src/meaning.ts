@@ -193,7 +193,14 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
 
   if (arrival.answers !== undefined && isSelf(run, by)) {
     return [
-      { _tag: "Confirmed", at: arrival.time, id: arrival.id, intent: arrival.answers, text: said },
+      {
+        _tag: "Confirmed",
+        at: arrival.time,
+        id: arrival.id,
+        intent: arrival.answers,
+        target,
+        text: said,
+      },
     ];
   }
 
