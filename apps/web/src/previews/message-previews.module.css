@@ -181,6 +181,38 @@
 }
 
 /*
+ * A failure in a Timeline that waits for a press: its one line, and a quiet word after it
+ * that says a press tries the link again, which takes the accent while hovered.
+ */
+.retry {
+  display: flex;
+  gap: 0.6em;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: default;
+}
+
+.again {
+  flex: none;
+  color: var(--color-muted);
+}
+
+.retry[data-hovered] .again {
+  color: var(--color-accent);
+}
+
+.retry[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+/*
  * The toggle after a link that may be previewed: a bare caret in the Message's text, as a
  * Network's row in the Sidebar has, which opens or closes the Preview under the Message.
  * Closed it is quiet and open it is the text's colour, and either takes the accent while

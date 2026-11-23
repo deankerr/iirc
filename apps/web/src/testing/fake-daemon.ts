@@ -819,6 +819,8 @@ export const fakeDaemon = () => {
     ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Whether a press reaches the fake and is held, but its answer is lost on the way back, as a 502. */
+    pressAnswersLost: false,
     /** Each press of a link waiting for one, by its Timeline, its place, and its index, refused or not. */
     presses,
     /** Each ask for a Message's Previews, by its Timeline and its place, refused or not. */
@@ -2141,8 +2143,9 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * A press of a link waiting for one, which the fake answers as pending, holding it so
-   * until a test sends its change, and refuses as `NotWaiting` for any other link.
+   * A press of a link waiting for one, or of one that failed, which the fake answers as
+   * pending, holding it so until a test sends its change, and refuses as `NotWaiting` for
+   * any other link.
    * @param timeline - The Message's Timeline.
    * @param init - The request.
    * @returns The answer.
@@ -2155,7 +2158,9 @@ export const fakeDaemon = () => {
     const items = daemon.previews.get(position);
     const item = items?.[link];
 
-    if (items === undefined || item?.state._tag !== "WaitingForPress") {
+    const pressable = item?.state._tag === "WaitingForPress" || item?.state._tag === "Failed";
+
+    if (items === undefined || item === undefined || !pressable) {
       return Response.json({ _tag: "NotWaiting", link, position, timeline }, { status: 409 });
     }
 
@@ -2166,7 +2171,7 @@ export const fakeDaemon = () => {
       items.map((one, index) => (index === link ? fetching : one))
     );
 
-    return Response.json(fetching);
+    return daemon.pressAnswersLost ? new Response(null, { status: 502 }) : Response.json(fetching);
   };
 
   /**
