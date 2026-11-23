@@ -31,7 +31,6 @@ import {
   Input,
   Menu,
   MenuItem,
-  Popover,
   SearchField,
 } from "react-aria-components";
 import type { Key } from "react-aria-components";
@@ -40,6 +39,7 @@ import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../keys/press.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { Button } from "../ui/button.tsx";
+import { Popover } from "../ui/overlays.tsx";
 import {
   change,
   closeOptions,

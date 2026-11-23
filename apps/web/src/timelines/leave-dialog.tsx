@@ -8,9 +8,10 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { offerOf } from "@iirc/frontend/closing";
 import type { Leaving } from "@iirc/frontend/closing";
-import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, Heading, Modal } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { confirmLeaving, dismissLeaving, leavingState } from "./closing.ts";
 
 import styles from "./leave-dialog.module.css";

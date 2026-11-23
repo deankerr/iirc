@@ -2,7 +2,8 @@
  * Starts the Frontend: one registry for every atom, a check of whether the browser is
  * signed in, the Timelines and the options under `ui` followed, the open one marked read,
  * and the open Channel and the nicks completion waits on read while it is, the page's
- * visibility and title watched, the theme in effect drawn, and React over them.
+ * visibility and title watched, the theme in effect drawn, the history kept to the overlays
+ * open, and React over them.
  *
  * @packageDocumentation
  */
@@ -24,6 +25,7 @@ import { optionsSync } from "./options/atoms.ts";
 import { ownerSync } from "./options/owner.ts";
 import { uiSync } from "./options/ui.ts";
 import { uploadsSync } from "./options/uploads.ts";
+import { watchBack } from "./page/back.ts";
 import { watchPage } from "./page/watch.ts";
 import { previewsSync } from "./previews/atoms.ts";
 import { marking } from "./reading/atoms.ts";
@@ -82,6 +84,10 @@ watchPage(registry);
 
 // The theme in effect, drawn from its palette as custom properties on the root.
 watchTheme(registry);
+
+// The history kept to the overlays open, from the entry the page is on, which a reload may
+// leave as an overlay's.
+watchBack();
 
 const root = document.querySelector("#root");
 

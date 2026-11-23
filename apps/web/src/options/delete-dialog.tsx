@@ -10,9 +10,10 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { shownName } from "@iirc/frontend/uploads";
-import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, Heading, Modal } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { uploadsState } from "./uploads-state.ts";
 import { closeDelete, confirmDelete, uploadEditsState } from "./uploads.ts";
 

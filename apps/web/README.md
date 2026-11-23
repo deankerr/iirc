@@ -263,6 +263,7 @@ The core decides and this package draws and does the I/O.
 
 - **Says across the top of the page when the Daemon stopped folding the Timelines:** that it hit a fatal error, that the Timelines stay behind until it restarts, and why. The notice goes once the Daemon, restarted, folds them again.
 - **A screen 640px wide or less shows the focused Pane alone,** under one slim bar holding the Sidebar's button and the Panes' switcher, with the Sidebar as a drawer and the members as a sheet.
+- **The browser's Back closes what Escape closes, the topmost first,** on any screen: the drawer, the sheet, the members over a narrow Pane, a Lookup card, a dialog, a Preview's larger view, or a menu. Each takes one entry in the history as it opens, with the same URL, and gives it back however it closes, so with nothing open Back leaves the page.
 - **Where the pointer is coarse, every control is at least 44px and every field's text at least 16px,** so iOS Safari does not zoom into it.
 - **Pinch zoom is never turned off.**
 
@@ -281,10 +282,10 @@ The core decides and this package draws and does the I/O.
 | `src/nick/` | The menu on a nick, and its atoms |
 | `src/previews/` | A Message's Previews and their atoms |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
-| `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the Sidebar's width and whether it shows |
+| `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, the history entries Back closes overlays by, and the Sidebar's width and whether it shows |
 | `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
-| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, the grip on a width the Owner drags, and dates |
-| `src/testing/` | The fake Daemon, and the test ports for uploading, notifying, and downloading |
+| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, the grip on a width the Owner drags, the modal overlay and popover every overlay is, and dates |
+| `src/testing/` | The fake Daemon, the test ports for uploading, notifying, and downloading, and the history Back is pressed in |
 
 ### The runtime
 

@@ -21,6 +21,7 @@ import { drawerState, pageSeen } from "../page/drawer.ts";
 import { marking } from "../reading/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { layoutKey, open, paned, showDraft, sync, timelinesState } from "../timelines/atoms.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -1132,5 +1133,112 @@ describe("what stands in front of a Timeline", () => {
       sidebar: { dialogs: 0, drawer: "None" },
       wide: { column: 0, kept: false },
     });
+  });
+
+  // Catches Back on a phone leaving the page while the drawer or the sheet lies over it.
+  it("closes the drawer or the sheet on Back, and the page stays", async () => {
+    pageEntered();
+    const { registry } = await signedIn({ strict: true });
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await settled(() => button() !== null);
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await back();
+    await settled(() => dialogs() === 0);
+
+    const sidebar = { drawer: registry.get(drawerState), left: left() };
+
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await back();
+    await settled(() => dialogs() === 0);
+
+    expect({
+      members: { drawer: registry.get(drawerState), left: left() },
+      sidebar,
+    }).toStrictEqual({
+      members: { drawer: "None", left: false },
+      sidebar: { drawer: "None", left: false },
+    });
+  });
+
+  // Catches an entry left behind by a drawer closed some other way than Back, which would
+  // make Back with nothing open seem to do nothing.
+  it("leaves no entry behind for a drawer closed by Escape or a press outside, so Back then leaves the page", async () => {
+    pageEntered();
+    const { registry } = await signedIn({ strict: true });
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await settled(() => button() !== null);
+
+    const openAndClose = async (escape: boolean) => {
+      await act(async () => {
+        button()?.click();
+        await Promise.resolve();
+      });
+      await settled(() => dialogs() === 1);
+      await act(async () => {
+        if (escape) {
+          document
+            .querySelector('[role="dialog"]')
+            ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+        } else {
+          document.body.dispatchEvent(
+            new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 })
+          );
+          document.body.click();
+        }
+
+        await Promise.resolve();
+      });
+      await settled(() => dialogs() === 0);
+    };
+
+    await openAndClose(true);
+    await openAndClose(false);
+    await openAndClose(true);
+    await openAndClose(false);
+    await openAndClose(true);
+    await back();
+
+    expect(left()).toBeTruthy();
+  });
+
+  // Catches the entry of a drawer the screen widening ended, which Back would then spend.
+  it("gives back the drawer's entry as the screen widens and ends it", async () => {
+    pageEntered();
+    const { registry } = await signedIn({ strict: true });
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await settled(() => button() !== null);
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await act(async () => {
+      pageSeen(registry, { compact: false, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 0);
+    await back();
+
+    expect(left()).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { eventually } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { OpensLarger } from "./larger-view.tsx";
 import type { Large } from "./larger-view.tsx";
 
@@ -158,5 +159,17 @@ describe("the larger view", () => {
 
       await expect(closedTo(control)).resolves.toStrictEqual({ focused: true, gone: true });
     });
+  });
+
+  // Catches Back leaving the page while a Preview is shown large.
+  it("closes on Back, and the page stays", async () => {
+    pageEntered();
+    const control = await opened(image);
+
+    await back();
+
+    await expect(
+      closedTo(control).then((closed) => ({ ...closed, left: left() }))
+    ).resolves.toStrictEqual({ focused: true, gone: true, left: false });
   });
 });

@@ -13,6 +13,7 @@ import { focusedId } from "../panes/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, profileOf, registryFor, run } from "../testing/fake-daemon.ts";
 import type { LookScript } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { open, paned, sync } from "../timelines/atoms.ts";
 import { nickMenuSync } from "./atoms.ts";
 
@@ -466,6 +467,19 @@ describe("the menu on a nick", () => {
       label: "What to do with peer",
       offered: operator("peer"),
     });
+  });
+
+  // Catches Back leaving the page while the nick menu is open.
+  it("closes on Back, and the page stays", async () => {
+    pageEntered();
+    await signedIn([]);
+    await settled(() => nickIn("line 2") !== undefined);
+    await press(nickIn("line 2"));
+    await settled(() => menu() !== null);
+    await back();
+    await settled(() => menu() === null);
+
+    expect(left()).toBeFalsy();
   });
 
   it("offers a ban by account where the Network's bans name one, and sends BanAccount for it", async () => {

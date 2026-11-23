@@ -26,6 +26,7 @@ import {
   run,
   theKey,
 } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { open, paned, sync, timelinesState } from "./atoms.ts";
 import { leavingState } from "./closing.ts";
 
@@ -560,6 +561,40 @@ describe("closing a Timeline from the sidebar", () => {
       listed: ["libera", "#iirc", "#other"],
       offered: "You are in #iirc. Leave it?",
       puts: 1,
+    });
+  });
+
+  // Catches Back closing the drawer under a dialog opened from it, or leaving the page.
+  it("closes a Leave dialog opened from the drawer on Back, and the drawer on a second", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    pageEntered();
+    const registry = await signedIn(undefined, fake);
+
+    await doing(() => {
+      registry.set(pageState, { compact: true, focused: true, visible: true });
+    });
+    await pressButton("Networks");
+    await settled(() => document.querySelector('[role="dialog"][aria-label="Networks"]') !== null);
+    await doing(() => {
+      row("#iirc").dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+      );
+    });
+    await chooseFromMenu("Close");
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+    await back();
+    await settled(() => document.querySelector('[role="alertdialog"]') === null);
+
+    const first = { drawer: registry.get(drawerState), left: left() };
+
+    await back();
+    await settled(() => document.querySelector('[role="dialog"]') === null);
+
+    expect({ first, second: { drawer: registry.get(drawerState), left: left() } }).toStrictEqual({
+      first: { drawer: "Sidebar", left: false },
+      second: { drawer: "None", left: false },
     });
   });
 

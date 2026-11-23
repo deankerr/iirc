@@ -17,10 +17,11 @@ import { nickEntries } from "@iirc/frontend/nick-menu";
 import type { NickEntry, Presence } from "@iirc/frontend/nick-menu";
 import { useContext, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
-import { Menu, MenuItem, Popover, Pressable } from "react-aria-components";
+import { Menu, MenuItem, Pressable } from "react-aria-components";
 
 import { membersDismissed } from "../channel/state.ts";
 import { commandContext, perform } from "../composer/atoms.ts";
+import { Popover } from "../ui/overlays.tsx";
 import { closeNickMenu, nickMenusState, openNickMenu } from "./atoms.ts";
 
 import styles from "./nick-menu.module.css";
