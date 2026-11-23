@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { Instant, IntentId, MessageId } from "@iirc/client";
+import type { Instant, IntentId, MessageId, NickSpan } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import type { IgnoreMask } from "@iirc/protocol/mask";
 
@@ -71,6 +71,8 @@ export type Change =
       readonly at: Fact<Instant>;
       readonly id: Fact<MessageId>;
       readonly text: string;
+      /** The spans of that text that name a User who counts. */
+      readonly nicks: readonly NickSpan[];
       /** The Ircd's id, when known: the item is kept under it from now on. */
       readonly messageId: MessageId | undefined;
     }
@@ -157,7 +159,13 @@ export const delivered = (before: Delivery, change: DeliveryChange): Delivery | 
 
   switch (change._tag) {
     case "Confirmed": {
-      return { _tag: "Confirmed", at: change.at, id: change.id, text: change.text };
+      return {
+        _tag: "Confirmed",
+        at: change.at,
+        id: change.id,
+        nicks: change.nicks,
+        text: change.text,
+      };
     }
 
     case "Unsent": {

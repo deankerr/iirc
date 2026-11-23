@@ -47,6 +47,7 @@ import type {
   NetworkInspection as WireNetworkInspection,
   NetworkStatus as WireNetworkStatus,
   News as WireNews,
+  NickSpan as WireNickSpan,
   RefusedReason as WireRefusedReason,
   Where as WireWhere,
 } from "@iirc/api";
@@ -65,6 +66,7 @@ import type {
   ModeChange,
   NamesEntry,
   News,
+  NickSpan,
   Profile,
   RefusedAction,
   Ctcp,
@@ -1168,6 +1170,9 @@ const closable = (source: Closable): WireClosable => {
 const stampOf = (ignored: readonly IgnoreMask[] | undefined): readonly IgnoreMask[] =>
   ignored ?? [];
 
+const spans = (source: readonly NickSpan[]): WireNickSpan[] =>
+  source.map(({ end, start }) => ({ end, start }));
+
 /**
  * One piece of News, as the contract says it.
  * @param source - The Client's News.
@@ -1195,6 +1200,7 @@ const news = (source: News): WireNews => {
         at: fact(source.at, same),
         id: fact(source.id, same),
         intent: source.intent,
+        nicks: spans(source.nicks),
         text: source.text,
       };
 
@@ -1262,6 +1268,7 @@ const news = (source: News): WireNews => {
         ignored: stampOf(source.ignored),
         kind: source.kind,
         live: source.live,
+        nicks: spans(source.nicks),
         ours:
           source.ours === undefined ? null : { echo: source.ours.echo, intent: source.ours.intent },
         prefix: orNull(source.prefix),
@@ -1656,6 +1663,7 @@ const delivery = (source: Delivery): WireDelivery => {
         _tag: "Confirmed",
         at: fact(source.at, same),
         id: fact(source.id, same),
+        nicks: spans(source.nicks),
         text: source.text,
       };
 
@@ -1746,6 +1754,7 @@ const itemContent = (source: Content): WireItemContent => {
         id: fact(source.id, same),
         kind: source.kind,
         live: source.live,
+        nicks: spans(source.nicks),
         ours:
           source.ours === undefined
             ? null

@@ -12,17 +12,10 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { questionOf } from "@iirc/frontend/removal";
 import type { Removal, Standing } from "@iirc/frontend/removal";
 import { useId } from "react";
-import {
-  Dialog,
-  Heading,
-  Modal,
-  ModalOverlay,
-  RadioButton,
-  RadioField,
-  RadioGroup,
-} from "react-aria-components";
+import { Dialog, Heading, Modal, RadioButton, RadioField, RadioGroup } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import {
   chooseKeep,
   closeRemoval,

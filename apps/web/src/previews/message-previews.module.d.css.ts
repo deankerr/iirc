@@ -1,5 +1,6 @@
 // The class names in message-previews.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly again: string;
   readonly audio: string;
   readonly card: string;
   readonly description: string;
@@ -9,6 +10,7 @@ declare const styles: {
   readonly pending: string;
   readonly previews: string;
   readonly pulse: string;
+  readonly retry: string;
   readonly row: string;
   readonly title: string;
   readonly toggle: string;

@@ -7,9 +7,10 @@
  */
 import { useAtomSet } from "@effect/atom-react";
 import type { Attempt } from "@iirc/frontend/sign-in";
-import { Dialog, DialogTrigger, Heading, Modal, ModalOverlay, Text } from "react-aria-components";
+import { Dialog, DialogTrigger, Heading, Modal, Text } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { signOut } from "./atoms.ts";
 
 import styles from "./sign-out-button.module.css";

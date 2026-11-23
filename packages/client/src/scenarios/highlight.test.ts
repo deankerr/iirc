@@ -37,13 +37,13 @@ describe("a Message naming Self", () => {
         ...inChannel,
         lines(
           "<< :peer!u@h PRIVMSG #iirc :iirc: hello",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hello",
+          "?? message Privmsg peer #iirc highlight nicks=0-4 in=channel:#iirc :iirc: hello",
           "<< :peer!u@h PRIVMSG #iirc :hello iirc",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :hello iirc",
+          "?? message Privmsg peer #iirc highlight nicks=6-10 in=channel:#iirc :hello iirc",
           "<< :peer!u@h PRIVMSG #iirc :ask iirc's owner, <iirc> or @iirc, (iirc).",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :ask iirc's owner, <iirc> or @iirc, (iirc).",
+          "?? message Privmsg peer #iirc highlight nicks=4-8,19-23,29-33,36-40 in=channel:#iirc :ask iirc's owner, <iirc> or @iirc, (iirc).",
           "<< :peer!u@h PRIVMSG #iirc :iirc",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc",
+          "?? message Privmsg peer #iirc highlight nicks=0-4 in=channel:#iirc :iirc",
           // Inside a word, or joined by what a nick may hold, it is another word.
           "<< :peer!u@h PRIVMSG #iirc :iirco and xiirc",
           "?? message Privmsg peer #iirc in=channel:#iirc :iirco and xiirc",
@@ -51,7 +51,7 @@ describe("a Message naming Self", () => {
           "?? message Privmsg peer #iirc in=channel:#iirc :iirc_ iirc- [iirc] iirc2 iirc|away",
           // A `/` ends a word, so a path or a URL that holds the nick names it.
           "<< :peer!u@h PRIVMSG #iirc :see https://example.test/iirc",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :see https://example.test/iirc"
+          "?? message Privmsg peer #iirc highlight nicks=25-29 in=channel:#iirc :see https://example.test/iirc"
         ),
       ],
     });
@@ -66,9 +66,9 @@ describe("a Message naming Self", () => {
         ...inChannel,
         lines(
           "<<\\ :peer!u@h PRIVMSG #iirc :\\x02iirc\\x02: look",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :\u0002iirc\u0002: look",
+          "?? message Privmsg peer #iirc highlight nicks=0-4 in=channel:#iirc :\u0002iirc\u0002: look",
           "<<\\ :peer!u@h PRIVMSG #iirc :ii\\x0304,01rc",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :ii\u000304,01rc",
+          "?? message Privmsg peer #iirc highlight nicks=0-4 in=channel:#iirc :ii\u000304,01rc",
           "<<\\ :peer!u@h PRIVMSG #iirc :x\\x0fiirc",
           "?? message Privmsg peer #iirc in=channel:#iirc :x\u000Fiirc"
         ),
@@ -88,12 +88,12 @@ describe("a Message naming Self", () => {
         joined(bracketed, "#iirc", ["peer"], { nick: "dean[m]" }),
         lines(
           "<< :peer!u@h PRIVMSG #iirc :DEAN{M}: rfc1459 folds these together",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :DEAN{M}: rfc1459 folds these together",
+          "?? message Privmsg peer #iirc highlight nicks=0-7 in=channel:#iirc :DEAN{M}: rfc1459 folds these together",
           "<< :irc.test 005 dean[m] CASEMAPPING=ascii :are supported by this server",
           "<< :peer!u@h PRIVMSG #iirc :DEAN{M}: ascii does not",
           "?? message Privmsg peer #iirc in=channel:#iirc :DEAN{M}: ascii does not",
           "<< :peer!u@h PRIVMSG #iirc :DEAN[M]: but it folds letters",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :DEAN[M]: but it folds letters"
+          "?? message Privmsg peer #iirc highlight nicks=0-7 in=channel:#iirc :DEAN[M]: but it folds letters"
         ),
       ],
     });
@@ -111,7 +111,7 @@ describe("a Message naming Self", () => {
           "<< :peer!u@h PRIVMSG #iirc :iirc?",
           "?? message Privmsg peer #iirc in=channel:#iirc :iirc?",
           "<< :peer!u@h PRIVMSG #iirc :other?",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :other?"
+          "?? message Privmsg peer #iirc highlight nicks=0-5 in=channel:#iirc :other?"
         ),
       ],
     });
@@ -126,14 +126,14 @@ describe("a Message naming Self", () => {
         ...inChannel,
         lines(
           "<< :peer!u@h NOTICE #iirc :iirc, a notice",
-          "?? message Notice peer #iirc highlight in=channel:#iirc :iirc, a notice",
+          "?? message Notice peer #iirc highlight nicks=0-4 in=channel:#iirc :iirc, a notice",
           "<<\\ :peer!u@h PRIVMSG #iirc :\\x01ACTION waves at iirc\\x01",
-          "?? message Action peer #iirc highlight in=channel:#iirc :waves at iirc",
+          "?? message Action peer #iirc highlight nicks=9-13 in=channel:#iirc :waves at iirc",
           // A Direct Message is its own level, and a Highlight only when it names Self too.
           "<< :peer!u@h PRIVMSG iirc :psst",
           "?? message Privmsg peer iirc in=direct:peer :psst",
           "<< :peer!u@h PRIVMSG iirc :psst iirc",
-          "?? message Privmsg peer iirc highlight in=direct:peer :psst iirc"
+          "?? message Privmsg peer iirc highlight nicks=5-9 in=direct:peer :psst iirc"
         ),
       ],
     });
@@ -151,11 +151,11 @@ describe("what is never a Highlight", () => {
         lines(
           "!! say #iirc :iirc talking to itself",
           ">> PRIVMSG #iirc :iirc talking to itself",
-          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :iirc talking to itself",
+          "?? message Privmsg iirc #iirc at=ours:t+0s nicks=0-4 in=channel:#iirc ours=i1 :iirc talking to itself",
           "<< :iirc!u@h PRIVMSG #iirc :iirc from elsewhere",
-          "?? message Privmsg iirc #iirc self in=channel:#iirc :iirc from elsewhere",
+          "?? message Privmsg iirc #iirc self nicks=0-4 in=channel:#iirc :iirc from elsewhere",
           "<< :IIRC!u@h PRIVMSG #iirc :iirc in any case",
-          "?? message Privmsg IIRC #iirc self in=channel:#iirc :iirc in any case",
+          "?? message Privmsg IIRC #iirc self nicks=0-4 in=channel:#iirc :iirc in any case",
           "<< :irc.test NOTICE iirc :welcome, iirc",
           "?? message Notice irc.test iirc in=network :welcome, iirc"
         ),
@@ -174,9 +174,9 @@ describe("what is never a Highlight", () => {
         lines(
           "!! say #iirc :hi iirc",
           ">> @label=l1 PRIVMSG #iirc :hi iirc",
-          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :hi iirc",
+          "?? message Privmsg iirc #iirc at=ours:t+0s nicks=3-7 in=channel:#iirc ours=i1 echo :hi iirc",
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hi iirc",
-          "?? confirmed i1 :hi iirc"
+          "?? confirmed i1 nicks=3-7 :hi iirc"
         ),
       ],
     });
@@ -193,10 +193,10 @@ describe("what is never a Highlight", () => {
         lines(
           "<< :irc.test BATCH +h chathistory #iirc",
           "<< @batch=h :peer!u@h PRIVMSG #iirc :iirc, earlier",
-          "?? message Privmsg peer #iirc history in=channel:#iirc :iirc, earlier",
+          "?? message Privmsg peer #iirc history nicks=0-4 in=channel:#iirc :iirc, earlier",
           "<< :irc.test BATCH -h",
           "<< :peer!u@h PRIVMSG #iirc :iirc, now",
-          "?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc, now"
+          "?? message Privmsg peer #iirc highlight nicks=0-4 in=channel:#iirc :iirc, now"
         ),
       ],
     });

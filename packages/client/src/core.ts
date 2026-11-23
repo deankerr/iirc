@@ -120,7 +120,14 @@ const dial = (run: Run, upgrade?: IrcdAddress): void => {
     },
     rotation: run.state.rotation + (upgrade === undefined ? 1 : 0),
   };
-  run.outputs.push({ _tag: "Dial", connection: ConnectionId.make(id), ircd });
+  // A certificate is presented in the TLS handshake, so a plaintext address has none to name.
+  const dialled = { _tag: "Dial", connection: ConnectionId.make(id), ircd } as const;
+
+  run.outputs.push(
+    configuration.tls._tag === "Certificate" && ircd.tls
+      ? { ...dialled, certificate: configuration.tls.certificate }
+      : dialled
+  );
 
   // Each Connection may reach another Ircd, so it starts from the protocol's casemapping
   // until its own ISUPPORT says otherwise.
@@ -716,7 +723,7 @@ const consumedBy = (state: State, input: Input): TimerId | undefined =>
 
 // The Transport
 
-// A `SecretLine` a holding Feature sent could not be filled. With none to hear it, it
+// A `SecretLine` a Feature sent could not be filled. With none to hear it, it
 // changes nothing.
 const unfilledHeld = (run: Run, line: SecretLine): void => {
   const was = before(run);

@@ -1,9 +1,11 @@
 import { formatSpans, parseFormatting, stripFormatting } from "@iirc/protocol/format";
+import type { Colour } from "@iirc/protocol/format";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { linesOf } from "./composer.ts";
 import {
+  flagOn,
   formattedIn,
   hasFormatting,
   linesIn,
@@ -16,14 +18,19 @@ import {
 import type { Format } from "./formatting.ts";
 
 /**
- * A style with some flags on.
- * @param on - The flags on.
+ * A style with some flags on, and its colours.
+ * @param on - The flags on, and the colours.
  * @returns The style.
  */
-const styleOf = (on: { readonly bold?: boolean; readonly italic?: boolean }) => ({
-  background: undefined,
+const styleOf = (on: {
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly foreground?: Colour;
+  readonly background?: Colour;
+}) => ({
+  background: on.background,
   bold: on.bold ?? false,
-  foreground: undefined,
+  foreground: on.foreground,
   italic: on.italic ?? false,
   monospace: false,
   reverse: false,
@@ -35,6 +42,9 @@ const bold: Format = { _tag: "Toggle", flag: "bold" };
 const italic: Format = { _tag: "Toggle", flag: "italic" };
 const red: Format = { _tag: "Colour", colour: { _tag: "Palette", index: 4 } };
 const uncoloured: Format = { _tag: "Colour", colour: undefined };
+const blue: Format = { _tag: "Colour", colour: { _tag: "Palette", index: 2 } };
+const onRed: Format = { _tag: "Background", colour: { _tag: "Palette", index: 4 } };
+const unbacked: Format = { _tag: "Background", colour: undefined };
 
 /**
  * Whether a draft's text is written as the writer writes it: each line read and written
@@ -74,6 +84,80 @@ describe("formatting a range", () => {
       "a \u000304b\u000399 c",
       "a b c",
     ]);
+  });
+
+  it("gives a selection a background over the default colour, which reads back as that background and the default colour", () => {
+    const backed = formattedIn("a b c", 2, 3, onRed);
+
+    expect([parseFormatting(backed), formattedIn(backed, 0, 5, unbacked)]).toStrictEqual([
+      [
+        { style: styleOf({}), text: "a " },
+        { style: styleOf({ background: { _tag: "Palette", index: 4 } }), text: "b" },
+        { style: styleOf({}), text: " c" },
+      ],
+      "a b c",
+    ]);
+  });
+
+  it("keeps a run's colour under a background, and its background under a colour", () => {
+    const backed = formattedIn(formattedIn("abc", 0, 3, blue), 1, 2, onRed);
+
+    expect([
+      parseFormatting(backed),
+      parseFormatting(formattedIn(backed, 0, 3, red)),
+    ]).toStrictEqual([
+      [
+        { style: styleOf({ foreground: { _tag: "Palette", index: 2 } }), text: "a" },
+        {
+          style: styleOf({
+            background: { _tag: "Palette", index: 4 },
+            foreground: { _tag: "Palette", index: 2 },
+          }),
+          text: "b",
+        },
+        { style: styleOf({ foreground: { _tag: "Palette", index: 2 } }), text: "c" },
+      ],
+      [
+        { style: styleOf({ foreground: { _tag: "Palette", index: 4 } }), text: "a" },
+        {
+          style: styleOf({
+            background: { _tag: "Palette", index: 4 },
+            foreground: { _tag: "Palette", index: 4 },
+          }),
+          text: "b",
+        },
+        { style: styleOf({ foreground: { _tag: "Palette", index: 4 } }), text: "c" },
+      ],
+    ]);
+  });
+
+  it("takes only the background away with the default background", () => {
+    expect(formattedIn("\u000302,04abc", 0, 3, unbacked)).toBe("\u000302abc");
+  });
+
+  it("writes a background across a line break again at the start of the next line", () => {
+    const text = formattedIn("ab\ncd", 1, 4, onRed);
+
+    const backed = { _tag: "Palette", index: 4 } as const;
+
+    expect({
+      lines: linesOf(text).map((line) =>
+        parseFormatting(line).map((span) => [span.text, span.style.background])
+      ),
+      normal: normalised(text),
+    }).toStrictEqual({
+      lines: [
+        [
+          ["a", undefined],
+          ["b", backed],
+        ],
+        [
+          ["c", backed],
+          ["d", undefined],
+        ],
+      ],
+      normal: true,
+    });
   });
 
   it("writes a style across a line break again at the start of the next line, so each Message carries it", () => {
@@ -161,7 +245,7 @@ describe("an edit merged into a draft", () => {
   });
 
   it("is always written plainly: its plain text is the value, and no code is stray", () => {
-    const styled = fc.constantFrom<Format>(bold, italic, red, uncoloured);
+    const styled = fc.constantFrom<Format>(bold, italic, red, uncoloured, onRed, unbacked);
     const text = fc.string({ maxLength: 12, unit: fc.constantFrom("a", "b", " ", "\n") });
 
     fc.assert(
@@ -196,6 +280,15 @@ describe("an edit merged into a draft", () => {
 });
 
 describe("the style pending at a caret", () => {
+  it("holds a background for what is typed there next", () => {
+    const pending = pendingAfter("hello", undefined, 5, onRed);
+
+    expect(parseFormatting(merged("hello", "hello!", { caret: 6, pending }))).toStrictEqual([
+      { style: styleOf({}), text: "hello" },
+      { style: styleOf({ background: { _tag: "Palette", index: 4 } }), text: "!" },
+    ]);
+  });
+
   it("is typed at that caret once, and then goes", () => {
     const pending = pendingAfter("hello", undefined, 5, bold);
 
@@ -259,6 +352,36 @@ describe("a style pending, in words", () => {
       words("\u0002hi", [bold]),
       words("\u000304hi", [uncoloured]),
       words("hi", []),
-    ]).toStrictEqual([["italic", "red"], ["not bold"], ["default colour"], []]);
+      words("hi", [onRed]),
+      words("\u000302,04hi", [unbacked]),
+    ]).toStrictEqual([
+      ["italic", "red"],
+      ["not bold"],
+      ["default colour"],
+      [],
+      ["red background"],
+      ["default background"],
+    ]);
+  });
+});
+
+describe("whether a flag is on where a format would go", () => {
+  it.each([
+    ["the whole selection has it", "a \u0002bc\u0002 d", 2, 4, true],
+    ["only some of the selection has it", "a \u0002b\u0002c d", 2, 4, false],
+    ["none of the selection has it", "a bc d", 2, 4, false],
+    ["at a caret in it", "a \u0002bc\u0002 d", 3, 3, true],
+    ["at a caret outside it", "a \u0002bc\u0002 d", 1, 1, false],
+  ])("%s", (_, text, start, end, on) => {
+    expect(flagOn(text, undefined, start, end, "bold")).toBe(on);
+  });
+
+  it("is what is pending at a caret, over what is in force there", () => {
+    const pending = pendingAfter("hello", undefined, 5, bold);
+
+    expect({
+      elsewhere: flagOn("hello", pending, 2, 2, "bold"),
+      here: flagOn("hello", pending, 5, 5, "bold"),
+    }).toStrictEqual({ elsewhere: false, here: true });
   });
 });

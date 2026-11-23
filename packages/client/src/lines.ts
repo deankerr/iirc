@@ -93,7 +93,14 @@ import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { noUsers, userIn } from "./users.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
-import { followSays, named, routeActivity, routeMessage, saidWhere } from "./where.ts";
+import {
+  followSays,
+  named,
+  routeActivity,
+  routeConfirmed,
+  routeMessage,
+  saidWhere,
+} from "./where.ts";
 import {
   askWho,
   whoEnded,
@@ -531,17 +538,17 @@ const fold = (
     run.news.push(routeMessage(run, meant, source));
   } else if (meant._tag === "Activity") {
     reportActivity(run, meant, arrival, source);
-  } else {
-    run.news.push(meant);
-  }
-
-  if (meant._tag === "Confirmed") {
+  } else if (meant._tag === "Confirmed") {
     const { intent } = meant;
+
+    run.news.push(routeConfirmed(run, meant));
 
     updateOpen(run, (open) => ({
       ...open,
       confirmed: [...open.confirmed, intent].slice(-maxConfirmed),
     }));
+  } else {
+    run.news.push(meant);
   }
 
   if (meant._tag !== "Activity" || !live) {

@@ -449,8 +449,8 @@ const readService = (text: string): Login | undefined => {
     : undefined;
 };
 
-// `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`, or a
-// service login.
+// `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`,
+// `external,required` or `external,optional`, or a service login.
 const readLogin = (text: string): Login | undefined => {
   if (text === "none") {
     return { _tag: "None" };
@@ -458,6 +458,10 @@ const readLogin = (text: string): Login | undefined => {
 
   if (text.startsWith("service,")) {
     return readService(text.slice(8));
+  }
+
+  if (text === "external,required" || text === "external,optional") {
+    return { _tag: "External", required: text === "external,required" };
   }
 
   const [kind, account, credential, ...rest] = text.split(",");
@@ -578,6 +582,30 @@ const readChanges = (tokens: readonly string[]): Result.Result<readonly Change[]
   return Result.succeed(changes);
 };
 
+const writeLogin = (login: Login): string => {
+  switch (login._tag) {
+    case "None": {
+      return "login=none";
+    }
+
+    case "External": {
+      return `login=external,${login.required ? "required" : "optional"}`;
+    }
+
+    case "Service": {
+      return `login=service,${login.service},${login.account},${login.credential},${login.wait}`;
+    }
+
+    case "Sasl": {
+      return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
+    }
+
+    default: {
+      return login satisfies never;
+    }
+  }
+};
+
 const writeChange = (change: Change): string => {
   switch (change._tag) {
     case "Join": {
@@ -623,25 +651,7 @@ const writeChange = (change: Change): string => {
     }
 
     case "Login": {
-      const { login } = change;
-
-      switch (login._tag) {
-        case "None": {
-          return "login=none";
-        }
-
-        case "Service": {
-          return `login=service,${login.service},${login.account},${login.credential},${login.wait}`;
-        }
-
-        case "Sasl": {
-          return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
-        }
-
-        default: {
-          return login satisfies never;
-        }
-      }
+      return writeLogin(change.login);
     }
 
     case "Oper": {

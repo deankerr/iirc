@@ -146,6 +146,7 @@ const said = ({
     id: { _tag: "Unknown" },
     kind,
     live,
+    nicks: [],
     ours: ours ? { delivery: { _tag: "Unconfirmed" }, intent: "web-1" } : null,
     prefix: null,
     sender,

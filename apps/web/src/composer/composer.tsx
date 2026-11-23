@@ -26,19 +26,24 @@ import type { Candidate, List } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Answering, Offer, Place } from "@iirc/frontend/composer";
 import { fontDescription, networkDescription, themeDescription } from "@iirc/frontend/entries";
+import { keyInList, listedFlags } from "@iirc/frontend/format-list";
+import type { Highlight } from "@iirc/frontend/format-list";
 import {
+  backgroundName,
   colourChoices,
   colouredStyle,
   colourName,
+  flagOn,
   hasFormatting,
   linesIn,
   pendingWords,
   runsIn,
   plainOf,
 } from "@iirc/frontend/formatting";
+import type { Format, Pending } from "@iirc/frontend/formatting";
 import { chordsFor, enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { quotedOf } from "@iirc/frontend/render";
-import type { Style } from "@iirc/frontend/render";
+import type { Colour, Style } from "@iirc/frontend/render";
 import { runColours } from "@iirc/frontend/theme";
 import { Atom } from "effect/reactivity";
 import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode, RefObject } from "react";
@@ -57,16 +62,16 @@ import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
 import {
-  colourChoiceAt,
-  colourChosen,
-  colourDismissed,
-  colourMoved,
   commandContext,
   composerFocus,
   confirmSend,
   dismiss,
   draft as draftAtom,
   dropReply,
+  formatChoiceAt,
+  formatChosen,
+  formatDismissed,
+  formatMoved,
   perform,
   recall,
   restoreDraft,
@@ -458,42 +463,46 @@ const Completions = ({
  * @returns The attributes.
  */
 const controlling = (
-  shown: { readonly id: string; readonly highlighted: number | undefined } | undefined
+  shown: { readonly id: string; readonly active: string | undefined } | undefined
 ) => ({
-  "aria-activedescendant":
-    shown?.highlighted === undefined ? undefined : optionId(shown.id, shown.highlighted),
+  "aria-activedescendant": shown?.active,
   "aria-autocomplete": "list" as const,
   "aria-controls": shown?.id,
 });
 
-/** How the arrows move through the colours offered. */
-const colourMoves: ReadonlyMap<string, number> = new Map([
-  ["ArrowDown", 1],
-  ["ArrowLeft", -1],
-  ["ArrowRight", 1],
-  ["ArrowUp", -1],
-]);
+/**
+ * The id of an item of the formatting list.
+ * @param list - The list's id.
+ * @param highlight - Where the item is.
+ * @returns Its id.
+ */
+const itemId = (list: string, { column, row }: Highlight) => `${list}-${row}-${column}`;
 
 /**
- * Which list the textarea controls while one is open: the colours offered, or else what it
+ * Which list the textarea controls while one is open: the formatting list, or else what it
  * can complete.
- * @param choosing - The colours offered, if they are.
- * @param coloursId - Their list's id.
+ * @param choosing - The formatting list, if it is open.
+ * @param formatsId - Its id.
  * @param list - What it can complete, if listed.
  * @param listId - That list's id.
  * @returns The list's id and the option highlighted, or none.
  */
 const controlled = (
-  choosing: { readonly highlighted: number } | undefined,
-  coloursId: string,
+  choosing: { readonly highlighted: Highlight } | undefined,
+  formatsId: string,
   list: List | undefined,
   listId: string
 ) => {
   if (choosing !== undefined) {
-    return { highlighted: choosing.highlighted, id: coloursId };
+    return { active: itemId(formatsId, choosing.highlighted), id: formatsId };
   }
 
-  return list === undefined ? undefined : { highlighted: list.highlighted, id: listId };
+  return list === undefined
+    ? undefined
+    : {
+        active: list.highlighted === undefined ? undefined : optionId(listId, list.highlighted),
+        id: listId,
+      };
 };
 
 /**
@@ -614,20 +623,94 @@ const Backdrop = ({
 };
 
 /**
- * The colours offered for the composer's selection, or for what is typed next: the
- * default and the sixteen, each a swatch drawn as a Timeline draws the colour. The
- * textarea keeps the focus, and the arrows, Enter, and Escape, as the completion list's.
- * @param props - The list's id, which is highlighted, and what picking one does.
+ * A row of the formatting list's colours, the default and the sixteen, for the text or for
+ * its background, its name shown before it and said by a screen reader, each swatch drawn as
+ * a Timeline draws a run in that colour or over that background.
+ * @param props - The list's id, the row's place and name, what it puts over the text, whether
+ * a swatch is highlighted, and what picking does.
+ * @returns The row.
+ */
+const ColourRow = ({
+  format,
+  id,
+  lit,
+  name,
+  onPick,
+  row,
+}: {
+  readonly format: "Colour" | "Background";
+  readonly id: string;
+  readonly lit: (column: number) => boolean;
+  readonly name: string;
+  readonly onPick: (format: Format) => void;
+  readonly row: number;
+}) => {
+  const theme = useAtomValue(drawnTheme);
+  const nameId = `${id}-${row}-name`;
+  const named = format === "Colour" ? colourName : backgroundName;
+
+  // Each swatch is the colour as a run is drawn in it: as its text, or as its background.
+  const fill = (colour: Colour | undefined) =>
+    format === "Colour"
+      ? runColours(colouredStyle(colour), theme).color
+      : runColours({ ...colouredStyle(undefined), background: colour }, theme).backgroundColor;
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of that listbox.
+    <div aria-labelledby={nameId} className={styles.row} role="group">
+      <span className={styles.rowName} id={nameId}>
+        {name}
+      </span>
+      {colourChoices.map((colour, column) => (
+        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
+        <div
+          aria-label={named(colour)}
+          aria-selected={lit(column)}
+          className={styles.swatch}
+          id={itemId(id, { column, row })}
+          // oxlint-disable-next-line react/no-array-index-key
+          key={column}
+          onClick={() => {
+            onPick({ _tag: format, colour });
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
+          role="option"
+          style={{ backgroundColor: fill(colour) }}
+          tabIndex={-1}
+          title={named(colour)}
+        >
+          {colour === undefined ? "A" : null}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/**
+ * The formatting list over the composer's selection, or what is typed next: a row of the
+ * formats, each its letter drawn in it and marked while the range has it, and a row each of
+ * the default and the sixteen colours for the text and for its background. The
+ * textarea keeps the focus and its keys, as it does from the completion list.
+ * @param props - The list's id, the draft and the list open over it, and what picking does.
  * @returns The listbox.
  */
-const Colours = ({
+const FormatList = ({
   choosing,
   id,
   onPick,
+  text,
+  typing,
 }: {
-  readonly choosing: { readonly highlighted: number } | undefined;
+  readonly choosing:
+    | { readonly start: number; readonly end: number; readonly highlighted: Highlight }
+    | undefined;
   readonly id: string;
-  readonly onPick: (index: number) => void;
+  readonly onPick: (format: Format) => void;
+  readonly text: string;
+  readonly typing: Pending | undefined;
 }) => {
   const theme = useAtomValue(drawnTheme);
 
@@ -635,42 +718,69 @@ const Colours = ({
     return null;
   }
 
-  const { highlighted } = choosing;
+  const { end, highlighted, start } = choosing;
+
+  const lit = (row: number, column: number) =>
+    highlighted.row === row && highlighted.column === column;
 
   return (
     <div
-      aria-label="Colours"
-      aria-orientation="horizontal"
-      className={styles.colours}
+      aria-label="Formatting"
+      className={styles.formats}
       id={id}
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a listbox the textarea controls and keeps the focus from, as the completion list is.
       role="listbox"
     >
-      {colourChoices.map((colour, index) => (
-        // The textarea takes the keys, and keeps the focus through a press.
-        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
-        <div
-          aria-label={colourName(colour)}
-          aria-selected={index === highlighted}
-          className={styles.swatch}
-          id={optionId(id, index)}
-          // oxlint-disable-next-line react/no-array-index-key
-          key={index}
-          onClick={() => {
-            onPick(index);
-          }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-          }}
-          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
-          role="option"
-          style={{ backgroundColor: runColours(colouredStyle(colour), theme).color }}
-          tabIndex={-1}
-          title={colourName(colour)}
-        >
-          {colour === undefined ? "A" : null}
-        </div>
-      ))}
+      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of that listbox. */}
+      <div aria-label="Formats" className={styles.row} role="group">
+        {listedFlags.map(({ flag, letter, name }, column) => {
+          const on = flagOn(text, typing, start, end, flag);
+          const style = { ...colouredStyle(undefined), [flag]: true };
+
+          return (
+            // The textarea takes the keys, and keeps the focus through a press.
+            // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
+            <div
+              aria-label={on ? `${name}, on` : name}
+              aria-selected={lit(0, column)}
+              className={styles.toggle}
+              data-on={on ? "" : undefined}
+              id={itemId(id, { column, row: 0 })}
+              key={flag}
+              onClick={() => {
+                onPick({ _tag: "Toggle", flag });
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an option of that listbox.
+              role="option"
+              tabIndex={-1}
+              title={on ? `${name}, on` : name}
+            >
+              <span data-flag={flag} style={runColours(style, theme)}>
+                {letter}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <ColourRow
+        format="Colour"
+        id={id}
+        lit={(column) => lit(1, column)}
+        name="Text colours"
+        onPick={onPick}
+        row={1}
+      />
+      <ColourRow
+        format="Background"
+        id={id}
+        lit={(column) => lit(2, column)}
+        name="Backgrounds"
+        onPick={onPick}
+        row={2}
+      />
     </div>
   );
 };
@@ -744,16 +854,16 @@ const Composer = ({
   const hintId = `${id}-hint`;
   const answeringId = `${id}-answering`;
   const listId = `${id}-list`;
-  const coloursId = `${id}-colours`;
+  const formatsId = `${id}-formats`;
   const pendingId = `${id}-pending`;
   const { answering, confirming, notice } = draft;
   // What the Owner sees and edits: the draft without its codes, which the backdrop draws.
   const shown = plainOf(draft.text);
   const pending = pendingWords(draft.text, draft.typing);
-  const choosing = useAtomValue(colourChoiceAt(timeline));
-  const moveColour = useAtomSet(colourMoved);
-  const chooseColour = useAtomSet(colourChosen);
-  const dismissColours = useAtomSet(colourDismissed);
+  const choosing = useAtomValue(formatChoiceAt(timeline));
+  const moveFormat = useAtomSet(formatMoved);
+  const chooseFormat = useAtomSet(formatChosen);
+  const dismissFormats = useAtomSet(formatDismissed);
   const backdrop = useRef<HTMLDivElement>(null);
 
   // The backdrop scrolls with the textarea, once its text is drawn.
@@ -1005,26 +1115,41 @@ const Composer = ({
   };
 
   /**
-   * While the colours are offered, the arrows move through them, Enter puts the one
-   * highlighted over the selection, and Escape puts them away.
+   * While the formatting list is open, the core reads each key: it chooses a format, moves
+   * the highlight, or puts the list away, or else is the textarea's as anywhere.
    * @param event - The key.
-   * @returns Whether the colours took it.
+   * @returns Whether the list took it.
    */
-  const colourKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const by = colourMoves.get(event.key);
-
-    if (choosing === undefined || event.altKey || event.ctrlKey || event.metaKey) {
+  const formatKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (choosing === undefined) {
       return false;
     }
 
-    if (by !== undefined) {
-      moveColour(by);
-    } else if (event.key === "Enter") {
-      chooseColour(choosing.highlighted);
-    } else if (event.key === "Escape") {
-      dismissColours(undefined);
-    } else {
-      return false;
+    const read = keyInList(choosing.highlighted, keyOf(event.nativeEvent));
+
+    switch (read._tag) {
+      case "Passed": {
+        return false;
+      }
+
+      case "Chosen": {
+        chooseFormat(read.format);
+        break;
+      }
+
+      case "Moved": {
+        moveFormat(read.highlight);
+        break;
+      }
+
+      case "Dismissed": {
+        dismissFormats(undefined);
+        break;
+      }
+
+      default: {
+        read satisfies never;
+      }
     }
 
     event.preventDefault();
@@ -1044,7 +1169,7 @@ const Composer = ({
       return;
     }
 
-    if (colourKey(event)) {
+    if (formatKey(event)) {
       return;
     }
 
@@ -1167,12 +1292,14 @@ const Composer = ({
           }}
         />
       )}
-      <Colours
+      <FormatList
         choosing={choosing}
-        id={coloursId}
-        onPick={(index) => {
-          chooseColour(index);
+        id={formatsId}
+        onPick={(format) => {
+          chooseFormat(format);
         }}
+        text={draft.text}
+        typing={draft.typing}
       />
       {answering === undefined ? null : (
         <AnsweringLine
@@ -1200,7 +1327,7 @@ const Composer = ({
         <div className={styles.field}>
           <Backdrop backdrop={backdrop} text={draft.text} />
           <textarea
-            {...controlling(controlled(choosing, coloursId, list, listId))}
+            {...controlling(controlled(choosing, formatsId, list, listId))}
             // Among several Panes, the number shown is said with what it is.
             aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
             aria-describedby={describedBy}
@@ -1213,12 +1340,12 @@ const Composer = ({
               const { selectionStart, value } = event.currentTarget;
               const from = selectedFrom.current;
 
-              // A selection read for one edit says nothing of the next, and the colours were
-              // offered for the text before it.
+              // A selection read for one edit says nothing of the next, and the formatting
+              // list was opened for the text before it.
               selectedFrom.current = undefined;
 
               if (choosing !== undefined) {
-                dismissColours(undefined);
+                dismissFormats(undefined);
               }
 
               setText(

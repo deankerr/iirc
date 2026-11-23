@@ -3,7 +3,7 @@
  * what a store is told.
  */
 import { Instant, IntentId, MessageId } from "@iirc/client";
-import type { Closable, Marked, News, Where } from "@iirc/client";
+import type { Closable, Marked, News, NickSpan, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { IgnoreMask } from "@iirc/protocol/mask";
 import { describe, expect, it } from "vitest";
@@ -52,6 +52,7 @@ const message = (
     readonly context?: string;
     readonly live?: boolean;
     readonly prefix?: string;
+    readonly nicks?: readonly NickSpan[];
   } = {}
 ): Extract<News, { readonly _tag: "Message" }> => ({
   _tag: "Message",
@@ -63,6 +64,7 @@ const message = (
   id: options.id ?? unknown,
   kind: "Privmsg",
   live: options.live ?? true,
+  nicks: options.nicks ?? [],
   ours:
     options.ours === undefined
       ? undefined
@@ -225,6 +227,7 @@ describe("items", () => {
       id: known("m1"),
       kind: "Privmsg",
       live: true,
+      nicks: [],
       ours: undefined,
       prefix: undefined,
       sender: "peer",
@@ -263,6 +266,33 @@ describe("a sender's prefix", () => {
     expect(said).toStrictEqual([
       ["first", "@"],
       ["second", undefined],
+    ]);
+  });
+});
+
+describe("a Message's nicks", () => {
+  it("are carried by its item as the News gave them", () => {
+    const { changes } = fold([
+      happened(1, [
+        message([channel("#iirc")], {
+          nicks: [
+            { end: 3, start: 0 },
+            { end: 10, start: 8 },
+          ],
+          text: "bob, hi al",
+        }),
+      ]),
+    ]);
+
+    const said = ofTag(changes, "Added").flatMap(({ content }) =>
+      content._tag === "Message" ? [content.nicks] : []
+    );
+
+    expect(said).toStrictEqual([
+      [
+        { end: 3, start: 0 },
+        { end: 10, start: 8 },
+      ],
     ]);
   });
 });
@@ -739,6 +769,7 @@ describe("our Messages' fate", () => {
           at: known(later(3)),
           id: known(MessageId.make("m9")),
           intent: IntentId.make("i1"),
+          nicks: [{ end: 2, start: 0 }],
           text: "hi!",
         },
       ]),
@@ -752,6 +783,7 @@ describe("our Messages' fate", () => {
         intent: "i1",
         messageId: "m9",
         network: "libera",
+        nicks: [{ end: 2, start: 0 }],
         sequence: 2,
         text: "hi!",
       },
@@ -789,6 +821,7 @@ describe("our Messages' fate", () => {
       at: { _tag: "Unknown" },
       id: { _tag: "Unknown" },
       messageId: undefined,
+      nicks: [{ end: 2, start: 0 }],
       text: "hi",
     } as const;
 
@@ -800,7 +833,13 @@ describe("our Messages' fate", () => {
       delivered({ _tag: "Unsent" }, unsent),
       delivered({ _tag: "Pending" }, confirmed),
       delivered(
-        { _tag: "Confirmed", at: { _tag: "Unknown" }, id: { _tag: "Unknown" }, text: "x" },
+        {
+          _tag: "Confirmed",
+          at: { _tag: "Unknown" },
+          id: { _tag: "Unknown" },
+          nicks: [],
+          text: "x",
+        },
         rejected
       ),
     ]).toStrictEqual([
@@ -809,7 +848,13 @@ describe("our Messages' fate", () => {
       { _tag: "Rejected", reply: "FAIL CANNOT_SEND" },
       { _tag: "Unsent" },
       undefined,
-      { _tag: "Confirmed", at: { _tag: "Unknown" }, id: { _tag: "Unknown" }, text: "hi" },
+      {
+        _tag: "Confirmed",
+        at: { _tag: "Unknown" },
+        id: { _tag: "Unknown" },
+        nicks: [{ end: 2, start: 0 }],
+        text: "hi",
+      },
       undefined,
     ]);
   });

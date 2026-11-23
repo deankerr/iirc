@@ -18,10 +18,15 @@ import type { Colour, Span, Style } from "@iirc/protocol/format";
 /** A style that is on or off. */
 export type Flag = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "reverse";
 
-/** What can be put over some text: a flag turned over, or a foreground colour, none for the default. */
+/**
+ * What can be put over some text: a flag turned over, the text's colour, or its background,
+ * each colour none for the default. A colour leaves the background as it was, and a
+ * background leaves the colour.
+ */
 export type Format =
   | { readonly _tag: "Toggle"; readonly flag: Flag }
-  | { readonly _tag: "Colour"; readonly colour: Colour | undefined };
+  | { readonly _tag: "Colour"; readonly colour: Colour | undefined }
+  | { readonly _tag: "Background"; readonly colour: Colour | undefined };
 
 /**
  * A style the Owner chose at a caret, with nothing selected, for what is typed there next,
@@ -313,10 +318,49 @@ export const merged = (text: string, value: string, { caret, pending }: Hint): s
  * @param on - Whether a flag is turned on.
  * @returns The style after.
  */
-const putOver = (style: Style, format: Format, on: boolean): Style =>
-  format._tag === "Toggle"
-    ? { ...style, [format.flag]: on }
-    : { ...style, foreground: format.colour };
+const putOver = (style: Style, format: Format, on: boolean): Style => {
+  switch (format._tag) {
+    case "Toggle": {
+      return { ...style, [format.flag]: on };
+    }
+
+    case "Colour": {
+      return { ...style, foreground: format.colour };
+    }
+
+    case "Background": {
+      return { ...style, background: format.colour };
+    }
+
+    default: {
+      return format satisfies never;
+    }
+  }
+};
+
+/**
+ * A range of a draft's plain text, in order and within it.
+ * @param styled - The draft as read.
+ * @param start - Where the range begins.
+ * @param end - Where it ends.
+ * @returns Its first unit and the unit after its last.
+ */
+const rangeIn = ({ plain }: Styled, start: number, end: number) => ({
+  from: Math.max(Math.min(start, end, plain.length), 0),
+  to: Math.min(Math.max(start, end), plain.length),
+});
+
+/**
+ * Whether every character of a range has a flag, a line break, which has no style of its
+ * own to show, aside.
+ * @param styled - The draft as read.
+ * @param from - The range's first unit.
+ * @param to - The unit after its last.
+ * @param flag - The flag.
+ * @returns Whether it does.
+ */
+const wholly = ({ plain, styles }: Styled, from: number, to: number, flag: Flag) =>
+  styles.slice(from, to).every((style, index) => isBreak(plain[from + index]) || style[flag]);
 
 /**
  * A draft once a format was put over a range of its plain text. A flag is turned off where
@@ -329,13 +373,9 @@ const putOver = (style: Style, format: Format, on: boolean): Style =>
  */
 export const formattedIn = (text: string, start: number, end: number, format: Format): string => {
   const styled = read(text);
-  const from = Math.max(Math.min(start, end, styled.plain.length), 0);
-  const to = Math.min(Math.max(start, end), styled.plain.length);
+  const { from, to } = rangeIn(styled, start, end);
   const inRange = styled.styles.slice(from, to);
-
-  const on =
-    format._tag === "Toggle" &&
-    !inRange.every((style, index) => isBreak(styled.plain[from + index]) || style[format.flag]);
+  const on = format._tag === "Toggle" && !wholly(styled, from, to, format.flag);
 
   return write({
     plain: styled.plain,
@@ -370,6 +410,34 @@ export const pendingAfter = (
   const style = putOver(from, format, format._tag === "Toggle" && !from[format.flag]);
 
   return sameStyle(style, inForce) ? undefined : { at, style };
+};
+
+/**
+ * Whether a flag is on where a format would go, as turning it over would read it: over a
+ * range, where every character of it has it, and at a caret, in the style pending there,
+ * or else the one in force.
+ * @param text - The draft's text.
+ * @param pending - The style pending, at this caret or another.
+ * @param start - Where the range begins, in the plain text.
+ * @param end - Where it ends, the caret when it is where it begins.
+ * @param flag - The flag.
+ * @returns Whether it is on.
+ */
+export const flagOn = (
+  text: string,
+  pending: Pending | undefined,
+  start: number,
+  end: number,
+  flag: Flag
+): boolean => {
+  const styled = read(text);
+  const { from, to } = rangeIn(styled, start, end);
+
+  if (from < to) {
+    return wholly(styled, from, to, flag);
+  }
+
+  return pending?.at === from ? pending.style[flag] : inherited(styled, from, from)[flag];
 };
 
 /** The sixteen colours every IRC client offers, by their number, as mIRC names them. */
@@ -423,6 +491,14 @@ export const colourName = (colour: Colour | undefined): string => {
     : `#${colour.hex}`;
 };
 
+/**
+ * A background's name: its colour's, or the default.
+ * @param colour - The colour, none for the default.
+ * @returns Its name.
+ */
+export const backgroundName = (colour: Colour | undefined): string =>
+  colour === undefined ? "default background" : `${colourName(colour)} background`;
+
 const flagNames: Readonly<Record<Flag, string>> = {
   bold: "bold",
   italic: "italic",
@@ -434,7 +510,8 @@ const flagNames: Readonly<Record<Flag, string>> = {
 
 /**
  * What a style pending changes from the style in force at its caret, in words, for a view
- * to show before anything is typed: each flag turned on, or `not` it, and the colour.
+ * to show before anything is typed: each flag turned on, or `not` it, the colour, and the
+ * background.
  * @param text - The draft's text.
  * @param pending - The style pending, if any.
  * @returns The words, none with nothing pending.
@@ -452,7 +529,13 @@ export const pendingWords = (text: string, pending: Pending | undefined): readon
       : [pending.style[flag] ? flagNames[flag] : `not ${flagNames[flag]}`]
   );
 
-  return sameColour(pending.style.foreground, inForce.foreground)
-    ? changed
-    : [...changed, colourName(pending.style.foreground)];
+  const colour = sameColour(pending.style.foreground, inForce.foreground)
+    ? []
+    : [colourName(pending.style.foreground)];
+
+  const background = sameColour(pending.style.background, inForce.background)
+    ? []
+    : [backgroundName(pending.style.background)];
+
+  return [...changed, ...colour, ...background];
 };

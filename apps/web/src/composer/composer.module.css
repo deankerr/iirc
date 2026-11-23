@@ -146,16 +146,31 @@
   white-space: nowrap;
 }
 
-/* The colours offered, a row of swatches just above the line. */
-.colours {
+/* The formatting list, just above the line: a row of the formats, then the text colours and the backgrounds. */
+.formats {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-background);
 }
 
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* A row of colours' name, before its swatches, so the eye tells the two rows apart. */
+.rowName {
+  align-self: center;
+  min-inline-size: 12ch;
+  color: var(--color-muted);
+}
+
+/* An item of the list: a format, its letter drawn in it, or a colour's swatch. */
+.toggle,
 .swatch {
   display: inline-flex;
   align-items: center;
@@ -168,6 +183,34 @@
   cursor: default;
 }
 
+/* A format's letter, drawn in it: reverse by its colours, the rest here. */
+.toggle [data-flag="bold"] {
+  font-weight: bold;
+}
+
+.toggle [data-flag="italic"] {
+  font-style: italic;
+}
+
+.toggle [data-flag="underline"] {
+  text-decoration: underline;
+}
+
+.toggle [data-flag="strikethrough"] {
+  text-decoration: line-through;
+}
+
+.toggle [data-flag="monospace"] {
+  font-family: var(--font-mono);
+}
+
+/* A format the range has, marked in the focus colour beneath its letter. */
+.toggle[data-on] {
+  border-color: var(--color-focus);
+  box-shadow: inset 0 calc(-1 * var(--space-1)) 0 var(--color-focus);
+}
+
+.toggle[aria-selected="true"],
 .swatch[aria-selected="true"] {
   outline: var(--border-width) solid var(--color-focus);
   outline-offset: 1px;

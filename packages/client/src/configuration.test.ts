@@ -120,7 +120,59 @@ describe("asking who is in each Channel on joining it", () => {
   });
 });
 
+describe("a client certificate", () => {
+  const old = {
+    channels: [],
+    declined: [],
+    enabled: true,
+    fallbackEncoding: "windows-1252",
+    ircds: [{ host: "irc.test", port: 6697, tls: true }],
+    login: { _tag: "None" },
+    nicks: ["iirc"],
+    realname: "iirc",
+    username: "iirc",
+  };
+
+  const external = { _tag: "External", required: false };
+  const certificate = { _tag: "Certificate", certificate: "cert" };
+
+  const takes = (overrides: { readonly login: unknown; readonly tls?: unknown }) =>
+    Result.isSuccess(Schema.decodeUnknownResult(NetworkConfiguration)({ ...old, ...overrides }));
+
+  it("decodes as none from a Configuration written before it existed", () => {
+    expect(Schema.decodeUnknownSync(NetworkConfiguration)(old).tls).toStrictEqual({
+      _tag: "None",
+    });
+  });
+
+  it("is needed by an External login, which is refused without it", () => {
+    expect([
+      takes({ login: external }),
+      takes({ login: external, tls: { _tag: "None" } }),
+      takes({ login: external, tls: certificate }),
+      takes({ login: { _tag: "None" }, tls: certificate }),
+    ]).toStrictEqual([false, false, true, true]);
+  });
+});
+
 describe("the Credentials a Configuration names", () => {
+  it("include a client certificate's, and an External login names none of its own", () => {
+    const configuration = Schema.decodeSync(NetworkConfiguration)({
+      channels: [],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: "irc.test", port: 6697, tls: true }],
+      login: { _tag: "External", required: true },
+      nicks: ["iirc"],
+      realname: "iirc",
+      tls: { _tag: "Certificate", certificate: "cert" },
+      username: "iirc",
+    });
+
+    expect(credentialsOf(configuration)).toStrictEqual(new Set(["cert"]));
+  });
+
   it("include an operator login's", () => {
     const configuration = Schema.decodeSync(NetworkConfiguration)({
       channels: [],

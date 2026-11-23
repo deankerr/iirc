@@ -241,7 +241,7 @@ describe("formatted text", () => {
             (inline) =>
               !controls.test(inline.text) &&
               balanced(inline.text) &&
-              (inline._tag === "Text" ||
+              (inline._tag !== "Link" ||
                 (linkSchemes.has(new URL(inline.href).protocol) && !controls.test(inline.href)))
           )
         ).toBeTruthy();
@@ -282,9 +282,15 @@ const unknown = { _tag: "Unknown" } as const;
  * @param sender - Who said it.
  * @param text - What they said.
  * @param delivery - Its delivery, for one of ours.
+ * @param nicks - The spans of its text that name a User.
  * @returns The content.
  */
-const message = (sender: string, text: string, delivery?: typeof Delivery.Encoded): ItemContent =>
+const message = (
+  sender: string,
+  text: string,
+  delivery?: typeof Delivery.Encoded,
+  nicks: readonly { start: number; end: number }[] = []
+): ItemContent =>
   content({
     _tag: "Message",
     answers: null,
@@ -294,6 +300,7 @@ const message = (sender: string, text: string, delivery?: typeof Delivery.Encode
     id: unknown,
     kind: "Privmsg",
     live: true,
+    nicks,
     ours: delivery === undefined ? null : { delivery, intent: "i1" },
     prefix: null,
     sender,
@@ -440,6 +447,7 @@ const saidBy = (bot: boolean) =>
       id: unknown,
       kind: "Privmsg",
       live: true,
+      nicks: [],
       ours: null,
       prefix: null,
       sender: "peer",
@@ -464,6 +472,7 @@ const heldBy = (prefix: string | null): ItemContent =>
     id: unknown,
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix,
     sender: "peer",
@@ -471,6 +480,94 @@ const heldBy = (prefix: string | null): ItemContent =>
     target: "#iirc",
     text: "hi",
   });
+
+describe("nicks in text", () => {
+  const alice = nickColour("alice");
+  const withAlice = { _tag: "Nick", colour: alice, text: "alice" };
+
+  it("draws a span that names a User as a Nick in the slot of the nick as written", () => {
+    expect(formatted("hi ALICE!", [{ end: 8, start: 3 }])).toStrictEqual([
+      { _tag: "Text", style: plainStyle, text: "hi " },
+      { _tag: "Nick", colour: nickColour("ALICE"), style: plainStyle, text: "ALICE" },
+      { _tag: "Text", style: plainStyle, text: "!" },
+    ]);
+  });
+
+  it("leaves a span under a mIRC colour, background, or reversal to the sender's colour", () => {
+    expect(
+      [
+        "\u000304alice\u0003",
+        "\u00030,4alice\u0003",
+        "\u0016alice\u0016",
+        "\u0004ff0000alice\u0004",
+      ].map((text) => formatted(text, [{ end: 5, start: 0 }]).map(({ _tag }) => _tag))
+    ).toStrictEqual([["Text"], ["Text"], ["Text"], ["Text"]]);
+  });
+
+  it("keeps the slot of the whole nick when formatting splits it", () => {
+    expect(formatted("al\u0002ice\u0002", [{ end: 5, start: 0 }])).toStrictEqual([
+      { ...withAlice, style: plainStyle, text: "al" },
+      { ...withAlice, style: bold, text: "ice" },
+    ]);
+  });
+
+  it("leaves a nick inside a link part of the link", () => {
+    expect(formatted("see https://alice.example/x now", [{ end: 17, start: 12 }])).toStrictEqual([
+      { _tag: "Text", style: plainStyle, text: "see " },
+      {
+        _tag: "Link",
+        href: "https://alice.example/x",
+        style: plainStyle,
+        text: "https://alice.example/x",
+      },
+      { _tag: "Text", style: plainStyle, text: " now" },
+    ]);
+  });
+
+  it("counts offsets in the text with formatting stripped, not the text as sent", () => {
+    expect(formatted("\u000304x\u0003 alice", [{ end: 7, start: 2 }]).at(-1)).toStrictEqual({
+      ...withAlice,
+      style: plainStyle,
+      text: "alice",
+    });
+  });
+
+  it("clips a span past the end of the text and skips one out of order", () => {
+    expect(
+      formatted("hi alice", [
+        { end: 99, start: 3 },
+        { end: 2, start: 0 },
+      ])
+    ).toStrictEqual([
+      { _tag: "Text", style: plainStyle, text: "hi " },
+      { ...withAlice, style: plainStyle },
+    ]);
+  });
+
+  it("uses the confirmed text's spans for one of ours the Ircd confirmed", () => {
+    const line = lineOf(
+      message(
+        "iirc",
+        "hello",
+        {
+          _tag: "Confirmed",
+          at: unknown,
+          id: unknown,
+          nicks: [{ end: 5, start: 0 }],
+          text: "alice!",
+        },
+        [{ end: 2, start: 0 }]
+      )
+    );
+
+    expect(
+      line._tag === "Message" && line.text.map(({ _tag, text }) => [_tag, text])
+    ).toStrictEqual([
+      ["Nick", "alice"],
+      ["Text", "!"],
+    ]);
+  });
+});
 
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
@@ -517,6 +614,7 @@ describe("lines", () => {
         id: unknown,
         kind: "Privmsg",
         live: true,
+        nicks: [],
         ours: null,
         prefix: null,
         sender: "peer",
@@ -552,7 +650,13 @@ describe("lines", () => {
     const pending = lineOf(message("iirc", "hello", { _tag: "Pending" }));
 
     const confirmed = lineOf(
-      message("iirc", "hello", { _tag: "Confirmed", at: unknown, id: unknown, text: "hello!" })
+      message("iirc", "hello", {
+        _tag: "Confirmed",
+        at: unknown,
+        id: unknown,
+        nicks: [],
+        text: "hello!",
+      })
     );
 
     const others = [

@@ -33,8 +33,10 @@ import type {
   SayFailure,
 } from "@iirc/frontend/composer";
 import { remember } from "@iirc/frontend/entries";
+import { firstHighlight } from "@iirc/frontend/format-list";
+import type { Highlight } from "@iirc/frontend/format-list";
 import type { Format } from "@iirc/frontend/formatting";
-import { colourChoices, plainOf } from "@iirc/frontend/formatting";
+import { plainOf } from "@iirc/frontend/formatting";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
 import { writtenOnDevice } from "@iirc/frontend/ui";
@@ -393,54 +395,52 @@ const formatHere = (
 };
 
 /**
- * The colours offered for a composer, while they are: its place, the range they go over,
- * its selection as it was when they were asked for, and which of `colourChoices` is
+ * The formatting list as it was opened over a composer: its place, the range a choice goes
+ * over, its selection as it was when the list opened, the draft's text then, and what is
  * highlighted.
  */
-const colourChoice = Atom.make<
-  (Range & { readonly place: Place; readonly highlighted: number }) | undefined
+const formatChoice = Atom.make<
+  | (Range & { readonly place: Place; readonly text: string; readonly highlighted: Highlight })
+  | undefined
 >(undefined).pipe(Atom.keepAlive);
 
-/** The colours offered for one composer, while they are. */
-export const colourChoiceAt = Atom.family((place: Place) =>
+/**
+ * The formatting list open over one composer: only while its draft's text is as it was
+ * when the list opened, so one replaced, as by a command started on Mod+K, puts it away.
+ */
+export const formatChoiceAt = Atom.family((place: Place) =>
   Atom.make((get) => {
-    const choice = get(colourChoice);
+    const choice = get(formatChoice);
 
-    return choice?.place === place ? choice : undefined;
+    return choice?.place === place && get(draft(place)).text === choice.text ? choice : undefined;
   })
 );
 
-/** Moves through the colours offered, on past either end to the other. */
-export const colourMoved = Atom.fnSync((by: number, get) => {
-  const choice = get.registry.get(colourChoice);
-  const { length } = colourChoices;
+/** Highlights another item of the formatting list, as the core moved it. */
+export const formatMoved = Atom.fnSync((highlighted: Highlight, get) => {
+  const choice = get.registry.get(formatChoice);
 
   if (choice !== undefined) {
-    get.registry.set(colourChoice, {
-      ...choice,
-      highlighted: (((choice.highlighted + by) % length) + length) % length,
-    });
+    get.registry.set(formatChoice, { ...choice, highlighted });
   }
 }).pipe(Atom.keepAlive);
 
-/**
- * Puts one of `colourChoices` over the range the colours were offered for, and puts them
- * away.
- */
-export const colourChosen = Atom.fnSync((index: number, get) => {
+/** Puts a format over the range the formatting list opened for, and puts the list away. */
+export const formatChosen = Atom.fnSync((format: Format, get) => {
   const { registry } = get;
-  const choice = registry.get(colourChoice);
+  const opened = registry.get(formatChoice);
+  const choice = opened === undefined ? undefined : registry.get(formatChoiceAt(opened.place));
 
-  registry.set(colourChoice, undefined);
+  registry.set(formatChoice, undefined);
 
-  if (choice !== undefined && index >= 0 && index < colourChoices.length) {
-    formatHere(registry, choice.place, { _tag: "Colour", colour: colourChoices[index] }, choice);
+  if (choice !== undefined) {
+    formatHere(registry, choice.place, format, choice);
   }
 }).pipe(Atom.keepAlive);
 
-/** Puts the colours away, choosing none. */
-export const colourDismissed = Atom.fnSync((_: undefined, get) => {
-  get.registry.set(colourChoice, undefined);
+/** Puts the formatting list away, choosing nothing. */
+export const formatDismissed = Atom.fnSync((_: undefined, get) => {
+  get.registry.set(formatChoice, undefined);
   composerInput(document)?.focus();
 }).pipe(Atom.keepAlive);
 
@@ -467,13 +467,13 @@ type Local = Extract<
       | "Look"
       | "Draft"
       | "Format"
-      | "ChooseColour";
+      | "ChooseFormat";
   }
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "AskRemoval",
-  "ChooseColour",
+  "ChooseFormat",
   "Draft",
   "FocusComposer",
   "Format",
@@ -648,8 +648,13 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
       break;
     }
 
-    case "ChooseColour": {
-      registry.set(colourChoice, { ...selectionIn(registry, place), highlighted: 0, place });
+    case "ChooseFormat": {
+      registry.set(formatChoice, {
+        ...selectionIn(registry, place),
+        highlighted: firstHighlight,
+        place,
+        text: registry.get(draft(place)).text,
+      });
       composerInput(document)?.focus();
       break;
     }

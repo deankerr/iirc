@@ -71,6 +71,7 @@ const message = (sequence: number, text: string): typeof TimelineItem.Encoded =>
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender: "peer",
@@ -866,9 +867,11 @@ describe("a Message's Previews", () => {
     await settled(() => drawn()[0]?.state === "failed");
 
     expect({
+      buttons: list()?.querySelectorAll("button").length,
       drawn: drawn(),
       links: list()?.querySelectorAll("a").length,
     }).toStrictEqual({
+      buttons: 0,
       drawn: [{ state: "failed", text: "No preview: the Daemon could not reach this link." }],
       links: 0,
     });
@@ -1767,6 +1770,72 @@ describe("a Message's Previews", () => {
         text: "CatsA page about cats.",
         waiting: { expanded: "false", list: null, presses: [] },
       });
+    });
+
+    it("draws a failure as a button that presses its link again, and its Preview arrives", async () => {
+      const { daemon, sendPreview } = await opened(
+        "on",
+        catsItem({ _tag: "Failed", reason: "Unreachable" }),
+        {},
+        false,
+        direct
+      );
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await settled(() => daemon.previewAsks.length === 1);
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "failed");
+
+      const retry = list()?.querySelector<HTMLButtonElement>('button[data-preview="failed"]');
+      const failed = { drawn: drawn(), presses: [...daemon.presses], tag: retry?.tagName };
+
+      await pressed(retry ?? null);
+      await settled(() => drawn()[0]?.state === "pending");
+      await act(async () => {
+        sendPreview(catsItem(ready));
+        await Promise.resolve();
+      });
+      await settled(() => drawn()[0]?.state === "ready");
+
+      expect({ failed, presses: daemon.presses, text: cardText() }).toStrictEqual({
+        failed: {
+          drawn: [
+            {
+              state: "failed",
+              text: "No preview: the Daemon could not reach this link.Try again",
+            },
+          ],
+          presses: [],
+          tag: "BUTTON",
+        },
+        presses: [{ link: 0, position: cursor(2), timeline: iirc }],
+        text: "CatsA page about cats.",
+      });
+    });
+
+    it("presses a failure once when the press's answer is lost, and asks for its Message again instead", async () => {
+      const { daemon } = await opened(
+        "on",
+        catsItem({ _tag: "Failed", reason: "Unreachable" }),
+        {},
+        false,
+        direct
+      );
+
+      await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
+      await scrolledIntoView();
+      await settled(() => daemon.previewAsks.length === 1);
+      await pressed(toggle());
+      await settled(() => drawn()[0]?.state === "failed");
+
+      daemon.pressAnswersLost = true;
+      await pressed(
+        list()?.querySelector<HTMLButtonElement>('button[data-preview="failed"]') ?? null
+      );
+      await settled(() => daemon.previewAsks.length === 2);
+
+      expect(daemon.presses).toStrictEqual([{ link: 0, position: cursor(2), timeline: iirc }]);
     });
 
     it("opens a link the Daemon already holds on its toggle, with no press", async () => {

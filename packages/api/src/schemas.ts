@@ -950,6 +950,18 @@ export const LookedAnswer = Schema.Union([
 /** The decoded form of {@link LookedAnswer}. */
 export type LookedAnswer = typeof LookedAnswer.Type;
 
+/**
+ * A span of a Message's text that names a User who counts: UTF-16 offsets into its text
+ * with formatting stripped, `start` inclusive and `end` exclusive.
+ */
+export const NickSpan = Schema.Struct({
+  end: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+/** The decoded form of {@link NickSpan}. */
+export type NickSpan = typeof NickSpan.Type;
+
 /** What happened in one step, as the Client's News says it. */
 export const News = Schema.TaggedUnion({
   Activity: {
@@ -967,7 +979,14 @@ export const News = Schema.TaggedUnion({
    * `where` keys it. Read the Channel again to see it.
    */
   ChannelLearned: { channel: Named },
-  Confirmed: { at: Fact(Instant), id: Fact(MessageId), intent: IntentId, text: Untrusted },
+  Confirmed: {
+    at: Fact(Instant),
+    id: Fact(MessageId),
+    intent: IntentId,
+    /** The spans of its `text` that name a User who counts. */
+    nicks: Schema.Array(NickSpan),
+    text: Untrusted,
+  },
   /**
    * A Connection ended before its Session began, with the Ircd it was dialled to, and
    * whether it was open, the Ircd reached, before it ended.
@@ -997,6 +1016,12 @@ export const News = Schema.TaggedUnion({
     ignored: Schema.Array(IgnoreMask),
     kind: SayKind,
     live: Schema.Boolean,
+    /**
+     * The spans of its `text` that name a User who counts, in order and never overlapping:
+     * the members of its Channel, or Self and the partner of a Direct Message, as they were
+     * when it was said.
+     */
+    nicks: Schema.Array(NickSpan),
     ours: Schema.NullOr(Schema.Struct({ echo: Schema.Boolean, intent: IntentId })),
     /**
      * The symbol of the highest prefix its sender held in the Channel when it was said, by
@@ -1349,7 +1374,13 @@ export type WindowQuery = typeof WindowQuery.Type;
 /** Where one of our Messages stands with the Ircd. */
 export const Delivery = Schema.TaggedUnion({
   /** The Ircd echoed it, with its own time, id, and text, which may differ from ours. */
-  Confirmed: { at: Fact(Instant), id: Fact(MessageId), text: Untrusted },
+  Confirmed: {
+    at: Fact(Instant),
+    id: Fact(MessageId),
+    /** The spans of its `text` that name a User who counts. */
+    nicks: Schema.Array(NickSpan),
+    text: Untrusted,
+  },
   /** Sent, and the Ircd will echo it, which has not come yet. */
   Pending: {},
   /** The Ircd refused it, with `reply`: its numeric or standard reply's code, never its text. */
@@ -1399,6 +1430,12 @@ export const ItemContent = Schema.TaggedUnion({
     id: Fact(MessageId),
     kind: SayKind,
     live: Schema.Boolean,
+    /**
+     * The spans of its `text` that name a User who counts, in order and never overlapping,
+     * as UTF-16 offsets into the text with formatting stripped. They are fixed when it is
+     * said.
+     */
+    nicks: Schema.Array(NickSpan),
     ours: Schema.NullOr(Schema.Struct({ delivery: Delivery, intent: IntentId })),
     /**
      * The symbol of the highest prefix its sender held in the Channel when it was said, by

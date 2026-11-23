@@ -36,11 +36,18 @@ export type IrcdAddress = typeof IrcdAddress.Type;
 const maxServiceWait = 60;
 
 /**
- * How Self logs in to an account: not at all, with SASL before registration ends, or by
- * telling a service as a Session begins, where there is no SASL. Whether a failed SASL
- * login ends the Connection is the Owner's choice. A service login never does.
+ * How Self logs in to an account: not at all, with SASL before registration ends, with
+ * SASL EXTERNAL by the client certificate `tls` names, or by telling a service as a
+ * Session begins, where there is no SASL. Whether a failed SASL login ends the Connection
+ * is the Owner's choice. A service login never does.
  */
 export const Login = Schema.TaggedUnion({
+  External: {
+    required: Schema.Boolean.annotate({
+      default: false,
+      description: "Whether a failed login ends the Connection rather than going on without it.",
+    }),
+  },
   None: {},
   Sasl: {
     account: Schema.String.annotate({
@@ -79,6 +86,15 @@ export const Login = Schema.TaggedUnion({
 export type Login = typeof Login.Type;
 
 /**
+ * Whether a login is a SASL login, of either kind, that a failed exchange must not go on
+ * without.
+ * @param login - The login, if there is a Configuration yet.
+ * @returns Whether it is a SASL login that is required.
+ */
+export const saslRequired = (login: Login | undefined): boolean =>
+  (login?._tag === "Sasl" || login?._tag === "External") && login.required;
+
+/**
  * Whether Self logs in as an IRC operator, with `OPER`, as each Session begins: not at all,
  * or as a name, with its Credential.
  */
@@ -99,6 +115,25 @@ export const Oper = Schema.TaggedUnion({
 export type Oper = typeof Oper.Type;
 
 const noOper: Oper = { _tag: "None" };
+
+/**
+ * Whether Self presents a client certificate when it connects over TLS: not at all, or the
+ * one held as a Credential.
+ */
+export const ClientTls = Schema.TaggedUnion({
+  Certificate: {
+    certificate: CredentialName.annotate({
+      description:
+        "The Credential holding a PEM client certificate and its private key, presented when connecting over TLS.",
+    }),
+  },
+  None: {},
+});
+
+/** The decoded form of {@link ClientTls}. */
+export type ClientTls = typeof ClientTls.Type;
+
+const noTls: ClientTls = { _tag: "None" };
 
 /** A Channel the Owner wants Self in, with its key named as a Credential. */
 export const WantedChannel = Schema.Struct({
@@ -276,7 +311,7 @@ export const NetworkConfiguration = Schema.Struct({
   login: Login.annotate({
     default: { _tag: "None" },
     description:
-      "How to log in to an account: none, sasl, or service, which tells a service such as NickServ. The options under it say the rest.",
+      "How to log in to an account: none, sasl, external, which uses SASL EXTERNAL by the client certificate and needs tls.certificate, or service, which tells a service such as NickServ. The options under it say the rest.",
   }),
   nicks: Schema.NonEmptyArray(Schema.String).annotate({
     description: "The nicks to use, the first preferred and the rest tried in turn.",
@@ -306,6 +341,22 @@ export const NetworkConfiguration = Schema.Struct({
     description: "The real name other Users see in WHOIS.",
     ...startsAsFirstNick,
   }),
+  /**
+   * Whether Self presents a client certificate over TLS. A `Configured` written before the
+   * field existed decodes as none, since the Client then named no certificate.
+   */
+  tls: Schema.optionalKey(ClientTls)
+    .pipe(
+      Schema.decodeTo(Schema.toType(ClientTls), {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => noTls)),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: noTls,
+      description:
+        "Whether to present a client certificate when connecting over TLS: none, or certificate, with the Credential under it.",
+    }),
   /**
    * User modes to set on Self as each Session begins. A Journal written before the field
    * existed holds `Configured` inputs without it, which decode as none.
@@ -343,7 +394,13 @@ export const NetworkConfiguration = Schema.Struct({
       description:
         "Whether to ask who is in each Channel on joining it, to learn who is away and who is logged in. Turn it off for a Network whose Channels are so large that asking is rude.",
     }),
-});
+}).check(
+  Schema.makeFilter((configuration) =>
+    configuration.login._tag === "External" && configuration.tls._tag !== "Certificate"
+      ? "login external needs tls.certificate"
+      : true
+  )
+);
 
 /** The decoded form of {@link NetworkConfiguration}. */
 export type NetworkConfiguration = typeof NetworkConfiguration.Type;
@@ -378,15 +435,16 @@ export const declinedToRequest = (
 };
 
 /**
- * The Credentials a Configuration names: its Ircd password, its login's, its operator's,
- * and each Channel's key.
+ * The Credentials a Configuration names: its Ircd password, its login's, its client
+ * certificate's, its operator's, and each Channel's key.
  * @param configuration - The Configuration.
  * @returns Their names.
  */
 export const credentialsOf = (configuration: NetworkConfiguration): ReadonlySet<CredentialName> =>
   new Set([
     ...(configuration.password === undefined ? [] : [configuration.password]),
-    ...(configuration.login._tag === "None" ? [] : [configuration.login.credential]),
+    ...("credential" in configuration.login ? [configuration.login.credential] : []),
+    ...(configuration.tls._tag === "Certificate" ? [configuration.tls.certificate] : []),
     ...(configuration.oper._tag === "None" ? [] : [configuration.oper.credential]),
     ...configuration.channels.flatMap((channel) =>
       channel.key === undefined ? [] : [channel.key]

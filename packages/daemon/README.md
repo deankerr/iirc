@@ -174,7 +174,7 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 - **A held read changes nothing.** It never fetches, claims a flight, writes the cache, or publishes a change, and it does not count as showing a Preview, so it keeps no image from eviction.
 - **A held read answers a link being fetched as its flight's state,** `Pending`, or the old ready Preview while it is fetched again, and a kept one as it is, whatever its age. Otherwise a link is `WaitingForPress` in a Timeline that waits, and `NotHeld` in any other.
 - **A held read sees a link settling meanwhile,** in flight or in the cache.
-- **A Direct Message with no entry in `ui.previews.timelines` waits for a press.** A kept link is served whatever its age, unless its image was evicted, and one being fetched as its fetch. A press of a kept link is `NotWaiting`. A Direct Message with an entry behaves as a Channel.
+- **A Direct Message with no entry in `ui.previews.timelines` waits for a press.** A kept link is served whatever its age, unless its image was evicted, and one being fetched as its fetch. A press of a kept failure fetches it again, at any age, as a first fetch, and a press of a kept Preview is `NotWaiting`. A Direct Message with an entry behaves as a Channel.
 - **A press starts its fetch as an ask would,** under the Timeline's mode, and is decided in the same turn as claiming the fetch, so two presses fetch once.
 - **Each change of a state is published** to every follower of the changes stream, `Pending` as a fetch starts and its outcome as it ends.
 - **A fetch runs in the Daemon's Scope,** so it ends when the Daemon stops.
@@ -303,7 +303,8 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **A hang-up drains for at most half of `stopTimeout`,** so the `QUIT` fits.
 - **Every log goes through `Effect.log*`,** annotated with the Network where there is one.
 - **Each Connection's dial, Session, and end is logged at `Info`,** with its Ircd and the reason it ended.
-- **A Credential is logged by name only,** when it is held or forgotten.
+- **A Credential is logged by name only,** when it is held or forgotten, or when a client certificate could not be had.
+- **A Connection presents the client certificate its Network's `tls.certificate` names,** revealed from the Vault as it dials and handed to the Transport, never journaled or logged, and so never in the Tail. One that cannot be had is dialled without.
 - **HTTP requests are not logged.**
 
 ## The handlers

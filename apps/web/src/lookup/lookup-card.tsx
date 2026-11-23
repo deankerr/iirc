@@ -9,7 +9,7 @@
  * User `/who` matched as one row of nick, `user@host`, away, and realname, dimly. Each Channel
  * `/list` found as a row of its name, which opens its Timeline or starts `/join`, its members,
  * and its topic, dimly, a page at a time, with a button that reads the next. Escape, in the
- * card or in the composer with nothing else to let go of, or its close button, puts it away.
+ * card or in the composer with nothing else to let go of, its close button, or Back puts it away.
  *
  * @packageDocumentation
  */
@@ -25,10 +25,11 @@ import type {
   UserShown,
 } from "@iirc/frontend/lookup";
 import type { KeyboardEvent } from "react";
-import { useId } from "react";
+import { useId, useRef } from "react";
 
 import { perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
+import { useBackCloses } from "../page/back.ts";
 import { paneTimeline } from "../timelines/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
@@ -349,6 +350,19 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const more = useAtomSet(moreChannels);
   const headingId = useId();
 
+  const section = useRef<HTMLElement>(null);
+
+  // Back puts it away as Escape does, and the composer takes the focus if it was in it.
+  useBackCloses(shown !== undefined, () => {
+    const inside = section.current?.contains(document.activeElement) === true;
+
+    dismiss(pane);
+
+    if (inside) {
+      run([{ _tag: "FocusComposer", text: undefined }]);
+    }
+  });
+
   if (shown === undefined) {
     return null;
   }
@@ -370,7 +384,12 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
 
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Escape anywhere in the card puts it away, as in a dialog.
-    <section aria-labelledby={headingId} className={styles.card} onKeyDown={onKeyDown}>
+    <section
+      aria-labelledby={headingId}
+      className={styles.card}
+      onKeyDown={onKeyDown}
+      ref={section}
+    >
       <div className={styles.head}>
         <h3 className={styles.heading} id={headingId}>
           <span className={styles.dim}>{kindWords[shown.kind]} </span>

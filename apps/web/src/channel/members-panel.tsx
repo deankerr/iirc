@@ -27,18 +27,19 @@ import {
   GridListLoadMoreItem,
   ListLayout,
   Modal,
-  ModalOverlay,
   Virtualizer,
 } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
 import { NickMenu } from "../nick/nick-menu.tsx";
 import { leadingShown, sizeShown } from "../options/ui.ts";
+import { useBackCloses } from "../page/back.ts";
 import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
 import { BotMark } from "../ui/bot-mark.tsx";
 import { IconButton } from "../ui/button.tsx";
 import { ColumnEdge } from "../ui/column-edge.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
@@ -197,8 +198,8 @@ const Members = ({
 /**
  * Members over a narrow Pane's Timeline, under its bar, for a moment: a dialog that takes
  * the focus but leaves the page usable. Escape puts it away and gives the focus back to
- * where it was, and a press anywhere but on it or the Pane's toggle puts it away, unless a
- * member's menu is open, which a press outside it closes first.
+ * where it was, as Back does while the focus is in it, and a press anywhere but on it or the Pane's toggle puts
+ * it away, unless a member's menu is open, which a press outside it closes first.
  * @param props - The Pane, whether a member's menu is open, and the members.
  * @returns The members.
  */
@@ -214,6 +215,17 @@ const Floating = ({
   const dismiss = useAtomSet(membersDismissed);
   const panel = useRef<HTMLElement>(null);
   const before = useRef<HTMLElement | undefined>(undefined);
+
+  // Back puts it away as Escape does, giving the focus back too when it was in it.
+  useBackCloses(true, () => {
+    const inside = panel.current?.contains(document.activeElement) === true;
+
+    dismiss(undefined);
+
+    if (inside) {
+      before.current?.focus();
+    }
+  });
 
   // Where the focus was before the dialog takes it, as it does once drawn.
   useLayoutEffect(() => {

@@ -18,7 +18,7 @@ import { extendedMonitor } from "./features/extended-monitor.ts";
 import { inviteNotify } from "./features/invite-notify.ts";
 import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
-import { saslPlain } from "./features/sasl.ts";
+import { saslLogin } from "./features/sasl.ts";
 import { serverTime } from "./features/server-time.ts";
 import { setname } from "./features/setname.ts";
 import { standardReplies } from "./features/standard-replies.ts";
@@ -48,7 +48,7 @@ export const register = <Own>(feature: Feature<Own>): Registered =>
  */
 export const registry: readonly Registered[] = [
   register(capNotify),
-  register(saslPlain),
+  register(saslLogin),
   register(messageTags),
   register(serverTime),
   register(batch),

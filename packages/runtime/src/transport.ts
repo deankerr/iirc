@@ -7,8 +7,9 @@
  */
 import type { CloseReason, IrcdAddress } from "@iirc/client";
 import { maxLineBytes } from "@iirc/protocol/line";
+import type { CredentialName } from "@iirc/protocol/line";
 import { Context } from "effect";
-import type { Effect, Scope, Stream } from "effect";
+import type { Effect, Redacted, Scope, Stream } from "effect";
 
 /** The most tag bytes an Ircd may send, with the leading `@` and the space after. */
 const maxReceivedTagBytes = 8191;
@@ -44,13 +45,31 @@ export interface Link {
   readonly hangup: Effect.Effect<void>;
 }
 
+/**
+ * A client certificate to present in a TLS handshake: PEM, a certificate chain and its
+ * private key. The values stay `Redacted` until the adapter hands them to TLS, and the
+ * name is carried only so a failure can be logged by it.
+ */
+export interface ClientCertificate {
+  readonly credential: CredentialName;
+  readonly certificate: Redacted.Redacted;
+  readonly key: Redacted.Redacted;
+}
+
 /** What a Transport adapter provides. */
 export interface TransportService {
   /**
    * Starts a Connection to an Ircd and returns at once. Closing the Scope ends the
    * Connection without a `Closed`, because nothing is left to read it.
+   *
+   * A TLS dial given a `certificate` presents it in the handshake. One the adapter cannot
+   * use is dialled without it, and the adapter logs the Credential's name and no value.
+   * A plaintext dial ignores it. The adapter never logs the values.
    */
-  readonly dial: (address: IrcdAddress) => Effect.Effect<Link, never, Scope.Scope>;
+  readonly dial: (
+    address: IrcdAddress,
+    certificate?: ClientCertificate
+  ) => Effect.Effect<Link, never, Scope.Scope>;
 }
 
 /** The Transport port. */

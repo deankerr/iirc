@@ -23,6 +23,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
 import {
   asksFor,
+  chosenIn,
   isOpen,
   mayPreview,
   modeIn,
@@ -51,6 +52,7 @@ import {
   previewsOpening,
   previewsShown,
   previewsState,
+  retryPreview,
   togglePreview,
 } from "./atoms.ts";
 import { useScroller, watchNear } from "./near-view.ts";
@@ -513,11 +515,18 @@ const Card = ({ shown }: { readonly shown: CardShown }) => {
 };
 
 /**
- * One open Preview.
- * @param props - The Preview, as drawn.
+ * One open Preview. A failure is one line of why, which in a Timeline that waits for a
+ * press is a button that presses its link again.
+ * @param props - The Preview, as drawn, and what a press of its failure does, if anything.
  * @returns Its card, or what stands in its place.
  */
-const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
+const PreviewRow = ({
+  retry,
+  shown,
+}: {
+  readonly retry: (() => void) | undefined;
+  readonly shown: PreviewShown;
+}) => {
   switch (shown._tag) {
     case "Pending": {
       return (
@@ -539,10 +548,17 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
     }
 
     case "Failed": {
-      return (
+      return retry === undefined ? (
         <p className={styles.failed} data-preview="failed" title={shown.reason}>
           {shown.reason}
         </p>
+      ) : (
+        <AriaButton className={styles.retry} data-preview="failed" onPress={retry}>
+          <span className={styles.failed} title={shown.reason}>
+            {shown.reason}
+          </span>
+          <span className={styles.again}>Try again</span>
+        </AriaButton>
       );
     }
 
@@ -616,6 +632,7 @@ export const MessagePreviews = ({
   const opening = useAtomValue(previewsOpening);
   const mediaHeight = useAtomValue(mediaHeightShown);
   const show = useAtomSet(previewsShown);
+  const retry = useAtomSet(retryPreview);
   const { content, position, timeline } = item;
   const scroller = useScroller();
   const direct = useAtomValue(directIn(timeline));
@@ -623,6 +640,8 @@ export const MessagePreviews = ({
   const players = modes?.players ?? noPlayers;
   const watched = mayPreview(mode, content);
   const links = previewableCount(content);
+  // The Daemon fetches a link here only on a press, so a failure is pressed to try again.
+  const waits = direct && chosenIn(modes, timeline) === undefined;
 
   const shown = useMemo(
     () => previewsOf(state, mode, timeline, position, content, players),
@@ -652,7 +671,16 @@ export const MessagePreviews = ({
     <ul aria-label="Previews" className={styles.previews} style={mediaStyle(mediaHeight)}>
       {drawn.map((one) => (
         <li className={styles.row} key={one.key}>
-          <PreviewRow shown={one} />
+          <PreviewRow
+            retry={
+              waits
+                ? () => {
+                    retry({ link: Number(one.key), position, timeline });
+                  }
+                : undefined
+            }
+            shown={one}
+          />
         </li>
       ))}
     </ul>

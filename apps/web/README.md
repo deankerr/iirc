@@ -53,6 +53,7 @@ The core decides and this package draws and does the I/O.
 ### A Timeline
 
 - **Shows a Timeline live, as terminal lines:** the time, the sender in their colour, and the text with its formatting and links.
+- **A name in a Message's text that the Client found to be a User is drawn in that nick's colour,** as a search result's text is, unless the sender's own mIRC colour covers it.
 - **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
@@ -109,7 +110,7 @@ The core decides and this package draws and does the I/O.
 - **The control that opens media large and the one that closes a video's larger view are the same square,** a finger's size on a touch screen, with their icon in the middle in any font.
 - **An animated image is its first frame under a play badge,** which a press plays in place and stops, with a control to open it large while it plays.
 - **An animated image plays on its own under `ui.previews.animate`,** on unless set, unless the device reduces motion.
-- **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again.
+- **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again. In a Direct Message with no mode of its own, the line is a button that says to try again, and a press of it presses the link, so the Daemon fetches it again.
 
 ### Panes
 
@@ -157,8 +158,7 @@ The core decides and this package draws and does the I/O.
 - **A draft of more than five lines asks before it is sent.** A blank line does not count.
 - **Spelling is checked unless `ui.composer.spellcheck` is off.**
 - **Why something was not said is shown under it,** with a way to dismiss it, and to send or check again when that is safe. It goes when it stops being true.
-- **Mod+B, I, U, and E turn bold, italic, underline, and fixed pitch on or off, Mod+R reverse, and Mod+Shift+X strikethrough.** They act on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then.
-- **Mod+Shift+K offers the sixteen colours and the default above the line,** chosen by the arrows and Enter or a press.
+- **Mod+Shift+K, or `/format`, opens the formatting list above the line:** a row of the formats, each its letter, B, I, U, M for fixed pitch, R for reverse, and S for strikethrough, marked while the selection has it, a row of the default and the sixteen colours for the text, and a row of the same for its background, each row of colours named before it. A format's letter turns it over, the arrows and Enter choose any item, as a press does, and Escape puts the list away. One choice is made each time it opens, on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then. No format has a key of its own, so Mod+R reloads the page wherever the focus is.
 - **The draft is drawn with its formatting,** and what is sent is IRC's formatting codes. In a font named as monospace it is drawn as a Timeline draws it. In any other font, a family the device has among them, bold is a stroke of the text's own colour, italic a dotted line under the run, and fixed pitch only its tint, so every letter stays where the caret expects it.
 - **Takes what is typed from anywhere.** A character, a dead key, or a paste where nothing takes text, such as a Timeline, the Sidebar, or the members, goes to the Composer, which takes the focus with that very key. A dialog, a popover, a menu, and a key the keymap binds keep their keys.
 - **Takes keys from anywhere on the page by the core's keymap.** A key the keymap does not take goes on as it would.
@@ -263,6 +263,7 @@ The core decides and this package draws and does the I/O.
 
 - **Says across the top of the page when the Daemon stopped folding the Timelines:** that it hit a fatal error, that the Timelines stay behind until it restarts, and why. The notice goes once the Daemon, restarted, folds them again.
 - **A screen 640px wide or less shows the focused Pane alone,** under one slim bar holding the Sidebar's button and the Panes' switcher, with the Sidebar as a drawer and the members as a sheet.
+- **The browser's Back closes what Escape closes, the topmost first,** on any screen: the drawer, the sheet, the members over a narrow Pane, a Lookup card, a dialog, a Preview's larger view, or a menu. Each takes one entry in the history as it opens, with the same URL, and gives it back however it closes, so with nothing open Back leaves the page.
 - **Where the pointer is coarse, every control is at least 44px and every field's text at least 16px,** so iOS Safari does not zoom into it.
 - **Pinch zoom is never turned off.**
 
@@ -281,10 +282,10 @@ The core decides and this package draws and does the I/O.
 | `src/nick/` | The menu on a nick, and its atoms |
 | `src/previews/` | A Message's Previews and their atoms |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
-| `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the Sidebar's width and whether it shows |
+| `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, the history entries Back closes overlays by, and the Sidebar's width and whether it shows |
 | `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
-| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, the grip on a width the Owner drags, and dates |
-| `src/testing/` | The fake Daemon, and the test ports for uploading, notifying, and downloading |
+| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, the grip on a width the Owner drags, the modal overlay and popover every overlay is, and dates |
+| `src/testing/` | The fake Daemon, the test ports for uploading, notifying, and downloading, and the history Back is pressed in |
 
 ### The runtime
 
@@ -389,7 +390,7 @@ The screen is compact at `(max-width: 640px)`. What is sized for touch is decide
 - **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. `public/pressable.css` carries the rule React Aria would inject inline. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses, and the page still works without that rule.
 - **An instant out of a `Date`'s range never takes the page down.** Every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
 - **The Composer is no keyboard trap.** Tab is taken only when there is a word to complete, or while its list is open.
-- **The Composer's list, and its colours, are a listbox its textarea controls,** which keeps the focus. `aria-controls` names the list while it is shown, and `aria-activedescendant` the candidate highlighted.
+- **The Composer's list, and its formatting list, are a listbox its textarea controls,** which keeps the focus. `aria-controls` names the list while it is shown, `aria-activedescendant` the item highlighted, and a format's name says whether it is on.
 - **The list shows exactly while it owns Tab, the arrows, and Escape,** and moving the caret without typing lets go of it.
 
 ### The fonts

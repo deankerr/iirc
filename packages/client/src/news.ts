@@ -349,6 +349,12 @@ export interface RefusedAction {
   readonly where: ActionWhere;
 }
 
+/** A span of a Message's text that names a User: UTF-16 offsets into its text with formatting stripped (`stripFormatting`), `start` inclusive, `end` exclusive. */
+export interface NickSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
 /** That we said a Message ourselves, as the Owner's intent. */
 export interface Ours {
   readonly intent: IntentId;
@@ -609,6 +615,13 @@ export type News =
        */
       readonly highlight: boolean;
       /**
+       * The spans of its text that name a User who counts, in order and never overlapping:
+       * the members of each Channel it is said to, or Self and the partner of a Direct
+       * Message, as they were as the Line was folded. None for a Message to no Timeline but
+       * the Network's, and none from the Ircd or another server. It is fixed when said.
+       */
+      readonly nicks: readonly NickSpan[];
+      /**
        * Whether Self said it, by the source: ours, Self's echo, or Self said elsewhere, as
        * from another IRC client. A projection counts none of these as unread.
        */
@@ -632,6 +645,8 @@ export type News =
       readonly at: Fact<Instant>;
       readonly id: Fact<MessageId>;
       readonly text: string;
+      /** The spans of that text that name a User who counts, as a Message's `nicks` are, worked out for the Target it was said to. */
+      readonly nicks: readonly NickSpan[];
     }
   | {
       readonly _tag: "Activity";
@@ -726,9 +741,12 @@ export type News =
 
 /**
  * News as the core reads it from a Line, before the step works out where it belongs,
- * whether a Message is a Highlight, which prefix its sender held, whether Self said it, and which
- * ignore masks its sender matches.
+ * whether a Message is a Highlight, which prefix its sender held, which spans of its text
+ * name a User, whether Self said it, and which ignore masks its sender matches. A `Confirmed`
+ * carries the Target it was said to instead, which the spans are worked out for.
  */
 export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
-  ? Omit<T, "where" | "highlight" | "prefix" | "self" | "ignored">
-  : T;
+  ? Omit<T, "where" | "highlight" | "prefix" | "nicks" | "self" | "ignored">
+  : T extends { readonly _tag: "Confirmed" }
+    ? Omit<T, "nicks"> & { readonly target: string }
+    : T;

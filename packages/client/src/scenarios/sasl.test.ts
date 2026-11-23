@@ -1,10 +1,11 @@
 /**
- * `sasl` with `PLAIN`: logging in before registration ends, and what a failed login
+ * `sasl` with `PLAIN` and `EXTERNAL`: logging in before registration ends, and what a failed login
  * means, as the Configuration says.
  */
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
+import type { IrcdAddress } from "../configuration.ts";
 import { client } from "../core.ts";
 import { FeatureName } from "../ids.ts";
 import { configured, play, registered } from "../testing/index.ts";
@@ -135,6 +136,164 @@ describe("logging in", () => {
   });
 });
 
+// The Credential each Dial names, in order, or none for a Dial that names none.
+const certificates = (played: ReturnType<typeof play>) =>
+  played.steps.flatMap((step) =>
+    step.outputs.flatMap((output) => (output._tag === "Dial" ? [output.certificate] : []))
+  );
+
+describe("presenting a client certificate", () => {
+  const cert = CredentialName.make("cert");
+
+  const certified = (...ircds: readonly [IrcdAddress, ...IrcdAddress[]]) =>
+    configured({ ircds, tls: { _tag: "Certificate", certificate: cert } });
+
+  it("names it on a Dial over TLS, and on none in plaintext", () => {
+    const tls = { host: "irc.test", port: 6697, tls: true };
+    const plain = { host: "irc.test", port: 6667, tls: false };
+
+    const played = play(client, {
+      configuration: certified(plain, tls),
+      transcript: [
+        lines("!! configure", "-> dial irc.test:6667", "== opened"),
+        lines(">> CAP LS 302", ">> NICK iirc", ">> USER iirc 0 * iirc"),
+        lines("== closed Reset", "?? connection-failed Closed Reset", "+2s"),
+        lines("-> dial irc.test:6697 tls"),
+      ],
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined, cert]);
+  });
+
+  it("names it on the TLS Dial an STS policy upgrades a plaintext Ircd to", () => {
+    const played = play(client, {
+      configuration: certified({ host: "irc.test", port: 6667, tls: false }),
+      transcript: [
+        lines("!! configure", "-> dial irc.test:6667", "== opened"),
+        lines(">> CAP LS 302", ">> NICK iirc", ">> USER iirc 0 * iirc"),
+        lines("<< :irc.test CAP * LS :sts=port=6697", "-> hangup", "== closed HungUp"),
+        lines("-> dial irc.test:6697 tls"),
+      ],
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined, cert]);
+  });
+
+  it("names none without a certificate in the Configuration", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: lines("!! configure", "-> dial irc.test:6697 tls"),
+    });
+
+    expect(certificates(played)).toStrictEqual([undefined]);
+  });
+});
+
+const external = (required: boolean) =>
+  configured({
+    login: { _tag: "External", required },
+    tls: { _tag: "Certificate", certificate: CredentialName.make("cert") },
+  });
+
+describe("logging in with EXTERNAL", () => {
+  // Up to `AUTHENTICATE EXTERNAL`, with the Ircd offering `sasl` with this value.
+  const askedExternal = (value: string) =>
+    opened +
+    lines(
+      `<< :irc.test CAP * LS :sasl${value}`,
+      ">> CAP REQ sasl",
+      "<< :irc.test CAP * ACK :sasl",
+      ">> AUTHENTICATE EXTERNAL"
+    );
+
+  const answered =
+    askedExternal("=PLAIN,EXTERNAL") + lines("<< AUTHENTICATE +", ">> AUTHENTICATE +");
+
+  // The mechanism is offered when the cap lists it in any case, or lists nothing.
+  it.each(["=EXTERNAL", "=PLAIN,external", ""])(
+    "logs in before CAP END, with the Ircd listing %j",
+    (value) => {
+      play(client, {
+        configuration: external(true),
+        transcript: [
+          askedExternal(value),
+          lines(
+            "<< AUTHENTICATE +",
+            ">> AUTHENTICATE +",
+            "<< :irc.test 903 iirc :SASL authentication successful"
+          ),
+          goesOn,
+        ],
+      });
+
+      expect.assertions(0);
+    }
+  );
+
+  it("does not try when the Ircd lists mechanisms without EXTERNAL, and a required login gives up", () => {
+    const listing = lines(
+      opened.trimEnd(),
+      "<< :irc.test CAP * LS :sasl=PLAIN,SCRAM-SHA-256",
+      ">> CAP REQ sasl",
+      "<< :irc.test CAP * ACK :sasl"
+    );
+
+    play(client, { configuration: external(false), transcript: [listing, goesOn] });
+    play(client, { configuration: external(true), transcript: [listing, givesUp] });
+
+    expect.assertions(0);
+  });
+
+  // Each row is a failure the Ircd answers the exchange with, as PLAIN's are.
+  it.each(["902", "904", "905", "906", "907"])("fails the login on %s", (numeric) => {
+    play(client, {
+      configuration: external(false),
+      transcript: [answered, lines(`<< :irc.test ${numeric} * :failed`), goesOn],
+    });
+    play(client, {
+      configuration: external(true),
+      transcript: [answered, lines(`<< :irc.test ${numeric} * :failed`), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when 001 comes before 903, and takes up no Session", () => {
+    const played = play(client, {
+      configuration: external(true),
+      transcript: [answered, lines("<< :irc.test 001 iirc :Welcome", ">> AUTHENTICATE *"), givesUp],
+    });
+
+    expect(began(played)).toStrictEqual([]);
+  });
+
+  it("aborts, rather than answer with a password, when the login turns to PLAIN after EXTERNAL was asked for", () => {
+    play(client, {
+      configuration: external(true),
+      transcript: [
+        askedExternal("=PLAIN,EXTERNAL"),
+        lines("!! configure login=required,iirc,pw", "<< AUTHENTICATE +", ">> AUTHENTICATE *"),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("aborts with AUTHENTICATE * on a challenge that is not +", () => {
+    play(client, {
+      configuration: external(true),
+      transcript: [
+        askedExternal("=EXTERNAL"),
+        lines("<< AUTHENTICATE Zm9vYmFy", ">> AUTHENTICATE *"),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
 describe("a login that cannot happen", () => {
   it("does not try when the Ircd lists mechanisms without PLAIN", () => {
     play(client, {
@@ -262,22 +421,6 @@ describe("an Ircd that does not keep to the exchange", () => {
     });
 
     expect(played.steps.at(-1)).toMatchObject({ news: [] });
-  });
-
-  it("does not log in again when sasl is new after registration", () => {
-    const played = play(client, {
-      configuration: optional,
-      transcript: [
-        registered(optional, { offered: ["cap-notify"] }),
-        lines(
-          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
-          ">> CAP REQ sasl",
-          "<< :irc.test CAP iirc ACK :sasl"
-        ),
-      ],
-    });
-
-    expect(client.inspect(played.state).features).toContain("sasl");
   });
 
   it("takes a new cap offered mid-exchange, and ends negotiation once both are done", () => {
@@ -460,6 +603,224 @@ describe("PLAIN withdrawn mid-exchange", () => {
           "<< AUTHENTICATE +",
           ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
         ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+describe("sasl offered anew during a Session", () => {
+  // A Session that began without a login: the Ircd offered no sasl.
+  const loggedOut = registered(optional, { offered: ["cap-notify"] });
+
+  const offeredAnew = lines(
+    "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+    ">> CAP REQ sasl",
+    "<< :irc.test CAP iirc ACK :sasl",
+    ">> AUTHENTICATE PLAIN",
+    "<< AUTHENTICATE +",
+    ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
+  );
+
+  // A required login that happened, then a logout, so no account is known for Self.
+  const loggedOutSince = lines(
+    "<< :irc.test 901 iirc iirc!iirc@iirc.test :You are now logged out",
+    "<< :irc.test CAP iirc DEL :sasl"
+  );
+
+  it("logs in with no account known, and 900 makes the account known", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        offeredAnew,
+        lines(
+          "<< :irc.test 900 iirc iirc!iirc@iirc.test iirc :You are now logged in as iirc",
+          "<< :irc.test 903 iirc :SASL authentication successful"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).self?.account).toMatchObject({
+      _tag: "Known",
+      value: "iirc",
+    });
+  });
+
+  it("logs in by EXTERNAL when the login names it", () => {
+    play(client, {
+      configuration: external(false),
+      transcript: [
+        registered(external(false), { offered: ["cap-notify"] }),
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=EXTERNAL",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE EXTERNAL",
+          "<< AUTHENTICATE +",
+          ">> AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("sends nothing with an account known", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        registered(optional, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        lines(
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect(played.steps.at(-1)).toMatchObject({ news: [] });
+  });
+
+  it("reports a 904 in the Network's Timeline, and keeps the Connection, even for a required login", () => {
+    const played = play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        offeredAnew,
+        lines(
+          "<< :irc.test 904 iirc :SASL authentication failed",
+          "?? activity Numeric 904 in=network :SASL authentication failed",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).session._tag).toBe("Registered");
+  });
+
+  it("does not try a mechanism the Ircd does not list, and keeps the Connection", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=EXTERNAL",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("aborts when the Credential cannot be filled, and keeps the Connection", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        registered(required, { offered: ["cap-notify", "sasl=PLAIN"] }),
+        loggedOutSince,
+        offeredAnew,
+        lines(
+          "== unfilled Missing",
+          ">> AUTHENTICATE *",
+          "<< :irc.test PING :alive",
+          ">> PONG alive"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("ends the exchange without a login when sasl is deleted mid-exchange", () => {
+    const played = play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< AUTHENTICATE +",
+          "<< :irc.test 903 iirc :SASL authentication successful"
+        ),
+      ],
+    });
+
+    expect(client.known(played.state).self?.account).toStrictEqual({ _tag: "Unknown" });
+  });
+
+  it("answers no late challenge once a deleted exchange's account became known", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        registered(optional, { offered: ["cap-notify", "account-notify"] }),
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test 900 iirc iirc!iirc@iirc.test iirc :You are now logged in as iirc",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("lets a fresh exchange be when an earlier exchange's Credential is unfilled", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        offeredAnew,
+        lines(
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "== unfilled Missing",
+          "?? ignored NotNow Unfilled",
+          "<< AUTHENTICATE +",
+          ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("begins anew when sasl is offered again after a deleted exchange", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl"
+        ),
+        offeredAnew,
       ],
     });
 

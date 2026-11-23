@@ -12,6 +12,7 @@ import type {
   IrcdAddress,
   IntentId,
   MessageId,
+  NickSpan,
   SayKind,
 } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
@@ -34,6 +35,8 @@ export type Delivery =
       readonly at: Fact<Instant>;
       readonly id: Fact<MessageId>;
       readonly text: string;
+      /** The spans of that text that name a User who counts, as the Message's `nicks` are. */
+      readonly nicks: readonly NickSpan[];
     }
   | { readonly _tag: "Unsent" }
   | { readonly _tag: "Rejected"; readonly reply: string };
@@ -78,6 +81,12 @@ export type Content =
        * `PREFIX`, or `undefined` for none. It is the sender's then, and never changes.
        */
       readonly prefix: string | undefined;
+      /**
+       * The spans of `text` that name a User who counts when it was said, in order, never
+       * overlapping, as UTF-16 offsets into the text with its formatting stripped. They
+       * never change.
+       */
+      readonly nicks: readonly NickSpan[];
     }
   | {
       readonly _tag: "Activity";

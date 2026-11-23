@@ -2,6 +2,7 @@
 import { RegistryContext } from "@effect/atom-react";
 import { uiDefaults } from "@iirc/api";
 import type { ReadRule, TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
+import { nickColour } from "@iirc/frontend/render";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +74,7 @@ const message = (
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours,
     prefix: null,
     sender: "peer",
@@ -111,6 +113,27 @@ const heldBy = (
 };
 
 /**
+ * A Message, as an item, whose text names Users.
+ * @param sequence - Its sequence.
+ * @param text - Its text.
+ * @param nicks - The spans of its text, with formatting stripped, that name a User.
+ * @returns The item.
+ */
+const naming = (
+  sequence: number,
+  text: string,
+  nicks: readonly { start: number; end: number }[]
+): typeof TimelineItem.Encoded => {
+  const item = message(sequence);
+
+  if (item.content._tag !== "Message") {
+    throw new Error("not a Message");
+  }
+
+  return { ...item, content: { ...item.content, nicks, text } };
+};
+
+/**
  * A reply, as an item, to what an earlier item said.
  * @param sequence - Its sequence.
  * @param answered - The Message it answers, as the Daemon resolved it, or none held.
@@ -133,6 +156,7 @@ const replied = (
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender: "peer",
@@ -360,6 +384,16 @@ const linesOf = () =>
 const nicksOf = () =>
   [...logOf().querySelectorAll('[aria-haspopup="menu"][role="button"]')].map(
     (one) => one.textContent
+  );
+
+/**
+ * The colour each span of the log with exactly this text is drawn in.
+ * @param text - The span's text.
+ * @returns The colours.
+ */
+const coloursOf = (text: string) =>
+  [...logOf().querySelectorAll<HTMLElement>("span")].flatMap((one) =>
+    one.textContent === text ? [one.style.color] : []
   );
 
 /**
@@ -1539,6 +1573,29 @@ describe("what the view says it shows", () => {
     });
   });
 
+  // Catches a name in a Message's text drawn plain, in the slot of the wrong text, or over the
+  // colour its sender chose for it.
+  it("draws a name its Message's text holds in that nick's colour, unless a mIRC colour covers it", async () => {
+    const { registry } = await signedIn(
+      [],
+      [
+        naming(1, "hi alice and \u000304bob\u0003", [
+          { end: 8, start: 3 },
+          { end: 16, start: 13 },
+        ]),
+      ]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("alice"));
+
+    expect({ alice: coloursOf("alice"), bob: coloursOf("bob") }).toStrictEqual({
+      alice: [`var(--nick-${nickColour("alice")})`],
+      bob: ["var(--irc-4)"],
+    });
+  });
+
   // Catches the sender's nick drawn anew as its prefix comes or goes, from another device's
   // change, which would take focus, and an open menu, from it.
   it("keeps focus on a sender's nick as ui.timeline.nickPrefix turns off and on", async () => {
@@ -2482,6 +2539,7 @@ const fromAlice = (sequence: number, id?: string): typeof TimelineItem.Encoded =
     id: id === undefined ? { _tag: "Unknown" } : { _tag: "Known", at: 1, from: "ircd", value: id },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender: "alice",

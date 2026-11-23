@@ -29,7 +29,7 @@ import type { Delivery, Line as LineOfRow, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 import { Fragment, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode, Ref, RefObject } from "react";
-import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-components";
+import { Button as AriaButton, Menu, MenuItem } from "react-aria-components";
 
 import { chooseReply, perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
@@ -43,6 +43,7 @@ import { ColumnEdge } from "../ui/column-edge.tsx";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { dayIso, dayWritten } from "../ui/day.ts";
 import { Icon } from "../ui/icon.tsx";
+import { Popover } from "../ui/overlays.tsx";
 import { tagsOn } from "./atoms.ts";
 import { Inlines } from "./inlines.tsx";
 

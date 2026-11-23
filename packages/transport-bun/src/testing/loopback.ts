@@ -21,7 +21,7 @@ import * as Tls from "node:tls";
  */
 import type { CloseReason, IrcdAddress } from "@iirc/client";
 import type { TestCall, TestIrcd, TransportHarness } from "@iirc/runtime/testing";
-import type { Link, LinkEvent, TransportService } from "@iirc/runtime/transport";
+import type { ClientCertificate, Link, LinkEvent, TransportService } from "@iirc/runtime/transport";
 import { Deferred, Effect, Queue, Schema, Scope, Stream } from "effect";
 import type { Cause } from "effect";
 import { constVoid } from "effect/Function";
@@ -93,12 +93,14 @@ const Listening = Schema.Struct({ port: Schema.Int });
  * @param certificate - Speaks TLS with this certificate, or plain TCP without one.
  * @param accepted - Called with each accepted socket, after any TLS handshake.
  * @param connected - Called with each TCP Connection as it is accepted, before any TLS.
+ * @param requestCert - Asks each TLS client for a certificate, and accepts any it offers.
  * @returns The port it listens on.
  */
 export const listen = (
   certificate: Certificate | undefined,
   accepted: (socket: Net.Socket) => void,
-  connected: (raw: Net.Socket) => void = constVoid
+  connected: (raw: Net.Socket) => void = constVoid,
+  requestCert = false
 ): Effect.Effect<number, never, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.callback<{ server: Server; sockets: Set<Net.Socket> }>((resume) => {
@@ -119,7 +121,15 @@ export const listen = (
       const server =
         certificate === undefined
           ? Net.createServer(onSocket)
-          : Tls.createServer({ cert: certificate.cert, key: certificate.key }, onSocket);
+          : Tls.createServer(
+              {
+                cert: certificate.cert,
+                key: certificate.key,
+                rejectUnauthorized: false,
+                requestCert,
+              },
+              onSocket
+            );
 
       server.on("connection", (raw: Net.Socket) => {
         track(raw);
@@ -242,7 +252,7 @@ export const makeLoopbackHarness = (
       trust: certificate === undefined ? [] : [certificate.cert],
     });
 
-    const dial = (address: IrcdAddress) =>
+    const dial = (address: IrcdAddress, presented?: ClientCertificate) =>
       Effect.gen(function* () {
         const destination = yield* Deferred.make<Destination>();
         const opened = yield* Deferred.make<undefined>();
@@ -256,7 +266,8 @@ export const makeLoopbackHarness = (
         yield* Queue.offer(routes, destination);
 
         const link = yield* inner.dial(
-          certificate === undefined ? { ...address, tls: false } : address
+          certificate === undefined ? { ...address, tls: false } : address,
+          presented
         );
 
         yield* Effect.forkScoped(
@@ -307,6 +318,7 @@ export const makeLoopbackHarness = (
 
         yield* Queue.offer(calls, {
           address,
+          certificate: presented,
           close,
           heard: Queue.take(heard),
           open,

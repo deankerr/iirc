@@ -727,6 +727,7 @@ const said = (sequence: number, sender: string, ours = false): typeof TimelineIt
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: ours ? { delivery: { _tag: "Unconfirmed" }, intent: "web-1" } : null,
     prefix: null,
     sender,
@@ -1391,7 +1392,7 @@ describe("everything the Composer's list ranks", () => {
     });
   });
 
-  it("lists the Networks after /network remove, a removed one whose Timelines were kept too, and writes only the id", () => {
+  it("lists the Networks after /network remove, a removed one whose Timelines were kept too, and writes the id", () => {
     expect({
       listed: opened("/network remove ").map((one) =>
         one._tag === "Network" ? [one.name, one.removed, one.text] : one._tag
@@ -1417,6 +1418,26 @@ describe("everything the Composer's list ranks", () => {
         value: [{ _tag: "AskRemoval", keep: undefined, network: "oftc" }],
       },
     ]);
+  });
+
+  it("names a Network whose id is keep or drop with a choice, so sending it asks about that Network", () => {
+    const [drop, keep] = (
+      [
+        ["drop", true],
+        ["keep", false],
+      ] as const
+    ).map(([id, removed]): Sources => ({
+      ...everywhere,
+      networks: [{ network: Schema.decodeSync(NetworkId)(id), removed }],
+    }));
+
+    expect({
+      drop: interpret(pickedIn("/network remove ", 0, drop), context),
+      keep: interpret(pickedIn("/network remove ", 0, keep), context),
+    }).toStrictEqual({
+      drop: { _tag: "Parsed", value: [{ _tag: "AskRemoval", keep: false, network: "drop" }] },
+      keep: { _tag: "Parsed", value: [{ _tag: "AskRemoval", keep: true, network: "keep" }] },
+    });
   });
 });
 

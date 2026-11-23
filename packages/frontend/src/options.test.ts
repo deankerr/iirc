@@ -163,9 +163,9 @@ describe("the options, derived from the Schema", () => {
         "network.libera.ircds",
         "network.libera.lines",
         "network.libera.login",
+        "network.libera.login.required",
         "network.libera.login.account",
         "network.libera.login.credential",
-        "network.libera.login.required",
         "network.libera.login.service",
         "network.libera.login.wait",
         "network.libera.nicks",
@@ -174,6 +174,8 @@ describe("the options, derived from the Schema", () => {
         "network.libera.oper.name",
         "network.libera.password",
         "network.libera.realname",
+        "network.libera.tls",
+        "network.libera.tls.certificate",
         "network.libera.userModes",
         "network.libera.username",
         "network.libera.whoOnJoin",
@@ -227,6 +229,8 @@ describe("the options, derived from the Schema", () => {
         value: { _tag: "Credential", held: false, name: "libera.password" },
       },
       realname: { starts: "the first nick", value: { _tag: "Shown", text: "Dean" } },
+      tls: { starts: "none", value: { _tag: "Shown", text: "none" } },
+      "tls.certificate": { starts: "libera.tls.certificate", value: { _tag: "Unset" } },
       userModes: { starts: "", value: { _tag: "Shown", text: "" } },
       username: { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
       whoOnJoin: { starts: "on", value: { _tag: "Shown", text: "on" } },
@@ -251,12 +255,12 @@ describe("the options, derived from the Schema", () => {
 
     expect(login.map((option) => [option.name, option.value])).toStrictEqual([
       ["network.libera.login", { _tag: "Shown", text: "service" }],
+      ["network.libera.login.required", { _tag: "Unset" }],
       ["network.libera.login.account", { _tag: "Shown", text: "dean" }],
       [
         "network.libera.login.credential",
         { _tag: "Credential", held: true, name: "libera.login.credential" },
       ],
-      ["network.libera.login.required", { _tag: "Unset" }],
       ["network.libera.login.service", { _tag: "Shown", text: "NickServ" }],
       ["network.libera.login.wait", { _tag: "Shown", text: "5" }],
     ]);
@@ -755,6 +759,23 @@ describe("editing", () => {
         wait: 5,
       },
       tooLong: "Invalid",
+    });
+  });
+
+  it("starts the login a member's option makes valid: SASL without a certificate, EXTERNAL with one", () => {
+    const certified = valueOf(set(libera, plain, ["tls"], "certificate"));
+
+    expect({
+      certified: valueOf(set(libera, certified, ["login", "required"], "on")).login,
+      plain: valueOf(set(libera, plain, ["login", "required"], "on")).login,
+    }).toStrictEqual({
+      certified: { _tag: "External", required: true },
+      plain: {
+        _tag: "Sasl",
+        account: "dean",
+        credential: "libera.login.credential",
+        required: true,
+      },
     });
   });
 

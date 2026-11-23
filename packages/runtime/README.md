@@ -121,7 +121,7 @@ Carrying out each output:
 
 | Output | What the Runtime does |
 | --- | --- |
-| `Dial` | Opens a Scope for the Connection, `dial`s in it, and starts its Outbox and pump there. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. Before a `Closed` is stepped, whatever is still queued or cut off is stepped as one `Unsent`. Once the `Closed` is stepped, the Scope is closed. |
+| `Dial` | When it names a `certificate`, `reveal`s that Credential and parses it as PEM, a certificate chain and one private key. It opens a Scope for the Connection, `dial`s in it with the certificate if there is one, and starts its Outbox and pump there. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. Before a `Closed` is stepped, whatever is still queued or cut off is stepped as one `Unsent`. Once the `Closed` is stepped, the Scope is closed. |
 | `Send` | Queues the Line in its Connection's Outbox. At its turn, the pump `encode`s and sends it. A `Rejected` encoding is logged and nothing is sent. A Line for a Connection the Runtime holds no Link for is dropped. |
 | `SendSecret` | Queues it the same way. At its turn, the pump `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. If any step fails, nothing is sent and an `Unfilled` input is stepped: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. |
 | `Hangup` | Lets the Lines queued before it leave at pace, for up to `hangupDrain`, then calls `hangup` on the Link. When the drain runs out, every Line still queued is dropped but a `QUIT`, which is sent at once, past the pacing. What was dropped is stepped as `Unsent`, exactly once and always before the `Closed` that follows. An empty Outbox hangs up at once. |
@@ -186,7 +186,8 @@ Each port is an Effect service. An adapter provides it as a Layer, from its own 
 ## Transport
 
 ```ts
-dial(address: IrcdAddress): Effect<Link, never, Scope>
+dial(address: IrcdAddress, certificate?: ClientCertificate): Effect<Link, never, Scope>
+ClientCertificate = { credential: CredentialName, certificate: Redacted<string>, key: Redacted<string> }
 Link = { events: Stream<LinkEvent>, send(bytes): Effect<void>, hangup: Effect<void> }
 LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 ```
@@ -195,6 +196,7 @@ LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 - **Events come in order.** At most one `Opened`, then any number of `Received`, then exactly one `Closed`, and then the stream ends. A failed dial gives `Closed` with no `Opened`. Over TLS, `Opened` comes after the handshake. `events` is read once.
 - **`Received` holds one Line's bytes without its line ending.** CRLF, a bare LF, and a bare CR each end a Line, and empty Lines are skipped.
 - **A Line longer than `maxReceivedBytes` is cut,** to 8191 tag bytes plus 510, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped.
+- **A TLS dial given a `certificate` presents it in the handshake.** One the adapter cannot use is dialled without it, with a warning that names only the Credential. A plaintext dial ignores it.
 - **It decodes nothing.** Bytes go to the Client as they came (ADR 0002).
 - **`send` writes one Line's bytes,** line ending included. Before `Opened` or after `Closed`, it does nothing.
 - **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason. It first lets what was already sent reach the Ircd, within a bound.
@@ -236,8 +238,9 @@ forget(name): Effect<void, VaultFailed>
 names: Effect<ReadonlySet<CredentialName>, VaultFailed>
 ```
 
-- **Values are always `Redacted`.** The Runtime unwraps one only through `fillSecret` in `@iirc/protocol`, and its result is sent, never kept.
-- **The Runtime reveals at the last moment,** for each `SendSecret`, and lets go of the value once the Line is sent.
+- **Values are always `Redacted`.** The Runtime unwraps one only through `fillSecret` in `@iirc/protocol`, whose result is sent and never kept, and through `parseCertificate`, which reads a client certificate to find its blocks. The Transport adapter unwraps the certificate's values to hand them to TLS.
+- **The Runtime reveals at the last moment,** for each `SendSecret` and for the certificate a `Dial` names, and lets go of the value once the Line is sent or the dial is made.
+- **A client certificate that cannot be had is dialled without.** A Credential that is missing, a Vault that fails, and a value with no certificate or no single key each give a warning naming only the Credential and the reason, and the Connection dials without a certificate. The value is never journaled or logged.
 - **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine` and the reason, so the Client decides what follows. It never holds the value or the refused Lines.
 - **`VaultFailed` can come from any call,** whenever the Vault cannot be read.
 - **`hold` replaces any earlier value, and `forget` of one not held does nothing.**

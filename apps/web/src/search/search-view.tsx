@@ -72,18 +72,31 @@ const Result = ({ row }: { readonly row: ResultRow }) => {
           {found.kind === "Action" ? <>* {nick}</> : null}
         </span>{" "}
         <bdi className={styles.text}>
-          {found.runs.map((run, index) =>
+          {found.runs.map((run, index) => {
+            // A nick's slot is the theme's own colour, read as a property of the element.
+            const style =
+              run.colour === undefined ? undefined : { color: `var(--nick-${run.colour})` };
+
             // A result's runs never move, so their order is their identity.
-            run.match ? (
-              // oxlint-disable-next-line react/no-array-index-key
-              <mark className={styles.match} key={index}>
-                {run.text}
-              </mark>
-            ) : (
+            if (run.match) {
+              return (
+                // oxlint-disable-next-line react/no-array-index-key
+                <mark className={styles.match} key={index} style={style}>
+                  {run.text}
+                </mark>
+              );
+            }
+
+            return style === undefined ? (
               // oxlint-disable-next-line react/no-array-index-key
               <Fragment key={index}>{run.text}</Fragment>
-            )
-          )}
+            ) : (
+              // oxlint-disable-next-line react/no-array-index-key
+              <span key={index} style={style}>
+                {run.text}
+              </span>
+            );
+          })}
         </bdi>
       </span>
     </>

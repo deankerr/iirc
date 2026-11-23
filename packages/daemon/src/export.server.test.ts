@@ -29,6 +29,7 @@ const said = (text: string, sender = "alice"): Content => ({
   id: { _tag: "Unknown" },
   kind: "Privmsg",
   live: true,
+  nicks: [],
   ours: undefined,
   prefix: undefined,
   sender,

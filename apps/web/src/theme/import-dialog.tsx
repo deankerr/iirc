@@ -10,10 +10,11 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useId } from "react";
-import { Dialog, FileTrigger, Form, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, FileTrigger, Form, Heading, Modal } from "react-aria-components";
 import type { FormProps } from "react-aria-components";
 
 import { Button } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import {
   cancelImport,
   chooseFile,

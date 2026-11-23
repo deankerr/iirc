@@ -10,9 +10,10 @@
  */
 import type { LinkShown } from "@iirc/frontend/previews";
 import type { ReactElement } from "react";
-import { Button, Dialog, DialogTrigger, Modal, ModalOverlay } from "react-aria-components";
+import { Button, Dialog, DialogTrigger, Modal } from "react-aria-components";
 
 import { Icon } from "../ui/icon.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 
 import styles from "./larger-view.module.css";
 

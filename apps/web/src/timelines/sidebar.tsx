@@ -60,7 +60,6 @@ import {
   Menu,
   MenuItem,
   MenuSection,
-  Popover,
   Tree,
   TreeItem,
   TreeItemContent,
@@ -79,6 +78,7 @@ import { SignOutButton } from "../sign-in/sign-out-button.tsx";
 import { IconButton, useKeysOf } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
 import type { IconName } from "../ui/icon.tsx";
+import { Popover } from "../ui/overlays.tsx";
 import {
   listedNetworks,
   mutedShown,

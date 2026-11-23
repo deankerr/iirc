@@ -13,6 +13,7 @@ import { membersShown } from "../channel/state.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, profileOf, registryFor, run } from "../testing/fake-daemon.ts";
 import type { LookScript } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { lookupsState } from "./state.ts";
 
@@ -350,6 +351,19 @@ describe("the Lookup card", () => {
       after: null,
       words: "whois nobodyNo one uses the nick nobody now (401).",
     });
+  });
+
+  // Catches Back leaving the page while a Lookup card lies over a Timeline.
+  it("is put away by Back, and the page stays", async () => {
+    pageEntered();
+    const { container } = await signedIn(hostilePeer);
+
+    await inComposer(container, "/whois peer", "Enter");
+    await settled(() => (card() ?? null) !== null);
+    await back();
+    await settled(() => (card() ?? null) === null);
+
+    expect(left()).toBeFalsy();
   });
 
   it("shows what /names found as nicks with their prefixes, text in isolates, of the open Channel", async () => {
