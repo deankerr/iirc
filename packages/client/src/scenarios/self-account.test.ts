@@ -13,6 +13,7 @@ const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\
 
 const service = configured({
   channels: [{ name: "#iirc" }],
+  lines: ["PRIVMSG HostServ :ON"],
   login: {
     _tag: "Service",
     account: "acct",
@@ -39,7 +40,8 @@ const waiting = lines(
   ">> {Identify credential=pw account=acct service=NickServ}"
 );
 
-const joins = lines(">> JOIN #iirc");
+// The Owner's own start, then the Channels, once the wait ends.
+const joins = lines(">> PRIVMSG HostServ ON", ">> JOIN #iirc");
 
 describe("an ACCOUNT for Self while a service login waits", () => {
   // Catches a Network whose service answers only with a NOTICE holding every Channel for
