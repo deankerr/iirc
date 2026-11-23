@@ -137,7 +137,10 @@
   background: var(--color-surface);
 }
 
-/* The press of an image fills its box, and is nothing but the image. */
+/*
+ * The press of an image fills its box, and is nothing but the image. A still one opens it
+ * large, and says so; an animated one plays it.
+ */
 .press {
   display: block;
   width: 100%;
@@ -149,6 +152,10 @@
   color: inherit;
   cursor: default;
   font: inherit;
+}
+
+.whole[data-still] .press {
+  cursor: zoom-in;
 }
 
 .press[data-focus-visible] {
@@ -187,34 +194,17 @@
   background: var(--color-scrim);
 }
 
-/* The control that opens an image or a video large, in its corner. */
+/*
+ * The control that opens an image or a video large, in its corner, shaped as the one that
+ * closes the larger view.
+ */
 .enlarge {
   position: absolute;
   inset: var(--space-1) var(--space-1) auto auto;
-  padding: var(--space-1);
-  border: 0;
-  border-radius: var(--radius);
   background: var(--color-scrim);
   color: var(--color-text);
-  cursor: default;
-  font: inherit;
-  line-height: 1;
 }
 
 .enlarge[data-hovered] {
   background: var(--color-background);
-}
-
-.enlarge[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-}
-
-@media (pointer: coarse) {
-  .enlarge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: var(--target-size);
-    min-height: var(--target-size);
-  }
 }

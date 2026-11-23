@@ -348,7 +348,7 @@ describe("the Lookup card", () => {
 
     expect({ after: card() ?? null, words }).toStrictEqual({
       after: null,
-      words: "whois nobody×No one uses the nick nobody now (401).",
+      words: "whois nobodyNo one uses the nick nobody now (401).",
     });
   });
 
@@ -403,7 +403,7 @@ describe("the Lookup card", () => {
       words: card()?.textContent,
     }).toStrictEqual({
       looks: [{ _tag: "Names", channel: "#empty" }],
-      words: "names #empty×#empty has no members.",
+      words: "names #empty#empty has no members.",
     });
   });
 
@@ -552,7 +552,7 @@ describe("the Lookup card", () => {
     await settled(() => card()?.textContent.includes("No one uses") === true);
 
     expect(card()?.textContent).toBe(
-      "whois nobody×No one uses the nick nobody now (401).NOTE WHOIS CACHED nobody: From cache"
+      "whois nobodyNo one uses the nick nobody now (401).NOTE WHOIS CACHED nobody: From cache"
     );
   });
 
@@ -599,10 +599,10 @@ describe("the Lookup card", () => {
       acts: [
         { _tag: "Mode", changes: [{ mode: "b", param: "bad!*@*", set: false }], target: "#iirc" },
       ],
-      after: [`${override}worse!*@*‬×`],
+      after: [`${override}worse!*@*‬`],
       heading: "bans #iirc",
       looks: [{ _tag: "Bans", channel: "#iirc" }],
-      masks: ["bad!*@* set by op!u@h×", `${override}worse!*@*‬×`],
+      masks: ["bad!*@* set by op!u@h", `${override}worse!*@*‬`],
       removable: ["Close the Lookup", "Remove bad!*@*", `Remove ${override}worse!*@*‬`],
     });
   });
@@ -646,7 +646,7 @@ describe("the Lookup card", () => {
           target: "#iirc",
         },
       ],
-      drawn: ["account bob ~account:bob set by op!u@h×", "bad!*@*×"],
+      drawn: ["account bob ~account:bob set by op!u@h", "bad!*@*"],
     });
   });
 

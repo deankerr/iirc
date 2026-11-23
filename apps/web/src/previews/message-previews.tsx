@@ -44,6 +44,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 
 import { mediaHeightShown } from "../options/ui.ts";
+import { Icon } from "../ui/icon.tsx";
 import {
   directIn,
   previewsModes,
@@ -262,6 +263,15 @@ const Description = ({
 };
 
 /**
+ * Whether a card has words: a host, a title, or a description. One with none is a link that
+ * is itself media.
+ * @param shown - The card.
+ * @returns Whether it has words.
+ */
+const hasWords = ({ description, host, title }: CardShown): boolean =>
+  host !== undefined || title !== undefined || description !== undefined;
+
+/**
  * A card's words, each only when it has it: the host it was read from, its title, and its
  * description.
  * @param props - The card, the description shown whole if any, and what a press of it sets.
@@ -278,7 +288,7 @@ const CardWords = ({
 }) => {
   const { description, host, title } = shown;
 
-  if (host === undefined && title === undefined && description === undefined) {
+  if (!hasWords(shown)) {
     return null;
   }
 
@@ -522,7 +532,7 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
 
     case "Ready": {
       return (
-        <div className={styles.card} data-preview="ready">
+        <div className={styles.card} data-bare={!hasWords(shown) || undefined} data-preview="ready">
           <Card shown={shown} />
         </div>
       );
@@ -582,7 +592,7 @@ export const PreviewToggle = ({
         toggle({ link, open: !open, position, timeline });
       }}
     >
-      {open ? "−" : "+"}
+      <Icon name={open ? "expanded" : "collapsed"} />
     </AriaButton>
   );
 };

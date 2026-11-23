@@ -12,7 +12,8 @@
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
-  padding: var(--space-2) 0;
+  /* The first row is the top row, with no room above it. */
+  padding: 0 0 var(--space-2);
   overflow-y: auto;
 }
 
@@ -146,12 +147,13 @@
   color: var(--color-muted);
 }
 
-/* The views' rows, signing out, and hiding the sidebar, at its foot. */
+/* The views' rows, signing out, and hiding the sidebar, at its foot, the first row right
+   under its border, and the last clear of the home bar. */
 .footer {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-1) 0 calc(var(--space-1) + var(--safe-bottom));
+  padding: 0 0 calc(var(--space-1) + var(--safe-bottom));
   border-top: var(--border-width) solid var(--color-border);
 }
 

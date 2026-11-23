@@ -483,6 +483,12 @@ const toggle = (index = 0) =>
   document.querySelectorAll<HTMLButtonElement>("[data-preview-toggle]")[index] ?? null;
 
 /**
+ * The caret the first toggle shows, by its icon's name.
+ * @returns Its name, or none.
+ */
+const caret = () => toggle()?.querySelector<HTMLElement>("[data-icon]")?.dataset.icon;
+
+/**
  * The press of a card's description that was cut, if it was.
  * @returns It, or none.
  */
@@ -880,6 +886,7 @@ describe("a Message's Previews", () => {
 
     expect({
       alt: image?.getAttribute("alt"),
+      bare: card()?.dataset.bare,
       decoding: image?.getAttribute("decoding"),
       drawn: image?.dataset.drawn,
       last: card()?.lastElementChild?.contains(image ?? null),
@@ -892,6 +899,7 @@ describe("a Message's Previews", () => {
       words: words(),
     }).toStrictEqual({
       alt: "Cats",
+      bare: undefined,
       decoding: "async",
       drawn: "whole",
       last: true,
@@ -1046,11 +1054,13 @@ describe("a Message's Previews", () => {
 
     expect({
       alt: image?.getAttribute("alt"),
+      bare: card()?.dataset.bare,
       drawn: image?.dataset.drawn,
       src: image?.getAttribute("src"),
       text: cardText(),
     }).toStrictEqual({
       alt: "https://example.com/cats",
+      bare: "true",
       drawn: "whole",
       src: `/api/previews/images/${hash}`,
       text: "",
@@ -1376,7 +1386,7 @@ describe("a Message's Previews", () => {
         drawn: "poster",
         hover: `plays from ${playerHost}`,
         src: `/api/previews/images/${hash}`,
-        text: "youtube.comA song▶",
+        text: "youtube.comA song",
       });
     });
 
@@ -1594,12 +1604,20 @@ describe("a Message's Previews", () => {
       await scrolledIntoView();
       await settled(() => drawn()[0]?.state === "ready");
 
-      const open = { expanded: toggle()?.getAttribute("aria-expanded"), shown: drawn().length };
+      const open = {
+        caret: caret(),
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        shown: drawn().length,
+      };
 
       await pressed(toggle());
       await settled(() => list() === null);
 
-      const closed = { expanded: toggle()?.getAttribute("aria-expanded"), list: list() };
+      const closed = {
+        caret: caret(),
+        expanded: toggle()?.getAttribute("aria-expanded"),
+        list: list(),
+      };
 
       await pressed(toggle());
       await settled(() => drawn()[0]?.state === "ready");
@@ -1611,8 +1629,8 @@ describe("a Message's Previews", () => {
         reopened: toggle()?.getAttribute("aria-expanded"),
       }).toStrictEqual({
         asks: 1,
-        closed: { expanded: "false", list: null },
-        open: { expanded: "true", shown: 1 },
+        closed: { caret: "collapsed", expanded: "false", list: null },
+        open: { caret: "expanded", expanded: "true", shown: 1 },
         reopened: "true",
       });
     });
