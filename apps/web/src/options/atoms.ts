@@ -10,6 +10,7 @@
  */
 import { CredentialPathName } from "@iirc/api";
 import type { NetworkId } from "@iirc/api";
+import { removalWords } from "@iirc/frontend/commands";
 import { panesOf } from "@iirc/frontend/layout";
 import type {
   Asked,
@@ -157,7 +158,7 @@ const failedWith = (tag: string, network: NetworkId): Outcome => {
 
     case "TimelinesKept": {
       return notDone(
-        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove ${network} drops them.`
+        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove ${removalWords(network, false)} drops them.`
       );
     }
 
