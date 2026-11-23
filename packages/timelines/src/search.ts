@@ -115,9 +115,8 @@ export const searchTextMaximum = 510;
  * {@link searchTextMaximum} code points once folded.
  */
 export const SearchText = Schema.String.check(
-  // No Line carries more than 510 bytes, and a code unit takes at least one, so no Message
-  // holds longer text, and it is refused unread, however short it folds.
-  Schema.isMaxLength(searchTextMaximum * 2),
+  // Nothing bounds the text before it folds: a combining accent folds to nothing, so text
+  // of any length may fold within the bounds.
   Schema.makeFilter(
     (text: string) => !/[\0\r\n]/u.test(text) || "must not hold a line break or NUL"
   ),

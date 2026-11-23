@@ -57,6 +57,11 @@ describe("the text a search looks for", () => {
     ["510 letters", "a".repeat(searchTextMaximum), true],
     ["511 letters", "a".repeat(searchTextMaximum + 1), false],
     ["510 astral characters, 1020 code units", "\u{1F600}".repeat(searchTextMaximum), true],
+    [
+      "four letters under a thousand accents, four once folded",
+      `cafe${"\u0301".repeat(1017)}`,
+      true,
+    ],
     ["510 dotted capital Is", "\u0130".repeat(searchTextMaximum), true],
   ])("counts %s by code point once folded", (_, text, valid) => {
     expect(isSearchText(text)).toBe(valid);
