@@ -115,7 +115,8 @@ export const searchTextMaximum = 510;
  * {@link searchTextMaximum} code points once folded.
  */
 export const SearchText = Schema.String.check(
-  // Two code units are the most a code point takes, so longer text is refused unread.
+  // No Line carries more than 510 bytes, and a code unit takes at least one, so no Message
+  // holds longer text, and it is refused unread, however short it folds.
   Schema.isMaxLength(searchTextMaximum * 2),
   Schema.makeFilter(
     (text: string) => !/[\0\r\n]/u.test(text) || "must not hold a line break or NUL"

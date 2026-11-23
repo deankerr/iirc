@@ -505,6 +505,7 @@ describe("marking what was found", () => {
         [" 5", false],
       ],
     ],
+    ["two matches that share an expanded ligature", "ss\u00DFss", "sss", [["ss\u00DFss", true]]],
   ])("marks %s", (_, text, sought, runs) => {
     expect(matchRuns(text, sought)).toStrictEqual(
       runs.map(([run, match]) => ({ colour: undefined, match, text: run }))

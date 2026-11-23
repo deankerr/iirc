@@ -915,8 +915,9 @@ const foundAt = (folded: readonly string[], needle: readonly string[], at: numbe
  * one, as `æ` does, so the fold is searched whole and each match given back as the
  * characters it came from: from the one its first folded character came from, through the
  * one its last came from and any after that fold to nothing, the accents on that letter.
- * Matches never overlap, and a character is marked whole, even when a match starts or
- * ends within what it folds to.
+ * Matches never overlap in the fold, though two may share a character that folds to more
+ * than one, and a character is marked whole, even when a match starts or ends within what
+ * it folds to.
  * @param characters - The text, by character.
  * @param sought - What was sought.
  * @returns For each character, whether a match holds it.
@@ -944,11 +945,7 @@ const matchedCharacters = (characters: readonly string[], sought: string): reado
     }
 
     matched.fill(true, first, last + 1);
-
-    // The next match starts at a character after this one's last.
-    while (at < folded.length && (from[at] ?? 0) <= last) {
-      at += 1;
-    }
+    at += needle.length;
   }
 
   return matched;
