@@ -649,6 +649,7 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Removed",
   "Retry",
   "Say",
+  "ScramChecked",
   "Started",
   "Stopping",
   "Unfilled",

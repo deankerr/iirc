@@ -1092,13 +1092,11 @@ export const OperName = Schema.String.check(Schema.isPattern(operWord));
 
 /**
  * A Line that carries a Credential, written with the Credential's name in place of its
- * value. It is a closed list, so this module knows every place a Credential can go,
- * and is the only code that fills one in.
- *
- * SASL `SCRAM-SHA-256` would land here. Its replies depend on the Ircd's challenge, a
- * nonce, and keys derived from the Credential, so it needs either cases that take the
- * challenge or an exchange run on the Runtime's side. SASL `EXTERNAL` needs no case
- * here: its Credential is a client certificate, which `Dial` would name.
+ * value. It is a closed list, so this module knows every place a Credential can go.
+ * {@link fillSecret} fills in every case but SASL `SCRAM-SHA-256`'s, whose answers need a
+ * nonce and keys derived from the Credential, which the Runtime's exchange for the
+ * Connection works out and sends with {@link authenticateResponse}. SASL `EXTERNAL` needs
+ * no case here: its Credential is a client certificate, which `Dial` names.
  */
 export const SecretLine = Schema.TaggedUnion({
   /** The SASL PLAIN response, which may be split over several `AUTHENTICATE` Lines. */
@@ -1118,10 +1116,28 @@ export const SecretLine = Schema.TaggedUnion({
   Oper: { credential: CredentialName, name: OperName },
   /** `PASS`, before registration. */
   Pass: { credential: CredentialName },
+  /**
+   * SASL `SCRAM-SHA-256`'s client-final message, answering `serverFirst`, the Ircd's
+   * server-first message in base64 as it came. It carries the proof that Self holds the
+   * Credential, which the Runtime derives.
+   */
+  ScramFinal: { credential: CredentialName, serverFirst: Schema.String },
+  /**
+   * SASL `SCRAM-SHA-256`'s client-first message, for the account `authcid`. It carries a
+   * nonce the Runtime makes, so it names none. The Credential is the one the exchange
+   * proves it holds.
+   */
+  ScramFirst: { authcid: Schema.String, credential: CredentialName },
 });
 
 /** The decoded form of {@link SecretLine}. */
 export type SecretLine = typeof SecretLine.Type;
+
+/** The `SecretLine`s the Runtime's SASL exchange answers, rather than {@link fillSecret}. */
+export type ExchangeLine = Extract<SecretLine, { readonly _tag: "ScramFinal" | "ScramFirst" }>;
+
+/** The `SecretLine`s {@link fillSecret} fills. */
+export type FilledLine = Exclude<SecretLine, ExchangeLine>;
 
 /** The most bytes of SASL payload in one `AUTHENTICATE`. */
 export const maxAuthenticateBytes = 400;
@@ -1130,6 +1146,25 @@ const chunks = (payload: string) =>
   Array.from({ length: Math.floor(payload.length / maxAuthenticateBytes) + 1 }, (_unused, index) =>
     payload.slice(index * maxAuthenticateBytes, (index + 1) * maxAuthenticateBytes)
   );
+
+/**
+ * A SASL response as the `AUTHENTICATE` Lines that carry it: in base64, split into
+ * {@link maxAuthenticateBytes} bytes of payload each, and ended by `AUTHENTICATE +` when
+ * the last is full. An empty response is `AUTHENTICATE +` alone.
+ * @param payload - The response's bytes.
+ * @returns The Lines to send, in order.
+ */
+export const authenticateResponse = (payload: Uint8Array): readonly OutboundLine[] | Rejected => {
+  // A payload that fills its last chunk exactly is ended by `+`, which is also the
+  // whole of an empty one, so the last chunk is always short.
+  const lines = chunks(Base64.encode(payload)).map((chunk) =>
+    outbound("AUTHENTICATE", [chunk === "" ? "+" : chunk])
+  );
+
+  const sendable = lines.flatMap((line) => (isRejected(line) ? [] : [line]));
+
+  return sendable.length === lines.length ? sendable : rejected("TooLong");
+};
 
 // The PLAIN response is `authzid NUL authcid NUL password`, so none may hold a NUL.
 const plain = (
@@ -1142,15 +1177,7 @@ const plain = (
     return rejected("InvalidParameter");
   }
 
-  // A payload that fills its last chunk exactly is ended by `+`, which is also the
-  // whole of an empty one, so the last chunk is always short.
-  const lines = chunks(Base64.encode(utf8.encode(parts.join("\0")))).map((chunk) =>
-    outbound("AUTHENTICATE", [chunk === "" ? "+" : chunk])
-  );
-
-  const sendable = lines.flatMap((line) => (isRejected(line) ? [] : [line]));
-
-  return sendable.length === lines.length ? sendable : rejected("TooLong");
+  return authenticateResponse(utf8.encode(parts.join("\0")));
 };
 
 // Each of `IDENTIFY <account> <credential>`'s words must stay one word, so the service
@@ -1192,8 +1219,9 @@ const oper = (
 };
 
 /**
- * Fills a Credential's value into the Line that carries it. This is the only code that
- * puts a Credential into a Line. Its result is sent and never journaled. The SASL PLAIN
+ * Fills a Credential's value into the Line that carries it. This and the Runtime's SASL
+ * exchange are the only code that puts a Credential, or anything derived from one, into
+ * a Line. Its result is sent and never journaled. The SASL PLAIN
  * response is split into `AUTHENTICATE` Lines of {@link maxAuthenticateBytes} bytes of
  * payload, and ended by `AUTHENTICATE +` when the last is full.
  * @param line - Where the Credential goes, by name.
@@ -1202,7 +1230,7 @@ const oper = (
  * holding a line break or a NUL.
  */
 export const fillSecret = (
-  line: SecretLine,
+  line: FilledLine,
   value: Redacted.Redacted
 ): readonly OutboundLine[] | Rejected => {
   const revealed = Redacted.value(value);

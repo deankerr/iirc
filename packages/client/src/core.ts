@@ -50,6 +50,7 @@ import {
   expire,
   reconfigured,
   recompute,
+  scramChecked,
   settle,
   unfilled,
 } from "./registration.ts";
@@ -738,6 +739,56 @@ const unfilledHeld = (run: Run, line: SecretLine): void => {
   settle(run);
 };
 
+// The Runtime checked a SCRAM server-final message a Feature sent. With none to hear it,
+// it changes nothing.
+const scramCheckedHeld = (run: Run, verified: boolean): void => {
+  const was = before(run);
+
+  if (!scramChecked(run, verified)) {
+    ignore(run, { _tag: "NotNow", input: "ScramChecked" });
+
+    return;
+  }
+
+  recompute(run, was);
+  settle(run);
+};
+
+// Who hears of a `SecretLine` that could not be filled, by what it was for.
+const unfilledLine = (run: Run, line: SecretLine): void => {
+  switch (line._tag) {
+    case "JoinWithKey": {
+      unfilledKey(run, line.channel);
+      break;
+    }
+
+    case "AuthenticatePlain":
+    case "ScramFirst":
+    case "ScramFinal": {
+      unfilledHeld(run, line);
+      break;
+    }
+
+    case "Identify": {
+      identified(run);
+      break;
+    }
+
+    case "Oper": {
+      operUnsent(run);
+      break;
+    }
+
+    case "Pass": {
+      break;
+    }
+
+    default: {
+      line satisfies never;
+    }
+  }
+};
+
 // Lines that never left. A `Say` or an `Act` with one among them is refused, once, unless
 // the Ircd already confirmed it, a Lookup reports `Unsent`, and a CTCP answer is reported
 // where its request was, from any Connection, since it never left either way. Any other
@@ -798,7 +849,7 @@ const current = (run: Run, connection: ConnectionId): Link | undefined => {
 
 type FromTransport = Extract<
   Input,
-  { readonly _tag: "Opened" | "Received" | "Closed" | "Unfilled" }
+  { readonly _tag: "Opened" | "Received" | "Closed" | "Unfilled" | "ScramChecked" }
 >;
 
 const transport = (run: Run, input: FromTransport): void => {
@@ -834,22 +885,27 @@ const transport = (run: Run, input: FromTransport): void => {
     // Line it sent, such as SASL's. With no service told, its Channels wait on nothing,
     // and with no `OPER` sent, nothing answers it.
     case "Unfilled": {
-      if (input.line._tag === "JoinWithKey") {
-        unfilledKey(run, input.line.channel);
-      } else if (input.line._tag === "AuthenticatePlain") {
-        unfilledHeld(run, input.line);
-      } else if (input.line._tag === "Identify") {
-        identified(run);
-      } else if (input.line._tag === "Oper") {
-        operUnsent(run);
-      }
+      unfilledLine(run, input.line);
+      break;
+    }
 
+    case "ScramChecked": {
+      scramCheckedHeld(run, input.verified);
       break;
     }
 
     default: {
       input satisfies never;
     }
+  }
+};
+
+// The Owner cuts a wait short: only a Network waiting to dial again has one.
+const retry = (run: Run): void => {
+  if (run.state.network._tag === "Waiting") {
+    dial(run);
+  } else {
+    ignore(run, { _tag: "NotNow", input: "Retry" });
   }
 };
 
@@ -883,12 +939,7 @@ const routine = (run: Run, input: Routine): void => {
     }
 
     case "Retry": {
-      if (run.state.network._tag === "Waiting") {
-        dial(run);
-      } else {
-        ignore(run, { _tag: "NotNow", input: "Retry" });
-      }
-
+      retry(run);
       break;
     }
 
@@ -930,7 +981,8 @@ const routine = (run: Run, input: Routine): void => {
     case "Opened":
     case "Received":
     case "Closed":
-    case "Unfilled": {
+    case "Unfilled":
+    case "ScramChecked": {
       transport(run, input);
       break;
     }

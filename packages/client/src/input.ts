@@ -24,10 +24,17 @@ export type CloseReason = typeof CloseReason.Type;
 
 /**
  * Why the Runtime could not fill a `SecretLine`: the Vault holds no such Credential, the
- * Vault could not be read, or the Credential's value cannot be sent in that Line, such as
- * a password with a line break.
+ * Vault could not be read, the Credential's value cannot be sent in that Line, such as
+ * a password with a line break, or the Ircd's SASL challenge cannot be answered, such as a
+ * `SCRAM-SHA-256` server-first message that does not parse, does not extend the nonce the
+ * Runtime made, or asks for more iterations than it allows.
  */
-export const UnfilledReason = Schema.Literals(["Missing", "Unavailable", "Unsendable"]);
+export const UnfilledReason = Schema.Literals([
+  "Missing",
+  "Unavailable",
+  "Unsendable",
+  "Unanswerable",
+]);
 
 /** The decoded form of {@link UnfilledReason}. */
 export type UnfilledReason = typeof UnfilledReason.Type;
@@ -236,6 +243,12 @@ export const Input = Schema.TaggedUnion({
     target: Schema.String,
     text: Schema.String,
   },
+  /**
+   * The Runtime checked a SASL `SCRAM-SHA-256` server-final message, as a `CheckScram`
+   * asked: `verified` when it proves the Ircd held the Credential's keys, and not when it
+   * does not, says an error, or there was no exchange to check it against.
+   */
+  ScramChecked: { at: Instant, connection: ConnectionId, verified: Schema.Boolean },
   /** The Runtime has started. A Connection the Client believed open is over. */
   Started: { at: Instant },
   /**

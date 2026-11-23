@@ -1269,7 +1269,13 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           payload: configured({
             channels: [{ name: channel }],
             ircds: [{ host: "ergo.test", port: tlsPort, tls: true }],
-            login: { _tag: "Sasl", account: "iirc", credential, required: true },
+            login: {
+              _tag: "Sasl",
+              account: "iirc",
+              credential,
+              mechanism: "plain",
+              required: true,
+            },
             nicks: ["iirc"],
           }),
           query: {},
@@ -1402,6 +1408,86 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       others: [{ mask: "spam!*@*", setAt: true, setBy: "owner" }],
     });
   }, 90_000);
+
+  it("logs in by SCRAM-SHA-256 where Ergo lists it, and never journals the password or the proof", async () => {
+    const password = "a-scram-password-only-the-vault-holds";
+
+    const result = await run(
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await registerAccount({
+            account: "scramacct",
+            host: ergo.host,
+            password,
+            port: ergo.plainPort,
+          });
+        });
+
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+        const credential = CredentialPathName.make("scram-password");
+
+        yield* api.credentials.set({
+          params: { name: credential },
+          payload: { value: Redacted.make(password) },
+        });
+
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
+            login: {
+              _tag: "Sasl",
+              account: "scramacct",
+              credential,
+              mechanism: "auto",
+              required: true,
+            },
+            nicks: ["scramnick"],
+          }),
+          query: {},
+        });
+
+        const known = yield* joined(api);
+
+        yield* daemon.stop;
+
+        const stored = yield* Effect.promise(
+          async () =>
+            await Promise.all(
+              ["journal.sqlite", "journal.sqlite-wal"].map(async (name) => {
+                const file = Bun.file(`${dataDir}/${name}`);
+
+                return (await file.exists()) ? await file.text() : "";
+              })
+            )
+        );
+
+        const journal = stored.join("");
+
+        return {
+          account: known.self?.account,
+          password: journal.includes(password),
+          plain: journal.includes("AuthenticatePlain"),
+          proof: journal.includes(",p="),
+          scram: journal.includes("ScramFinal"),
+          session: known.session._tag,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      account: { _tag: "Known", value: "scramacct" },
+      password: false,
+      plain: false,
+      proof: false,
+      scram: true,
+      session: "Registered",
+    });
+  }, 120_000);
 
   // Ergo answers a NickServ login with a NOTICE alone, with no `900` and no `+r`, so the
   // Channel waits out the bound, and Self's account is known only from the `ACCOUNT` that

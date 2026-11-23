@@ -48,10 +48,14 @@ export type Kept =
  */
 export type KnownBefore = Pick<Knowledge, "session" | "casemapping" | "self">;
 
-/** A Line to send, or one that carries a Credential. */
+/**
+ * A Line to send, one that carries a Credential, or the Ircd's SASL `SCRAM-SHA-256`
+ * server-final message for the Runtime to check, in order with them.
+ */
 export type Sendable =
   | { readonly _tag: "Line"; readonly line: OutboundLine }
-  | { readonly _tag: "Secret"; readonly line: SecretLine };
+  | { readonly _tag: "Secret"; readonly line: SecretLine }
+  | { readonly _tag: "CheckScram"; readonly serverFinal: string };
 
 /** What a hook may do besides refining its value. */
 export interface Effects<Own> {
@@ -281,6 +285,11 @@ export interface Feature<Own = undefined> {
    * the Line was its own.
    */
   readonly unfilled?: (line: SecretLine, context: Context<Own>) => Effects<Own>;
+  /**
+   * While it is on, the Runtime checked a SASL `SCRAM-SHA-256` server-final message the
+   * Feature sent with `CheckScram`, and found it `verified` or not.
+   */
+  readonly scramChecked?: (verified: boolean, context: Context<Own>) => Effects<Own>;
   readonly tags?: (arrival: Arrival, context: Context<Own>) => Refined<Arrival, Own>;
   /** Return no Arrivals to hold this one, and several to release those held. */
   readonly batch?: (arrival: Arrival, context: Context<Own>) => Refined<readonly Arrival[], Own>;

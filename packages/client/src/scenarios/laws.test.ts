@@ -29,7 +29,13 @@ import {
 } from "../testing/index.ts";
 
 const base = configured({
-  login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: false },
+  login: {
+    _tag: "Sasl",
+    account: "iirc",
+    credential: CredentialName.make("pw"),
+    mechanism: "auto",
+    required: false,
+  },
 });
 
 const token = CapName.make("UTF8ONLY");

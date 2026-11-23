@@ -194,6 +194,10 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
   for (const each of lines) {
     if (each._tag === "Secret") {
       sendSecret(run, each.line);
+    } else if (each._tag === "CheckScram") {
+      if (id !== undefined) {
+        run.outputs.push({ _tag: "CheckScram", connection: id, serverFinal: each.serverFinal });
+      }
     } else if (id !== undefined) {
       run.outputs.push({ _tag: "Send", connection: id, line: each.line });
     }

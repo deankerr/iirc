@@ -25,7 +25,8 @@ import type {
 import { depth, makeOutbox, nextAt, offer, spend, take as takeLine, takeAll } from "@iirc/outbox";
 import type { Outbox, Pacing } from "@iirc/outbox";
 import { encode, fillSecret, isRejected } from "@iirc/protocol/line";
-import type { CredentialName, OutboundLine, SecretLine } from "@iirc/protocol/line";
+import type { CredentialName, ExchangeLine, OutboundLine, SecretLine } from "@iirc/protocol/line";
+import type { Redacted } from "effect";
 import {
   Cause,
   Deferred,
@@ -47,6 +48,8 @@ import { JournalFailed, Sequence } from "./journal.ts";
 import type { JournalService, NetworkId } from "./journal.ts";
 import { ClientThrew, lifeAfter, stepContained } from "./replay.ts";
 import type { Folded, InForce } from "./replay.ts";
+import { clientFinal, clientFirst, verify } from "./scram.ts";
+import type { Exchange } from "./scram.ts";
 import type { ClientCertificate, Link, LinkEvent, TransportService } from "./transport.ts";
 import type { VaultService } from "./vault.ts";
 
@@ -99,6 +102,13 @@ export const runtimeClosed = "The Runtime closed";
 
 /** Why a Network stops once the Owner removed it. */
 const networkRemoved = "The Network was removed";
+
+/** What carrying out an output left: Lines the Outbox refused, or an input to step next. */
+type Carried =
+  | { readonly _tag: "Refused"; readonly lines: readonly UnsentLine[] }
+  | { readonly _tag: "Step"; readonly input: (at: Instant) => Input };
+
+const none: Carried = { _tag: "Refused", lines: [] };
 
 /** A `SendSecret` that could not be filled, to be stepped as `Unfilled`. */
 interface Unfilled {
@@ -165,6 +175,12 @@ interface Live {
    * Credential, or pacing its filled Lines, which only the pump holds.
    */
   readonly unfinished: Ref.Ref<UnsentLine | undefined>;
+  /**
+   * The SASL `SCRAM-SHA-256` exchange under way, if any: its nonce, then the server
+   * signature it must check. It lives as long as the Connection, and is never journaled
+   * or logged.
+   */
+  readonly exchange: Ref.Ref<Exchange | undefined>;
   /**
    * Lines the pump dropped at a hang-up's cutoff, until the Network's fiber steps them as
    * `Unsent`. Whichever of a `Dropped` and the `Closed` comes first takes them, so they
@@ -400,6 +416,67 @@ const waitUntil = (held: Pumped, until: number, deadline: Instant | undefined) =
     Queue.take(held.wake)
   );
 
+// A round of the Connection's SCRAM exchange. The client-first message begins a new
+// exchange, replacing any before it. The client-final message answers only the one
+// its nonce came from, and only if it is still the Connection's when the proof is
+// derived: a check that came first ended it, so the proof is never sent.
+const answer = (
+  held: Pumped,
+  line: ExchangeLine,
+  password: Redacted.Redacted
+): Effect.Effect<
+  | { readonly _tag: "Encoded"; readonly lines: readonly Uint8Array[] }
+  | { readonly _tag: "Unanswerable" | "Unsendable" }
+> =>
+  Effect.gen(function* () {
+    const unsendable = { _tag: "Unsendable" } as const;
+    const unanswerable = { _tag: "Unanswerable" } as const;
+
+    if (line._tag === "ScramFirst") {
+      const opened = yield* clientFirst(line.authcid);
+
+      if (opened._tag !== "Answered") {
+        return opened;
+      }
+
+      const encoded = encodeAll(opened.lines);
+
+      if (encoded === undefined) {
+        return unsendable;
+      }
+
+      yield* Ref.set(held.exchange, opened.exchange);
+
+      return { _tag: "Encoded", lines: encoded } as const;
+    }
+
+    const first = yield* Ref.get(held.exchange);
+
+    if (first?._tag !== "First") {
+      return unanswerable;
+    }
+
+    const proved = yield* clientFinal(first, password, line.serverFirst);
+
+    if (proved._tag !== "Answered") {
+      yield* Ref.set(held.exchange, undefined);
+
+      return proved;
+    }
+
+    const encoded = encodeAll(proved.lines);
+
+    const current = yield* Ref.modify(held.exchange, (now) =>
+      now === first && encoded !== undefined ? [true, proved.exchange] : [false, undefined]
+    );
+
+    if (encoded === undefined) {
+      return unsendable;
+    }
+
+    return current ? ({ _tag: "Encoded", lines: encoded } as const) : unanswerable;
+  });
+
 /**
  * Makes a Network's handle, stopped or ready to drive.
  * @param id - The Network.
@@ -479,6 +556,7 @@ const drive = <S>(
     // `Unfilled`.
     const fill = (
       connection: ConnectionId,
+      held: Pumped,
       line: SecretLine
     ): Effect.Effect<readonly Uint8Array[] | undefined> =>
       Effect.gen(function* () {
@@ -510,6 +588,12 @@ const drive = <S>(
 
         if (revealed._tag === "Refused") {
           return yield* refuse(revealed.reason);
+        }
+
+        if (line._tag === "ScramFirst" || line._tag === "ScramFinal") {
+          const answered = yield* answer(held, line, revealed.value);
+
+          return answered._tag === "Encoded" ? answered.lines : yield* refuse(answered._tag);
         }
 
         const filled = fillSecret(line, revealed.value);
@@ -620,7 +704,7 @@ const drive = <S>(
                 break;
               }
 
-              const encoded = yield* fill(connection, item.line);
+              const encoded = yield* fill(connection, held, item.line);
 
               if (encoded === undefined || encoded.length === 0) {
                 yield* Ref.set(held.unfinished, undefined);
@@ -715,6 +799,7 @@ const drive = <S>(
 
         const held: Pumped = {
           dropped: yield* Ref.make<readonly UnsentLine[]>([]),
+          exchange: yield* Ref.make<Exchange | undefined>(undefined),
           hangup: yield* Ref.make<Instant | undefined>(undefined),
           ircd: output.ircd,
           link,
@@ -794,24 +879,54 @@ const drive = <S>(
         yield* Queue.offer(held.wake, true);
       });
 
-    // Each output, carried out, with any Line the Outbox refused.
-    const carryOut = (output: Output): Effect.Effect<readonly UnsentLine[]> => {
+    // The Ircd's SCRAM server-final message, checked against the Connection's exchange,
+    // which ends with it. Its result is stepped at once, before any other input, so the
+    // Client knows it before the Ircd's `903`, which may come right behind.
+    const checkScram = (output: Extract<Output, { _tag: "CheckScram" }>) =>
+      Effect.gen(function* () {
+        const held = yield* live(output.connection);
+
+        const exchange =
+          held === undefined ? undefined : yield* Ref.getAndSet(held.exchange, undefined);
+
+        const verified = verify(exchange, output.serverFinal);
+
+        if (!verified) {
+          yield* Effect.logWarning("The Ircd's SASL server signature was not verified", {
+            connection: output.connection,
+          });
+        }
+
+        return (at: Instant): Input => ({
+          _tag: "ScramChecked",
+          at,
+          connection: output.connection,
+          verified,
+        });
+      });
+
+    // Each output, carried out, with any Line the Outbox refused, or the input it steps.
+    const carryOut = (output: Output): Effect.Effect<Carried> => {
       switch (output._tag) {
+        case "CheckScram": {
+          return Effect.map(checkScram(output), (input) => ({ _tag: "Step", input }) as const);
+        }
+
         case "Dial": {
-          return Effect.as(dial(output.connection, output), []);
+          return Effect.as(dial(output.connection, output), none);
         }
 
         case "Send":
         case "SendSecret": {
-          return enqueue(output);
+          return Effect.map(enqueue(output), (lines) => ({ _tag: "Refused", lines }) as const);
         }
 
         case "Hangup": {
-          return Effect.as(hangup(output.connection), []);
+          return Effect.as(hangup(output.connection), none);
         }
 
         case "Wake": {
-          return Effect.as(wake(output.timer, output.at), []);
+          return Effect.as(wake(output.timer, output.at), none);
         }
 
         default: {
@@ -873,19 +988,30 @@ const drive = <S>(
           }
         }
 
+        const checked: ((at: Instant) => Input)[] = [];
+
         for (const output of step.outputs) {
-          refused.push(...(yield* carryOut(output)));
+          const carried = yield* carryOut(output);
+
+          if (carried._tag === "Step") {
+            checked.push(carried.input);
+          } else {
+            refused.push(...carried.lines);
+          }
         }
 
         const unsent = Map.groupBy(refused, (line) => line.connection);
 
         return {
-          more: [...unsent].map(([connection, outputs]) => (at: Instant): Input => ({
-            _tag: "Unsent",
-            at,
-            connection,
-            outputs,
-          })),
+          more: [
+            ...checked,
+            ...[...unsent].map(([connection, outputs]) => (at: Instant): Input => ({
+              _tag: "Unsent",
+              at,
+              connection,
+              outputs,
+            })),
+          ],
           news: step.news,
           sequence,
         };

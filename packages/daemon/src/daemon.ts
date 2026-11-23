@@ -28,6 +28,7 @@ import {
   Layer,
   LogLevel,
   Logger,
+  Random,
   Scope,
 } from "effect";
 import type { Path } from "effect";
@@ -134,6 +135,25 @@ const dataDirectory = (dataDir: string) =>
     })
   ).pipe(Layer.provide(BunFileSystem.layer));
 
+// The most a double from Random can hold exactly: 53 bits.
+const doubleBits = 2 ** 53;
+
+// A number below `2 ** 53` from seven secure random bytes, the last giving five bits.
+const secureBits = (): number =>
+  SecureRandom.randomBytesUnsafe(7).reduce(
+    (sum, byte, index) => sum + (index === 6 ? byte % 32 : byte) * 256 ** index,
+    0
+  );
+
+/**
+ * Effect's Random from the platform's secure source rather than `Math.random`, for the
+ * Runtime, which makes a SASL `SCRAM-SHA-256` nonce from it, so no Ircd can predict one.
+ */
+const secureRandom: Random.Random = {
+  nextDoubleUnsafe: () => secureBits() / doubleBits,
+  nextIntUnsafe: secureBits,
+};
+
 /**
  * The Runtime in a Scope of its own, which {@link StopRuntime} closes, so the Daemon can
  * stop it before serving stops. It spares the Credentials the Owner's options name when it
@@ -158,7 +178,9 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
         stopTimeout: options.stopTimeout,
       });
 
-      const built = yield* Layer.buildWithScope(runtime, scope);
+      const built = yield* Layer.buildWithScope(runtime, scope).pipe(
+        Effect.provideService(Random.Random, secureRandom)
+      );
 
       return Context.add(built, StopRuntime, close);
     })

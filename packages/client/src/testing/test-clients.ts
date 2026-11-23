@@ -520,6 +520,7 @@ const step =
       case "Removed":
       case "Retry":
       case "Stopping":
+      case "ScramChecked":
       case "Unfilled":
       case "Unsent": {
         return ignore(state, { _tag: "NotNow", input: input._tag });

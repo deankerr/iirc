@@ -166,6 +166,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.login.required",
         "network.libera.login.account",
         "network.libera.login.credential",
+        "network.libera.login.mechanism",
         "network.libera.login.service",
         "network.libera.login.wait",
         "network.libera.nicks",
@@ -217,6 +218,7 @@ describe("the options, derived from the Schema", () => {
         starts: "libera.login.credential",
         value: { _tag: "Credential", held: true, name: "libera.sasl" },
       },
+      "login.mechanism": { starts: "auto", value: { _tag: "Shown", text: "auto" } },
       "login.required": { starts: "off", value: { _tag: "Shown", text: "on" } },
       "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
       "login.wait": { starts: "5", value: { _tag: "Unset" } },
@@ -261,6 +263,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.login.credential",
         { _tag: "Credential", held: true, name: "libera.login.credential" },
       ],
+      ["network.libera.login.mechanism", { _tag: "Unset" }],
       ["network.libera.login.service", { _tag: "Shown", text: "NickServ" }],
       ["network.libera.login.wait", { _tag: "Shown", text: "5" }],
     ]);
@@ -697,6 +700,7 @@ describe("editing", () => {
         _tag: "Sasl",
         account: "other",
         credential: "libera.login.credential",
+        mechanism: "auto",
         required: false,
       },
       none: { _tag: "None" },
@@ -705,6 +709,7 @@ describe("editing", () => {
         _tag: "Sasl",
         account: "dean",
         credential: "libera.login.credential",
+        mechanism: "auto",
         required: false,
       },
     });
@@ -774,6 +779,7 @@ describe("editing", () => {
         _tag: "Sasl",
         account: "dean",
         credential: "libera.login.credential",
+        mechanism: "auto",
         required: true,
       },
     });

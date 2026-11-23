@@ -5,16 +5,22 @@
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
-import type { IrcdAddress } from "../configuration.ts";
+import type { IrcdAddress, SaslMechanism } from "../configuration.ts";
 import { client } from "../core.ts";
 import { FeatureName } from "../ids.ts";
 import { configured, play, registered } from "../testing/index.ts";
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
-const login = (required: boolean) =>
+const login = (required: boolean, mechanism: SaslMechanism = "auto") =>
   configured({
-    login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required },
+    login: {
+      _tag: "Sasl",
+      account: "iirc",
+      credential: CredentialName.make("pw"),
+      mechanism,
+      required,
+    },
   });
 
 const optional = login(false);
@@ -90,7 +96,10 @@ describe("logging in", () => {
   });
 
   it("reads the mechanisms in any case and order", () => {
-    play(client, { configuration: optional, transcript: asked("=EXTERNAL,plain,SCRAM-SHA-256") });
+    play(client, {
+      configuration: login(false, "plain"),
+      transcript: asked("=EXTERNAL,plain,SCRAM-SHA-256"),
+    });
 
     expect.assertions(0);
   });
@@ -297,7 +306,7 @@ describe("logging in with EXTERNAL", () => {
 describe("a login that cannot happen", () => {
   it("does not try when the Ircd lists mechanisms without PLAIN", () => {
     play(client, {
-      configuration: optional,
+      configuration: login(false, "plain"),
       transcript: lines(
         opened.trimEnd(),
         "<< :irc.test CAP * LS :sasl=EXTERNAL,SCRAM-SHA-256",
@@ -509,6 +518,7 @@ describe("a required login never goes unmet", () => {
         _tag: "Sasl",
         account: "iirc",
         credential: CredentialName.make("pw"),
+        mechanism: "auto",
         required: true,
       },
     });

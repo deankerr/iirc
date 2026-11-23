@@ -15,7 +15,13 @@ const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\
 const none = configured({ channels: [{ name: "#iirc" }] });
 
 const required = configured({
-  login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+  login: {
+    _tag: "Sasl",
+    account: "iirc",
+    credential: CredentialName.make("pw"),
+    mechanism: "auto",
+    required: true,
+  },
 });
 
 const opened = lines(
@@ -81,6 +87,7 @@ describe("a Configured that requires a login", () => {
         _tag: "Sasl",
         account: "iirc",
         credential: CredentialName.make("pw"),
+        mechanism: "auto",
         required: false,
       },
     });

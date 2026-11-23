@@ -37,6 +37,7 @@ const fixtures = [
         _tag: "Sasl",
         account: "iirc",
         credential: CredentialName.make("iirc"),
+        mechanism: "plain",
         required: true,
       },
     }),
@@ -182,7 +183,13 @@ describe("the first Features on the recorded Ircds", () => {
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
 const login = configured({
-  login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+  login: {
+    _tag: "Sasl",
+    account: "iirc",
+    credential: CredentialName.make("pw"),
+    mechanism: "plain",
+    required: true,
+  },
 });
 
 const everyCap = [
