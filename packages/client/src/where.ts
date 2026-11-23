@@ -14,7 +14,7 @@ import type { IgnoreMask } from "@iirc/protocol/mask";
 import { isHighlight } from "./highlight.ts";
 import { ignoredBy } from "./ignores.ts";
 import { isSelf, namingNow, rulesNow, serverName } from "./meaning.ts";
-import { inListing } from "./members.ts";
+import { inListing, memberLookup } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import { isNetworkOnly, isPresenceChange, isUserChange } from "./news.ts";
@@ -23,17 +23,21 @@ import type {
   Marked,
   Named,
   News,
+  NickSpan,
   PresenceChange,
   Unrouted,
   UserChange,
   Where,
 } from "./news.ts";
+import { nickSpans } from "./nicks.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
 import type { Joined, Member } from "./state.ts";
 import { sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
+
+type ConfirmedNews = Extract<News, { readonly _tag: "Confirmed" }>;
 
 type ActivityNews = Extract<News, { readonly _tag: "Activity" }>;
 
@@ -447,6 +451,59 @@ const prefixOfSender = (run: Run, sender: string, target: string): string | unde
 };
 
 /**
+ * The spans of a Message's text that name a User who counts: the members of each Channel
+ * Self is in that it is said to, and, for each Direct Message it is, the partner and Self.
+ * What belongs to the Network's own Timeline names no one. What the Ircd or another
+ * server says to a Channel is read as a User's is.
+ * @param run - The step, before the Message is folded in.
+ * @param message - Who said it, by nick, the Target as said, and what was said.
+ * @param fromUser - Whether a User said it, rather than the Ircd or another server.
+ * @returns The spans, in order.
+ */
+const nicksOf = (
+  run: Run,
+  message: { readonly sender: string; readonly target: string; readonly text: string },
+  fromUser: boolean
+): readonly NickSpan[] => {
+  const naming = namingNow(run);
+  const fold = folder(run.state);
+  const nick = fromUser ? parseNick(naming, message.sender) : undefined;
+  const self = sessionOf(run.state)?.nick;
+  const members: ((folded: string) => boolean)[] = [];
+  const partners = new Set<string>();
+  let selfCounts = false;
+
+  for (const target of parseTargets(naming, message.target)) {
+    const where = targetWhere(run, nick, target);
+
+    if (where._tag === "Channel") {
+      const { phase } = run.state.channels.get(fold(where.name)) ?? {};
+
+      if (phase?._tag === "Joined") {
+        members.push(memberLookup(phase));
+        // Self is a member of a Channel it is joined to, whatever a listing said.
+        selfCounts = true;
+      }
+    } else if (where._tag === "Direct") {
+      partners.add(fold(where.name));
+      selfCounts = true;
+    }
+  }
+
+  if (selfCounts && self !== undefined) {
+    partners.add(fold(self));
+  }
+
+  return members.length === 0 && partners.size === 0
+    ? []
+    : nickSpans(
+        fold,
+        message.text,
+        (folded) => partners.has(folded) || members.some((isMember) => isMember(folded))
+      );
+};
+
+/**
  * A Message read from a Line, with where it belongs.
  * @param run - The step, before the Message is folded in.
  * @param message - The Message.
@@ -463,6 +520,7 @@ export const routeMessage = (
   return {
     ...message,
     highlight: isHighlight(run, message, fromUser),
+    nicks: nicksOf(run, message, fromUser),
     prefix: fromUser ? prefixOfSender(run, message.sender, message.target) : undefined,
     self: fromUser && isSelf(run, message.sender),
     where: messageWhere(run, message.sender, fromUser, message.target),
@@ -479,10 +537,31 @@ export const routeMessage = (
 export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews => ({
   ...message,
   highlight: false,
+  nicks: nicksOf(run, message, true),
   prefix: prefixOfSender(run, message.sender, message.target),
   self: true,
   where: messageWhere(run, message.sender, true, message.target),
 });
+
+/**
+ * What Self's echo of a Message confirms, with the spans of its own text that name a User,
+ * for the Target it was said to.
+ * @param run - The step, before the echo is folded in.
+ * @param echo - The echo, with the Target it was said to.
+ * @returns The Confirmed News.
+ */
+export const routeConfirmed = (run: Run, echo: Unrouted<ConfirmedNews>): ConfirmedNews => {
+  const { target, ...confirmed } = echo;
+
+  return {
+    ...confirmed,
+    nicks: nicksOf(
+      run,
+      { sender: sessionOf(run.state)?.nick ?? "", target, text: echo.text },
+      true
+    ),
+  };
+};
 
 /**
  * Where a Message Self said to a Target stands now, as {@link routeOurs} places it.

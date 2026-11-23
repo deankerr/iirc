@@ -87,6 +87,7 @@ export {
   LocateQuery,
   Located,
   Marked,
+  NickSpan,
   Closable,
   Member,
   MemberKnowledge,

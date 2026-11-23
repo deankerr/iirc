@@ -494,6 +494,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 - **A Direct Message's `context`, the Channel it is about, is contained like any name.**
 - **A Message line says its sender is a bot** in `bot`, and the prefix they held when it was said, contained, in `prefix`.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16.
+- **A Message's text draws each span the Client found naming a User in that nick's colour,** a `Nick` inline, unless a mIRC colour, background, or reversal covers it or a link holds it. A search result's characters carry the colour of exactly what is drawn as a `Nick`, so a link or a mIRC colour leaves them uncoloured as it does there.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`.
 - **A refused action is a line of its own,** such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong** (`mismatchedTls`): a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667.

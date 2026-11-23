@@ -25,6 +25,7 @@ const heard = (sequence: number): Change => ({
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: undefined,
     prefix: undefined,
     sender: "peer",

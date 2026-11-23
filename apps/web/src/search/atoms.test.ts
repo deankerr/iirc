@@ -58,6 +58,7 @@ const message = (
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender,
@@ -162,9 +163,9 @@ describe("searching", () => {
       main: "Search",
       narrowed: [150, 145],
       shown: [
-        { match: false, text: "a " },
-        { match: true, text: "word" },
-        { match: false, text: " 150" },
+        { colour: undefined, match: false, text: "a " },
+        { colour: undefined, match: true, text: "word" },
+        { colour: undefined, match: false, text: " 150" },
       ],
     });
   });

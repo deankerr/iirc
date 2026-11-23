@@ -20,6 +20,7 @@ import type {
   LookResult,
   Named,
   News,
+  NickSpan,
   Ours,
   NetworkOnly,
   PresenceChange,
@@ -671,6 +672,10 @@ const describeTimelineNews = (news: TimelineNews): string => {
   }
 };
 
+// The spans that name a User, as `nicks=0-3,10-13`, or nothing for none.
+const writeNicks = (nicks: readonly NickSpan[]): readonly string[] =>
+  nicks.length === 0 ? [] : [`nicks=${nicks.map(({ start, end }) => `${start}-${end}`).join(",")}`];
+
 const writeMessage = (news: Extract<News, { readonly _tag: "Message" }>, now: Instant): string =>
   words([
     "message",
@@ -683,6 +688,7 @@ const writeMessage = (news: Extract<News, { readonly _tag: "Message" }>, now: In
     ...(news.self && news.ours === undefined ? ["self"] : []),
     ...(news.bot ? ["bot"] : []),
     ...(news.prefix === undefined ? [] : [`prefix=${atom(news.prefix)}`]),
+    ...writeNicks(news.nicks),
     ...writeStamp(news.ignored),
     ...writeWhere(news.where),
     ...writeTags(news.tags),
@@ -738,7 +744,13 @@ export const describeNews = (news: News, now: Instant): string => {
     }
 
     case "Confirmed": {
-      return words(["confirmed", atom(news.intent), ...attributes(news, now), `:${news.text}`]);
+      return words([
+        "confirmed",
+        atom(news.intent),
+        ...attributes(news, now),
+        ...writeNicks(news.nicks),
+        `:${news.text}`,
+      ]);
     }
 
     case "Activity": {

@@ -153,6 +153,7 @@ const news: fc.Arbitrary<News> = fc.oneof(
       ignored: masks,
       kind: fc.constant("Privmsg"),
       live: fc.boolean(),
+      nicks: fc.array(fc.record({ end: fc.nat(20), start: fc.nat(20) }), { maxLength: 3 }),
       ours: fc.option(fc.record({ echo: fc.boolean(), intent }), { nil: undefined }),
       prefix: fc.option(fc.constantFrom("@", "+"), { nil: undefined }),
       self: fc.boolean(),
@@ -173,6 +174,7 @@ const news: fc.Arbitrary<News> = fc.oneof(
         "id",
         "kind",
         "live",
+        "nicks",
         "ours",
         "prefix",
         "self",
@@ -203,6 +205,7 @@ const news: fc.Arbitrary<News> = fc.oneof(
     at: fact(at),
     id: fact(messageId),
     intent,
+    nicks: fc.array(fc.record({ end: fc.nat(20), start: fc.nat(20) }), { maxLength: 3 }),
     text: fc.string(),
   }),
   fc.record({

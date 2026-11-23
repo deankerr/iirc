@@ -74,6 +74,7 @@ const message = (sequence: number, at = sequence * 1000): typeof TimelineItem.En
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender: "peer",

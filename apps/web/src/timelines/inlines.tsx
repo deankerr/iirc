@@ -1,6 +1,6 @@
 /**
  * Formatted text as React elements: each run a text node in a span whose classes say its
- * style, and each link an anchor that opens in a new tab, with whatever its caller puts after
+ * style, a nick's in its slot's colour, and each link an anchor that opens in a new tab, with whatever its caller puts after
  * it, such as a Preview's toggle. Nothing a Network sent is ever
  * markup: it is only ever a text node's text, or a link's `href` the core parsed.
  *
@@ -62,6 +62,10 @@ export const Inlines = ({
   return inlines.map((inline, index) => {
     const { className, colours } = styled(inline.style, theme);
 
+    // A nick's slot is the theme's own colour, read as a property of the element.
+    const drawn: CSSProperties =
+      inline._tag === "Nick" ? { ...colours, color: `var(--nick-${inline.colour})` } : colours;
+
     return inline._tag === "Link" && links ? (
       // The runs of one text never move, so their order is their identity.
       // oxlint-disable-next-line react/no-array-index-key
@@ -85,7 +89,7 @@ export const Inlines = ({
       </Fragment>
     ) : (
       // oxlint-disable-next-line react/no-array-index-key
-      <span className={className} key={index} style={colours}>
+      <span className={className} key={index} style={drawn}>
         {inline.text}
       </span>
     );

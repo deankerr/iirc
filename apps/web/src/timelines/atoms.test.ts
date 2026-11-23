@@ -59,6 +59,7 @@ const message = (sequence: number, text = `line ${sequence}`): typeof TimelineIt
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: null,
     prefix: null,
     sender: "peer",

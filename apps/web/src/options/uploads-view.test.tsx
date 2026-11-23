@@ -389,6 +389,7 @@ const ours = (
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
+    nicks: [],
     ours: mine ? { delivery: { _tag: "Unconfirmed" }, intent: `web-${sequence}` } : null,
     prefix: null,
     sender: mine ? "iirc" : "peer",
