@@ -1,3 +1,4 @@
+import type { Closed } from "@iirc/api";
 /**
  * Closing a Timeline, as atoms: what carries out a close, and the offer to leave a Channel
  * Self is in, which the core folds. The Daemon never closes a Channel Self is in, and says
@@ -8,15 +9,9 @@
  *
  * @packageDocumentation
  */
-import {
-  closedBy,
-  initialLeaving,
-  leaveOf,
-  reduceClosing,
-  reduceLeaving,
-} from "@iirc/frontend/closing";
+import { initialLeaving, leaveOf, reduceClosing, reduceLeaving } from "@iirc/frontend/closing";
 import type { ClosingEvent, Leave, Leaving, LeavingEvent } from "@iirc/frontend/closing";
-import type { CloseTimeline } from "@iirc/frontend/commands";
+import type { CloseTarget, CloseTimeline } from "@iirc/frontend/commands";
 import { Effect, Exit } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -62,10 +57,26 @@ const closingHappened = (registry: AtomRegistry.AtomRegistry, event: ClosingEven
   registry.set(closingState, reduceClosing(registry.get(closingState), event));
 };
 
+/** A close: of a Timeline held, by its id, or of what the Owner named that none held is. */
+type Close = CloseTimeline | CloseTarget;
+
+/**
+ * What a close is of, in words: the Timeline's name as held, or the Target as typed.
+ * @param registry - The registry.
+ * @param close - The close.
+ * @returns The name.
+ */
+const nameOf = (registry: AtomRegistry.AtomRegistry, close: Close): string =>
+  close._tag === "CloseTarget"
+    ? close.target
+    : (registry.get(timelinesState).networks.get(close.network)?.timelines.get(close.timeline)
+        ?.name ?? "That Timeline");
+
 /**
  * Carries out a close that shows at once, when it names a Timeline held: it is folded in as
  * asked, and let go of once answered, however that ends, but for a close the Daemon did,
- * which holds until the stream says so, so the Timeline never shows again meanwhile.
+ * which holds until the stream says so, so the Timeline never shows again meanwhile. A close
+ * of a Target is of nothing held, so shows nothing.
  * @param registry - The registry.
  * @param close - The close.
  * @param work - What carries it out.
@@ -75,19 +86,21 @@ const closingHappened = (registry: AtomRegistry.AtomRegistry, event: ClosingEven
  */
 const onItsWay = <A, E, R>(
   registry: AtomRegistry.AtomRegistry,
-  close: CloseTimeline,
+  close: Close,
   work: Effect.Effect<A, E, R>,
   closedAt: (done: A) => number | undefined
-) => {
-  const timeline = closedBy(registry.get(timelinesState).networks, close);
-
-  return timeline === undefined
+) =>
+  close._tag === "CloseTarget"
     ? work
     : Effect.acquireUseRelease(
         Effect.sync(() => {
           const { next } = registry.get(closingState);
 
-          closingHappened(registry, { _tag: "Asked", network: close.network, timeline });
+          closingHappened(registry, {
+            _tag: "Asked",
+            network: close.network,
+            timeline: close.timeline,
+          });
 
           return next;
         }),
@@ -101,31 +114,32 @@ const onItsWay = <A, E, R>(
             });
           })
       );
-};
 
 /**
  * Why a close was not done, in words, from its error's tag, never its text. Closing can be
  * asked again freely.
  * @param close - The close.
+ * @param name - What it is of, in words.
  * @param tag - The error's tag.
  * @returns What it came to.
  */
-const refusedWith = (close: CloseTimeline, tag: string): Outcome => {
+const refusedWith = (close: Close, name: string, tag: string): Outcome => {
   if (tag === "Unauthorized") {
     return { _tag: "SignedOut" };
   }
 
   const reasons: ReadonlyMap<string, string> = new Map([
     ["UnknownNetwork", `The Daemon has no Network ${close.network}, so nothing was closed.`],
+    ["UnknownTimeline", `The Daemon has no ${name}, so nothing was closed.`],
     [
       "NetworkStopped",
-      `${close.network} has stopped, so whether ${close.target} was closed is unknown. Closing it again is safe.`,
+      `${close.network} has stopped, so whether ${name} was closed is unknown. Closing it again is safe.`,
     ],
   ]);
 
   return {
     _tag: "NotDone",
-    message: reasons.get(tag) ?? `The Daemon did not close ${close.target}. Try again.`,
+    message: reasons.get(tag) ?? `The Daemon did not close ${name}. Try again.`,
   };
 };
 
@@ -139,11 +153,20 @@ const refusedWith = (close: CloseTimeline, tag: string): Outcome => {
  */
 export const closeTimeline = (
   registry: AtomRegistry.AtomRegistry,
-  close: CloseTimeline
+  close: Close
 ): Effect.Effect<Outcome, never, DaemonClient> =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     let stayed = registry.get(signedIn);
+
+    // The route differs by what names the Timeline, and the answer is the same.
+    const sent: Effect.Effect<Closed, { readonly _tag: string }> =
+      close._tag === "CloseTimeline"
+        ? client.timelines.close({ params: { timeline: close.timeline } })
+        : client.networks.close({
+            params: { network: close.network },
+            payload: { target: close.target },
+          });
 
     const answer = yield* Effect.acquireUseRelease(
       Effect.sync(() =>
@@ -155,14 +178,10 @@ export const closeTimeline = (
         onItsWay(
           registry,
           close,
-          client.networks
-            .close({ params: { network: close.network }, payload: { target: close.target } })
-            .pipe(
-              Effect.map((closed) => ({ _tag: "Answered", closed }) as const),
-              Effect.catch((error) =>
-                Effect.succeed({ _tag: "Failed", error: error._tag } as const)
-              )
-            ),
+          sent.pipe(
+            Effect.map((closed) => ({ _tag: "Answered", closed }) as const),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
+          ),
           (done) =>
             done._tag === "Answered" && done.closed._tag === "Closed"
               ? done.closed.sequence
@@ -172,7 +191,7 @@ export const closeTimeline = (
     );
 
     if (answer._tag === "Failed") {
-      return refusedWith(close, answer.error);
+      return refusedWith(close, nameOf(registry, close), answer.error);
     }
 
     const { closed } = answer;
@@ -184,7 +203,10 @@ export const closeTimeline = (
     if (closed.reason._tag === "NoTimeline") {
       return {
         _tag: "NotDone",
-        message: `${close.target} names no one Timeline, so nothing was closed.`,
+        message:
+          close._tag === "CloseTarget"
+            ? `${close.target} names no one Timeline, so nothing was closed.`
+            : `${nameOf(registry, close)} cannot be closed, so nothing was closed.`,
       } satisfies Outcome;
     }
 

@@ -166,7 +166,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, a mask that does not parse is refused saying why, and masks are compared under the Network's casemapping.
 - **`/ignore` alone opens the options on the Network's `ignores`.**
 - **`/query` opens a Timeline by name and never makes one.** `queried` finds it by the casemapping `known` reports, and with none shows a Direct Message not yet begun.
-- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane. Whether Self is in a Channel is the Daemon's to answer.
+- **`/close-timeline [#channel|nick]` closes a Timeline by its id,** the focused one unless named, never a Network's own, and never a Pane. A name a Timeline held on the Network has, folded as `/go` folds it, closes that Timeline, and any other name is left to the Network's Client as a Target (`CloseTarget`). Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and `keep` or `drop` to start on. A lone `keep` or `drop` is the choice about the focused Network, so a Network of that id is named with both words, as `/network remove keep keep`. Nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, a raw `PASS`, `AUTHENTICATE`, or `OPER`, and `/oper` are refused, `/oper` naming the `oper` options to set instead.
 - **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks.
@@ -566,7 +566,8 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **`/read all` still marks a muted Timeline, and `/next-unread` passes it over** unless a Highlight is unread there.
 - **`ui.unread.quietBots` leaves what bots said out of the counts.** Off, and until the options are read, everything counts. A Timeline where only bots spoke is passed over by `/next-unread`, though `/read all` still marks it.
 - **A divider that only bots' Messages opened is dropped while bots are quieted** (`dividerShown`).
-- **A removed Network's Timelines are never marked, and call for nothing,** neither in the title nor for `/next-unread`.
+- **A Timeline is marked read by its id** (`markOf`), a detached Direct Message and a removed Network's kept Timeline too, unless nothing is unread or the instant is not past its Read Marker.
+- **A removed Network's Timelines call for nothing,** neither in the title nor for `/next-unread`, though `/read` and `/read all` still mark them.
 
 ## Removing a Network
 
@@ -584,10 +585,10 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 `@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), and the offer to leave a Channel Self is in instead, as a reducer, `reduceLeaving`.
 
 - **A close shows at once.** `reduceClosing` holds each close asked for until it is answered, or, answered closed, until the Timeline changes after it, and `closingShown` gives the Timelines `sidebar` leaves out meanwhile. A refusal or a failure shows the Timeline again.
-- **A close is matched to its Timeline by the name the Daemon gives** (`closedBy`), so a Target typed otherwise shows only once answered.
+- **A close of a Timeline held names it by its id,** so it shows at once. A Target typed that no Timeline held has shows nothing until it is answered.
 - **A Channel Self is in is never closed.** The Daemon refuses it as `Joined`, naming the Channel it checked, and that refusal offers to leave it, so `@#iirc` offers and leaves `#iirc`.
 - **Leaving is sent once, only once the Owner chooses it** (`leaveOf`): as the edit `/part` sends when the Network's Configuration wants the Channel, and as the `Part` action when it does not. Leaving does not close the Channel.
-- **Only a Channel's or a Direct Message's Timeline has a Target to close it by.** A Network's own, a Direct Message that no longer follows its partner, and a removed Network's have none.
+- **Any Channel's or Direct Message's Timeline can be closed from its row** (`closeOf`), a Direct Message that no longer follows its partner and a removed Network's kept ones too, since the id names it. A Network's own is never closed.
 
 ## Notifications
 

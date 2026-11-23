@@ -48,9 +48,9 @@ const refusedWith = (tag: string, mark: MarkRead): Outcome => {
   return {
     _tag: "NotDone",
     message:
-      tag === "UnknownNetwork"
-        ? `The Daemon has no Network ${mark.network}.`
-        : `The Daemon did not mark ${mark.target ?? mark.network} read. Try /read again.`,
+      tag === "UnknownTimeline"
+        ? `The Daemon has no such Timeline on ${mark.network}, so nothing was marked read.`
+        : `The Daemon did not mark a Timeline on ${mark.network} read. Try /read again.`,
   };
 };
 
@@ -63,11 +63,8 @@ export const markRead = (mark: MarkRead): Effect.Effect<Outcome, never, DaemonCl
   Effect.gen(function* () {
     const client = yield* DaemonClient;
 
-    return yield* client.networks
-      .read({
-        params: { network: mark.network },
-        payload: { read: mark.read, target: mark.target },
-      })
+    return yield* client.timelines
+      .read({ params: { timeline: mark.timeline }, payload: { read: mark.read } })
       .pipe(
         Effect.as<Outcome>({ _tag: "Done" }),
         Effect.catch((error) => Effect.succeed(refusedWith(error._tag, mark)))

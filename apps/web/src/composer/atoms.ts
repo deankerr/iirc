@@ -749,7 +749,8 @@ const changeOne = (
       return markRead(intent);
     }
 
-    case "CloseTimeline": {
+    case "CloseTimeline":
+    case "CloseTarget": {
       return closeTimeline(registry, intent);
     }
 

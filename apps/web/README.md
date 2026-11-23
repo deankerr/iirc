@@ -43,6 +43,7 @@ The core decides and this package draws and does the I/O.
 - **A Highlight's line is tinted, and a "new" divider stands before the first unread item.**
 - **Marks read as `ui.unread.markRead` says on this device,** once what the Owner has seen has held for a second in a Pane they can see. Under `latest`, the default, a Timeline is marked at its latest. Under `shown`, it is marked up to the last item on screen, scrolled up or not.
 - **Under `asked`, only `/read` marks a Timeline read.** Nothing is marked until this device or the shared options say which rule holds.
+- **Names the Timeline by its id to mark it read,** so a detached Direct Message and a removed Network's kept Timeline clear their counts too.
 - **The Daemon keeps the Read Marker,** so every Frontend sees the counts clear.
 - **Mutes a Timeline,** from its row's menu, or with `/mute` and `/unmute` for the focused one, a Network's own too, as `ui.unread.muted` says on every device. More than 256 is refused in words.
 - **A muted row counts only its Highlights.** It is dim and in italics, with a quiet `∅` after its name and `muted` in its label.
@@ -146,7 +147,7 @@ The core decides and this package draws and does the I/O.
 ### Saving and closing a Timeline
 
 - **Saves a Timeline as text,** from its row's menu or `/export [since] [until]`, as a file the browser downloads. A day given is placed in the Owner's time zone.
-- **Closes a Timeline,** from its row's menu or `/close-timeline`. It leaves the Sidebar as the close is asked, and comes back, with why, if the Daemon refuses it or the request fails.
+- **Closes a Timeline by its id,** from its row's menu or `/close-timeline`, a detached Direct Message and a removed Network's kept Timeline too. It leaves the Sidebar as the close is asked, and comes back, with why, if the Daemon refuses it or the request fails.
 - **A closed Timeline is out of the Sidebar until something arrives in it.** `/go` and the search still find it, and it shows in the Sidebar while a Pane has it open.
 - **A Channel Self is in is never closed.** A dialog offers to leave it instead, by the edit of its Network's Configuration that `/part` sends where the Configuration names it, and otherwise by parting it. Signing out lets the offer go.
 - **Leaving a Channel does not close its Timeline,** since the part arrives in it as Activity.

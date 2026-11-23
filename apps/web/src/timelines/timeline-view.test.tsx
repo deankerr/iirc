@@ -745,7 +745,7 @@ describe("what the view says it shows", () => {
     await scrollTo(80, 120);
     await settled(() => daemon.reads.length === 1);
 
-    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
+    expect(daemon.reads).toStrictEqual([{ read: 2000, timeline: iirc }]);
   });
 
   it("draws rows a screen beyond the view, so their Previews are asked for and loaded before they scroll in", async () => {
@@ -772,7 +772,7 @@ describe("what the view says it shows", () => {
 
   it("takes this device's ui.unread.markRead shown over asked, which every device shares", async () => {
     await expect(readScrolledUp("asked", "shown")).resolves.toStrictEqual([
-      { read: 3000, target: "#iirc" },
+      { read: 3000, timeline: iirc },
     ]);
   });
 
@@ -794,7 +794,7 @@ describe("what the view says it shows", () => {
       windows: daemon.windowsRead.map((query) => new URLSearchParams(query).has("before")),
     }).toStrictEqual({
       // Marked no further than the Message drawn, never a hidden join after it.
-      reads: [{ read: 1000, target: "#iirc" }],
+      reads: [{ read: 1000, timeline: iirc }],
       windows: [false, true, true],
     });
   });
@@ -919,8 +919,8 @@ describe("what the view says it shows", () => {
       jumpAfter: false,
       reached: { jump: true, reads: [] },
       reads: [
-        { read: 1_102_000, target: "#iirc" },
-        { read: 1_103_000, target: "#iirc" },
+        { read: 1_102_000, timeline: iirc },
+        { read: 1_103_000, timeline: iirc },
       ],
       // The latest, and nine pages before it: a thousand items.
       unasked: 10,

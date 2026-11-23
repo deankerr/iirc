@@ -13,16 +13,16 @@ import { wantsChannel } from "./options.ts";
 import type { Configuration, Edit, Naming } from "./options.ts";
 
 /**
- * What closes a Timeline from its row: its Target, a Channel's name or a Direct Message
- * partner's nick, on its Network.
+ * What closes a Timeline from its row: its id, whatever names it, so a Direct Message that no
+ * longer follows its partner, which no Target names, and a Timeline a removed Network kept,
+ * which no Client holds, close as any other.
  * @param timeline - The Timeline.
- * @returns The intent, or none for a Network's own, a Direct Message that no longer
- * follows its partner, which has no Target, or one of a Network removed, which is only read.
+ * @returns The intent, or none for a Network's own, which is never closed.
  */
 export const closeOf = (timeline: Timeline): CloseTimeline | undefined =>
-  timeline.kind === "Network" || timeline.key === null || timeline.removed
+  timeline.kind === "Network"
     ? undefined
-    : { _tag: "CloseTimeline", network: timeline.network, target: timeline.name };
+    : { _tag: "CloseTimeline", network: timeline.network, timeline: timeline.id };
 
 /**
  * The offer to leave a Channel the Owner asked to close, as it stands.
@@ -231,18 +231,6 @@ export const reduceClosing = (state: Closing, event: ClosingEvent): Closing => {
     }
   }
 };
-
-/**
- * The Timeline a close names, found by its name as the Daemon gives it, so a Target typed
- * in another case, or with a status prefix, finds none, and shows only once it is answered.
- * @param held - The Timelines held.
- * @param close - The close.
- * @returns The Timeline, or none.
- */
-export const closedBy = (held: Held, close: CloseTimeline): TimelineId | undefined =>
-  [...(held.get(close.network)?.timelines.values() ?? [])].find(
-    (one) => closeOf(one) !== undefined && one.name === close.target
-  )?.id;
 
 /**
  * The Timelines that show as closed before the Daemon says so: each asked to be and not yet

@@ -263,8 +263,8 @@ describe("marking read", () => {
     expect({ before, reads: daemon.reads }).toStrictEqual({
       before: 0,
       reads: [
-        { read: 2000, target: "#iirc" },
-        { read: 4000, target: "#iirc" },
+        { read: 2000, timeline: iirc },
+        { read: 4000, timeline: iirc },
       ],
     });
   });
@@ -288,7 +288,7 @@ describe("marking read", () => {
     await viewLatest();
     await passing(clock, () => daemon.reads.length > 0);
 
-    expect(daemon.reads).toStrictEqual([{ read: 3000, target: "#other" }]);
+    expect(daemon.reads).toStrictEqual([{ read: 3000, timeline: other }]);
   });
 
   it("marks a Timeline opened while the page was hidden once the page is seen at its latest", async () => {
@@ -307,7 +307,46 @@ describe("marking read", () => {
     await viewLatest();
     await eventually(() => daemon.reads.length === 1);
 
-    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
+    expect(daemon.reads).toStrictEqual([{ read: 2000, timeline: iirc }]);
+  });
+
+  // Catches a read that names a Target, which no detached Direct Message has and no Client holds
+  // for a removed Network's Timeline, so the count would stay.
+  it("marks a detached Direct Message and a removed Network's Timeline read, by their ids", async () => {
+    const { daemon, opening, send } = await reading();
+
+    const detached = {
+      ...listed(peer, { changed: 3, latest: 3000, unread: { direct: 1 } }),
+      detached: true,
+      key: null,
+    };
+
+    const removed = {
+      ...listed(other, { changed: 4, latest: 4000, unread: { messages: 1 } }),
+      removed: true,
+    };
+
+    for (const [item, timeline] of [
+      [message(peer, 3, "Direct"), detached],
+      [message(other, 4), removed],
+    ] as const) {
+      const held = daemon.timelines.get("libera")?.find((one) => one.timeline.id === timeline.id);
+
+      held?.items.push(item);
+      Object.assign(held ?? {}, { timeline });
+      daemon.through = item.sequence;
+      send(changed(item.sequence, [item], [timeline]));
+    }
+
+    await opening(peer);
+    await eventually(() => daemon.reads.length === 1);
+    await opening(other);
+    await eventually(() => daemon.reads.length === 2);
+
+    expect(daemon.reads).toStrictEqual([
+      { read: 3000, timeline: peer },
+      { read: 4000, timeline: other },
+    ]);
   });
 
   it("marks once the shared ui.unread.markRead is known to be latest", async () => {
@@ -318,7 +357,7 @@ describe("marking read", () => {
     uiRead(registry, { options: uiDefaults, sequence: 0 });
     await eventually(() => daemon.reads.length === 1);
 
-    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
+    expect(daemon.reads).toStrictEqual([{ read: 2000, timeline: iirc }]);
   });
 
   it("forgets the shared ui.unread.markRead on signing out, and takes the one in force on signing in again", async () => {
@@ -379,7 +418,7 @@ describe("marking read", () => {
     await opening(iirc);
     await eventually(() => daemon.reads.length === 1);
 
-    expect(daemon.reads).toStrictEqual([{ read: 2000, target: "#iirc" }]);
+    expect(daemon.reads).toStrictEqual([{ read: 2000, timeline: iirc }]);
   });
 
   it("marks the open Timeline read with /read, and every one with /read all", async () => {
@@ -405,11 +444,11 @@ describe("marking read", () => {
     expect({ all: daemon.reads.slice(one.length), one }).toStrictEqual({
       // `#iirc` once more, since the Daemon's marker never came back here.
       all: [
-        { read: 2000, target: "#iirc" },
-        { read: 3000, target: "#other" },
-        { read: 3000, target: "peer" },
+        { read: 2000, timeline: iirc },
+        { read: 3000, timeline: other },
+        { read: 3000, timeline: peer },
       ],
-      one: [{ read: 2000, target: "#iirc" }],
+      one: [{ read: 2000, timeline: iirc }],
     });
   });
 });

@@ -421,16 +421,17 @@ export const contextOf = (
   const networks = sidebar(timelines, new Set(), muted, quietBots);
   const shownAs = arranged(networks, arrangement);
 
-  // A removed Network's Timelines are read, never marked, so what is unread there calls
-  // for nothing. Ties among what calls go by the order shown, the pinned first.
-  const marked = networks.filter((one) => !one.removed);
-
+  // A removed Network's Timelines are only kept to read, so what is unread there calls for
+  // nothing, though marking it read clears it. Ties among what calls go by the order shown,
+  // the pinned first.
   const calling = [
     ...shownAs.pinned.filter((pin) => !pin.network.removed).map((pin) => pin.timeline),
     ...shownAs.networks.filter((one) => !one.removed).flatMap((one) => one.timelines),
   ];
 
-  const closed = marked.flatMap((one) => one.closed);
+  const closed = networks.flatMap((one) =>
+    one.removed ? [...one.timelines, ...one.closed] : one.closed
+  );
 
   // A Timeline behind the options, the search, or a draft is not the one shown, so
   // `/next-unread` may go to it, which shows it.
