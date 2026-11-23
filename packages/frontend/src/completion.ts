@@ -16,7 +16,14 @@ import type { Aliases, FontShown } from "@iirc/api/ui";
 import { themeCommandWords } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
-import { aliasCommands, commandNamed, commands, namedIn, themeFlags } from "./commands.ts";
+import {
+  aliasCommands,
+  commandNamed,
+  commands,
+  namedIn,
+  removalWords,
+  themeFlags,
+} from "./commands.ts";
 import type { Command, NamedTimeline } from "./commands.ts";
 import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
@@ -603,7 +610,10 @@ const candidateOfEntry = (entry: Entry, go?: GoText): Candidate | undefined => {
     }
 
     case "Network": {
-      return { _tag: "Network", name: entry.network, removed: entry.removed, text: entry.network };
+      const { network, removed } = entry;
+
+      // Its Timelines kept, removing it again only drops them.
+      return { _tag: "Network", name: network, removed, text: removalWords(network, !removed) };
     }
 
     case "Theme": {

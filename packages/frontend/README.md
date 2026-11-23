@@ -167,7 +167,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/ignore` alone opens the options on the Network's `ignores`.**
 - **`/query` opens a Timeline by name and never makes one.** `queried` finds it by the casemapping `known` reports, and with none shows a Direct Message not yet begun.
 - **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane. Whether Self is in a Channel is the Daemon's to answer.
-- **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and after an id, `keep` or `drop` to start on. Nothing is removed until the Owner confirms.
+- **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and `keep` or `drop` to start on. A lone `keep` or `drop` is the choice about the focused Network, so a Network of that id is named with both words, as `/network remove keep keep`. Nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, a raw `PASS`, `AUTHENTICATE`, or `OPER`, and `/oper` are refused, `/oper` naming the `oper` options to set instead.
 - **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks.
 - **Of two Timelines that share a name on one Network, `/go` takes the first.**
@@ -457,7 +457,7 @@ What the Composer can complete, as a reducer, and the list it shows above the Co
 - **The emoji names are the Frontend's to give** (`emoji` in the sources). `emojiWanted` says when they are needed and not held, and until then the list is empty and Tab waits.
 - **Entries are ranked as `Entries` says,** and Channels and nicks are matched by their start.
 - **The whole argument of `/go`, `/theme`, `/set ui.font`, `/network remove`, and `/alias` is completed as one,** its spaces collapsed, and a candidate replaces all of it. `/theme` completes after any flags.
-- **`/network remove` lists a removed Network whose Timelines were kept too.**
+- **`/network remove` lists a removed Network whose Timelines were kept too,** and writes a Network whose id is `keep` or `drop` with a choice after it, `drop` for a removed one and `keep` otherwise.
 - **`/alias` lists each alias with its line, and writes `add <name> <line>` to edit it.** After `/alias remove`, it writes only the name.
 - **A bare `/` lists every command once, by name,** those run recently first, and an alias of the Owner's own among them unless a built-in command takes its name. A command's fixed alias still finds its command.
 - **`/go` writes a name alone where it finds that Timeline from the Composer's Network,** the Network's id before it where it would not, and leaves out a Timeline it reaches neither way.

@@ -194,22 +194,43 @@ describe("reading a line", () => {
     expect({
       bad: message("/network remove Not-An-Id", inChannel),
       drafting: interpret("/network remove", { ...nowhere, draft: { network, nick: "bob" } }),
+      // One word that is a choice is the choice, about the focused Network or the draft's.
+      dropFocused: interpret("/network remove drop", inChannel),
+      dropNone: message("/network remove drop", nowhere),
       dropping: interpret("/network remove oftc drop", nowhere),
       focused: interpret("/network remove", inChannel),
+      keepDrafting: interpret("/network remove keep", {
+        ...nowhere,
+        draft: { network, nick: "bob" },
+      }),
+      keepFocused: interpret("/network remove keep", inChannel),
+      keepNone: message("/network remove keep", nowhere),
       keeping: interpret("/network  remove  oftc  keep ", nowhere),
       // A removed Network's own Timeline asks again, which drops what was kept.
       kept: interpret("/network remove", { ...inChannel, focus: removedFocus }),
       named: interpret("/network remove oftc", inChannel),
+      // A Network whose id is a choice is named with both words.
+      namedDrop: interpret("/network remove drop keep", nowhere),
+      namedKeep: interpret("/network remove keep keep", nowhere),
       none: message("/network remove", nowhere),
       unknownChoice: message("/network remove oftc forget", nowhere),
     }).toStrictEqual({
       bad: 'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
       drafting: asks(network, undefined),
+      dropFocused: asks(network, false),
+      dropNone:
+        "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
       dropping: asks(oftc, false),
       focused: asks(network, undefined),
+      keepDrafting: asks(network, true),
+      keepFocused: asks(network, true),
+      keepNone:
+        "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
       keeping: asks(oftc, true),
       kept: asks(network, undefined),
       named: asks(oftc, undefined),
+      namedDrop: asks(Schema.decodeSync(NetworkId)("drop"), true),
+      namedKeep: asks(Schema.decodeSync(NetworkId)("keep"), true),
       none: "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
       unknownChoice: "Usage: /network remove [id] [keep|drop]",
     });
@@ -241,6 +262,21 @@ describe("reading a line", () => {
       pane: "There is only one Pane. /split makes another.",
       removed:
         "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.",
+    });
+  });
+
+  it("names a removed Network whose id is keep or drop with drop, in how to drop its Timelines", () => {
+    const removedAs = (["drop", "keep"] as const).map((id): CommandContext => ({
+      ...inChannel,
+      focus: { ...removedFocus, network: Schema.decodeSync(NetworkId)(id) },
+    }));
+
+    expect({
+      drop: message("hello", removedAs[0] ?? inChannel),
+      keep: message("hello", removedAs[1] ?? inChannel),
+    }).toStrictEqual({
+      drop: "drop was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove drop drop drops them.",
+      keep: "keep was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove keep drop drops them.",
     });
   });
 
