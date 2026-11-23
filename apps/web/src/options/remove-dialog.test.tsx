@@ -355,4 +355,25 @@ describe("removing a Network", () => {
       "libera was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove libera drops them."
     );
   });
+
+  // A lone `keep` or `drop` after `/network remove` is the choice about the focused Network,
+  // so the command the hint names must say the choice after a Network with that id.
+  it.each([
+    ["keep", "/network remove keep drop drops them."],
+    ["drop", "/network remove drop drop drops them."],
+  ])(
+    "names the command that drops the kept Timelines of a Network whose id is %s",
+    async (network, ending) => {
+      const { container, daemon } = await signedIn();
+
+      daemon.kept.add(network);
+
+      await submit(container, `/network add ${network} irc.example.org bot`);
+      await settled(() => container.querySelector('[role="alert"] p') !== null);
+
+      expect(container.querySelector('[role="alert"] p')?.textContent).toBe(
+        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. ${ending}`
+      );
+    }
+  );
 });
