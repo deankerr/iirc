@@ -16,7 +16,7 @@ import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
 import { globMatches } from "@iirc/protocol/mask";
 
 import { fits, online } from "./acts.ts";
-import { endOfNames, listedApart, see } from "./channels.ts";
+import { channelsSharedWith, endOfNames, listedApart, see } from "./channels.ts";
 import type { ListedPart } from "./channels.ts";
 import type { Arrival } from "./feature.ts";
 import { Instant } from "./ids.ts";
@@ -42,7 +42,7 @@ import type {
 import { readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
-import type { Link, Looking, Refreshed } from "./state.ts";
+import type { Link, Looking, Refreshed, Seen } from "./state.ts";
 import {
   maxDirectory,
   maxForgotten,
@@ -53,6 +53,7 @@ import {
 import { lookupTime } from "./timers.ts";
 import { userIn } from "./users.ts";
 import { openOf } from "./views.ts";
+import { named } from "./where.ts";
 import { awayOf, readWho, whoAnswering } from "./who-query.ts";
 
 /** A Lookup of a User: a `WHOIS` or a `WHOWAS`. */
@@ -613,27 +614,77 @@ const speaksOf: ReadonlyMap<string, readonly Refreshed[]> = new Map<string, read
 ]);
 
 /** What Knowledge holds of a User it keeps nothing of: one value, so it compares as the same while that lasts. */
-const unknown: Fact<unknown> = { _tag: "Unknown" };
+const unknown: Fact<never> = { _tag: "Unknown" };
+
+/** The facts of a User a `WHOIS` refreshes, as Knowledge holds them. */
+type Held = Pick<Seen, Refreshed>;
+
+const unheld: Held = { account: unknown, away: unknown, mask: unknown, realname: unknown };
 
 /**
- * A fact of a User as Knowledge holds it now: Self's, or another User's while they share
- * a Channel with Self, or `Unknown`.
+ * The facts of a User a `WHOIS` refreshes, as Knowledge holds them now: Self's, or another
+ * User's while they share a Channel with Self, or each `Unknown`.
+ * @param run - The step.
+ * @param nick - The User.
+ * @returns The facts, as State holds them.
+ */
+const heldOf = (run: Run, nick: string): Held => {
+  const open = openOf(run.state);
+  const presence = open?.presence._tag === "Session" ? open.presence : undefined;
+
+  if (presence !== undefined && isSelf(run, nick)) {
+    return presence;
+  }
+
+  return (open === undefined ? undefined : userIn(open.users, folder(run.state)(nick))) ?? unheld;
+};
+
+/**
+ * A fact of a User as Knowledge holds it now, as {@link heldOf} finds it.
  * @param run - The step.
  * @param nick - The User.
  * @param field - Which fact.
  * @returns The fact, as State holds it.
  */
-const factOf = (run: Run, nick: string, field: Refreshed): Fact<unknown> => {
-  const open = openOf(run.state);
-  const presence = open?.presence._tag === "Session" ? open.presence : undefined;
+const factOf = (run: Run, nick: string, field: Refreshed): Fact<unknown> =>
+  heldOf(run, nick)[field];
 
-  if (presence !== undefined && isSelf(run, nick)) {
-    return presence[field];
+// How a fact is known and its value, but not when or from where.
+const shownFact = <T>(fact: Fact<T>, text: (value: T) => string): string => {
+  switch (fact._tag) {
+    case "Known": {
+      return `Known ${text(fact.value)}`;
+    }
+
+    case "Stale": {
+      return `Stale ${text(fact.was)}`;
+    }
+
+    case "Partial": {
+      return `Partial ${text(fact.atLeast)}`;
+    }
+
+    case "Unknown": {
+      return fact._tag;
+    }
+
+    default: {
+      return fact satisfies never;
+    }
   }
+};
 
-  const seen = open === undefined ? undefined : userIn(open.users, folder(run.state)(nick));
+// What a Frontend is shown of the facts of a User a `WHOIS` refreshes, so a reply that
+// repeats what was known, later or from elsewhere, shows nothing new.
+const shownOf = (run: Run, nick: string): string => {
+  const { account, away, mask, realname } = heldOf(run, nick);
 
-  return seen === undefined ? unknown : seen[field];
+  return JSON.stringify([
+    shownFact(account, (value) => JSON.stringify(value)),
+    shownFact(away, (value) => JSON.stringify(value?.message ?? null)),
+    shownFact(mask, ({ user, host }) => JSON.stringify([user, host])),
+    shownFact(realname, (value) => value),
+  ]);
 };
 
 // What a reply says of a User the Client already models, as `replied`, as of the Line
@@ -805,8 +856,24 @@ const finish = (run: Run, intent: IntentId, ending: Ending, reply: string): void
   report(run, looking, result);
 
   if (result._tag === "Found" && looking.lookup._tag === "Whois") {
+    const changed = new Set<string>();
+
     for (const profile of result.profiles) {
+      const before = shownOf(run, profile.nick);
+
       learn(run, looking, profile);
+
+      if (shownOf(run, profile.nick) !== before) {
+        for (const channel of channelsSharedWith(run, profile.nick)) {
+          changed.add(channel);
+        }
+      }
+    }
+
+    // No Activity says what a reply changed, so each Channel a User it changed is in is
+    // reported learned, once, for a Frontend to read its members again.
+    for (const channel of changed) {
+      run.news.push({ _tag: "ChannelLearned", channel: named(run, channel) });
     }
   }
 };

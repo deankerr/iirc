@@ -797,3 +797,102 @@ describe("a labelled Lookup", () => {
     expect.assertions(0);
   });
 });
+
+// The Channels reported learned by the steps the last transcript item played, in order.
+const learnedBy = (transcript: readonly string[]): readonly string[] => {
+  const before = played(transcript.slice(0, -1));
+  const after = played(transcript);
+
+  return after.steps
+    .slice(before.steps.length)
+    .flatMap((step) => step.news)
+    .flatMap((news) => (news._tag === "ChannelLearned" ? [news.channel.key] : []));
+};
+
+const whoisPeer = (...replies: readonly string[]) =>
+  lines(
+    "!! whois peer",
+    ">> WHOIS peer",
+    ...replies.map((reply) => `<< :irc.test ${reply}`),
+    "<< :irc.test 318 iirc peer :End"
+  );
+
+describe("a WHOIS that changes what is known of a member", () => {
+  // Catches an open members' list that keeps showing a member as here after a WHOIS found
+  // them away.
+  it("names the Channel of a member known to be here, found away", () => {
+    expect(
+      learnedBy([
+        ...inChannel(["away-notify"]),
+        lines("<< :peer!~u@peer.test AWAY"),
+        whoisPeer("301 iirc peer :gone fishing"),
+      ])
+    ).toStrictEqual(["#iirc"]);
+  });
+
+  // Catches a Channel missed, or reported once per fact or per Line, for a member in two.
+  it("names each Joined Channel the member is in, once", () => {
+    expect(
+      learnedBy([
+        ...inChannel(),
+        joined(base, "#two", ["peer"]),
+        joined(base, "#quiet", ["other"]),
+        whoisPeer(
+          "311 iirc peer ~u peer.test * :Peer",
+          "301 iirc peer :gone",
+          "330 iirc peer acct :is logged in as"
+        ),
+      ]).toSorted()
+    ).toStrictEqual(["#iirc", "#two"]);
+  });
+
+  // Catches every WHOIS making each open members' list read again, though nothing changed.
+  it("names none when its replies say only what was already known", () => {
+    const again = whoisPeer("311 iirc peer ~u peer.test * :Peer", "301 iirc peer :gone");
+
+    expect(learnedBy([...inChannel(), again, lines("+5s"), again])).toStrictEqual([]);
+  });
+
+  // Catches a Channel reported for a User who is in none Self shares.
+  it("names none for a User in no Joined Channel, and is looked up as before", () => {
+    const transcript = [
+      ...inChannel(),
+      lines(
+        "!! whois stranger",
+        ">> WHOIS stranger",
+        "<< :irc.test 311 iirc stranger ~s far.test * :Far",
+        "<< :irc.test 301 iirc stranger :gone",
+        "<< :irc.test 318 iirc stranger :End"
+      ),
+    ];
+
+    expect(learnedBy(transcript)).toStrictEqual([]);
+    expect(lookedUp(played(transcript)).map((news) => news.result._tag)).toStrictEqual(["Found"]);
+  });
+
+  // Catches Self's own facts changing with no members' list told, as Self is a member too.
+  it("names every Joined Channel when it changes what is known of Self", () => {
+    expect(
+      learnedBy([
+        ...inChannel(),
+        joined(base, "#two"),
+        lines(
+          "!! whois iirc",
+          ">> WHOIS iirc",
+          "<< :irc.test 311 iirc iirc ~me me.test * :Me Myself",
+          "<< :irc.test 318 iirc iirc :End"
+        ),
+      ]).toSorted()
+    ).toStrictEqual(["#iirc", "#two"]);
+  });
+
+  // Catches a WHOIS reported more than once, or with another result, now it reports Channels.
+  it("is looked up once, found", () => {
+    const run = played([
+      ...inChannel(),
+      whoisPeer("311 iirc peer ~u peer.test * :Peer", "301 iirc peer :gone"),
+    ]);
+
+    expect(lookedUp(run).map((news) => news.result._tag)).toStrictEqual(["Found"]);
+  });
+});

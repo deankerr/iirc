@@ -112,7 +112,7 @@ News is what happened in one step, in order. Replaying the Journal makes it agai
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it. |
 | `Unignored` | The Owner took masks out of the Configuration's `ignores`, each given as every casemapping folds it. |
-| `ChannelLearned` | What is known of a Channel Self is in changed with no Activity saying so: its modes or topic, the end of a `NAMES` listing or of a `WHO` answer that described its members, a member's bot mark, or a fact of a member gone stale as the Feature that kept it turned off. It names the Channel, keyed as `where` keys it. |
+| `ChannelLearned` | What is known of a Channel Self is in changed with no Activity saying so: its modes or topic, the end of a `NAMES` listing or of a `WHO` answer that described its members, a member's bot mark, a fact of a member a `WHOIS` changed, or a fact of a member gone stale as the Feature that kept it turned off. It names the Channel, keyed as `where` keys it. |
 | `PartnerLearned` | Whether a Direct Message partner is on the Network changed with no Activity saying so: the first status `MONITOR` or `WATCH` gave, their joining or leaving a Channel Self shares, or the Session ending. It names the partner, keyed as `where` keys their Timeline. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `AccountUnknown` or `NoAccount` for a ban by account, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
@@ -318,7 +318,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came. A `FAIL` ends the Lookup by its code, at once when it was sent without a label, and so does an error numeric that refuses a list, a `NAMES`, or a `WHO`. A `WARN` or `NOTE`, and each `FAIL` after the first, is kept in the result's `notes`.
 - **Nothing is read from free text but the one mode word of a `379`.** A `335` says the User is a bot only where the Ircd names a bot mode, and only as `335 <client> <nick> :<text>`. One of another shape, or where the Ircd names none, is kept as it came.
 - **Bounded.** At most 8 Lookups await their replies on a Connection, at most 64 Lines of one are kept, besides at most 500 members or Users, or 1000 Channels, and one with no end within 30 s reports what it has.
-- **A `WHOIS` refreshes only what the Client already models,** and never undoes something said since. The Client never sends a Lookup itself, so nothing is polled.
+- **A `WHOIS` refreshes only what the Client already models,** and never undoes something said since. When that changes how a fact of a User is known or its value, each Joined Channel the User is in is reported `ChannelLearned` once, every one for Self. The Client never sends a Lookup itself, so nothing is polled.
 
 ### Standard replies
 
