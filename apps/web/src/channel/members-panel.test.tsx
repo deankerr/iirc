@@ -12,6 +12,7 @@ import { deviceUi } from "../options/device.ts";
 import { pageState } from "../page/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { back, left, pageEntered } from "../testing/history.ts";
 import { open, sync } from "../timelines/atoms.ts";
 import { channelSync } from "./atoms.ts";
 import { channelState, membersShown, paneMeasured } from "./state.ts";
@@ -665,6 +666,21 @@ describe("a Pane's members", () => {
       narrow: { grip: true, members: true },
       sheet: true,
     });
+  });
+
+  // Catches Back leaving the page while members lie over a narrow Pane's Timeline.
+  it("over a narrow Pane are put away by Back, and the page stays", async () => {
+    pageEntered();
+    const { registry } = await signedIn();
+
+    await settled(() => toggle() !== undefined);
+    await measure(registry, 400);
+    await press(toggle());
+    await settled(() => members() !== null);
+    await back();
+    await settled(() => members() === null);
+
+    expect(left()).toBeFalsy();
   });
 
   it("offer a menu on a member, Query first, so Enter twice opens their Direct Message and puts the members away", async () => {

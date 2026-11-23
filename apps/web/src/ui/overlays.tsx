@@ -38,22 +38,24 @@ const useOverlayBack = ({
 };
 
 /**
- * A modal overlay that Back closes while it is open.
- * @param props - React Aria's.
+ * A modal overlay that Back closes while it is open: open as its `isOpen` says, or as its
+ * trigger's state does, never by a `defaultOpen` the hook cannot see.
+ * @param props - React Aria's, but `defaultOpen`.
  * @returns The overlay.
  */
-export const ModalOverlay = (props: ModalOverlayProps) => {
+export const ModalOverlay = (props: Omit<ModalOverlayProps, "defaultOpen">) => {
   useOverlayBack(props);
 
   return <AriaModalOverlay {...props} />;
 };
 
 /**
- * A popover that Back closes while it is open.
- * @param props - React Aria's.
+ * A popover that Back closes while it is open: open as its `isOpen` says, or as its
+ * trigger's state does, never by a `defaultOpen` the hook cannot see.
+ * @param props - React Aria's, but `defaultOpen`.
  * @returns The popover.
  */
-export const Popover = (props: PopoverProps) => {
+export const Popover = (props: Omit<PopoverProps, "defaultOpen">) => {
   useOverlayBack(props);
 
   return <AriaPopover {...props} />;

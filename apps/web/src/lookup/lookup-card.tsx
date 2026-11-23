@@ -9,7 +9,7 @@
  * User `/who` matched as one row of nick, `user@host`, away, and realname, dimly. Each Channel
  * `/list` found as a row of its name, which opens its Timeline or starts `/join`, its members,
  * and its topic, dimly, a page at a time, with a button that reads the next. Escape, in the
- * card or in the composer with nothing else to let go of, or its close button, puts it away.
+ * card or in the composer with nothing else to let go of, its close button, or Back puts it away.
  *
  * @packageDocumentation
  */
@@ -29,6 +29,7 @@ import { useId } from "react";
 
 import { perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
+import { useBackCloses } from "../page/back.ts";
 import { paneTimeline } from "../timelines/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
 import { Button, IconButton } from "../ui/button.tsx";
@@ -348,6 +349,11 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const run = useAtomSet(perform);
   const more = useAtomSet(moreChannels);
   const headingId = useId();
+
+  // Back puts it away as Escape does, leaving the focus where it is.
+  useBackCloses(shown !== undefined, () => {
+    dismiss(pane);
+  });
 
   if (shown === undefined) {
     return null;

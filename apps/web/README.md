@@ -263,7 +263,7 @@ The core decides and this package draws and does the I/O.
 
 - **Says across the top of the page when the Daemon stopped folding the Timelines:** that it hit a fatal error, that the Timelines stay behind until it restarts, and why. The notice goes once the Daemon, restarted, folds them again.
 - **A screen 640px wide or less shows the focused Pane alone,** under one slim bar holding the Sidebar's button and the Panes' switcher, with the Sidebar as a drawer and the members as a sheet.
-- **The browser's Back closes what Escape closes, the topmost first,** on any screen: the drawer, the sheet, a dialog, a Preview's larger view, or a menu. Each takes one entry in the history as it opens, with the same URL, and gives it back however it closes, so with nothing open Back leaves the page.
+- **The browser's Back closes what Escape closes, the topmost first,** on any screen: the drawer, the sheet, the members over a narrow Pane, a Lookup card, a dialog, a Preview's larger view, or a menu. Each takes one entry in the history as it opens, with the same URL, and gives it back however it closes, so with nothing open Back leaves the page.
 - **Where the pointer is coarse, every control is at least 44px and every field's text at least 16px,** so iOS Safari does not zoom into it.
 - **Pinch zoom is never turned off.**
 
