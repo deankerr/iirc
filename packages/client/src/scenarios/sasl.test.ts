@@ -762,6 +762,52 @@ describe("sasl offered anew during a Session", () => {
     expect(client.known(played.state).self?.account).toStrictEqual({ _tag: "Unknown" });
   });
 
+  it("answers no late challenge once a deleted exchange's account became known", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        registered(optional, { offered: ["cap-notify", "account-notify"] }),
+        lines(
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test 900 iirc iirc!iirc@iirc.test iirc :You are now logged in as iirc",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          "<< AUTHENTICATE +"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("lets a fresh exchange be when an earlier exchange's Credential is unfilled", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        loggedOut,
+        offeredAnew,
+        lines(
+          "<< :irc.test CAP iirc DEL :sasl",
+          "<< :irc.test CAP iirc NEW :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP iirc ACK :sasl",
+          ">> AUTHENTICATE PLAIN",
+          "== unfilled Missing",
+          "?? ignored NotNow Unfilled",
+          "<< AUTHENTICATE +",
+          ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("begins anew when sasl is offered again after a deleted exchange", () => {
     play(client, {
       configuration: optional,

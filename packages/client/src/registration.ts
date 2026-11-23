@@ -595,10 +595,10 @@ export const expire = (run: Run): void => {
 
 /**
  * A `SecretLine` could not be filled: each Feature on that has an `unfilled` hook decides
- * what follows, whether or not it holds registration.
+ * what follows, whether or not it holds registration. It was heard when one acted on it.
  * @param run - The step.
  * @param line - The Line that was not sent.
- * @returns Whether any Feature heard it.
+ * @returns Whether any Feature acted on it.
  */
 export const unfilled = (run: Run, line: SecretLine): boolean => {
   const open = openOf(run.state);
@@ -616,12 +616,13 @@ export const unfilled = (run: Run, line: SecretLine): boolean => {
     return false;
   }
 
-  carryOut(
-    run,
-    runEffects(hearing, open.seam, reading, (feature, context) => feature.unfilled?.(line, context))
+  const ran = runEffects(hearing, open.seam, reading, (feature, context) =>
+    feature.unfilled?.(line, context)
   );
 
-  return true;
+  carryOut(run, ran);
+
+  return ran.send.length > 0 || ran.registration.length > 0 || ran.failed.length > 0;
 };
 
 const capList = (text: string): readonly (readonly [CapName, string])[] =>

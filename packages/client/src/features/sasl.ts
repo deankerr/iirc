@@ -26,7 +26,8 @@
  * acknowledged, begins the same exchange when no account is known for Self, and does
  * nothing when one is. It holds nothing open, and a failed login ends nothing, required or
  * not: the Session has begun. Its numeric is the Network's to show. A `CAP DEL` mid-exchange
- * turns the Feature off, so it hears nothing more, and the next `CAP NEW` begins anew.
+ * ends it without a login, so a late challenge goes unanswered, and the next `CAP NEW`
+ * begins anew. An unfilled Credential is heard only by the exchange that sent it.
  *
  * A `CAP DEL` after `903` changes nothing: Self is logged in, and the account stays known.
  *
@@ -139,13 +140,17 @@ const begin = (context: Context<Exchange>): Effects<Exchange> => {
 
 /** The `sasl` Feature, with `PLAIN` or `EXTERNAL`. */
 export const saslLogin: Feature<Exchange> = {
-  // Off while registering, with a login required and none made: give up.
-  absent: (context) =>
-    context.known.session._tag === "Registering" &&
-    saslRequired(context.configuration.login) &&
-    context.own._tag !== "LoggedIn"
+  // Off while registering, with a login required and none made: give up. Off during a
+  // Session, mid-exchange: it is over, so nothing answers a challenge that comes late.
+  absent: (context) => {
+    if (context.known.session._tag !== "Registering") {
+      return running(context.own) ? { own: notLoggedIn } : {};
+    }
+
+    return saslRequired(context.configuration.login) && context.own._tag !== "LoggedIn"
       ? { own: notLoggedIn, registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } } }
-      : {},
+      : {};
+  },
   // A login the Configuration now names, before `CAP END`, begins if it is not under way.
   configured: (context) =>
     context.own._tag === "Idle" || context.own._tag === "Failed" ? begin(context) : {},
@@ -210,6 +215,9 @@ export const saslLogin: Feature<Exchange> = {
     };
   },
   start: (context) => begin(context),
+  // Only the exchange that sent the Credential awaits it: one begun since has not.
   unfilled: (secret, context) =>
-    secret._tag === "AuthenticatePlain" && running(context.own) ? failed(context, line("*")) : {},
+    secret._tag === "AuthenticatePlain" && context.own._tag === "Sent"
+      ? failed(context, line("*"))
+      : {},
 };
