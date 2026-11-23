@@ -15,9 +15,9 @@ export { levels, unreadCap } from "./content.ts";
 
 export type { ActionRefusal, Content, Delivery, Level, OursItem } from "./content.ts";
 
-export { emptyDirectory, projectionVersion, step } from "./fold.ts";
+export { emptyDirectory, projectionVersion, step, stepMarking } from "./fold.ts";
 
-export type { Directory, Happened, Keyed, NetworkDirectory, Stepped } from "./fold.ts";
+export type { Directory, Happened, Keyed, Marking, NetworkDirectory, Stepped } from "./fold.ts";
 
 export { comparePositions, cursorOf, cursorsAfter, cursorsFrom, parseCursor } from "./position.ts";
 

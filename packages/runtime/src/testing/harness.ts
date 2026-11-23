@@ -215,6 +215,10 @@ export const outline = (journal: JournalService): Effect.Effect<readonly string[
         case "Change": {
           const { change } = record;
 
+          if ("timeline" in change) {
+            return `${sequence} ${change._tag} ${change.timeline}`;
+          }
+
           return `${sequence} ${change._tag} ${"id" in change ? change.id : change.option}`;
         }
 

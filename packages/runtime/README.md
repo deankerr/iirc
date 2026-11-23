@@ -19,7 +19,7 @@ act(network, { action, intent? }): Effect<Acted { intent, sequence } | Refused {
 said(network, intent): Effect<Option<Sequence>, JournalFailed>          // was a Say or an Act under this intent journaled?
 look(network, { lookup, intent? }): Effect<LookedUp { intent, sequence, result } | Pending { intent, sequence }, UnknownNetwork | NetworkStopped>
 looked(network, intent): Effect<Option<LookedUp | Pending>, JournalFailed>   // a Lookup's result, folded from the Journal
-read(network, { target, read }): Effect<Sequence, UnknownNetwork | NetworkStopped>   // target null for the Network's own
+read(network, { target, read }): Effect<Sequence, UnknownNetwork | NetworkStopped>   // target a Target, a Resolved, or null for the Network's own
 close(network, target): Effect<Closed { sequence } | Refused { sequence, reason: Joined { channel } | NoTimeline }, UnknownNetwork | NetworkStopped>
 retry(network): Effect<Sequence, UnknownNetwork | NetworkStopped>
 known(network): Effect<{ knowledge, life }, UnknownNetwork>
@@ -28,6 +28,7 @@ inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { sta
 networks: Effect<ReadonlyMap<NetworkId, NetworkStatus>>                 // Running | Stopped { reason }
 lives: Effect<ReadonlyMap<NetworkId, Live { status, life } | Kept { life }>>  // every one held, live or kept, read together
 news({ after? }): Stream<Happened, JournalFailed>                        // { network, life, sequence, at, news }, never ends
+happenings({ after? }): Stream<Stepped { happened } | Changed { sequence, change }, JournalFailed>  // News and Changes, in Journal order
 ```
 
 `Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, `client` from `@iirc/client` in the Daemon, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents with Effect's `Random`. Closing the Layer's Scope is shutdown.
@@ -47,7 +48,8 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 - **A `say` or an `act` answers with what its own step knew.** It is `Refused` when the Client refused it in that step, and `Said` or `Acted` otherwise. A `say` is refused as `Offline` or `Unsendable`, and an `act` as those or, for a ban by account, `AccountUnknown` or `NoAccount`.
 - **A refusal that comes later, `Unsent` or `Rejected`, is News of a later step.**
 - **A `say` names its intent,** given or chosen, and journals its `answers` with the `Say`, so its `Refused`, `Message`, and `Confirmed` News can be matched to it.
-- **A `close` answers with what its step decided.** It is `Closed` when the step reported `TimelineClosed`, `Refused` with `Joined`, naming the Channel, when Self was in it, and `Refused` with `NoTimeline` when its Target names no one Timeline.
+- **A `read` or a `close` names a Timeline by a Target, or as a projection holds it,** a `Resolved` from `@iirc/client`, which is journaled as given, for the Client to take without parsing.
+- **A `close` answers with what its step decided.** It is `Closed` when the step reported `TimelineClosed`, `Refused` with `Joined`, naming the Channel, when Self was in it, and `Refused` with `NoTimeline` when its Target names no one Timeline, or it names the Network's own.
 - **A stopped Network fails what waits on it.** A Network that has stopped fails its Owner inputs with `NetworkStopped`, at once or as it stops, so none waits forever.
 - **Closing the Runtime stops every Network** with the reason `The Runtime closed`, and fails every call made after, a `configure` that would add a Network included.
 
@@ -100,6 +102,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 ### News
 
 - **News is derived from the Journal.** `news` folds each Network's Inputs from `initial`, passing over every `Change`, and gives each step's News with its Network, its life, the sequence of its Input, and its `at`, for steps after `after`, and then live.
+- **`happenings` gives the same steps with every Change in its place,** each Change with its sequence, so a reader that folds both, as the Timelines projection does, folds them in the order they were journaled.
 - **A reader that resumes after the last sequence it has misses nothing,** and sees exactly what the Runtime's own fold saw.
 - **A removed Network's last News is its `NetworkRemoved`.** The Inputs that trail its `Removed`, such as its Connection's `Closed`, give none, and another `Removed` gives its own.
 
@@ -213,12 +216,13 @@ read({ after?, network? }): Stream<Entry, JournalFailed>    // up to the end as 
 follow({ after?, network? }): Stream<Entry, JournalFailed>  // and then each new Entry
 Entry = { sequence: Sequence, record: JournalRecord }
 JournalRecord = Input { network, input } | Outputs { network, of, outputs } | Forgotten { network, credentials } | Change { change }
-Change = UiSet | UiUnset | OptionSet | OptionUnset | Uploaded | Renamed | Deleted
+Change = UiSet | UiUnset | OptionSet | OptionUnset | Uploaded | Renamed | Deleted | TimelineRead | TimelineClosed
 networkOf(record): NetworkId | undefined                 // none for a Change
 ```
 
-- **One Journal for the Daemon.** Every Entry shares one sequence. An `Input`, `Outputs`, or `Forgotten` names its Network, and a `Change` names none.
+- **One Journal for the Daemon.** Every Entry shares one sequence. An `Input`, `Outputs`, or `Forgotten` names its Network, and a `Change` belongs to none, though one that marks a Timeline names the Network the Timeline is one of.
 - **The Journal knows nothing of which options exist.** It holds an option's Change by its name, with its value as JSON. The Daemon parses a value before it journals it, and folds the Changes.
+- **A Timeline no Client can name is marked by a Change** (ADR 0018): `TimelineRead` or `TimelineClosed`, naming the Timeline's id and the Network it is one of, which no Client steps.
 - **Reading by Network leaves out every Change.** `read` and `follow` with `network` give that Network's Entries alone, and without it, every Entry.
 - **Appends are durable** before `append` returns, and are numbered in the order they complete. Sequences only increase, and may skip numbers.
 - **An append is whole or absent, and settled when it returns.** One interrupted or failed is either kept, and read like any other, or never appears. An adapter whose write can go on after interruption makes the append uninterruptible, or waits for the write to settle. No law can check this, so each adapter says how it keeps it.

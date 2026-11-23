@@ -1,4 +1,4 @@
-import { ChannelHeader, NetworkId, ReadRequest, TimelineId } from "@iirc/api";
+import { ChannelHeader, NetworkId, TimelineId, TimelineReadRequest } from "@iirc/api";
 import type { ActionRequest } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -70,7 +70,7 @@ const exports = (since: Moment | undefined, until: Moment | undefined) => [
 
 const atOf = (ms: number): Moment => ({
   _tag: "At",
-  at: Schema.decodeSync(ReadRequest)({ read: ms, target: null }).read,
+  at: Schema.decodeSync(TimelineReadRequest)({ read: ms }).read,
 });
 
 const message = (line: string, context: CommandContext) => {
@@ -112,9 +112,14 @@ describe("the command registry", () => {
   });
 });
 
-const closing = (target: string) => ({
+const closing = (held: TimelineId) => ({
   _tag: "Parsed",
-  value: [{ _tag: "CloseTimeline", network, target }],
+  value: [{ _tag: "CloseTimeline", network, timeline: held }],
+});
+
+const closingTarget = (target: string) => ({
+  _tag: "Parsed",
+  value: [{ _tag: "CloseTarget", network, target }],
 });
 
 describe("reading a line", () => {
@@ -236,32 +241,43 @@ describe("reading a line", () => {
     });
   });
 
-  it("closes a Timeline by its Target, the focused one unless named, never a Network's own or a pane", () => {
+  it("closes a Timeline by its id, the focused one unless named, never a Network's own or a pane", () => {
+    const held = Schema.decodeSync(TimelineId)("00000000000009-00000000-00000000");
+    const named = [{ kind: "Direct", name: "Bob", network, timeline: held }] as const;
+
     expect({
       channel: interpret("/close-timeline", inChannel),
-      detached: message("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
+      // A Direct Message that no longer follows its partner has no Target, and closes by its id.
+      detached: interpret("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
       direct: interpret("/close-timeline", inDirect),
       list: message("/close-timeline #a,#b", inChannel),
-      named: interpret("/close-timeline  bob ", inNetwork),
+      // A name is a Target, which the Network's Client resolves by its own naming, held or not.
+      named: interpret("/close-timeline  bob ", { ...inNetwork, named }),
       network: message("/close-timeline", inNetwork),
+      notHeld: interpret("/close-timeline @#elsewhere", { ...inNetwork, named }),
       // Offline, it is closed all the same: the Daemon journals it.
       offline: interpret("/close-timeline", offline),
+      own: interpret("/close-timeline libera", {
+        ...inChannel,
+        named: [{ kind: "Network", name: "libera", network, timeline: held }],
+      }),
       // `/close` closes a Pane, and never a Timeline.
       pane: message("/close", inChannel),
-      removed: message("/close-timeline", { ...inChannel, focus: removedFocus }),
+      // What a removed Network kept is closed too.
+      removed: interpret("/close-timeline", { ...inChannel, focus: removedFocus }),
     }).toStrictEqual({
-      channel: closing("#iirc"),
-      detached:
-        "This Direct Message no longer follows its partner, so it has no Target to close it by.",
-      direct: closing("peer"),
+      channel: closing(timeline),
+      detached: closing(timeline),
+      direct: closing(timeline),
       list: "Close one Timeline at a time. /close-timeline [#channel|nick]",
-      named: closing("bob"),
+      named: closingTarget("bob"),
       network:
         "A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. /close-timeline [#channel|nick]",
-      offline: closing("#iirc"),
+      notHeld: closingTarget("@#elsewhere"),
+      offline: closing(timeline),
+      own: closingTarget("libera"),
       pane: "There is only one Pane. /split makes another.",
-      removed:
-        "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.",
+      removed: closing(timeline),
     });
   });
 
@@ -582,17 +598,16 @@ describe("reading a line", () => {
   });
 });
 
-const mark = (id: TimelineId, target: string | null): MarkRead => ({
+const mark = (id: TimelineId): MarkRead => ({
   _tag: "MarkRead",
   network,
-  read: Schema.decodeSync(ReadRequest)({ read: 1000, target: null }).read,
-  target,
+  read: Schema.decodeSync(TimelineReadRequest)({ read: 1000 }).read,
   timeline: id,
 });
 
-const unseen = (id: TimelineId, level: Unseen["level"], target: string | null): Unseen => ({
+const unseen = (id: TimelineId, level: Unseen["level"]): Unseen => ({
   level,
-  mark: mark(id, target),
+  mark: mark(id),
   timeline: id,
 });
 
@@ -927,11 +942,11 @@ describe("what is unread", () => {
 
   // In the sidebar's order: the Network's own, two Channels, and a Direct Message.
   const unread: readonly Unseen[] = [
-    unseen(own, "Activity", null),
-    unseen(timeline, "Message", "#iirc"),
-    unseen(first, "Highlight", "#a"),
-    unseen(second, "Highlight", "#b"),
-    unseen(dm, "Direct", "peer"),
+    unseen(own, "Activity"),
+    unseen(timeline, "Message"),
+    unseen(first, "Highlight"),
+    unseen(second, "Highlight"),
+    unseen(dm, "Direct"),
   ];
 
   const opened = (open: TimelineId | undefined, more: readonly Unseen[] = unread) => ({
@@ -952,8 +967,8 @@ describe("what is unread", () => {
           unread.filter((one) => one.level !== "Highlight")
         )
       ),
-      onlyActivity: outcome("/next-unread", opened(timeline, [unseen(own, "Activity", null)])),
-      onlyOpen: outcome("/next-unread", opened(dm, [unseen(dm, "Direct", "peer")])),
+      onlyActivity: outcome("/next-unread", opened(timeline, [unseen(own, "Activity")])),
+      onlyOpen: outcome("/next-unread", opened(dm, [unseen(dm, "Direct")])),
     }).toStrictEqual({
       fromFirst: [{ _tag: "Open", timeline: second }],
       fromNone: [{ _tag: "Open", timeline: first }],
@@ -975,7 +990,7 @@ describe("what is unread", () => {
       all: unread.map((one) => one.mark),
       nothing: [],
       nowhere: "Open a Timeline first, or use /read all.",
-      open: [mark(timeline, "#iirc")],
+      open: [mark(timeline)],
       other: "Use /read for the open Timeline, or /read all for every Timeline.",
     });
   });
@@ -1036,10 +1051,7 @@ describe("the Panes", () => {
   const shown = idOf("00000000000005-00000000-00000000");
 
   it("splits side by side, or one above another, opening what calls most that no Pane shows", () => {
-    const unread: readonly Unseen[] = [
-      unseen(shown, "Highlight", "#shown"),
-      unseen(calling, "Direct", "peer"),
-    ];
+    const unread: readonly Unseen[] = [unseen(shown, "Highlight"), unseen(calling, "Direct")];
 
     const context = { ...inChannel, shown: [timeline, shown], unread };
 

@@ -4,7 +4,6 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
-  closedBy,
   closeOf,
   closingShown,
   initialClosing,
@@ -70,20 +69,27 @@ const rfc: Naming = { casemapping: "rfc1459", chantypes: "#" };
 
 const offered: LeavingEvent = { _tag: "Offered", channel: "#iirc", network: libera };
 
+const closedById = (timeline: Timeline) => closeOf(timeline)?.timeline;
+
 describe("closing a Timeline", () => {
-  it("closes a Channel's or a Direct Message's from its row, by its Target, and never a Network's own", () => {
+  it("closes a Channel or a Direct Message from its row, by its id, whatever names it, and never a Network's own", () => {
+    const idOf = timelineOf("Channel", "#iirc").id;
+
     expect({
       channel: closeOf(timelineOf("Channel", "#iirc")),
-      detached: closeOf(timelineOf("Direct", "peer", { detached: true, key: null })),
+      // No Target names a detached Direct Message, and no Client holds what a removed Network kept.
+      detached: closedById(timelineOf("Direct", "peer", { detached: true, key: null })),
       direct: closeOf(timelineOf("Direct", "peer")),
       network: closeOf(timelineOf("Network", "libera")),
-      removed: closeOf(timelineOf("Channel", "#iirc", { removed: true })),
+      removedChannel: closedById(timelineOf("Channel", "#iirc", { removed: true })),
+      removedDirect: closedById(timelineOf("Direct", "peer", { removed: true })),
     }).toStrictEqual({
-      channel: { _tag: "CloseTimeline", network: libera, target: "#iirc" },
-      detached: undefined,
-      direct: { _tag: "CloseTimeline", network: libera, target: "peer" },
+      channel: { _tag: "CloseTimeline", network: libera, timeline: idOf },
+      detached: idOf,
+      direct: { _tag: "CloseTimeline", network: libera, timeline: idOf },
       network: undefined,
-      removed: undefined,
+      removedChannel: idOf,
+      removedDirect: idOf,
     });
   });
 });
@@ -200,17 +206,6 @@ const closes = (events: readonly ClosingEvent[]) => {
 };
 
 describe("a close on its way", () => {
-  it("finds its Timeline by the name the Daemon gives it, and none by another case or a status prefix", () => {
-    const named = (target: string) =>
-      closedBy(heldWith(channel), { _tag: "CloseTimeline", network: libera, target });
-
-    expect([named("#iirc"), named("#IIRC"), named("@#iirc")]).toStrictEqual([
-      channel.id,
-      undefined,
-      undefined,
-    ]);
-  });
-
   it("shows its Timeline closed from when it is asked until the stream says it is, once answered closed", () => {
     const asked = closes([{ _tag: "Asked", network: libera, timeline: channel.id }]);
     const answered = reduceClosing(asked, { _tag: "Answered", ask: 0, closedAt: 5 });

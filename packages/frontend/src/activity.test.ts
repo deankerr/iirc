@@ -27,6 +27,7 @@ import {
   titleOf,
 } from "./activity.ts";
 import type { Page } from "./activity.ts";
+import { interpret } from "./commands.ts";
 import { contextOf } from "./composer.ts";
 import { notificationsOf } from "./notifications.ts";
 import {
@@ -411,13 +412,15 @@ describe("what is unread", () => {
     });
   });
 
-  it("marks a Timeline read up to its latest, as the Daemon names its Target", () => {
+  it("marks a Timeline read up to its latest, by its id, whatever names it", () => {
     const marks = [
       described({ id: own, kind: "Network", latest: 50, name: "libera", unread: { activity: 1 } }),
       described({ id: iirc, latest: 50, name: "#iirc", read: 10, unread: { messages: 1 } }),
       described({ id: iirc, latest: 50, name: "#iirc", read: 50, unread: { messages: 1 } }),
       described({ id: iirc, latest: 50, name: "#iirc" }),
       described({ id: iirc, latest: null, name: "#iirc", unread: { messages: 1 } }),
+      // No Target names a detached Direct Message, nor does a Client hold what a removed
+      // Network kept, and both are marked all the same.
       described({
         detached: true,
         id: peer,
@@ -429,17 +432,18 @@ describe("what is unread", () => {
       described({ id: iirc, latest: 50, name: "#iirc", removed: true, unread: { messages: 1 } }),
     ].map((one) => markLatest(decodeTimeline(one)));
 
-    expect(marks.map((mark) => mark && { read: mark.read, target: mark.target })).toStrictEqual([
-      { read: 50, target: null },
-      { read: 50, target: "#iirc" },
-      // Already read that far, nothing unread, no item, a detached Direct Message, or a
-      // removed Network's, which no Client marks.
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    expect(marks.map((mark) => mark && { read: mark.read, timeline: mark.timeline })).toStrictEqual(
+      [
+        { read: 50, timeline: own },
+        { read: 50, timeline: iirc },
+        // Already read that far, nothing unread, or no item.
+        undefined,
+        undefined,
+        undefined,
+        { read: 50, timeline: peer },
+        { read: 50, timeline: iirc },
+      ]
+    );
   });
 });
 
@@ -638,6 +642,33 @@ describe("bots quieted", () => {
     expect({ off: unseen(false), on: unseen(true) }).toStrictEqual({
       off: [["Message", true]],
       on: [[undefined, true]],
+    });
+  });
+
+  // Catches `/read` and `/read all` leaving a removed Network's kept Timeline unread, now that
+  // the Daemon marks it by its id, while `/next-unread` must still pass it over.
+  it("lets /next-unread pass a removed Network's Timeline, which /read and /read all still mark", () => {
+    const kept = described({
+      id: iirc,
+      latest: 30,
+      name: "#iirc",
+      removed: true,
+      unread: { messages: 2 },
+    });
+
+    const context = contextOf(world([kept], iirc));
+
+    expect({
+      calling: context.unread,
+      closed: context.unreadClosed.map((one) => [one.level, one.mark?.timeline]),
+      read: interpret("/read", context),
+    }).toStrictEqual({
+      calling: [],
+      closed: [["Message", iirc]],
+      read: {
+        _tag: "Parsed",
+        value: [{ _tag: "MarkRead", network: "libera", read: 30, timeline: iirc }],
+      },
     });
   });
 
@@ -881,7 +912,7 @@ describe("when a Timeline is marked read, as ui.unread.markRead says", () => {
       back: markDue(back, seeing, "shown"),
       latest: markDue(world([unreadIirc], iirc, items), seeing, "shown")?.read,
     }).toStrictEqual({
-      back: { _tag: "MarkRead", network: "libera", read: 30, target: "#iirc", timeline: iirc },
+      back: { _tag: "MarkRead", network: "libera", read: 30, timeline: iirc },
       latest: 40,
     });
   });

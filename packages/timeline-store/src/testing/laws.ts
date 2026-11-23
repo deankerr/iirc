@@ -3490,6 +3490,78 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: (store) =>
       Effect.gen(function* () {
+        const summary = Effect.map(store.timeline(direct), (found) =>
+          Option.match(found, {
+            onNone: () => "none" as const,
+            onSome: ({ closed, key, read, unread }) => ({ closed, key, read, unread }),
+          })
+        );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          described(2, direct, "Direct", "peer", "peer"),
+          added(2, direct, position(1, 2, 0), said("psst"), undefined, libera, "Direct"),
+          added(2, direct, position(3, 2, 1), said("still there?"), undefined, libera, "Direct"),
+        ]);
+        // Another partner took the nick, so the Timeline is detached and receives nothing more.
+        yield* apply(store, 3, [described(3, direct, "Direct", "peer", null)]);
+        yield* apply(store, 4, [marker(4, direct, at(5)), closing(4, direct)]);
+        yield* apply(store, 5, [marker(5, direct, at(2))]);
+
+        yield* same("read, closed, and counted again", yield* summary, {
+          closed: true,
+          key: null,
+          read: at(5),
+          unread: noneUnread,
+        });
+        yield* same(
+          "the Read Marker kept, at the change that moved it",
+          (yield* store.timeline(direct)).pipe(Option.map(({ changed }) => changed)),
+          Option.some(4)
+        );
+        yield* same("still found", yield* searchFor(store, { text: "psst" }), ["psst"]);
+      }),
+    name: "marks a detached Timeline read only forward and closes it, still found by search",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const summary = Effect.map(store.timeline(channel), (found) =>
+          Option.match(found, {
+            onNone: () => "none" as const,
+            onSome: ({ closed, read, removed, unread }) => ({ closed, read, removed, unread }),
+          })
+        );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...[1, 2, 3].map((ms, n) =>
+            added(2, channel, position(ms, 2, n), said(`${ms}`), undefined, libera, "Message")
+          ),
+        ]);
+        yield* apply(store, 3, [removal(3, true)]);
+        yield* apply(store, 4, [marker(4, channel, at(2))]);
+        yield* apply(store, 5, [marker(5, channel, at(1))]);
+        yield* apply(store, 6, [closing(6, channel)]);
+
+        yield* same("read only forward, counted again, closed, still removed", yield* summary, {
+          closed: true,
+          read: at(2),
+          removed: true,
+          unread: { ...noneUnread, messages: 1 },
+        });
+
+        // Once dropped, nothing is marked or closed, and nothing comes back.
+        yield* apply(store, 7, [removal(7, false)]);
+        yield* apply(store, 8, [marker(8, channel, at(9)), closing(8, channel)]);
+        yield* same("dropped stays dropped", yield* summary, "none");
+        yield* same("nothing changed", (yield* store.changedAfter(7)).timelines, []);
+      }),
+    name: "marks a removed Network's kept Timeline read only forward and closes it, and a dropped one never",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
         const again = timelineIdOf(5, 0, 0);
 
         yield* apply(store, 2, [...opened(2)]);

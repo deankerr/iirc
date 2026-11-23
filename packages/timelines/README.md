@@ -1,12 +1,14 @@
 # @iirc/timelines
 
-Timelines as a pure fold over News. Each step the Runtime's News stream gives goes in, and the changes a Timeline store applies come out. It does no I/O, reads no clock, and holds plain data, so the same steps always give the same Timelines, ids, positions, and changes.
+Timelines as a pure fold over News, and over the Changes that mark a Timeline by its id. Each step the Runtime's News stream gives goes in, and each such Change in its place among them, and the changes a Timeline store applies come out. It does no I/O, reads no clock, and holds plain data, so the same steps always give the same Timelines, ids, positions, and changes.
 
 ```ts
-import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
+import { emptyDirectory, projectionVersion, step, stepMarking } from "@iirc/timelines";
 
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, life, sequence, at, news }  // the Runtime's Happened fits it
+stepMarking(directory: Directory, marking: Marking): { directory: Directory, changes: readonly Change[] }
+Marking = TimelineRead { network, sequence, timeline, read } | TimelineClosed { network, sequence, timeline }
 emptyDirectory: Directory
 projectionVersion: number
 comparePositions(left, right): number
@@ -67,6 +69,8 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it, followed by `ReadMarker` for the one kept when the merged one was read further. |
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `TimelineClosed` | `Closed` for the Timeline its `where` names, when one has that key. Closing opens nothing. Whether it stays closed is the store's to derive, from what is added to it after. |
+| A `TimelineRead` marking | `ReadMarker` for the Timeline it names, as below. |
+| A `TimelineClosed` marking | `Closed` for the Timeline it names, unless it is a Network's own. |
 | `ChannelLearned` | `HeadChanged` for the Channel's Timeline, when one exists, so a Frontend reads the Channel's head again. It opens no Timeline and adds no item. |
 | `PartnerLearned` | `HeadChanged` for the partner's Direct Message Timeline, when one exists, so a Frontend reads whether they are there again. It opens no Timeline and adds no item. |
 | `Unignored` | `Unignored` for the Network, with the masks the Owner no longer ignores. It places nothing. |
@@ -80,11 +84,12 @@ A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed
 
 ## Read Markers and levels
 
-The fold keeps each Timeline's **Read Marker**, how far the Owner has read it, as an instant, from the Client's `ReadMarker` News.
+The fold keeps each Timeline's **Read Marker**, how far the Owner has read it, as an instant, from the Client's `ReadMarker` News and from a `TimelineRead` marking, a Change that names a Timeline no Client can name by its id.
 
 - **It moves only forward, per Timeline.** A `ReadMarker` sets the Read Marker of the Timeline its `where` names, `Network`, `Channel`, or `Direct`, only when it is later than the one the Timeline has, whatever the News says. So after a casemapping change, when the Client's marker for a key follows another spelling than the Timeline's, no Timeline's Read Marker moves back.
 - **Marking read opens nothing.** A `ReadMarker` for a key no Timeline has changes nothing.
 - **It goes with its Timeline.** A Direct Message Timeline renamed by `DirectRenamed` keeps its Read Marker, and one detached keeps it too, and receives no more. Of two Timelines merged, the kept one has been read as far as the later of their two Read Markers.
+- **A marking moves it as News does.** A `TimelineRead` for a Timeline the directory holds, the Network's own or a keyed one, moves its Read Marker only forward there, so a Client's `ReadMarker` behind it moves nothing after. One for a Timeline the directory no longer holds, a detached one or a removed Network's, is told to the store by its id, as a `ReadMarker` change, which the store moves only forward. Marking opens nothing, and moves no Network's last step.
 
 Each `Added` item has a **level**, how much it calls for the Owner in its Timeline, as WeeChat ranks activity, which a store counts what lies after a Read Marker by:
 
@@ -103,6 +108,7 @@ The Owner closes a Channel's or a Direct Message partner's Timeline, and the fol
 
 - **Closing opens nothing.** A `TimelineClosed` for a key no Timeline has changes nothing.
 - **It goes with its Timeline.** A close is kept by the Timeline's id, which a rename, a refold, and a detach keep. A partner's rename is an Activity added to their Timeline, so it opens it, as anything arriving does, and a detached Timeline, which receives nothing more, stays as it was. Of two Timelines merged, the store keeps the one kept closed only when both were.
+- **A marking closes by id.** A `TimelineClosed` marking tells the store to close the Timeline it names, whether the directory holds it or not, so a detached Timeline or a removed Network's is closed too, and stays closed, since nothing arrives in it. A Network's own is never closed: its id is the only one whose last part is `00000000`, so even a removed Network's is told apart.
 
 ## What a search finds
 

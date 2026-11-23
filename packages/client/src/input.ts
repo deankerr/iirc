@@ -160,6 +160,21 @@ export const UnsentLine = Schema.TaggedUnion({
 export type UnsentLine = typeof UnsentLine.Type;
 
 /**
+ * A Timeline as a projection holds it, already resolved: the Network's own, or a Channel's
+ * or a Direct Message partner's by its `key` and `name`, as a `where` gave them. A `Read` or
+ * a `CloseTimeline` that names one is taken as it is, with no Target to parse, so it needs no
+ * `CHANTYPES` and works whatever the Client knows of the Network now.
+ */
+export const Resolved = Schema.TaggedUnion({
+  Channel: { key: Schema.String, name: Schema.String },
+  Direct: { key: Schema.String, name: Schema.String },
+  Network: {},
+});
+
+/** The decoded form of {@link Resolved}. */
+export type Resolved = typeof Resolved.Type;
+
+/**
  * Everything that can happen to a Client. Each input is journaled before it is stepped,
  * and carries the instant it happened as the Runtime saw it.
  */
@@ -168,9 +183,10 @@ export const Input = Schema.TaggedUnion({
   Act: { action: Action, at: Instant, intent: IntentId },
   /**
    * The Owner closed a Timeline: a Channel's or a Direct Message partner's, named as `Say`
-   * names one. The Network's own, and a Channel Self is in, cannot be closed.
+   * names one, or {@link Resolved} as a projection holds it. The Network's own, and a
+   * Channel Self is in, cannot be closed.
    */
-  CloseTimeline: { at: Instant, target: Schema.String },
+  CloseTimeline: { at: Instant, target: Schema.Union([Schema.String, Resolved]) },
   /** A Connection is over. */
   Closed: { at: Instant, connection: ConnectionId, reason: CloseReason },
   /** The Owner's Configuration for this Network, whole. */
@@ -190,10 +206,14 @@ export const Input = Schema.TaggedUnion({
   /**
    * The Owner has read a Timeline up to the instant `read`: a Target's, a Channel or a
    * Direct Message partner named as `Say` names one, or with `target` null, the Network's
-   * own. A Read Marker only moves forward, so an instant no later than the one held
-   * changes nothing.
+   * own, or {@link Resolved} as a projection holds it. A Read Marker only moves forward, so
+   * an instant no later than the one held changes nothing.
    */
-  Read: { at: Instant, read: Instant, target: Schema.NullOr(Schema.String) },
+  Read: {
+    at: Instant,
+    read: Instant,
+    target: Schema.Union([Schema.Null, Schema.String, Resolved]),
+  },
   /** One Line's bytes, without its line ending, framed by the Transport. */
   Received: { at: Instant, bytes: Schema.Uint8Array, connection: ConnectionId },
   /**

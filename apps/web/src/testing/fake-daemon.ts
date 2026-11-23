@@ -384,9 +384,7 @@ const ownerOptionRoute = new RegExp(
   "u"
 );
 
-const ReadBody = Schema.fromJsonString(
-  Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
-);
+const ReadBody = Schema.fromJsonString(Schema.Struct({ read: Schema.Finite }));
 
 const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String }));
 
@@ -621,8 +619,9 @@ export const fakeDaemon = () => {
   const listsHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
   const removals: { readonly network: string; readonly keep: boolean }[] = [];
-  const reads: (typeof ReadBody.Type)[] = [];
-  const closes: { readonly network: string; readonly target: string }[] = [];
+  const reads: { readonly read: number; readonly timeline: string }[] = [];
+  const closes: { readonly timeline: string }[] = [];
+  const targetCloses: { readonly network: string; readonly target: string }[] = [];
   const channelsRead: string[] = [];
   const channelsAsked: string[] = [];
   const channelsHeld: (() => void)[] = [];
@@ -691,7 +690,7 @@ export const fakeDaemon = () => {
     channelsAsked,
     /** Each read of a Channel's head answered, by its Timeline. */
     channelsRead,
-    /** Each close asked for, joined or not, in order. */
+    /** Each close of a Timeline by its id, joined or not, in order. */
     closes,
     /** Each Network's Configuration in force, and the sequence that set it. */
     configurations: new Map<string, { configuration: ConfigurationOnWire; sequence: number }>([
@@ -874,6 +873,8 @@ export const fakeDaemon = () => {
     tailFollowers,
     /** Whether the Tail's stream answers `502`, as a proxy does while the Daemon cannot be reached. */
     tailStreamDown: false,
+    /** Each close by a Target, joined or not, in order. */
+    targetCloses,
     /** The last step folded, which every Timeline read gives as `through`. */
     through: 1,
     /** The Timelines of each Network, in the order they opened. */
@@ -1423,10 +1424,11 @@ export const fakeDaemon = () => {
 
   /**
    * Marks a Timeline read, kept for a test to look at, or gets no answer as a test asks.
+   * @param timeline - The Timeline's id.
    * @param init - The request.
    * @returns The answer.
    */
-  const markRead = async (init: RequestInit) => {
+  const markRead = async (timeline: string, init: RequestInit) => {
     if (!daemon.signedIn) {
       return json(401, { _tag: "Unauthorized" });
     }
@@ -1436,7 +1438,9 @@ export const fakeDaemon = () => {
       throw new TypeError("fetch failed");
     }
 
-    daemon.reads.push(Schema.decodeSync(ReadBody)(await new Response(init.body).text()));
+    const { read } = Schema.decodeSync(ReadBody)(await new Response(init.body).text());
+
+    daemon.reads.push({ read, timeline });
     daemon.nextSequence += 1;
 
     return json(200, { sequence: daemon.nextSequence - 1 });
@@ -1444,33 +1448,29 @@ export const fakeDaemon = () => {
 
   /**
    * Closes a Timeline, as the Daemon does: a Channel Self is in is refused as `Joined`, and
-   * otherwise the Timeline named, in any ASCII case, is `closed`, which the changes stream
-   * says in one step, and stays so until something arrives in it. The answer waits while
-   * `holdCloses` says, though the close was already stepped.
+   * otherwise the Timeline is `closed`, which the changes stream says in one step, and
+   * stays so until something arrives in it. The answer waits while `holdCloses` says,
+   * though the close was already stepped.
    * @param network - The Network.
-   * @param init - The request.
+   * @param target - The name of the Timeline, as a refusal names it.
+   * @param held - The Timeline closed, if one is held.
+   * @param kind - Its kind, or none for a Target that no Timeline held is.
    * @returns The answer.
    */
-  const close = async (network: string, init: RequestInit) => {
-    if (!daemon.signedIn) {
-      return json(401, { _tag: "Unauthorized" });
-    }
-
-    const { target: typed } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
-    // The Client resolves a Target as it does a `Read`'s, so a status prefix names the Channel
-    // without it, and that is what a refusal names.
-    const target = typed.replace(/^[~&@%+]+(?=[#&])/u, "");
+  const closeStepped = async (
+    network: string,
+    target: string,
+    held: FakeTimeline | undefined,
+    kind: "Channel" | "Direct" | undefined
+  ) => {
     const sequence = daemon.nextSequence;
 
-    daemon.closes.push({ network, target: typed });
     daemon.nextSequence += 1;
     daemon.through = sequence;
 
-    const joined = (daemon.joined.get(network) ?? []).some((name) => lower(name) === lower(target));
-
-    const held = (daemon.timelines.get(network) ?? []).find(
-      (one) => one.timeline.kind !== "Network" && lower(one.timeline.name) === lower(target)
-    );
+    const joined =
+      kind !== "Direct" &&
+      (daemon.joined.get(network) ?? []).some((name) => lower(name) === lower(target));
 
     if (!joined && held !== undefined) {
       Object.assign(held, { timeline: { ...held.timeline, changed: sequence, closed: true } });
@@ -1504,6 +1504,60 @@ export const fakeDaemon = () => {
       : { _tag: "Closed", sequence };
 
     return json(200, closed);
+  };
+
+  /**
+   * Closes the Timeline a Target names, as the Client resolves one: a status prefix names
+   * the Channel without it, which is what a refusal names, and the Timeline is found in any
+   * ASCII case.
+   * @param network - The Network.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const closeTarget = async (network: string, init: RequestInit) => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const { target: typed } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
+    const target = typed.replace(/^[~&@%+]+(?=[#&])/u, "");
+
+    daemon.targetCloses.push({ network, target: typed });
+
+    const held = (daemon.timelines.get(network) ?? []).find(
+      (one) => one.timeline.kind !== "Network" && lower(one.timeline.name) === lower(target)
+    );
+
+    return await closeStepped(
+      network,
+      target,
+      held,
+      held?.timeline.kind === "Direct" ? "Direct" : "Channel"
+    );
+  };
+
+  /**
+   * Closes the Timeline an id names, held by any Network, a detached Direct Message and a
+   * removed Network's kept Timelines included, or answers `UnknownTimeline`.
+   * @param timeline - The Timeline's id.
+   * @returns The answer.
+   */
+  const closeById = async (timeline: string) => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    daemon.closes.push({ timeline });
+
+    const held = [...daemon.timelines.values()].flat().find((one) => one.timeline.id === timeline);
+
+    if (held === undefined || held.timeline.kind === "Network") {
+      return json(404, { _tag: "UnknownTimeline", timeline });
+    }
+
+    const { kind, name, network } = held.timeline;
+
+    return await closeStepped(network, name, held, kind === "Direct" ? "Direct" : "Channel");
   };
 
   /**
@@ -2261,7 +2315,28 @@ export const fakeDaemon = () => {
       : Response.json({ previews });
   };
 
+  /**
+   * Marking a Timeline read or closing it, by its id.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing for any other route.
+   */
+  const markingRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const one = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/(?<what>read|close)$/u.exec(
+      url.pathname
+    )?.groups;
+
+    if (one === undefined || init.method !== "POST") {
+      return undefined;
+    }
+
+    const { timeline = "", what } = one;
+
+    return what === "read" ? await markRead(timeline, init) : await closeById(timeline);
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
+    (await markingRoute(url, init)) ??
     (await previewsRoute(url, init)) ??
     removeRoute(url, init) ??
     (await lookupRoute(url, init)) ??
@@ -2379,12 +2454,8 @@ export const fakeDaemon = () => {
         );
       }
 
-      case "POST /api/networks/libera/read": {
-        return await markRead(init);
-      }
-
       case "POST /api/networks/libera/close": {
-        return await close("libera", init);
+        return await closeTarget("libera", init);
       }
 
       case "POST /api/networks/libera/act": {

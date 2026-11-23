@@ -150,8 +150,9 @@ export interface CommandContext {
   /** Every Timeline the sidebar lists with something unread, in its order. */
   readonly unread: readonly Unseen[];
   /**
-   * Every Timeline closed, with something unread, that no Pane shows, which navigation
-   * skips since the sidebar does not list it, and which `/read all` still marks.
+   * Every Timeline with something unread that navigation skips: one closed, which the
+   * sidebar does not list, and one of a Network removed, which calls for nothing. `/read`
+   * and `/read all` still mark them.
    */
   readonly unreadClosed: readonly Unseen[];
   /**
@@ -177,14 +178,13 @@ export interface Unseen {
 }
 
 /**
- * Mark a Timeline read up to an instant: the Daemon's `read`, with `target` the Timeline's
- * name, or `null` for the Network's own.
+ * Mark a Timeline read up to an instant: the Daemon's `read`, naming the Timeline by its id,
+ * which every Timeline held has, detached or of a removed Network or not.
  */
 export interface MarkRead {
   readonly _tag: "MarkRead";
   readonly network: NetworkId;
   readonly timeline: TimelineId;
-  readonly target: string | null;
   readonly read: Instant;
 }
 
@@ -197,12 +197,21 @@ export interface Export {
 }
 
 /**
- * Close a Timeline: the Daemon's `close`, with `target` a Channel's name or a Direct Message
- * partner's nick. A Channel Self is in is never closed: the Daemon answers so, and the
- * runtime offers to leave it instead.
+ * Close a Timeline held: the Daemon's `close`, naming the Timeline by its id. A Channel Self
+ * is in is never closed: the Daemon answers so, and the runtime offers to leave it instead.
  */
 export interface CloseTimeline {
   readonly _tag: "CloseTimeline";
+  readonly network: NetworkId;
+  readonly timeline: TimelineId;
+}
+
+/**
+ * Close what the Owner named: the Daemon's `close` by a Target, a Channel's name or a Direct
+ * Message partner's nick, which the Network's Client resolves by the Network's own naming.
+ */
+export interface CloseTarget {
+  readonly _tag: "CloseTarget";
   readonly network: NetworkId;
   readonly target: string;
 }
@@ -285,7 +294,8 @@ export interface Act {
  *   there is one, as `/topic` starts the Channel's topic. A draft with text in it is never
  *   replaced: the composer says what was not put in.
  * - `MarkRead`: mark a Timeline read, above.
- * - `CloseTimeline`: close a Timeline, above.
+ * - `CloseTimeline`: close a Timeline held, above.
+ * - `CloseTarget`: close what the Owner named, above.
  * - `Mute`: mute a Timeline, or unmute it, for every device, which the runtime writes as
  *   `ui.unread.muted`, the whole list, as `muting` gives it.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
@@ -354,6 +364,7 @@ export type Intent =
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
   | CloseTimeline
+  | CloseTarget
   | { readonly _tag: "Mute"; readonly timeline: TimelineId; readonly muted: boolean }
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
@@ -960,34 +971,40 @@ const networkArguments = (args: string, context: CommandContext): Parsed<Intent>
 const closeUsage = "/close-timeline [#channel|nick]";
 
 /**
- * The Timeline `/close-timeline` names: a Channel or a nick given, or else the one in
- * focus, which must have a Target, since the Daemon closes a Timeline by its Target and
- * never closes a Network's own.
+ * What `/close-timeline` closes: a Channel or a nick given, as a Target the Network's Client
+ * resolves by the Network's own naming, or else the one in focus, by its id, so one that no
+ * Target names is closed all the same. The focused one is never a Network's own, which is
+ * never closed.
  * @param args - The text after `/close-timeline`.
- * @param focus - The Timeline in focus.
- * @returns The Target, or why there is none.
+ * @param context - The context.
+ * @returns The intent, or why there is none.
  */
-const closeArguments = (args: string, focus: Focus): Parsed<string> => {
+const closeArguments = (
+  args: string,
+  context: CommandContext
+): Parsed<CloseTimeline | CloseTarget> => {
+  const { focus } = context;
+
+  if (focus === undefined) {
+    return invalid("Open a Timeline first.");
+  }
+
   const name = args.trim();
 
   if (name !== "") {
     // A list of Targets is never one Timeline.
-    return /[\s,]/u.test(name)
-      ? invalid(`Close one Timeline at a time. ${closeUsage}`)
-      : parsed(name);
+    if (/[\s,]/u.test(name)) {
+      return invalid(`Close one Timeline at a time. ${closeUsage}`);
+    }
+
+    return parsed({ _tag: "CloseTarget", network: focus.network, target: name });
   }
 
-  if (focus.kind === "Network") {
-    return invalid(
-      `A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. ${closeUsage}`
-    );
-  }
-
-  return focus.key === undefined
+  return focus.kind === "Network"
     ? invalid(
-        "This Direct Message no longer follows its partner, so it has no Target to close it by."
+        `A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. ${closeUsage}`
       )
-    : parsed(focus.name);
+    : parsed({ _tag: "CloseTimeline", network: focus.network, timeline: focus.timeline });
 };
 
 const ignoreUsage = "/ignore [<nick|mask>]";
@@ -1364,7 +1381,13 @@ const readArguments = (args: string, context: CommandContext): Parsed<readonly M
 
   return focus === undefined
     ? invalid("Open a Timeline first, or use /read all.")
-    : parsed(marksOf(context.unread.filter((one) => one.timeline === focus.timeline)));
+    : parsed(
+        marksOf(
+          [...context.unread, ...context.unreadClosed].filter(
+            (one) => one.timeline === focus.timeline
+          )
+        )
+      );
 };
 
 /** The least a Timeline's highest level must be for `/next-unread` to go to it. */
@@ -2892,19 +2915,17 @@ export const commands: readonly Command[] = [
     usage: unignoreUsage,
     when: live,
   }),
-  command({
+  unfocused({
     aliases: [],
     arguments: "Optional",
     description:
       "Close a Channel you left, or a Direct Message, the open one unless named, taking it out of the sidebar until something arrives in it. A Channel you are in offers to leave it instead.",
     id: "timeline.close",
-    intents: (name: string, focus) => [
-      { _tag: "CloseTimeline", network: focus.network, target: name },
-    ],
+    intents: (intent: CloseTimeline | CloseTarget) => [intent],
     name: "close-timeline",
     parse: closeArguments,
     usage: closeUsage,
-    when: live,
+    when: [{ _tag: "Focused" }],
   }),
   ...actions,
   setCommand,

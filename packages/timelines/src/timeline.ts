@@ -37,6 +37,14 @@ const hex = (value: number, digits: number): string => value.toString(16).padSta
 export const timelineIdOf = (sequence: number, n: number, slot: number): TimelineId =>
   TimelineId.make(`${hex(sequence, 14)}-${hex(n, 8)}-${hex(slot, 8)}`);
 
+/**
+ * Whether an id is a Network's own Timeline's, which opens before any News is placed and
+ * so is the only one whose slot is 0.
+ * @param id - The id.
+ * @returns Whether it is.
+ */
+export const isNetworkOwn = (id: TimelineId): boolean => id.endsWith("-00000000");
+
 /** Whose Timeline it is: the Network's own, a Channel's, or a Direct Message partner's. */
 export type Kind = "Network" | "Channel" | "Direct";
 

@@ -61,15 +61,15 @@ Each SQLite database also has its `-wal` and `-shm` files beside it.
 
 ## Timelines
 
-The projector keeps `views.sqlite` folded up to the Journal, with the fold of `@iirc/timelines`.
+The projector keeps `views.sqlite` folded up to the Journal, with the fold of `@iirc/timelines`. It follows the Runtime's `happenings`, each step's News with each Change in its place, and folds the News and the `TimelineRead` and `TimelineClosed` Changes, in Journal order, passing over every other Change.
 
 - **On start, it resumes or rebuilds.** A store built by the same `projectionVersion` resumes after the last sequence it folded. Any other, a new or emptied one included, is reset to `projectionVersion` and folded from the start of the Journal, which is logged.
-- **Each step is applied whole,** with its sequence as `through`, in one transaction. A step at or before the last one folded changes nothing, so resuming never folds a step twice.
+- **Each step, and each Change that marks a Timeline, is applied whole,** with its sequence as `through`, in one transaction. A step at or before the last one folded changes nothing, so resuming never folds a step twice.
 - **It never holds up the Runtime or a Network.** It follows the Journal on its own, so a slow or stopped projector holds back only itself.
 - **A failure stops it, and nothing else.** A store that cannot be written or read, or a Journal that cannot be followed, stops it: the error is logged with its reason, `Projector`'s status becomes `Stopped` with that reason, and the Daemon and every Network go on. A restart tries again.
 - **A store that cannot be opened at start is a refusal,** as a Journal that cannot be opened is.
 - **The store may lag the Journal, never lead it.** After a crash, what the store lost of the last steps is folded again on start.
-- **Read Markers, unread counts, and whether a Timeline is closed are the projection's.** A `read` and a `close` are journaled and stepped like any input, and the store derives the rest, so a restart, or a store folded again, gives the same answer to every Frontend.
+- **Read Markers, unread counts, and whether a Timeline is closed are the projection's.** A `read` and a `close` are journaled, as an input a Client steps or as a Change, and the store derives the rest, so a restart, or a store folded again, gives the same answer to every Frontend.
 - **`Projector.folded` gives `{ version, through }` together,** from where it resumed, or the version it reset to with no `through`, and again once each step is kept.
 
 ## The options
@@ -320,6 +320,7 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **A Key in `Authorization: Bearer` is tried before the `iirc_sign_in` cookie,** and either gives the handler the Key's name as its `Caller`.
 - **Each News reader follows the Journal on its own,** so a reader that reads nothing holds back only its own response.
 - **A Timeline read, or a search, is read in one state of the store,** so what it gives, its `version`, and its `through` agree.
+- **A Timeline is marked read, or closed, by its id** in `src/marking.ts`, from its summary in the store, a merged id's being the one it went to, and its Network's life as the Runtime holds it now, since the store may lag a removal. One with a key, of a Network live in the Timeline's life, is given to its Network's Client as the summary holds it, and the Client decides as for a Target. A detached one, or one its removed Network kept, is journaled as a `TimelineRead` or `TimelineClosed` Change, and so is one whose Network was removed, keeping it, while its Client was stepped. One whose Network was removed without keeping it, or given its id again, is unknown. A close of a Network's own by a Change is journaled and answers `NoTimeline`, since the fold closes none.
 - **A Network neither running nor removed with its Timelines kept is `UnknownNetwork`** before the store is read.
 - **A window reads at most `limit + 1` runs of Gaps,** since the store collapses them between each two items.
 - **An export is streamed 256 items at a time,** each page read only once the one before is sent, so a long Timeline is never held whole. Pages are not read together, so an item folded during an export may or may not be in it. Its lines and file name are written in `src/export.ts`.

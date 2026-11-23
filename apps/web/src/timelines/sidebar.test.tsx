@@ -522,9 +522,58 @@ describe("closing a Timeline from the sidebar", () => {
     }).toStrictEqual({
       back: [["libera", "#iirc", "#other", "peer"], "peer, 1 unread"],
       closed: ["libera", "#iirc", "#other"],
-      closes: [{ network: "libera", target: "peer" }],
+      closes: [{ timeline: peer }],
       // Every Timeline's row has a menu, a Network's own too.
       menus: [true, true, true, true],
+    });
+  });
+
+  // Catches a row with no Close, or a close that names a Target, for a Direct Message that no
+  // longer follows its partner, which no Target names.
+  it("closes a detached Direct Message from its row's menu, by its id", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn(
+      {
+        listed: 1,
+        timelines: [{ ...describeTimeline(peer, "peer", "Direct"), detached: true, key: null }],
+      },
+      fake
+    );
+
+    await pressButton("More for peer");
+    await chooseFromMenu("Close");
+    await settled(() => !names().includes("peer"));
+
+    expect({ closes: fake.daemon.closes, names: names() }).toStrictEqual({
+      closes: [{ timeline: peer }],
+      names: ["libera", "#iirc", "#other"],
+    });
+  });
+
+  // Catches a row with no Close for what a removed Network kept, which no Client holds.
+  it("closes a Timeline a removed Network kept from its row's menu, by its id", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn(undefined, fake);
+
+    await pressButton("More for libera");
+    await chooseFromMenu("Remove Network…");
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+    await pressButton("Remove");
+    await settled(
+      () =>
+        document.querySelector('[role="alertdialog"]') === null &&
+        row("libera").getAttribute("aria-label") === "libera, removed"
+    );
+
+    await pressButton("More for #iirc");
+    await chooseFromMenu("Close");
+    await settled(() => !names().includes("#iirc"));
+
+    expect({ closes: fake.daemon.closes, names: names() }).toStrictEqual({
+      closes: [{ timeline: iirc }],
+      names: ["libera", "#other"],
     });
   });
 
@@ -556,7 +605,7 @@ describe("closing a Timeline from the sidebar", () => {
     }).toStrictEqual({
       channels: [],
       // The close is sent, and the Daemon's `Joined` answer is what opens the offer.
-      closes: [{ network: "libera", target: "#iirc" }],
+      closes: [{ timeline: iirc }],
       // Leaving does not close it: the part shows in it, and it is closed once Self has left.
       listed: ["libera", "#iirc", "#other"],
       offered: "You are in #iirc. Leave it?",
@@ -621,7 +670,7 @@ describe("closing a Timeline from the sidebar", () => {
       puts: fake.daemon.puts.length,
     }).toStrictEqual({
       acts: [{ _tag: "Part", channel: "#iirc", reason: null }],
-      closes: [{ network: "libera", target: "#iirc" }],
+      closes: [{ timeline: iirc }],
       puts: 0,
     });
   });
@@ -634,7 +683,7 @@ describe("closing a Timeline from the sidebar", () => {
 
     // What `/close-timeline @#iirc` asks.
     registry.set(perform, [
-      { _tag: "CloseTimeline", network: Schema.decodeSync(NetworkId)("libera"), target: "@#iirc" },
+      { _tag: "CloseTarget", network: Schema.decodeSync(NetworkId)("libera"), target: "@#iirc" },
     ]);
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
 
@@ -645,12 +694,13 @@ describe("closing a Timeline from the sidebar", () => {
 
     expect({
       channels: fake.daemon.configurations.get("libera")?.configuration.channels,
-      closes: fake.daemon.closes,
       offered,
+      targetCloses: fake.daemon.targetCloses,
     }).toStrictEqual({
       channels: [],
-      closes: [{ network: "libera", target: "@#iirc" }],
       offered: "You are in #iirc. Leave it?",
+      // A Target no Timeline held is, named by a status prefix, is left to the Client.
+      targetCloses: [{ network: "libera", target: "@#iirc" }],
     });
   });
 
@@ -717,10 +767,7 @@ describe("closing a Timeline from the sidebar", () => {
       dialog: document.querySelector('[role="alertdialog"]'),
       leaving: registry.get(leavingState)._tag,
     }).toStrictEqual({
-      closes: [
-        { network: "libera", target: "#iirc" },
-        { network: "libera", target: "#other" },
-      ],
+      closes: [{ timeline: iirc }, { timeline: other }],
       dialog: null,
       leaving: "Idle",
     });

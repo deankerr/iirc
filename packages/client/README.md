@@ -45,8 +45,8 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Look` | Owner | Look something up, with an intent id: `Whois`, `Whowas`, `Bans`, `Exceptions`, `Invitations`, `Names`, `Who`, or `Channels`. |
 | `Retry` | Owner | Try connecting now, cutting a wait short. |
 | `Removed` | Owner | The Owner removed the Network, keeping its Timelines readable or not, as `keep` says. |
-| `Read` | Owner | The Owner has read a Timeline up to an instant: a Target's, or the Network's own. |
-| `CloseTimeline` | Owner | The Owner closed a Target's Timeline: a Channel Self is not in, or a Direct Message partner's. |
+| `Read` | Owner | The Owner has read a Timeline up to an instant: a Target's, the Network's own, or one already resolved, by its kind, key, and name as a projection holds it. |
+| `CloseTimeline` | Owner | The Owner closed a Timeline, named as a `Read` names one: a Channel Self is not in, or a Direct Message partner's. |
 | `Opened`, `Received`, `Closed` | Transport | A Connection opened, one Line's bytes arrived, or a Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due. It consumes the timer. |
 | `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent. |
@@ -220,7 +220,7 @@ A fact's source is `ircd`, `replied`, `receipt`, or `ours`. Nothing in Knowledge
 | Input from an old Connection, or a stale `Fired` | `Ignored` with `StaleConnection` or `StaleTimer`. |
 | An input or a Line that makes no sense now, such as a second `001` | `Ignored` with `NotNow`. A Line the Client does not read is not an error. |
 | An Owner intent that cannot be carried out | `Refused` with the intent id. It is not queued. |
-| A `Read` or a `CloseTimeline` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
+| A `Read` or a `CloseTimeline` whose Target names no one Timeline, or a `CloseTimeline` of the Network's own | `Ignored` with `NoTimeline`. |
 | A `CloseTimeline` of a Channel Self is in | `Ignored` with `Joined`, naming the Channel as resolved, without a status prefix. |
 | A Line a Feature refuses at egress | A `Say` or an `Act` is `Refused` with `Unsendable`. A Line the Client sends itself is `Ignored` with `Unsendable`. Nothing is sent. |
 | A Line the Client sends itself that does not fit, such as `Away` again as a Session begins | `Ignored` with `Unsendable`. |
@@ -276,6 +276,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **An answer that never left is a `CtcpUnsent`,** in the Timelines its request is in as they stand then. Once another User took that nick, or 64 later answers have pushed it out of memory, it goes to the Network's own Timeline alone. Its budget stays spent.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
 - **Closing a Timeline** (`close.test.ts`). A `CloseTimeline` names a Channel or a Direct Message partner as a `Read` does, never the Network's own, and is reported unless Self is in that Channel now. It needs no Session.
+- **A Timeline already resolved** (`resolved.test.ts`). A `Read` or a `CloseTimeline` may name a Timeline by its kind, key, and name, as a projection holds it, instead of a Target. It is taken as it is, with nothing parsed or folded, so a Channel only `CHANTYPES` made one is named while the Network is offline, and it shares the Read Marker its Target has.
 - **Highlights** (`highlight.test.ts`). A live Message from another User is a Highlight when it holds Self's nick, or one of the Configuration's `highlights`, as a whole word. Word boundaries use Unicode 17.0, pinned in `src/word-characters.ts`, so a Journal gives the same Highlights on every runtime. The search is linear in the text, however hostile.
 - **Ignoring by mask** (`ignore.test.ts`). The Configuration's `ignores` are `nick!user@host` masks, at most 64, and a mask respelt in another case is the same mask. A Message or an Activity from a User one of them matches, by its source, carries those masks as `ignored`, folded by the casemapping the Network last declared, each once, in the Configuration's order.
 - **The ignored User is the one who acted:** who joined, quit, set a mode, or kicked, not the one kicked. A `HostChanged` is stamped by the mask the User had or the one they have now. History is stamped as live is, and a Message from a server never is, nor is Self.

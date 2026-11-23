@@ -16,7 +16,7 @@ import {
   NetworkStopped,
   UnknownNetwork,
 } from "./runtime.ts";
-import type { Happened, NetworkStatus } from "./runtime.ts";
+import type { Happened, Happening, NetworkStatus } from "./runtime.ts";
 import {
   awaitRecord,
   entries,
@@ -999,6 +999,46 @@ describe("marking read", () => {
   });
 });
 
+describe("a Timeline as a projection holds it", () => {
+  it("is journaled as it was given, for the Client to take without a Target to parse", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { when: "Configured" },
+          { when: "Read" },
+          { when: "CloseTimeline" },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+        yield* TestClock.adjust(1000);
+
+        const other = { _tag: "Channel", key: "+other", name: "+Other" } as const;
+
+        yield* runtime.read(libera, { read: at(500), target: other });
+        yield* runtime.close(libera, other);
+
+        return inputs(yield* entries(world.journal)).slice(1);
+      })
+    );
+
+    expect(result).toStrictEqual([
+      {
+        _tag: "Read",
+        at: at(1000),
+        read: at(500),
+        target: { _tag: "Channel", key: "+other", name: "+Other" },
+      },
+      {
+        _tag: "CloseTimeline",
+        at: at(1000),
+        target: { _tag: "Channel", key: "+other", name: "+Other" },
+      },
+    ]);
+  });
+});
+
 describe("closing a Timeline", () => {
   it("journals a CloseTimeline at the Clock's time, steps it, and answers Closed with its sequence", async () => {
     const closed: News = {
@@ -1120,6 +1160,70 @@ describe("the News stream", () => {
       all: ["1 libera first", "2 oftc first", "4 libera second third"],
       live: Exit.succeed(["6 oftc second third"]),
       resumed: ["4 libera second third"],
+    });
+  });
+});
+
+describe("the happenings stream", () => {
+  it("gives each Change in its place among the steps, from a sequence, then live", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { news: [told("first")], when: "Configured" },
+          { news: [told("again")], when: "Retry" },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        const read: JournalRecord = {
+          _tag: "Change",
+          change: {
+            _tag: "TimelineRead",
+            network: libera,
+            read: at(5),
+            timeline: "00000000000001-00000000-00000001",
+          },
+        };
+
+        yield* runtime.configure(libera, configuration);
+        yield* world.journal.append(uiChange);
+        yield* runtime.retry(libera);
+        yield* world.journal.append(read);
+
+        const brieflyOf = (happening: Happening) =>
+          happening._tag === "Stepped"
+            ? brief(happening.happened)
+            : `${happening.sequence} ${happening.change._tag}`;
+
+        const all = yield* Stream.runCollect(Stream.take(runtime.happenings(), 4));
+
+        const live = yield* Effect.forkChild(
+          Stream.runCollect(Stream.take(runtime.happenings({ after: Sequence.make(3) }), 2))
+        );
+
+        yield* settle;
+        yield* world.journal.append({
+          _tag: "Change",
+          change: {
+            _tag: "TimelineClosed",
+            network: libera,
+            timeline: "00000000000001-00000000-00000001",
+          },
+        });
+
+        return {
+          all: all.map(brieflyOf),
+          live: (yield* Fiber.await(live)).pipe(Exit.map((got) => got.map(brieflyOf))),
+          news: (yield* Stream.runCollect(Stream.take(runtime.news(), 2))).map(brief),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      all: ["1 libera first", "2 UiSet", "3 libera again", "4 TimelineRead"],
+      live: Exit.succeed(["4 TimelineRead", "5 TimelineClosed"]),
+      // News passes every Change over.
+      news: ["1 libera first", "3 libera again"],
     });
   });
 });

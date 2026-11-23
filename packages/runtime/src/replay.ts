@@ -19,7 +19,14 @@ import type {
 } from "@iirc/client";
 import { Effect, Schema, Stream } from "effect";
 
-import type { Entry, JournalFailed, JournalService, NetworkId, Sequence } from "./journal.ts";
+import type {
+  Change,
+  Entry,
+  JournalFailed,
+  JournalService,
+  NetworkId,
+  Sequence,
+} from "./journal.ts";
 
 /** The Configuration in force for a Network: the last `Configured` stepped, and its sequence. */
 export interface InForce {
@@ -75,6 +82,14 @@ export interface Happened {
    */
   readonly life: Sequence;
 }
+
+/**
+ * What one Entry made happen, as a fold of the Journal gives it: a step's News, or a Change,
+ * which no Client steps.
+ */
+export type Happening =
+  | { readonly _tag: "Stepped"; readonly happened: Happened }
+  | { readonly _tag: "Changed"; readonly sequence: Sequence; readonly change: Change };
 
 /** A Client threw, which a total Client never does: a bug, contained to its Network. */
 export class ClientThrew extends Schema.TaggedError<
@@ -297,10 +312,46 @@ export const refold = <S>(
   );
 
 /**
- * The News of every Network, derived from the Journal: each Network's Inputs are folded
- * from `initial`, as `refold` folds them, and what each step after `after` made happen is
- * given, in Journal order, and then live as Inputs are appended. Each reader folds from
- * the start, which is simple, and costs time only on a long Journal.
+ * What one Entry made happen: its Change, or the News of the step it was.
+ * @param entry - The Entry.
+ * @param happened - What its step made happen, when it was an Input.
+ * @returns What happened.
+ */
+const happeningsOf = (entry: Entry, happened: readonly Happened[]): readonly Happening[] =>
+  entry.record._tag === "Change"
+    ? [{ _tag: "Changed", change: entry.record.change, sequence: entry.sequence }]
+    : happened.map((one) => ({ _tag: "Stepped", happened: one }));
+
+/**
+ * What happened in the Journal, derived from it: each Network's Inputs are folded from
+ * `initial`, as `refold` folds them, and what each step after `after` made happen is given,
+ * with each Change after `after`, in Journal order, and then live as Entries are appended.
+ * Each reader folds from the start, which is simple, and costs time only on a long Journal.
+ * @param client - The Client.
+ * @param journal - The Journal.
+ * @param after - The last sequence the reader has, if any.
+ * @returns A stream that never ends.
+ */
+export const happeningsAfter = <S>(
+  client: Client<S>,
+  journal: JournalService,
+  after: Sequence | undefined
+): Stream.Stream<Happening, JournalFailed> =>
+  journal.follow({}).pipe(
+    Stream.mapAccumEffect(
+      () => new Map<NetworkId, Folded<S>>(),
+      (networks, entry) =>
+        Effect.map(
+          foldEntry(client, networks, entry),
+          (happened) =>
+            [networks, entry.sequence <= (after ?? 0) ? [] : happeningsOf(entry, happened)] as const
+        )
+    )
+  );
+
+/**
+ * The News of every Network, derived from the Journal, as `happeningsAfter` gives it with
+ * every Change passed over.
  * @param client - The Client.
  * @param journal - The Journal.
  * @param after - The last sequence the reader has, if any.
@@ -311,16 +362,12 @@ export const newsAfter = <S>(
   journal: JournalService,
   after: Sequence | undefined
 ): Stream.Stream<Happened, JournalFailed> =>
-  journal.follow({}).pipe(
-    Stream.mapAccumEffect(
-      () => new Map<NetworkId, Folded<S>>(),
-      (networks, entry) =>
-        Effect.map(
-          foldEntry(client, networks, entry),
-          (happened) =>
-            [networks, happened.filter(({ sequence }) => sequence > (after ?? 0))] as const
-        )
-    )
+  happeningsAfter(client, journal, after).pipe(
+    Stream.filter(
+      (happening): happening is Extract<Happening, { readonly _tag: "Stepped" }> =>
+        happening._tag === "Stepped"
+    ),
+    Stream.map(({ happened }) => happened)
   );
 
 /** What the Journal says of a Lookup: the sequence of its `Look`, and its result once a step reported it. */

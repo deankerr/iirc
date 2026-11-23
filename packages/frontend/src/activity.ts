@@ -243,7 +243,7 @@ const appName = "iirc";
 /**
  * The page's title: how many Highlights and Direct Messages are unread across every
  * Network not removed, such as `(3) iirc`, or the name alone when none are. A removed
- * Network's Timelines can no longer be marked read, so they call for nothing.
+ * Network's Timelines are only kept to read, so they call for nothing.
  * @param networks - The sidebar.
  * @returns The title.
  */
@@ -279,11 +279,10 @@ export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefine
 };
 
 /**
- * How the Daemon is asked to mark a Timeline read up to an instant, or nothing when that
- * would change nothing: the Timeline has nothing unread, its Read Marker is already there
- * or later, it is a detached Direct Message, whose partner's nick now names another
- * Timeline, if any, so no Target names it, or its Network was removed, so no Client moves
- * its Read Marker.
+ * How the Daemon is asked to mark a Timeline read up to an instant, by its id, or nothing
+ * when that would change nothing: the Timeline has nothing unread, or its Read Marker is
+ * already there or later. A detached Direct Message, or a Timeline a removed Network kept,
+ * is marked like any other.
  * @param timeline - The Timeline, as its Network lists it.
  * @param read - The instant to mark it read up to.
  * @returns The intent, or none.
@@ -293,8 +292,6 @@ export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined 
   const unread = unreadShown(timeline.unread, false);
 
   const nothing =
-    timeline.detached ||
-    timeline.removed ||
     (timeline.read !== null && read <= timeline.read) ||
     (saidCount(unread) === 0 && unread.activity === 0);
 
@@ -304,7 +301,6 @@ export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined 
         _tag: "MarkRead",
         network: timeline.network,
         read,
-        target: timeline.kind === "Network" ? null : timeline.name,
         timeline: timeline.id,
       };
 };
