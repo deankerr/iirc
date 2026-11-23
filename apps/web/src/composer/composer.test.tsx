@@ -1358,6 +1358,24 @@ describe("the Composer's formatting", () => {
     });
   });
 
+  it("puts the list away once a command started on Mod+K replaces the draft, so a letter after it is typed", async () => {
+    const { container } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+    await chordIn(container, "k");
+
+    const gone = formatListOf(container);
+    const typed = await pressIn(container, "b");
+
+    expect({ gone, shown: composerOf(container).value, typed }).toStrictEqual({
+      gone: undefined,
+      shown: "/go ",
+      typed: true,
+    });
+  });
+
   it("puts the list away on Escape with the draft unchanged, and leaves Mod+R to the browser", async () => {
     const { container, daemon } = await signedIn();
 

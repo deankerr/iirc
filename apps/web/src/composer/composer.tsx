@@ -690,7 +690,7 @@ const FormatList = ({
               tabIndex={-1}
               title={on ? `${name}, on` : name}
             >
-              <span className={draftClasses(style)} style={runColours(style, theme)}>
+              <span data-flag={flag} style={runColours(style, theme)}>
                 {letter}
               </span>
             </div>

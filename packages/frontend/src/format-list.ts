@@ -105,14 +105,15 @@ const moved = ({ column, row }: Highlight, key: string): Highlight | undefined =
 };
 
 /**
- * What a key does while the list is open. A key held with Mod, Ctrl, Meta, or Alt is never
- * the list's, so the keymap keeps it; Shift alone types a letter's capital.
+ * What a key does while the list is open. A key held with Mod, Ctrl, Meta, Alt, or AltGr is
+ * never the list's, so the keymap or the layout keeps it; Shift alone types a letter's
+ * capital.
  * @param highlight - What is highlighted.
  * @param event - The key.
  * @returns What it does.
  */
 export const keyInList = (highlight: Highlight, event: KeyEvent): ListKey => {
-  if (event.alt || event.ctrl || event.meta) {
+  if (event.alt || event.ctrl || event.meta || event.altGraph) {
     return { _tag: "Passed" };
   }
 

@@ -176,6 +176,27 @@
   cursor: default;
 }
 
+/* A format's letter, drawn in it: reverse by its colours, the rest here. */
+.toggle [data-flag="bold"] {
+  font-weight: bold;
+}
+
+.toggle [data-flag="italic"] {
+  font-style: italic;
+}
+
+.toggle [data-flag="underline"] {
+  text-decoration: underline;
+}
+
+.toggle [data-flag="strikethrough"] {
+  text-decoration: line-through;
+}
+
+.toggle [data-flag="monospace"] {
+  font-family: var(--font-mono);
+}
+
 /* A format the range has, marked in the focus colour beneath its letter. */
 .toggle[data-on] {
   border-color: var(--color-focus);

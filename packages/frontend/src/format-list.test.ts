@@ -75,6 +75,12 @@ describe("a key while the formatting list is open", () => {
       { _tag: "Passed" },
     ],
     [
+      "a letter with AltGr types another character",
+      at(colours, 0),
+      press("b", { altGraph: true }),
+      { _tag: "Passed" },
+    ],
+    [
       "a letter with Alt is the keymap's",
       at(colours, 0),
       press("b", { alt: true }),

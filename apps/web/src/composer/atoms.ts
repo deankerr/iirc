@@ -395,19 +395,24 @@ const formatHere = (
 };
 
 /**
- * The formatting list open over a composer, while it is: its place, the range a choice goes
- * over, its selection as it was when the list opened, and what is highlighted.
+ * The formatting list as it was opened over a composer: its place, the range a choice goes
+ * over, its selection as it was when the list opened, the draft's text then, and what is
+ * highlighted.
  */
 const formatChoice = Atom.make<
-  (Range & { readonly place: Place; readonly highlighted: Highlight }) | undefined
+  | (Range & { readonly place: Place; readonly text: string; readonly highlighted: Highlight })
+  | undefined
 >(undefined).pipe(Atom.keepAlive);
 
-/** The formatting list open over one composer, while it is. */
+/**
+ * The formatting list open over one composer: only while its draft's text is as it was
+ * when the list opened, so one replaced, as by a command started on Mod+K, puts it away.
+ */
 export const formatChoiceAt = Atom.family((place: Place) =>
   Atom.make((get) => {
     const choice = get(formatChoice);
 
-    return choice?.place === place ? choice : undefined;
+    return choice?.place === place && get(draft(place)).text === choice.text ? choice : undefined;
   })
 );
 
@@ -423,7 +428,8 @@ export const formatMoved = Atom.fnSync((highlighted: Highlight, get) => {
 /** Puts a format over the range the formatting list opened for, and puts the list away. */
 export const formatChosen = Atom.fnSync((format: Format, get) => {
   const { registry } = get;
-  const choice = registry.get(formatChoice);
+  const opened = registry.get(formatChoice);
+  const choice = opened === undefined ? undefined : registry.get(formatChoiceAt(opened.place));
 
   registry.set(formatChoice, undefined);
 
@@ -647,6 +653,7 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
         ...selectionIn(registry, place),
         highlighted: firstHighlight,
         place,
+        text: registry.get(draft(place)).text,
       });
       composerInput(document)?.focus();
       break;
