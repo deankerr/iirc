@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { firstHighlight, formatRows, keyInList, listedFlags } from "./format-list.ts";
 import type { Highlight } from "./format-list.ts";
+import { colourChoices } from "./formatting.ts";
 import type { Format } from "./formatting.ts";
 import type { KeyEvent } from "./keymap.ts";
 
@@ -18,6 +19,7 @@ const press = (key: string, held: Partial<KeyEvent> = {}): KeyEvent => ({
 
 const formats = 0;
 const colours = 1;
+const backgrounds = 2;
 
 const at = (row: number, column: number): Highlight => ({ column, row });
 
@@ -25,18 +27,20 @@ const bold: Format = { _tag: "Toggle", flag: "bold" };
 const red: Format = { _tag: "Colour", colour: { _tag: "Palette", index: 4 } };
 
 describe("the formatting list", () => {
-  it("holds the six formats by their letters, then the default and the sixteen colours", () => {
+  it("holds the six formats by their letters, then the default and the sixteen colours, then the same as backgrounds", () => {
     expect({
+      backgrounds: formatRows[backgrounds],
       colours: formatRows[colours]?.length,
       first: formatRows[colours]?.[0],
       letters: listedFlags.map(({ letter }) => letter).join(""),
       rows: formatRows.length,
       toggles: formatRows[formats],
     }).toStrictEqual({
+      backgrounds: colourChoices.map((colour) => ({ _tag: "Background", colour })),
       colours: 17,
       first: { _tag: "Colour", colour: undefined },
       letters: "BIUMRS",
-      rows: 2,
+      rows: 3,
       toggles: listedFlags.map(({ flag }) => ({ _tag: "Toggle", flag })),
     });
   });
@@ -142,10 +146,34 @@ describe("a key while the formatting list is open", () => {
       { _tag: "Moved", highlight: at(colours, 4) },
     ],
     [
-      "down from the colours stays",
+      "down from the colours reaches the backgrounds",
       at(colours, 9),
       press("ArrowDown"),
-      { _tag: "Moved", highlight: at(colours, 9) },
+      { _tag: "Moved", highlight: at(backgrounds, 9) },
+    ],
+    [
+      "up from the backgrounds reaches the colours",
+      at(backgrounds, 3),
+      press("ArrowUp"),
+      { _tag: "Moved", highlight: at(colours, 3) },
+    ],
+    [
+      "down from the backgrounds stays",
+      at(backgrounds, 9),
+      press("ArrowDown"),
+      { _tag: "Moved", highlight: at(backgrounds, 9) },
+    ],
+    [
+      "right past the backgrounds' end goes round to the start",
+      at(backgrounds, 16),
+      press("ArrowRight"),
+      { _tag: "Moved", highlight: at(backgrounds, 0) },
+    ],
+    [
+      "Enter on a background chooses it",
+      at(backgrounds, 5),
+      press("Enter"),
+      { _tag: "Chosen", format: { _tag: "Background", colour: { _tag: "Palette", index: 4 } } },
     ],
     [
       "an arrow with Alt is the keymap's",

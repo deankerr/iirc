@@ -146,7 +146,7 @@
   white-space: nowrap;
 }
 
-/* The formatting list, just above the line: a row of the formats, then one of the colours. */
+/* The formatting list, just above the line: a row of the formats, then the text colours and the backgrounds. */
 .formats {
   display: flex;
   flex-direction: column;
@@ -160,6 +160,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
+}
+
+/* A row of colours' name, before its swatches, so the eye tells the two rows apart. */
+.rowName {
+  align-self: center;
+  min-inline-size: 12ch;
+  color: var(--color-muted);
 }
 
 /* An item of the list: a format, its letter drawn in it, or a colour's swatch. */

@@ -1,6 +1,6 @@
 /**
  * The list a draft's formatting is chosen from: a row of formats, each by its letter, above
- * a row of text colours. A Frontend draws it and carries out what it decides, while the
+ * a row of text colours and a row of backgrounds. A Frontend draws it and carries out what it decides, while the
  * field the Owner types in keeps the focus, so each key pressed while it is open is read
  * here: a format's letter chooses it, the arrows move the highlight, Enter chooses what is
  * highlighted, and Escape puts the list away. One choice is made each time it opens.
@@ -28,10 +28,14 @@ export const listedFlags: readonly ListedFlag[] = [
   { flag: "strikethrough", letter: "S", name: "strikethrough" },
 ];
 
-/** The list's rows, top to bottom: the formats, then the default and the sixteen colours. */
+/**
+ * The list's rows, top to bottom: the formats, then the default and the sixteen colours for
+ * the text, then the same for its background.
+ */
 export const formatRows: readonly (readonly Format[])[] = [
   listedFlags.map(({ flag }): Format => ({ _tag: "Toggle", flag })),
   colourChoices.map((colour): Format => ({ _tag: "Colour", colour })),
+  colourChoices.map((colour): Format => ({ _tag: "Background", colour })),
 ];
 
 /** Which item is highlighted: its row in `formatRows`, and its place along it. */

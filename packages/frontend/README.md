@@ -254,12 +254,12 @@ A draft's formatting, between its text with codes and the plain text the Owner e
 - **A run of a draft holds its characters as written,** a tab or a control among them, never shown as a symbol as a Network's text is.
 - **Where the text alone could place an edit in several ways,** as a letter typed beside the same letter, the caret places it.
 - **A flag goes off where the whole range has it, and on otherwise.**
-- **A colour is chosen from the sixteen, `colourNames`, or the default** (`colourChoices`).
+- **A colour, for the text or for its background, is chosen from the sixteen, `colourNames`, or the default** (`colourChoices`). One leaves the other as it was, so the default background takes only the background away.
 - **`flagOn` says whether a flag is on where a format would go,** by the rule turning it over follows: over a range where all of it has it, and at a caret in the style pending there or else in force.
 
 ## The formatting list
 
-The one list a draft's formatting is chosen from, as data for a view to draw: `formatRows`, the formats by their letters in `listedFlags`, then the default and the sixteen colours. `keyInList` reads each key pressed while it is open, and the view carries out what it says.
+The one list a draft's formatting is chosen from, as data for a view to draw: `formatRows`, the formats by their letters in `listedFlags`, then the default and the sixteen colours for the text, then the same for its background. `keyInList` reads each key pressed while it is open, and the view carries out what it says.
 
 - **A format's letter, in either case and with no modifier, chooses it,** and is not typed.
 - **Left and right move along a row, round past either end, and up and down move between the rows,** stopping at the first and the last. The highlight starts on the default colour (`firstHighlight`).

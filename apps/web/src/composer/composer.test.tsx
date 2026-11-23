@@ -1098,17 +1098,29 @@ const formatListOf = (container: HTMLElement) =>
   container.querySelector('[role="listbox"][aria-label="Formatting"]') ?? undefined;
 
 /**
+ * A group's name, as a screen reader says it: its label, or the text of what labels it.
+ * @param group - The group.
+ * @returns Its name.
+ */
+const groupName = (group: Element) => {
+  const by = group.getAttribute("aria-labelledby");
+
+  return by === null
+    ? group.getAttribute("aria-label")
+    : group.ownerDocument.querySelector(`#${by}`)?.textContent;
+};
+
+/**
  * The names of the items in one row of the formatting list, as a screen reader says them.
  * @param container - The page.
  * @param row - The row's name.
  * @returns The names.
  */
-const namesIn = (container: HTMLElement, row: "Formats" | "Colours") =>
-  [
-    ...(formatListOf(container)?.querySelectorAll(
-      `[role="group"][aria-label="${row}"] [role="option"]`
-    ) ?? []),
-  ].map((one) => one.getAttribute("aria-label"));
+const namesIn = (container: HTMLElement, row: "Formats" | "Text colours" | "Backgrounds") =>
+  [...(formatListOf(container)?.querySelectorAll('[role="group"]') ?? [])]
+    .filter((group) => groupName(group) === row)
+    .flatMap((group) => [...group.querySelectorAll('[role="option"]')])
+    .map((one) => one.getAttribute("aria-label"));
 
 /**
  * The backdrop behind the composer, if one is drawn.
@@ -1125,6 +1137,7 @@ const backdropOf = (container: HTMLElement) =>
  */
 const drawnRuns = (container: HTMLElement) =>
   [...(backdropOf(container)?.querySelectorAll("span") ?? [])].map((span) => ({
+    backed: span.style.backgroundColor !== "",
     bold: span.classList.contains(draftStyles.bold),
     coloured: span.style.color !== "",
     text: span.textContent,
@@ -1192,9 +1205,9 @@ describe("the Composer's formatting", () => {
     }).toStrictEqual({
       before: undefined,
       drawn: [
-        { bold: false, coloured: false, text: "a " },
-        { bold: true, coloured: false, text: "b" },
-        { bold: false, coloured: false, text: " c" },
+        { backed: false, bold: false, coloured: false, text: "a " },
+        { backed: false, bold: true, coloured: false, text: "b" },
+        { backed: false, bold: false, coloured: false, text: " c" },
       ],
       gone: undefined,
       left: false,
@@ -1253,7 +1266,7 @@ describe("the Composer's formatting", () => {
     await chordIn(container, "k", true);
 
     const formats = namesIn(container, "Formats");
-    const colours = namesIn(container, "Colours");
+    const colours = namesIn(container, "Text colours");
 
     // From the default, past white, black, blue, green, and red, to brown, and back to red.
     await pressIn(container, "ArrowRight");
@@ -1280,13 +1293,77 @@ describe("the Composer's formatting", () => {
     }).toStrictEqual({
       colours: [17, "default colour", "red"],
       drawn: [
-        { bold: false, coloured: false, text: "a " },
-        { bold: false, coloured: true, text: "b" },
-        { bold: false, coloured: false, text: " c" },
+        { backed: false, bold: false, coloured: false, text: "a " },
+        { backed: false, bold: false, coloured: true, text: "b" },
+        { backed: false, bold: false, coloured: false, text: " c" },
       ],
       formats: ["bold", "italic", "underline", "fixed pitch", "reverse", "strikethrough"],
       gone: undefined,
       said: ["a \u000304b\u000399 c"],
+    });
+  });
+
+  it("gives the selection a background from the row under the colours, draws it, and sends the codes", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "a b c");
+    await select(container, 2, 3);
+    await chordIn(container, "k", true);
+
+    const backgrounds = namesIn(container, "Backgrounds");
+
+    // Down to the default background, then past white, black, blue, and green, to red.
+    await pressIn(container, "ArrowDown");
+
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+    await pressIn(container, "ArrowRight");
+
+    await pressIn(container, "Enter");
+
+    const drawn = drawnRuns(container);
+    const gone = formatListOf(container);
+
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({
+      backgrounds: [backgrounds.length, backgrounds[0], backgrounds[5]],
+      drawn,
+      gone,
+      said: daemon.says.map((one) => one.text),
+    }).toStrictEqual({
+      backgrounds: [17, "default background", "red background"],
+      drawn: [
+        { backed: false, bold: false, coloured: false, text: "a " },
+        { backed: true, bold: false, coloured: true, text: "b" },
+        { backed: false, bold: false, coloured: false, text: " c" },
+      ],
+      gone: undefined,
+      said: ["a \u000399,04b\u000399,99 c"],
+    });
+  });
+
+  it("with nothing selected, says the background pending and types it next", async () => {
+    const { container, daemon } = await signedIn();
+
+    await typeIn(container, "hello ");
+    await chordIn(container, "k", true);
+    await pressIn(container, "ArrowDown");
+    await pressIn(container, "ArrowLeft");
+    await pressIn(container, "Enter");
+
+    const pending = container.querySelector("[data-composer-pending]")?.textContent;
+
+    await editTo(container, "hello you", 9);
+    await pressIn(container, "Enter");
+    await settled(() => daemon.says.length === 1);
+
+    expect({ pending, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      pending: "light grey background",
+      said: ["hello \u000399,15you"],
     });
   });
 
