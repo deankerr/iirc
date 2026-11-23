@@ -207,8 +207,8 @@ export interface CloseTimeline {
 }
 
 /**
- * Close what the Owner named that no Timeline held is: the Daemon's `close` by a Target, a
- * Channel's name or a Direct Message partner's nick, which the Network's Client resolves.
+ * Close what the Owner named: the Daemon's `close` by a Target, a Channel's name or a Direct
+ * Message partner's nick, which the Network's Client resolves by the Network's own naming.
  */
 export interface CloseTarget {
   readonly _tag: "CloseTarget";
@@ -295,7 +295,7 @@ export interface Act {
  *   replaced: the composer says what was not put in.
  * - `MarkRead`: mark a Timeline read, above.
  * - `CloseTimeline`: close a Timeline held, above.
- * - `CloseTarget`: close what was named that no Timeline held is, above.
+ * - `CloseTarget`: close what the Owner named, above.
  * - `Mute`: mute a Timeline, or unmute it, for every device, which the runtime writes as
  *   `ui.unread.muted`, the whole list, as `muting` gives it.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
@@ -971,21 +971,10 @@ const networkArguments = (args: string, context: CommandContext): Parsed<Intent>
 const closeUsage = "/close-timeline [#channel|nick]";
 
 /**
- * Whether two Timelines' names are the same, folded as RFC 1459 does, which only chooses
- * among the Timelines the Daemon already keeps, never names a Target.
- * @param left - One name.
- * @param right - The other.
- * @returns Whether they are.
- */
-const sameName = (left: string, right: string) =>
-  casefold("rfc1459", left) === casefold("rfc1459", right);
-
-/**
- * What `/close-timeline` closes: a Channel or a nick given, or else the one in focus. A name
- * that a Timeline held on the focused Network has, folded as `/go` finds one, closes that
- * Timeline by its id, so one that no Target names is closed all the same. Any other name is
- * left to the Network's Client, as a Target, since a close of what is not held is journaled
- * too. The focused one is never a Network's own, which is never closed.
+ * What `/close-timeline` closes: a Channel or a nick given, as a Target the Network's Client
+ * resolves by the Network's own naming, or else the one in focus, by its id, so one that no
+ * Target names is closed all the same. The focused one is never a Network's own, which is
+ * never closed.
  * @param args - The text after `/close-timeline`.
  * @param context - The context.
  * @returns The intent, or why there is none.
@@ -1008,15 +997,7 @@ const closeArguments = (
       return invalid(`Close one Timeline at a time. ${closeUsage}`);
     }
 
-    const held = context.named.find(
-      (one) => one.network === focus.network && one.kind !== "Network" && sameName(one.name, name)
-    );
-
-    return parsed(
-      held === undefined
-        ? { _tag: "CloseTarget", network: focus.network, target: name }
-        : { _tag: "CloseTimeline", network: focus.network, timeline: held.timeline }
-    );
+    return parsed({ _tag: "CloseTarget", network: focus.network, target: name });
   }
 
   return focus.kind === "Network"
@@ -1153,6 +1134,16 @@ const pinArguments = (args: string, context: CommandContext): Parsed<ArrangeEdit
 };
 
 const goUsage = "/go [network] <name>";
+
+/**
+ * Whether two Timelines' names are the same, folded as RFC 1459 does, which only chooses
+ * among the Timelines the Daemon already keeps, never names a Target.
+ * @param left - One name.
+ * @param right - The other.
+ * @returns Whether they are.
+ */
+const sameName = (left: string, right: string) =>
+  casefold("rfc1459", left) === casefold("rfc1459", right);
 
 /**
  * The Timeline `/go` was given: a name, on the Network the composer is on if one there has

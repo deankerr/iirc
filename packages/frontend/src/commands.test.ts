@@ -251,14 +251,12 @@ describe("reading a line", () => {
       detached: interpret("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
       direct: interpret("/close-timeline", inDirect),
       list: message("/close-timeline #a,#b", inChannel),
-      // A name a held Timeline has, in another case, closes that Timeline.
+      // A name is a Target, which the Network's Client resolves by its own naming, held or not.
       named: interpret("/close-timeline  bob ", { ...inNetwork, named }),
       network: message("/close-timeline", inNetwork),
-      // A name no Timeline held has is left to the Network's Client.
       notHeld: interpret("/close-timeline @#elsewhere", { ...inNetwork, named }),
       // Offline, it is closed all the same: the Daemon journals it.
       offline: interpret("/close-timeline", offline),
-      // A Network's own Timeline named by its Network's name is not closed by id.
       own: interpret("/close-timeline libera", {
         ...inChannel,
         named: [{ kind: "Network", name: "libera", network, timeline: held }],
@@ -272,7 +270,7 @@ describe("reading a line", () => {
       detached: closing(timeline),
       direct: closing(timeline),
       list: "Close one Timeline at a time. /close-timeline [#channel|nick]",
-      named: closing(held),
+      named: closingTarget("bob"),
       network:
         "A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. /close-timeline [#channel|nick]",
       notHeld: closingTarget("@#elsewhere"),
