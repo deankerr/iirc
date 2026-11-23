@@ -1525,3 +1525,20 @@ describe("acting on a Network", () => {
     });
   });
 });
+
+describe("the formatting commands", () => {
+  it("open the formatting list by /format, and know no /colour", () => {
+    expect({
+      colour: interpret("/colour", inChannel),
+      format: interpret("/format", inChannel),
+      formatWith: interpret("/format bold", inChannel)._tag,
+    }).toStrictEqual({
+      colour: {
+        _tag: "Invalid",
+        message: "There is no command /colour. Start with // to say text that begins with /.",
+      },
+      format: { _tag: "Parsed", value: [{ _tag: "ChooseFormat" }] },
+      formatWith: "Invalid",
+    });
+  });
+});

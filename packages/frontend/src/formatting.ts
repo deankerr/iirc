@@ -319,6 +319,30 @@ const putOver = (style: Style, format: Format, on: boolean): Style =>
     : { ...style, foreground: format.colour };
 
 /**
+ * A range of a draft's plain text, in order and within it.
+ * @param styled - The draft as read.
+ * @param start - Where the range begins.
+ * @param end - Where it ends.
+ * @returns Its first unit and the unit after its last.
+ */
+const rangeIn = ({ plain }: Styled, start: number, end: number) => ({
+  from: Math.max(Math.min(start, end, plain.length), 0),
+  to: Math.min(Math.max(start, end), plain.length),
+});
+
+/**
+ * Whether every character of a range has a flag, a line break, which has no style of its
+ * own to show, aside.
+ * @param styled - The draft as read.
+ * @param from - The range's first unit.
+ * @param to - The unit after its last.
+ * @param flag - The flag.
+ * @returns Whether it does.
+ */
+const wholly = ({ plain, styles }: Styled, from: number, to: number, flag: Flag) =>
+  styles.slice(from, to).every((style, index) => isBreak(plain[from + index]) || style[flag]);
+
+/**
  * A draft once a format was put over a range of its plain text. A flag is turned off where
  * every character of the range has it, and on otherwise, as a word processor does.
  * @param text - The draft's text.
@@ -329,13 +353,9 @@ const putOver = (style: Style, format: Format, on: boolean): Style =>
  */
 export const formattedIn = (text: string, start: number, end: number, format: Format): string => {
   const styled = read(text);
-  const from = Math.max(Math.min(start, end, styled.plain.length), 0);
-  const to = Math.min(Math.max(start, end), styled.plain.length);
+  const { from, to } = rangeIn(styled, start, end);
   const inRange = styled.styles.slice(from, to);
-
-  const on =
-    format._tag === "Toggle" &&
-    !inRange.every((style, index) => isBreak(styled.plain[from + index]) || style[format.flag]);
+  const on = format._tag === "Toggle" && !wholly(styled, from, to, format.flag);
 
   return write({
     plain: styled.plain,
@@ -370,6 +390,34 @@ export const pendingAfter = (
   const style = putOver(from, format, format._tag === "Toggle" && !from[format.flag]);
 
   return sameStyle(style, inForce) ? undefined : { at, style };
+};
+
+/**
+ * Whether a flag is on where a format would go, as turning it over would read it: over a
+ * range, where every character of it has it, and at a caret, in the style pending there,
+ * or else the one in force.
+ * @param text - The draft's text.
+ * @param pending - The style pending, at this caret or another.
+ * @param start - Where the range begins, in the plain text.
+ * @param end - Where it ends, the caret when it is where it begins.
+ * @param flag - The flag.
+ * @returns Whether it is on.
+ */
+export const flagOn = (
+  text: string,
+  pending: Pending | undefined,
+  start: number,
+  end: number,
+  flag: Flag
+): boolean => {
+  const styled = read(text);
+  const { from, to } = rangeIn(styled, start, end);
+
+  if (from < to) {
+    return wholly(styled, from, to, flag);
+  }
+
+  return pending?.at === from ? pending.style[flag] : inherited(styled, from, from)[flag];
 };
 
 /** The sixteen colours every IRC client offers, by their number, as mIRC names them. */

@@ -7,7 +7,6 @@ declare const styles: {
   readonly backdrop: string;
   readonly camera: string;
   readonly candidate: string;
-  readonly colours: string;
   readonly command: string;
   readonly composer: string;
   readonly description: string;
@@ -17,6 +16,7 @@ declare const styles: {
   readonly field: string;
   readonly fileIcon: string;
   readonly files: string;
+  readonly formats: string;
   readonly hint: string;
   readonly image: string;
   readonly inked: string;
@@ -34,9 +34,11 @@ declare const styles: {
   readonly progress: string;
   readonly prompt: string;
   readonly quote: string;
+  readonly row: string;
   readonly status: string;
   readonly swatch: string;
   readonly thumbnail: string;
+  readonly toggle: string;
   readonly upload: string;
   readonly uploads: string;
   readonly usage: string;

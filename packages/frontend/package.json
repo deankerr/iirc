@@ -14,6 +14,7 @@
     "./completion": "./src/completion.ts",
     "./composer": "./src/composer.ts",
     "./entries": "./src/entries.ts",
+    "./format-list": "./src/format-list.ts",
     "./formatting": "./src/formatting.ts",
     "./keymap": "./src/keymap.ts",
     "./layout": "./src/layout.ts",

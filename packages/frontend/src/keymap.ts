@@ -499,11 +499,11 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * composer, as an IRC client's do, and Alt+A jumps to what calls for the Owner most, as
  * WeeChat's does. Alt+M shows or hides the members and Alt+N the sidebar of Networks beside
  * them: Mod+Shift+M is the browser's own in Chrome and Firefox. Alt+O shows the options:
- * Mod+, is the browser's own for its settings on a Mac, which a page never hears. Formatting is Mod and a
- * letter, as an IRC client's and a word processor's are: B, I, and U, E for fixed pitch, as
- * some editors mark code, R for reverse, and Mod+Shift+X to strike through. mIRC's Ctrl+K for
- * colour is starting `/go ` here, so the colours are Mod+Shift+K. They act only while typing
- * in the composer, so anywhere else Mod+R still reloads the page. No letter is bound to
+ * Mod+, is the browser's own for its settings on a Mac, which a page never hears. A draft's
+ * formatting is chosen from one list, Mod+Shift+K while typing in the composer, since
+ * mIRC's Ctrl+K for colour is starting `/go ` here. No format has a key of its own: Mod and
+ * a letter alone is where a browser keeps its own features, such as reloading the page on
+ * Mod+R, and some never reach a page at all. No letter is bound to
  * focusing the composer, since a character typed outside a field goes to it. The Panes are
  * Alt+Shift: with the arrows to move between them, as Alt and the arrows move between
  * Timelines, and with a letter to split, close, zoom, equalize, grow, or shrink, a letter
@@ -523,13 +523,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "sidebar.toggle", keys: "alt+n" },
   { args: "", command: "options.set", keys: "alt+o" },
   { command: "search.open", keys: "mod+shift+f" },
-  { command: "format.bold", keys: "mod+b", when: "inComposer" },
-  { command: "format.italic", keys: "mod+i", when: "inComposer" },
-  { command: "format.underline", keys: "mod+u", when: "inComposer" },
-  { command: "format.monospace", keys: "mod+e", when: "inComposer" },
-  { command: "format.reverse", keys: "mod+r", when: "inComposer" },
-  { command: "format.strikethrough", keys: "mod+shift+x", when: "inComposer" },
-  { command: "format.colour", keys: "mod+shift+k", when: "inComposer" },
+  { command: "format.open", keys: "mod+shift+k", when: "inComposer" },
   { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft" },
   { args: "right", command: "pane.focus", keys: "alt+shift+arrowright" },
   { args: "up", command: "pane.focus", keys: "alt+shift+arrowup" },
