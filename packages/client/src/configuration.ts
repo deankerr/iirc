@@ -91,10 +91,12 @@ export const Login = Schema.TaggedUnion({
     }),
   },
   Service: {
-    account: IdentifyWord.annotate({
-      description: "The account to log in to by telling the service, one word.",
-      ...startsAsFirstNick,
-    }),
+    account: Schema.optionalKey(
+      IdentifyWord.annotate({
+        description:
+          "The account to log in to by telling the service, one word. Left out, Self tells the service the password alone, which logs in to the account of the nick Self holds.",
+      })
+    ),
     credential: CredentialName.annotate({
       description: "The Credential holding the account's password.",
     }),

@@ -1809,6 +1809,37 @@ const configurationOf = (plain: Record): Parsed<Configuration> => {
 
 const firstNick = (plain: Record): string | undefined => texts(plain.nicks)[0];
 
+/**
+ * The field a path names in a Configuration: for a field members of a union share, such
+ * as `login.account`, the field of the member in force when it has one, since members may
+ * start it differently, and otherwise the field the name resolves to.
+ * @param plain - The Configuration, as JSON.
+ * @param path - The path.
+ * @returns The path and its field, or none.
+ */
+const fieldAt = (
+  plain: Record,
+  path: Path
+): { readonly path: Path; readonly field: Field } | undefined => {
+  const at = resolvePath(path.join("."));
+  const [key = "", second, third] = path;
+  const top = fieldNamed(fields, key);
+  const current = plain[key];
+
+  if (at === undefined || second === undefined || third !== undefined) {
+    return at;
+  }
+
+  const inForce =
+    top?.kind._tag === "Tagged" && isRecord(current)
+      ? top.kind.members.find((member) => member.tag === current._tag)
+      : undefined;
+
+  const own = inForce === undefined ? undefined : fieldNamed(inForce.fields, second);
+
+  return own === undefined ? at : { field: own, path: at.path };
+};
+
 const noOption = (network: string, path: Path) =>
   invalid<Record>(`There is no option ${optionName(network, path)}.`);
 
@@ -2058,7 +2089,7 @@ export const wantsChannel = (
  * @returns The JSON after, or why not.
  */
 const setText = (network: string, plain: Record, path: Path, text: string): Parsed<Record> => {
-  const at = resolvePath(path.join("."));
+  const at = fieldAt(plain, path);
   const [key = ""] = path;
 
   if (at === undefined) {
@@ -2101,7 +2132,7 @@ const setText = (network: string, plain: Record, path: Path, text: string): Pars
  * @returns The JSON after, or why not.
  */
 const unsetAt = (network: string, plain: Record, path: Path): Parsed<Record> => {
-  const at = resolvePath(path.join("."));
+  const at = fieldAt(plain, path);
   const [key = "", second, third] = path;
   const current = plain[key];
 

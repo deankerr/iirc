@@ -1107,9 +1107,14 @@ export const SecretLine = Schema.TaggedUnion({
   },
   /**
    * `PRIVMSG <service> :IDENTIFY <account> <credential>`: logging in to an account by
-   * telling a service, where there is no SASL.
+   * telling a service, where there is no SASL. With no account it is
+   * `IDENTIFY <credential>`, which a service reads as the password of the nick Self holds.
    */
-  Identify: { account: IdentifyWord, credential: CredentialName, service: ServiceTarget },
+  Identify: {
+    account: Schema.optionalKey(IdentifyWord),
+    credential: CredentialName,
+    service: ServiceTarget,
+  },
   /** `JOIN` with a Channel key. */
   JoinWithKey: { channel: Schema.String, credential: CredentialName },
   /** `OPER <name> <credential>`: logging in as an IRC operator. */
@@ -1180,24 +1185,26 @@ const plain = (
   return authenticateResponse(utf8.encode(parts.join("\0")));
 };
 
-// Each of `IDENTIFY <account> <credential>`'s words must stay one word, so the service
+// Each of `IDENTIFY [<account>] <credential>`'s words must stay one word, so the service
 // reads them as the Owner meant, and nothing more goes with them. A password may hold
 // anything else, a comma or a colon included.
 const staysOneWord = (text: string) => oneWord.test(text) && text.isWellFormed();
 
 const identify = (
-  { account, service }: { readonly account: string; readonly service: string },
+  { account, service }: { readonly account?: string; readonly service: string },
   value: string
 ): readonly OutboundLine[] | Rejected => {
   if (!serviceNick.test(service)) {
     return rejected("InvalidTarget");
   }
 
-  if (!staysOneWord(account) || !staysOneWord(value)) {
+  const words = account === undefined ? [value] : [account, value];
+
+  if (!words.every(staysOneWord)) {
     return rejected("InvalidParameter");
   }
 
-  const line = outbound("PRIVMSG", [service, `IDENTIFY ${account} ${value}`]);
+  const line = outbound("PRIVMSG", [service, ["IDENTIFY", ...words].join(" ")]);
 
   return isRejected(line) ? line : [line];
 };

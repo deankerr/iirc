@@ -290,4 +290,19 @@ describe("a service login", () => {
   it("refuses an account that is not one word", () => {
     expect(takesLogin("NickServ", "a b")).toBeFalsy();
   });
+
+  it("keeps an account it was given, and takes one with none", () => {
+    const { login } = serviceLogin("NickServ");
+    const { account: _account, ...alone } = login;
+
+    const decoded = [login, alone].map(
+      (given) =>
+        Schema.decodeUnknownSync(NetworkConfiguration)({
+          ...serviceLogin("NickServ"),
+          login: given,
+        }).login
+    );
+
+    expect(decoded).toStrictEqual([login, alone]);
+  });
 });

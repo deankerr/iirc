@@ -37,6 +37,7 @@ export type Change =
    * `login=none`, `login=required,iirc,pw` and `login=optional,iirc,pw`, or
    * `login=service,NickServ,iirc,pw,5`: how Self logs in, with the account and the
    * Credential's name, and for a service, its nick first and the seconds to wait last.
+   * A service login's account may be empty, as in `login=service,NickServ,,pw,5`, for none.
    * A SASL login may end with `,plain` or `,scram-sha-256` to pin its mechanism, as in
    * `login=required,iirc,pw,scram-sha-256`; with none it is `auto`.
    */
@@ -283,6 +284,17 @@ const secretFields = (kind: SecretKind): readonly string[] =>
     .filter((key) => key !== "_tag" && key !== "credential")
     .toSorted();
 
+// The fields a case may leave out, such as an `Identify`'s account.
+const optionalSecretFields = (kind: SecretKind): ReadonlySet<string> => {
+  const fields: Readonly<Record<string, Schema.Top>> = SecretLine.cases[kind].fields;
+
+  return new Set(
+    Object.entries(fields).flatMap(([key, field]) =>
+      field.ast.context?.isOptional === true ? [key] : []
+    )
+  );
+};
+
 const mustEscapeInField = (char: string): boolean => {
   const code = char.codePointAt(0) ?? 0;
 
@@ -330,15 +342,15 @@ const unescapeField = (text: string): string | undefined => {
 
 /**
  * Writes a SecretLine as a placeholder: its kind, the Credential's name, and every other
- * field, so a strict match checks them all and the value never appears.
+ * field it holds, so a strict match checks them all and the value never appears.
  * @param line - The SecretLine.
  * @returns The placeholder, such as `{Pass credential=libera}`.
  */
 const writeSecret = (line: SecretLine): string => {
   const record: Readonly<Record<string, string>> = line;
 
-  const fields = ["credential", ...secretFields(line._tag)].map(
-    (key) => `${key}=${escapeField(record[key] ?? "")}`
+  const fields = ["credential", ...secretFields(line._tag)].flatMap((key) =>
+    key in record ? [`${key}=${escapeField(record[key] ?? "")}`] : []
   );
 
   return `{${line._tag} ${fields.join(" ")}}`;
@@ -364,7 +376,9 @@ const readSecret = (text: string): Result.Result<SecretLine, string> => {
     fields.set(token.slice(0, equals), value);
   }
 
-  const expected = ["_tag", "credential", ...secretFields(kind)].toSorted();
+  const optional = optionalSecretFields(kind);
+  const named = ["_tag", "credential", ...secretFields(kind)];
+  const expected = named.filter((key) => !optional.has(key) || fields.has(key)).toSorted();
 
   if ([...fields.keys()].toSorted().join(" ") !== expected.join(" ")) {
     return Result.fail(`a ${kind} placeholder names exactly ${expected.slice(1).join(", ")}`);
@@ -453,16 +467,23 @@ const asLogin = (
 // A part of a login that is written, which the schema may accept empty.
 const present = (part: string | undefined): boolean => part !== undefined && part !== "";
 
-// `service,<service>,<account>,<credential>,<seconds>`.
+// `service,<service>,<account>,<credential>,<seconds>`, where an empty account is none.
 const readService = (text: string): Login | undefined => {
   const [service, account, credential, wait, ...rest] = text.split(",");
 
-  return [service, account, credential].every(present) &&
-    wait !== undefined &&
-    secondsPattern.test(wait) &&
-    rest.length === 0
-    ? asLogin({ _tag: "Service", account, credential, service, wait: Number(wait) })
-    : undefined;
+  if (
+    ![service, credential].every(present) ||
+    account === undefined ||
+    wait === undefined ||
+    !secondsPattern.test(wait) ||
+    rest.length > 0
+  ) {
+    return undefined;
+  }
+
+  const login = { _tag: "Service", credential, service, wait: Number(wait) };
+
+  return asLogin(account === "" ? login : { ...login, account });
 };
 
 // `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`, each
@@ -613,7 +634,7 @@ const writeLogin = (login: Login): string => {
     }
 
     case "Service": {
-      return `login=service,${login.service},${login.account},${login.credential},${login.wait}`;
+      return `login=service,${login.service},${login.account ?? ""},${login.credential},${login.wait}`;
     }
 
     case "Sasl": {
