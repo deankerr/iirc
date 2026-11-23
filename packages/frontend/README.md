@@ -167,7 +167,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/ignore` alone opens the options on the Network's `ignores`.**
 - **`/query` opens a Timeline by name and never makes one.** `queried` finds it by the casemapping `known` reports, and with none shows a Direct Message not yet begun.
 - **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane. Whether Self is in a Channel is the Daemon's to answer.
-- **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and after an id, `keep` or `drop` to start on. Nothing is removed until the Owner confirms.
+- **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and `keep` or `drop` to start on. A lone `keep` or `drop` is the choice about the focused Network, so a Network of that id is named with both words, as `/network remove keep keep`. Nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, a raw `PASS`, `AUTHENTICATE`, or `OPER`, and `/oper` are refused, `/oper` naming the `oper` options to set instead.
 - **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks.
 - **Of two Timelines that share a name on one Network, `/go` takes the first.**

@@ -863,19 +863,21 @@ const removeUsage = "/network remove [id] [keep|drop]";
 
 /**
  * What `/network remove` was given: the Network, the focused one unless named, and whether
- * its Timelines are to be kept, `keep` or `drop`, which the question starts with.
+ * its Timelines are to be kept, `keep` or `drop`, which the question starts with. One word
+ * that is `keep` or `drop` is the choice, so a Network of that id is named with both words.
  * @param words - The words after `remove`.
  * @param context - The context, for the focused Network.
  * @returns The intent, or why there is none.
  */
 const removeArguments = (words: readonly string[], context: CommandContext): Parsed<Intent> => {
-  const [first, second, ...rest] = words;
-
   const choices: ReadonlyMap<string | undefined, boolean | undefined> = new Map([
     [undefined, undefined],
     ["keep", true],
     ["drop", false],
   ]);
+
+  const [first, second, ...rest] =
+    words.length === 1 && choices.has(words[0]) ? [undefined, ...words] : words;
 
   if (rest.length > 0 || !choices.has(second)) {
     return invalid(`Usage: ${removeUsage}`);
@@ -886,7 +888,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
 
     return network === undefined
       ? invalid(`Name a Network, or open one of its Timelines first. ${removeUsage}`)
-      : parsed({ _tag: "AskRemoval", keep: undefined, network });
+      : parsed({ _tag: "AskRemoval", keep: choices.get(second), network });
   }
 
   const network = networkIdOf(first);
