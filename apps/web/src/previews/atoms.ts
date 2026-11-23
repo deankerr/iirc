@@ -19,6 +19,7 @@ import {
   linkKey,
   messageKey,
   pressesWanted,
+  pressOf,
   reducePreviews,
 } from "@iirc/frontend/previews";
 import type {
@@ -161,6 +162,37 @@ const performPress = (registry: AtomRegistry.AtomRegistry, press: PreviewsPress)
         )
       );
   });
+
+/**
+ * Presses a link whose fetch failed, in a Timeline that waits for a press, so the Daemon
+ * fetches it again. Each press is its own, so pressing one link lets no other go.
+ */
+export const retryPreview = runtime
+  .fn(
+    (
+      retried: {
+        readonly timeline: TimelineId;
+        readonly position: TimelineItem["position"];
+        readonly link: number;
+      },
+      get
+    ) => {
+      const { registry } = get;
+
+      const press = pressOf(
+        registry.get(previewsState),
+        retried.timeline,
+        retried.position,
+        retried.link
+      );
+
+      happened(registry, { _tag: "Pressing", press });
+
+      return performPress(registry, press);
+    },
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
 
 /**
  * While the browser is signed in and any Timeline's mode asks, follows the stream of

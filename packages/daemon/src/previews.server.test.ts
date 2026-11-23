@@ -2776,6 +2776,55 @@ describe("a Direct Message's press and a Timeline's override over a real server"
     });
   });
 
+  it("fetches a failed link again on a press in a Direct Message, at any age, and never on an ask", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { links, turn } = yield* turning(
+          { "https://cats.example/": new LinkUnreachable({ reason: "down" }) },
+          { "https://cats.example/": cats }
+        );
+
+        const served = yield* serve({}, { links });
+
+        yield* setPreviews(served, "on");
+        yield* talk(served, ["https://cats.example/"], ["iirc"]);
+        const place = yield* live(only(served, "Direct"));
+
+        yield* expecting(press(served, place, 0), 200);
+        const failed = titles(yield* live(settled(served, place)));
+
+        // The host is back, and the failure is older than any a Channel keeps, yet an ask
+        // serves it as it is.
+        yield* turn;
+        yield* TestClock.adjust(day);
+        const asked = titles(yield* asking(served, place));
+        const askedFetches = (yield* served.asked).length;
+
+        const pressed = decodeItem(yield* bodyOf(yield* expecting(press(served, place, 0), 200)));
+
+        return {
+          asked,
+          askedFetches,
+          failed,
+          fetched: yield* served.asked,
+          later: titles(yield* live(settled(served, place))),
+          pressed: pressed.state,
+        };
+      })
+    );
+
+    const first = { link: "https://cats.example/", precedence: "first", purpose: { kind: "page" } };
+
+    expect(result).toStrictEqual({
+      asked: ["Failed"],
+      askedFetches: 1,
+      failed: ["Failed"],
+      fetched: [first, first],
+      later: ["Cats"],
+      pressed: { _tag: "Pending" },
+    });
+  });
+
   it("refuses a press of a link that is not waiting, with 409, and fetches nothing", async () => {
     const result = await run({ "https://cats.example/": cats }, (served) =>
       Effect.gen(function* () {

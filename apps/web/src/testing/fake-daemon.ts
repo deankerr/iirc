@@ -2141,8 +2141,9 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * A press of a link waiting for one, which the fake answers as pending, holding it so
-   * until a test sends its change, and refuses as `NotWaiting` for any other link.
+   * A press of a link waiting for one, or of one that failed, which the fake answers as
+   * pending, holding it so until a test sends its change, and refuses as `NotWaiting` for
+   * any other link.
    * @param timeline - The Message's Timeline.
    * @param init - The request.
    * @returns The answer.
@@ -2155,7 +2156,9 @@ export const fakeDaemon = () => {
     const items = daemon.previews.get(position);
     const item = items?.[link];
 
-    if (items === undefined || item?.state._tag !== "WaitingForPress") {
+    const pressable = item?.state._tag === "WaitingForPress" || item?.state._tag === "Failed";
+
+    if (items === undefined || item === undefined || !pressable) {
       return Response.json({ _tag: "NotWaiting", link, position, timeline }, { status: 409 });
     }
 

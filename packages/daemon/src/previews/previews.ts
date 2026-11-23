@@ -134,7 +134,8 @@ export class Previews extends Context.Service<
     >;
     /**
      * Fetches one link of the Message at a position in a Timeline that waits for a press,
-     * answering its item, pending. A link that is not waiting is `NotWaiting`.
+     * answering its item, pending. A link not kept, or kept as a failure, is fetched; any
+     * other is `NotWaiting`.
      */
     readonly press: (
       timeline: TimelineId,
@@ -638,20 +639,25 @@ interface Claimed {
 }
 
 /**
- * Whether a kept record is fetched again rather than served as it is. One whose image was
- * evicted is, in any Timeline, since the Owner was shown it once; in a Timeline that waits
- * for a press, age alone never is.
+ * Whether a kept record is fetched again rather than served as it is. A press fetches a
+ * failure again at any age, and nothing else, since the Owner asked for it. On an ask, one
+ * whose image was evicted is, in any Timeline, since the Owner was shown it once; in a
+ * Timeline that waits for a press, age alone never is.
  * @param kept - The record.
  * @param now - The time, in milliseconds since the epoch.
- * @param waits - Whether it is in a Timeline that waits for a press.
+ * @param how - Whether it is in a Timeline that waits for a press, and whether it is one.
  * @returns Whether it is stale.
  */
-const stale = (kept: Kept, now: number, waits: boolean): boolean => {
+const stale = (kept: Kept, now: number, how: Pick<How, "pressed" | "waits">): boolean => {
+  if (how.pressed) {
+    return kept.state._tag === "Failed";
+  }
+
   if (kept.fetched === null) {
     return true;
   }
 
-  if (waits) {
+  if (how.waits) {
     return false;
   }
 
@@ -870,13 +876,12 @@ export const layerPreviews = Layer.effect(Previews)(
      * Decides what an ask or a press of a link answers and whether it starts a fetch, in one
      * turn. A link that is being fetched or kept fresh is served as it is, and one not kept in
      * a Timeline that waits is waiting, unless pressed, which starts its fetch. A press of a
-     * kept link starts nothing, even of a stale one, which only an ask fetches again.
+     * kept link starts nothing unless it failed, and an ask fetches again only a stale one.
      * @param key - The link it is kept under.
-     * @param waits - Whether its Timeline waits for a press.
-     * @param pressed - Whether it is a press rather than an ask.
+     * @param how - Whether its Timeline waits for a press, and whether it is a press.
      * @returns What it answers and whether it started.
      */
-    const claim = (key: string, waits: boolean, pressed: boolean) =>
+    const claim = (key: string, how: Pick<How, "pressed" | "waits">) =>
       turn.withPermit(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
@@ -895,7 +900,7 @@ export const layerPreviews = Layer.effect(Previews)(
             .shown(key, now)
             .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
 
-          if (Option.isSome(kept) && (pressed || !stale(kept.value, now, waits))) {
+          if (Option.isSome(kept) && !stale(kept.value, now, how)) {
             return {
               publish: false,
               started: undefined,
@@ -903,7 +908,7 @@ export const layerPreviews = Layer.effect(Previews)(
             } satisfies Claimed;
           }
 
-          if (Option.isNone(kept) && waits && !pressed) {
+          if (Option.isNone(kept) && how.waits && !how.pressed) {
             return { publish: false, started: undefined, state: waiting } satisfies Claimed;
           }
 
@@ -936,7 +941,7 @@ export const layerPreviews = Layer.effect(Previews)(
     const stateOf = (link: string, how: How) =>
       Effect.gen(function* () {
         const key = keyOf(link);
-        const { publish, started, state } = yield* claim(key, how.waits, how.pressed);
+        const { publish, started, state } = yield* claim(key, how);
 
         if (publish) {
           yield* PubSub.publish(changed, { id: idOf(key), link, state });

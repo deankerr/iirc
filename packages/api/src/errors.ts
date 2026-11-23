@@ -166,8 +166,9 @@ export class PreviewsOff extends Schema.TaggedError<
 
 /**
  * The link pressed is not waiting for a press: the Message has no link at that index, or
- * the link is already kept, being fetched, or in a Timeline that does not wait, so nothing
- * was fetched: a 409.
+ * the link is already kept as a Preview, being fetched, or in a Timeline that does not wait,
+ * so nothing was fetched: a 409. A failure kept in a Timeline that waits is waiting, and a
+ * press fetches it again.
  */
 export class NotWaiting extends Schema.TaggedError<NotWaiting, { readonly brand: unique symbol }>()(
   "NotWaiting",

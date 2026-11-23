@@ -109,7 +109,7 @@ The core decides and this package draws and does the I/O.
 - **The control that opens media large and the one that closes a video's larger view are the same square,** a finger's size on a touch screen, with their icon in the middle in any font.
 - **An animated image is its first frame under a play badge,** which a press plays in place and stops, with a control to open it large while it plays.
 - **An animated image plays on its own under `ui.previews.animate`,** on unless set, unless the device reduces motion.
-- **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again.
+- **A Preview that failed is one quiet line,** "No preview:" and why, and never the link again. In a Direct Message with no mode of its own, the line is a button that says to try again, and a press of it presses the link, so the Daemon fetches it again.
 
 ### Panes
 
