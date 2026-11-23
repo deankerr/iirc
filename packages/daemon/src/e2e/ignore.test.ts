@@ -78,14 +78,19 @@ const read = (api: Api) =>
       return yield* Effect.die(`${channel} was not listed`);
     }
 
+    const items = yield* windowOf(api, found);
+
     const searched = yield* api.timelines.search({
       query: { network, text: SearchText.make("spam") },
     });
 
+    // Listed again after the items, so the counts are never older than the items read.
+    const after = yield* timelines(api);
+
     return {
-      channel: found,
-      direct: named(listed, "spam"),
-      items: yield* windowOf(api, found),
+      channel: named(after, channel) ?? found,
+      direct: named(after, "spam"),
+      items,
       searched: searched.items.map(shown),
     };
   });
