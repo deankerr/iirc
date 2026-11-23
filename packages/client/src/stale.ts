@@ -135,6 +135,10 @@ const rewrite = (run: Run, facts: readonly Kept[]): void => {
       case "user.account.joined": {
         updateOpen(run, (open) => ({
           ...open,
+          presence:
+            open.presence._tag === "Session"
+              ? { ...open.presence, account: staled(open.presence.account, since) }
+              : open.presence,
           users: usersStaled(open.users, (seen) => ({
             ...seen,
             account: staled(seen.account, since),

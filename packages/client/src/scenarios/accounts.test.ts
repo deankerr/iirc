@@ -271,7 +271,7 @@ describe("account-notify", () => {
     expect(userOf(transcript, "peer", withHistory)?.account).toStrictEqual(unknown);
   });
 
-  it("makes others' accounts stale on CAP DEL, and Self's not, until a tag says again", () => {
+  it("makes every account stale on CAP DEL, Self's too, until a tag says again", () => {
     const deleted = [
       ...inChannels(["cap-notify", ...accounts]),
       lines(
@@ -285,7 +285,7 @@ describe("account-notify", () => {
 
     expect(userOf(deleted, "peer")?.account).toMatchObject({ _tag: "Stale", was: "bob" });
     expect(userOf(deleted, "other")?.account).toMatchObject({ _tag: "Stale", was: null });
-    expect(selfOf(deleted)?.account).toMatchObject({ _tag: "Known", value: "carol" });
+    expect(selfOf(deleted)?.account).toMatchObject({ _tag: "Stale", was: "carol" });
 
     expect(
       userOf([...deleted, lines("<< @account=dan :peer!u@h PRIVMSG #iirc :hi")], "peer")?.account
