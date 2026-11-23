@@ -1,6 +1,6 @@
 /**
  * Playing a transcript through a Client. `play` is strict, for hand-written scenarios:
- * it matches every `Send`, `SendSecret`, `Dial`, and `Hangup` in order, every `Ignored`,
+ * it matches every `Send`, `SendSecret`, `Dial`, `Hangup`, and `CheckScram` in order, every `Ignored`,
  * and each `??` written. `replay` feeds a recorded fixture's inputs and reports what the
  * Client did, without matching. After either, the inputs are folded again from
  * `initial`, and the states, outputs, and News must be the same, and plain data.
@@ -549,7 +549,29 @@ const unfilledInput = <State>(at: Driver<State>, reason: UnfilledReason): Input 
 };
 
 // The steps an item feeds, if it feeds any, after any bookkeeping it does.
+// The items that step nothing: what the Client sends, and what a reader writes.
+type Passive = Extract<
+  Item,
+  { readonly _tag: "Sent" | "Hangup" | "CheckScram" | "Expect" | "Any" | "Comment" | "Blank" }
+>;
+
+const passiveTags: ReadonlySet<Item["_tag"]> = new Set([
+  "Sent",
+  "Hangup",
+  "CheckScram",
+  "Expect",
+  "Any",
+  "Comment",
+  "Blank",
+] satisfies Passive["_tag"][]);
+
+const isPassive = (item: Item): item is Passive => passiveTags.has(item._tag);
+
 const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
+  if (isPassive(item)) {
+    return [];
+  }
+
   switch (item._tag) {
     case "Received": {
       return [
@@ -593,6 +615,17 @@ const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
       return [stepInput(at, unfilledInput(at, item.reason))];
     }
 
+    case "ScramChecked": {
+      return [
+        stepInput(at, {
+          _tag: "ScramChecked",
+          at: at.now,
+          connection: at.connection,
+          verified: item.verified,
+        }),
+      ];
+    }
+
     case "Fired": {
       const timer = TimerId.make(item.timer);
 
@@ -623,15 +656,6 @@ const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
     case "Connection": {
       at.connection = ConnectionId.make(item.connection);
 
-      return [];
-    }
-
-    case "Sent":
-    case "Hangup":
-    case "Expect":
-    case "Any":
-    case "Comment":
-    case "Blank": {
       return [];
     }
 
@@ -670,6 +694,7 @@ type InputItem = Extract<
       | "Started"
       | "Stopping"
       | "Unfilled"
+      | "ScramChecked"
       | "Unsent"
       | "Fired"
       | "Owner"
@@ -684,6 +709,7 @@ const inputTags: ReadonlySet<Item["_tag"]> = new Set([
   "Started",
   "Stopping",
   "Unfilled",
+  "ScramChecked",
   "Unsent",
   "Fired",
   "Owner",
@@ -769,8 +795,8 @@ interface PendingNews extends Pending {
 const ignoredLine = (news: News, at: Instant): string => `?? ${describeNews(news, at)}`;
 
 /**
- * Plays a hand-written scenario, strictly. Every `Send`, `SendSecret`, `Dial`, and
- * `Hangup` must be written, in order, before the next input. Every `Ignored` must be
+ * Plays a hand-written scenario, strictly. Every `Send`, `SendSecret`, `Dial`,
+ * `Hangup`, and `CheckScram` must be written, in order, before the next input. Every `Ignored` must be
  * written. A `??` must match a News of its step, in order. `...` allows anything up to
  * the next expectation. `Wake` is never written: the fake clock carries it.
  * It throws `TranscriptMismatchError` with a transcript diff, or `ReplayMismatchError`.
@@ -905,7 +931,8 @@ export const play = <State>(client: Client<State>, scenario: Scenario): Played<S
       case "Sent":
       case "SentSecret":
       case "Dial":
-      case "Hangup": {
+      case "Hangup":
+      case "CheckScram": {
         if (!matchOutput(line) && item._tag === "Dial") {
           missed = [...missed, at.dialled + 1];
         }

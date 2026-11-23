@@ -625,6 +625,38 @@ export const unfilled = (run: Run, line: SecretLine): boolean => {
   return ran.send.length > 0 || ran.registration.length > 0 || ran.failed.length > 0;
 };
 
+/**
+ * The Runtime checked a SASL `SCRAM-SHA-256` server-final message: each Feature on that
+ * has a `scramChecked` hook decides what follows. It was heard when one acted on it.
+ * @param run - The step.
+ * @param verified - Whether the message proved the Ircd held the Credential's keys.
+ * @returns Whether any Feature acted on it.
+ */
+export const scramChecked = (run: Run, verified: boolean): boolean => {
+  const open = openOf(run.state);
+  const reading = readingOf(run);
+
+  if (open === undefined || reading === undefined) {
+    return false;
+  }
+
+  const hearing = onNow(run.registry, run.state).filter(
+    (feature) => feature.scramChecked !== undefined
+  );
+
+  if (hearing.length === 0) {
+    return false;
+  }
+
+  const ran = runEffects(hearing, open.seam, reading, (feature, context) =>
+    feature.scramChecked?.(verified, context)
+  );
+
+  carryOut(run, ran);
+
+  return ran.send.length > 0 || ran.registration.length > 0 || ran.failed.length > 0;
+};
+
 const capList = (text: string): readonly (readonly [CapName, string])[] =>
   text
     .split(" ")

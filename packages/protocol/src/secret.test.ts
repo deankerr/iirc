@@ -11,7 +11,7 @@ import {
   maxAuthenticateBytes,
   parse,
 } from "./line.ts";
-import type { OutboundLine, SecretLine } from "./line.ts";
+import type { FilledLine, OutboundLine } from "./line.ts";
 
 // The bytes `encode` writes for a Line our own builders made, which it never rejects.
 const encodedBytes = (line: OutboundLine): Uint8Array => {
@@ -36,21 +36,21 @@ const wires = (lines: ReturnType<typeof fillSecret>) => {
   return lines.map((line) => text.decode(encodedBytes(line)));
 };
 
-const plain = (authcid: string, authzid = ""): SecretLine => ({
+const plain = (authcid: string, authzid = ""): FilledLine => ({
   _tag: "AuthenticatePlain",
   authcid,
   authzid,
   credential,
 });
 
-const identify = (service: string, account = "iirc"): SecretLine => ({
+const identify = (service: string, account = "iirc"): FilledLine => ({
   _tag: "Identify",
   account,
   credential,
   service,
 });
 
-const oper = (name: string): SecretLine => ({ _tag: "Oper", credential, name });
+const oper = (name: string): FilledLine => ({ _tag: "Oper", credential, name });
 
 describe(fillSecret, () => {
   it("fills OPER, with the password trailing when it must be", () => {

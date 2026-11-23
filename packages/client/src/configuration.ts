@@ -36,6 +36,15 @@ export type IrcdAddress = typeof IrcdAddress.Type;
 const maxServiceWait = 60;
 
 /**
+ * Which SASL mechanism a login with a password uses: `auto` chooses `SCRAM-SHA-256` where
+ * the Ircd lists it and `PLAIN` otherwise, and the others pin one.
+ */
+export const SaslMechanism = Schema.Literals(["auto", "plain", "scram-sha-256"]);
+
+/** The decoded form of {@link SaslMechanism}. */
+export type SaslMechanism = typeof SaslMechanism.Type;
+
+/**
  * How Self logs in to an account: not at all, with SASL before registration ends, with
  * SASL EXTERNAL by the client certificate `tls` names, or by telling a service as a
  * Session begins, where there is no SASL. Whether a failed SASL login ends the Connection
@@ -51,12 +60,31 @@ export const Login = Schema.TaggedUnion({
   None: {},
   Sasl: {
     account: Schema.String.annotate({
-      description: "The account to log in to with SASL PLAIN.",
+      description: "The account to log in to with SASL.",
       ...startsAsFirstNick,
     }),
     credential: CredentialName.annotate({
       description: "The Credential holding the account's password.",
     }),
+    /**
+     * A new Network starts with `auto`. A `Configured` written before the field existed
+     * decodes as `plain`, since the Client then logged in with `PLAIN`, so replaying an old
+     * Journal never tries `SCRAM-SHA-256` where `PLAIN` was used.
+     */
+    mechanism: Schema.optionalKey(SaslMechanism)
+      .pipe(
+        Schema.decodeTo(Schema.toType(SaslMechanism), {
+          decode: SchemaGetter.transformOptional((given) =>
+            Option.orElseSome(given, () => "plain" as const)
+          ),
+          encode: SchemaGetter.passthrough(),
+        })
+      )
+      .annotate({
+        default: "auto",
+        description:
+          "The SASL mechanism: auto, which uses scram-sha-256 where the Ircd lists it and plain otherwise, or plain or scram-sha-256 alone. A scram-sha-256 login never sends the password, and one that fails never falls back to plain.",
+      }),
     required: Schema.Boolean.annotate({
       default: false,
       description: "Whether a failed login ends the Connection rather than going on without it.",

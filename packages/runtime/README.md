@@ -31,7 +31,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 happenings({ after? }): Stream<Stepped { happened } | Changed { sequence, change }, JournalFailed>  // News and Changes, in Journal order
 ```
 
-`Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, `client` from `@iirc/client` in the Daemon, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents with Effect's `Random`. Closing the Layer's Scope is shutdown.
+`Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, `client` from `@iirc/client` in the Daemon, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents and makes SASL nonces with Effect's `Random`, which the Daemon backs with a secure source. Closing the Layer's Scope is shutdown.
 
 | Option | Default | What it sets |
 | --- | --- | --- |
@@ -126,7 +126,8 @@ Carrying out each output:
 | --- | --- |
 | `Dial` | When it names a `certificate`, `reveal`s that Credential and parses it as PEM, a certificate chain and one private key. It opens a Scope for the Connection, `dial`s in it with the certificate if there is one, and starts its Outbox and pump there. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. Before a `Closed` is stepped, whatever is still queued or cut off is stepped as one `Unsent`. Once the `Closed` is stepped, the Scope is closed. |
 | `Send` | Queues the Line in its Connection's Outbox. At its turn, the pump `encode`s and sends it. A `Rejected` encoding is logged and nothing is sent. A Line for a Connection the Runtime holds no Link for is dropped. |
-| `SendSecret` | Queues it the same way. At its turn, the pump `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. If any step fails, nothing is sent and an `Unfilled` input is stepped: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. |
+| `SendSecret` | Queues it the same way. At its turn, the pump `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. If any step fails, nothing is sent and an `Unfilled` input is stepped: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. A `SCRAM-SHA-256` round is answered by the Connection's exchange instead, below. |
+| `CheckScram` | Checks the Ircd's server-final message against the Connection's exchange, which ends with it, and steps `ScramChecked` at once, before any other input, so the Client knows before a `903` right behind it. A signature that differs, an error, or no exchange is not verified, and is logged as a warning. |
 | `Hangup` | Lets the Lines queued before it leave at pace, for up to `hangupDrain`, then calls `hangup` on the Link. When the drain runs out, every Line still queued is dropped but a `QUIT`, which is sent at once, past the pacing. What was dropped is stepped as `Unsent`, exactly once and always before the `Closed` that follows. An empty Outbox hangs up at once. |
 | `Wake` | Sets one timer per `TimerId`, replacing the earlier one, or cancels it for `null`. When it is due, `Fired { at, due, timer }` is queued. A firing that went stale while it waited is stepped all the same, and the Client ignores it. |
 
@@ -143,6 +144,16 @@ Each Connection has its own Outbox, from `@iirc/outbox`, and one pump fiber, bot
 - **A Credential's value is never logged or journaled.** The filled Lines stay with the pump until written, and never reach `Unsent` or the Journal. A `SendSecret` cut off part way is given back as the Output it was.
 - **A Line that never leaves comes back as `Unsent`.** A `Send` counts as sent unless an `Unsent` says otherwise, and a Line the pump has taken counts as sent, even if the Connection ended as it was written.
 - **The Outbox is never journaled.** A restart begins with none, since every Connection has ended.
+
+### The SASL exchange
+
+`SCRAM-SHA-256` (RFC 5802 and RFC 7677, with no channel binding) is worked out in `src/scram.ts`, in an exchange the Runtime holds for each Connection (ADR 0019).
+
+- **The client-first message begins an exchange.** At its turn, the pump makes a 15-byte nonce from Effect's `Random` and keeps it with the Connection, replacing any exchange before it.
+- **The client-final message answers only the exchange its nonce came from.** A server-first message that is not base64 of UTF-8, does not parse, names a mandatory extension, has a nonce that does not extend ours, or asks for more than 600,000 iterations is `Unanswerable`, and nothing is derived. Otherwise the pump SASLpreps the password, derives the salted password with PBKDF2 on WebCrypto, sends the proof, and keeps the server signature to check. A check that ended the exchange while it derived means the proof is never sent.
+- **Nothing the exchange makes is journaled or logged:** the client messages with the nonce and the proof, and the salted password. The Journal records the Client's request, the `SecretLine` with the account, the Credential's name, and the Ircd's message it answers. The exchange keeps the nonce until the client-final message is made, then the server signature until the check, which ends it, and is dropped with the Connection.
+- **What the Ircd sends is journaled whole, as every received Line is.** A login leaves the server-first message, holding the salt, the iteration count, and our nonce inside the Ircd's, and the server-final message, holding the server signature, in the Journal. Anyone who can read the Journal can test password guesses against them offline, as a passive listener who can read the IRC plaintext could, and ADR 0019 accepts this rather than redact received Lines.
+- **A long message is split over `AUTHENTICATE` Lines** as `PLAIN`'s is, each spending a token.
 
 ### Restart
 
@@ -242,7 +253,7 @@ forget(name): Effect<void, VaultFailed>
 names: Effect<ReadonlySet<CredentialName>, VaultFailed>
 ```
 
-- **Values are always `Redacted`.** The Runtime unwraps one only through `fillSecret` in `@iirc/protocol`, whose result is sent and never kept, and through `parseCertificate`, which reads a client certificate to find its blocks. The Transport adapter unwraps the certificate's values to hand them to TLS.
+- **Values are always `Redacted`.** The Runtime unwraps one only through `fillSecret` in `@iirc/protocol`, whose result is sent and never kept, through its SASL exchange, which keeps only the server signature it derived, and through `parseCertificate`, which reads a client certificate to find its blocks. The Transport adapter unwraps the certificate's values to hand them to TLS.
 - **The Runtime reveals at the last moment,** for each `SendSecret` and for the certificate a `Dial` names, and lets go of the value once the Line is sent or the dial is made.
 - **A client certificate that cannot be had is dialled without.** A Credential that is missing, a Vault that fails, and a value with no certificate or no single key each give a warning naming only the Credential and the reason, and the Connection dials without a certificate. The value is never journaled or logged.
 - **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine` and the reason, so the Client decides what follows. It never holds the value or the refused Lines.

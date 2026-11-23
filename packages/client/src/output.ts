@@ -29,6 +29,12 @@ export type Answers = typeof Answers.Type;
  */
 export const Output = Schema.TaggedUnion({
   /**
+   * Check the Ircd's SASL `SCRAM-SHA-256` server-final message, in base64 as it came,
+   * against the exchange the Runtime holds for the Connection. The Runtime steps the result
+   * as a `ScramChecked` at once.
+   */
+  CheckScram: { connection: ConnectionId, serverFinal: Schema.String },
+  /**
    * Open a new Connection, numbered by the Client. The address is worked out, not copied:
    * while an STS policy holds for the host, it is TLS on the policy's port, whatever
    * Configuration says. A failed TLS Connection is never retried in plaintext.

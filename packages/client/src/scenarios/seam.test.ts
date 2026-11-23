@@ -424,7 +424,13 @@ describe("history, and hooks that act", () => {
   const client = makeClient([...registry, register(history)]);
 
   const login = configured({
-    login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+    login: {
+      _tag: "Sasl",
+      account: "iirc",
+      credential: CredentialName.make("pw"),
+      mechanism: "auto",
+      required: true,
+    },
   });
 
   const asked = lines(

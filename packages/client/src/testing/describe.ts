@@ -813,6 +813,10 @@ export const describeOutput = (output: Exclude<Output, { readonly _tag: "Wake" }
       return printItem({ _tag: "Hangup" });
     }
 
+    case "CheckScram": {
+      return printItem({ _tag: "CheckScram", serverFinal: output.serverFinal });
+    }
+
     default: {
       return output satisfies never;
     }

@@ -10,7 +10,7 @@ import { CredentialName, SecretLine } from "@iirc/protocol/line";
 import { IgnoreMask } from "@iirc/protocol/mask";
 import { Result, Schema } from "effect";
 
-import { Login, Oper } from "../configuration.ts";
+import { Login, Oper, SaslMechanism } from "../configuration.ts";
 import { FeatureName, SendableMessageId } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
 import type { Action, Lookup, ModeRequest, SayKind } from "../input.ts";
@@ -37,6 +37,8 @@ export type Change =
    * `login=none`, `login=required,iirc,pw` and `login=optional,iirc,pw`, or
    * `login=service,NickServ,iirc,pw,5`: how Self logs in, with the account and the
    * Credential's name, and for a service, its nick first and the seconds to wait last.
+   * A SASL login may end with `,plain` or `,scram-sha-256` to pin its mechanism, as in
+   * `login=required,iirc,pw,scram-sha-256`; with none it is `auto`.
    */
   | { readonly _tag: "Login"; readonly login: Login }
   /** `oper=none`, or `oper=admin,pw`: whether Self opers, as a name with its Credential's name. */
@@ -98,6 +100,8 @@ export type Item =
   | { readonly _tag: "Dial"; readonly host: string; readonly port: number; readonly tls: boolean }
   /** `-> hangup`. */
   | { readonly _tag: "Hangup" }
+  /** `-> check-scram c=biws,r=…`: the Client asks the Runtime to check the Ircd's server-final message, base64 as it came. */
+  | { readonly _tag: "CheckScram"; readonly serverFinal: string }
   /** `== opened`. */
   | { readonly _tag: "Opened" }
   /** `== closed Reset`. */
@@ -110,6 +114,8 @@ export type Item =
   | { readonly _tag: "Unsent"; readonly count: number }
   /** `== unfilled Missing`: the last SecretLine written could not be filled. */
   | { readonly _tag: "Unfilled"; readonly reason: UnfilledReason }
+  /** `== scram-checked verified` or `== scram-checked unverified`: the Runtime's answer to a `CheckScram`. */
+  | { readonly _tag: "ScramChecked"; readonly verified: boolean }
   /** `== fired ping t+30s`: a timer fires now, with the instant its `Wake` set, stale or not. */
   | { readonly _tag: "Fired"; readonly timer: string; readonly due: number }
   /** `== connection 1`: later Transport inputs come from this Connection, until the next dial. */
@@ -258,7 +264,15 @@ const unescapeBytes = (text: string): Uint8Array | undefined => {
 type SecretKind = SecretLine["_tag"];
 
 const isSecretKind = Schema.is(
-  Schema.Literals(["AuthenticatePlain", "Identify", "JoinWithKey", "Oper", "Pass"])
+  Schema.Literals([
+    "AuthenticatePlain",
+    "Identify",
+    "JoinWithKey",
+    "Oper",
+    "Pass",
+    "ScramFinal",
+    "ScramFirst",
+  ] satisfies readonly SecretKind[])
 );
 
 const decodeSecret = Schema.decodeUnknownResult(SecretLine);
@@ -421,6 +435,8 @@ const secondsPattern = /^\d{1,2}$/u;
 
 const decodeLogin = Schema.decodeUnknownResult(Login);
 
+const isMechanism = Schema.is(SaslMechanism);
+
 const decodeAnswers = (id: string): Result.Result<SendableMessageId, string> =>
   Result.mapError(Schema.decodeResult(SendableMessageId)(id), () => "not a sendable id");
 
@@ -449,8 +465,9 @@ const readService = (text: string): Login | undefined => {
     : undefined;
 };
 
-// `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`,
-// `external,required` or `external,optional`, or a service login.
+// `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`, each
+// with an optional `,plain` or `,scram-sha-256` after, `external,required` or
+// `external,optional`, or a service login.
 const readLogin = (text: string): Login | undefined => {
   if (text === "none") {
     return { _tag: "None" };
@@ -464,12 +481,15 @@ const readLogin = (text: string): Login | undefined => {
     return { _tag: "External", required: text === "external,required" };
   }
 
-  const [kind, account, credential, ...rest] = text.split(",");
+  const [kind, account, credential, mechanism = "auto", ...rest] = text.split(",");
 
+  // `auto` is what no mechanism means, so it is never written, and is not read.
   return (kind === "required" || kind === "optional") &&
     [account, credential].every(present) &&
+    isMechanism(mechanism) &&
+    (mechanism !== "auto" || text.split(",").length === 3) &&
     rest.length === 0
-    ? asLogin({ _tag: "Sasl", account, credential, required: kind === "required" })
+    ? asLogin({ _tag: "Sasl", account, credential, mechanism, required: kind === "required" })
     : undefined;
 };
 
@@ -597,7 +617,9 @@ const writeLogin = (login: Login): string => {
     }
 
     case "Sasl": {
-      return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
+      return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}${
+        login.mechanism === "auto" ? "" : `,${login.mechanism}`
+      }`;
     }
 
     default: {
@@ -1171,18 +1193,28 @@ const parseOutput = (rest: string): Result.Result<Item, string> => {
     return Result.succeed({ _tag: "Hangup" });
   }
 
+  if (rest.startsWith(" check-scram ")) {
+    const serverFinal = rest.slice(13);
+
+    return serverFinal !== "" && !/\s/u.test(serverFinal)
+      ? Result.succeed({ _tag: "CheckScram", serverFinal })
+      : Result.fail("`-> check-scram` takes one base64 token, with no space");
+  }
+
   const dial = dialPattern.exec(rest.slice(1))?.groups;
   const port = Number(dial?.port);
 
   if (dial?.host === undefined || port < 1 || port > 65_535) {
-    return Result.fail("not `-> dial host:port`, `-> dial host:port tls`, or `-> hangup`");
+    return Result.fail(
+      "not `-> dial host:port`, `-> dial host:port tls`, `-> hangup`, or `-> check-scram <base64>`"
+    );
   }
 
   return Result.succeed({ _tag: "Dial", host: dial.host, port, tls: dial.tls !== undefined });
 };
 
 const runtimeHelp =
-  "not `== opened`, `== closed <CloseReason>`, `== started`, `== stopping`, `== unfilled <UnfilledReason>`, `== unsent <n>`, `== fired <timer> t+<n>s`, or `== connection <n>`";
+  "not `== opened`, `== closed <CloseReason>`, `== started`, `== stopping`, `== unfilled <UnfilledReason>`, `== scram-checked verified`, `== scram-checked unverified`, `== unsent <n>`, `== fired <timer> t+<n>s`, or `== connection <n>`";
 
 // Each `==` verb, reading its arguments into an item, or `undefined` if they do not fit.
 const runtimeVerbs = new Map<string, (args: readonly string[]) => Item | undefined>([
@@ -1205,6 +1237,13 @@ const runtimeVerbs = new Map<string, (args: readonly string[]) => Item | undefin
     "unfilled",
     ([reason, ...extra]) =>
       extra.length === 0 && isUnfilledReason(reason) ? { _tag: "Unfilled", reason } : undefined,
+  ],
+  [
+    "scram-checked",
+    ([answer, ...extra]) =>
+      extra.length === 0 && (answer === "verified" || answer === "unverified")
+        ? { _tag: "ScramChecked", verified: answer === "verified" }
+        : undefined,
   ],
   [
     "fired",
@@ -1335,6 +1374,7 @@ type RuntimeItem = Extract<
       | "Started"
       | "Stopping"
       | "Unfilled"
+      | "ScramChecked"
       | "Unsent"
       | "Fired"
       | "Connection";
@@ -1347,6 +1387,7 @@ const runtimeTags: ReadonlySet<Item["_tag"]> = new Set([
   "Started",
   "Stopping",
   "Unfilled",
+  "ScramChecked",
   "Unsent",
   "Fired",
   "Connection",
@@ -1378,6 +1419,10 @@ const printRuntime = (item: RuntimeItem): string => {
 
     case "Unfilled": {
       return `unfilled ${item.reason}`;
+    }
+
+    case "ScramChecked": {
+      return `scram-checked ${item.verified ? "verified" : "unverified"}`;
     }
 
     case "Fired": {
@@ -1423,6 +1468,10 @@ export const printItem = (item: Item): string => {
 
     case "Hangup": {
       return "-> hangup";
+    }
+
+    case "CheckScram": {
+      return `-> check-scram ${item.serverFinal}`;
     }
 
     case "Owner": {
