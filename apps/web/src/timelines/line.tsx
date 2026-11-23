@@ -33,7 +33,7 @@ import { Button as AriaButton, Menu, MenuItem, Popover } from "react-aria-compon
 
 import { chooseReply, perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
-import { bracketsShown, dayShown, lineShown, timeShown } from "../options/ui.ts";
+import { bracketsShown, dayShown, lineShown, prefixShown, timeShown } from "../options/ui.ts";
 import { MessagePreviews, PreviewToggle } from "../previews/message-previews.tsx";
 import { jumpTo } from "../search/atoms.ts";
 import { BotMark } from "../ui/bot-mark.tsx";
@@ -462,9 +462,9 @@ type Place = "Line" | "Head" | "Later";
 
 /**
  * What comes before a Message's text: what it answers, the time, and the sender as said,
- * with a quiet `bot` by the sender's nick when their User said they are one. A
- * run's head has its nick and time on a line of their own, with what it answers under them,
- * just above the text that answers it. A later Message of a run has its time alone, still
+ * with the prefix they held before their nick where shown, and a quiet `bot` by the nick
+ * when their User said they are one. A run's head has its nick and time on a line of their
+ * own, with what it answers under them, just above the text that answers it. A later Message of a run has its time alone, still
  * there for a screen reader and shown while the row is hovered or focused, and reached by
  * Tab when nothing else in the row takes focus.
  * @param props - The Message's item, its line, where it stands, and whether its time takes focus.
@@ -482,6 +482,14 @@ const Said = ({
   readonly place: Place;
 }) => {
   const brackets = useAtomValue(bracketsShown);
+  const prefixed = useAtomValue(prefixShown);
+
+  // The symbol is a sibling of the nick, placed before it, so it is no part of the nick's
+  // button, colour, or menu, and its coming and going leaves the nick where it is.
+  const prefix =
+    prefixed && line.prefix !== undefined ? (
+      <span className={styles.prefix}>{line.prefix}</span>
+    ) : null;
 
   const nick = (
     <NickButton nick={line.nick} timeline={item.timeline}>
@@ -493,6 +501,7 @@ const Said = ({
     return (
       <>
         <span className={styles.heading}>
+          {prefix}
           <span className={styles.headNick}>{nick}</span>
           {line.bot ? (
             <>
@@ -536,12 +545,23 @@ const Said = ({
           {line.kind === "Privmsg" ? (
             <>
               {brackets ? "<" : null}
+              {prefix}
               {nick}
               {brackets ? ">" : null}
             </>
           ) : null}
-          {line.kind === "Notice" ? <>-{nick}-</> : null}
-          {line.kind === "Action" ? <>* {nick}</> : null}
+          {line.kind === "Notice" ? (
+            <>
+              -{prefix}
+              {nick}-
+            </>
+          ) : null}
+          {line.kind === "Action" ? (
+            <>
+              * {prefix}
+              {nick}
+            </>
+          ) : null}
         </span>
       </span>{" "}
     </>

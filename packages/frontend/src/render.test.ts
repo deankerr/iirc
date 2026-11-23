@@ -449,6 +449,29 @@ const saidBy = (bot: boolean) =>
     })
   );
 
+/**
+ * A Message from `peer` whose sender held a prefix.
+ * @param prefix - The symbol of the prefix, or none.
+ * @returns The content.
+ */
+const heldBy = (prefix: string | null): ItemContent =>
+  content({
+    _tag: "Message",
+    answers: null,
+    at: unknown,
+    bot: false,
+    context: null,
+    id: unknown,
+    kind: "Privmsg",
+    live: true,
+    ours: null,
+    prefix,
+    sender: "peer",
+    tags: [],
+    target: "#iirc",
+    text: "hi",
+  });
+
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
@@ -460,6 +483,7 @@ describe("lines", () => {
       delivery: undefined,
       kind: "Privmsg",
       nick: "peer",
+      prefix: undefined,
       text: [{ _tag: "Text", style: bold, text: "hi" }],
     });
   });
@@ -469,6 +493,17 @@ describe("lines", () => {
     expect(
       [saidBy(false), saidBy(true)].map((line) => line._tag === "Message" && line.bot)
     ).toStrictEqual([false, true]);
+  });
+
+  // Catches a view told a prefix for a sender who held none, or one it would draw raw.
+  it("says the prefix its sender held, contained, and nothing for one who held none", () => {
+    expect(
+      [null, "@", "+\u202E"].map((prefix) => {
+        const line = lineOf(heldBy(prefix));
+
+        return line._tag === "Message" ? line.prefix : "not a Message";
+      })
+    ).toStrictEqual([undefined, "@", contained("+\u202E")]);
   });
 
   it("says which Channel a Direct Message is about, contained, and nothing for one that names none", () => {

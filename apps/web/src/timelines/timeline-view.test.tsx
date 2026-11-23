@@ -88,6 +88,29 @@ const message = (
 });
 
 /**
+ * A Message, as an item, from a sender who held a prefix.
+ * @param sequence - Its sequence.
+ * @param prefix - The symbol of the prefix its sender held, or none.
+ * @param kind - How it was said.
+ * @param bot - Whether its sender said they are a bot.
+ * @returns The item.
+ */
+const heldBy = (
+  sequence: number,
+  prefix: string | null,
+  kind: "Privmsg" | "Notice" | "Action" = "Privmsg",
+  bot = false
+): typeof TimelineItem.Encoded => {
+  const item = message(sequence, null, bot);
+
+  if (item.content._tag !== "Message") {
+    throw new Error("not a Message");
+  }
+
+  return { ...item, content: { ...item.content, kind, prefix } };
+};
+
+/**
  * A reply, as an item, to what an earlier item said.
  * @param sequence - Its sequence.
  * @param answered - The Message it answers, as the Daemon resolved it, or none held.
@@ -328,6 +351,15 @@ const linesOf = () =>
     one.textContent?.includes("line ")
       ? [plain(one.textContent)?.replaceAll(/\d{1,2}:\d{2}/gu, "T")]
       : []
+  );
+
+/**
+ * The text of the nick each row of the log draws as a button, which a prefix is no part of.
+ * @returns The texts.
+ */
+const nicksOf = () =>
+  [...logOf().querySelectorAll('[aria-haspopup="menu"][role="button"]')].map(
+    (one) => one.textContent
   );
 
 /**
@@ -1438,6 +1470,103 @@ describe("what the view says it shows", () => {
       on: ["T <peer> line 1", "T -peer- line 2", "T * peer line 3", "T bot <peer> line 4"],
       stacked: ["peer T line 1", "T -peer- line 2", "T * peer line 3", "peer bot T line 4"],
       stackedOff: ["peer T line 1", "T -peer- line 2", "T * peer line 3", "peer bot T line 4"],
+    });
+  });
+
+  // Catches a sender's prefix missing, drawn outside the brackets, or taken for part of the
+  // nick, in any layout and for any kind, or still drawn once ui.timeline.nickPrefix is off.
+  it("draws the prefix its sender held before their nick, inside any brackets, in each layout and for each kind, and nothing once ui.timeline.nickPrefix is off or they held none", async () => {
+    const { registry } = await signedIn(
+      [],
+      [
+        heldBy(1, "@"),
+        heldBy(2, "@", "Notice"),
+        heldBy(3, "@", "Action"),
+        heldBy(4, null),
+        heldBy(5, "+", "Privmsg", true),
+      ]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 5"));
+
+    const drawn = async (layout: "columns" | "inline" | "stacked", prefix: boolean) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.layout": layout, "timeline.nickPrefix": prefix });
+        await Promise.resolve();
+      });
+
+      return linesOf();
+    };
+
+    expect({
+      columns: await drawn("columns", true),
+      inline: await drawn("inline", true),
+      names: nicksOf(),
+      off: await drawn("columns", false),
+      stacked: await drawn("stacked", true),
+    }).toStrictEqual({
+      columns: [
+        "T <@peer> line 1",
+        "T -@peer- line 2",
+        "T * @peer line 3",
+        "T <peer> line 4",
+        "T bot <+peer> line 5",
+      ],
+      inline: [
+        "T <@peer> line 1",
+        "T -@peer- line 2",
+        "T * @peer line 3",
+        "T <peer> line 4",
+        "T bot <+peer> line 5",
+      ],
+      names: ["peer", "peer", "peer", "peer", "peer"],
+      off: [
+        "T <peer> line 1",
+        "T -peer- line 2",
+        "T * peer line 3",
+        "T <peer> line 4",
+        "T bot <peer> line 5",
+      ],
+      stacked: [
+        "@peer T line 1",
+        "T -@peer- line 2",
+        "T * @peer line 3",
+        "peer T line 4",
+        "+peer bot T line 5",
+      ],
+    });
+  });
+
+  // Catches the sender's nick drawn anew as its prefix comes or goes, from another device's
+  // change, which would take focus, and an open menu, from it.
+  it("keeps focus on a sender's nick as ui.timeline.nickPrefix turns off and on", async () => {
+    const { registry } = await signedIn([], [heldBy(1, "@")]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 1"));
+
+    const nick = logOf().querySelector<HTMLElement>('[aria-haspopup="menu"][role="button"]');
+
+    nick?.focus();
+
+    const focused = nick !== null && document.activeElement === nick;
+
+    const kept = async (prefix: boolean) => {
+      await act(async () => {
+        registry.set(deviceUi, { "timeline.nickPrefix": prefix });
+        await Promise.resolve();
+      });
+
+      return document.activeElement === nick;
+    };
+
+    expect({ focused, off: await kept(false), on: await kept(true) }).toStrictEqual({
+      focused: true,
+      off: true,
+      on: true,
     });
   });
 

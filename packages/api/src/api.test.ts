@@ -531,6 +531,7 @@ describe("the contract", () => {
         "timeline.layout": "columns",
         "timeline.maxWidth": "none",
         "timeline.nickBrackets": true,
+        "timeline.nickPrefix": true,
         "timeline.nickWidth": 16,
         "timeline.spacing": 0.3,
         "timeline.timeFormat": "HH:mm",
@@ -567,6 +568,7 @@ describe("the contract", () => {
         "timeline.layout",
         "timeline.maxWidth",
         "timeline.nickBrackets",
+        "timeline.nickPrefix",
         "timeline.nickWidth",
         "timeline.spacing",
         "timeline.timeFormat",
@@ -944,12 +946,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
+        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
         event: "changed",
         id: "9",
       },

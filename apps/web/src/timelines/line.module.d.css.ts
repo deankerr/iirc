@@ -51,6 +51,7 @@ declare const styles: {
   readonly nick9: string;
   readonly numeric: string;
   readonly popover: string;
+  readonly prefix: string;
   readonly quote: string;
   readonly refused: string;
   readonly repeated: string;

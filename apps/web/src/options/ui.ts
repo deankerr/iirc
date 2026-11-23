@@ -68,6 +68,9 @@ export const spacingShown = Atom.make((get) => get(uiInEffect)["timeline.spacing
 /** Whether a sender's nick stands in `<` and `>` on this device, alone, as `timeShown` is. */
 export const bracketsShown = Atom.make((get) => get(uiInEffect)["timeline.nickBrackets"]);
 
+/** Whether a sender's nick has their prefix before it on this device, alone, as `timeShown` is. */
+export const prefixShown = Atom.make((get) => get(uiInEffect)["timeline.nickPrefix"]);
+
 /** How a line is laid out on this device, alone, as `timeShown` is. */
 export const lineShown = Atom.make((get) => get(uiInEffect)["timeline.layout"]);
 

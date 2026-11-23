@@ -484,7 +484,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
 - **A reply's quotation is one plain line:** its sender's colour slot, how it was said, its text, and the position it stands at, for a view to go to.
 - **A Direct Message's `context`, the Channel it is about, is contained like any name.**
-- **A Message line says its sender is a bot** in `bot`.
+- **A Message line says its sender is a bot** in `bot`, and the prefix they held when it was said, contained, in `prefix`.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`.
 - **A refused action is a line of its own,** such as `Your topic change for #iirc was refused (482)`.
