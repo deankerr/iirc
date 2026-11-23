@@ -436,6 +436,7 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
           kind: input.kind,
           live: true,
           ours: { echo: false, intent: input.intent },
+          prefix: undefined,
           self: true,
           sender: state.self,
           tags: new Map(),

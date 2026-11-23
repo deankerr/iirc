@@ -26,6 +26,7 @@ const heard = (sequence: number): Change => ({
     kind: "Privmsg",
     live: true,
     ours: undefined,
+    prefix: undefined,
     sender: "peer",
     tags: [],
     target: "#a",

@@ -67,7 +67,7 @@ For each Network it holds its Timelines, its life, its connection, Self's nick, 
 - **Self's own joins, parts, quits, and changes of nick are never folded,** and split a run in two. `rowsOf` is given Self's nick now, from `selfOf`, and works back through Self's changes of nick in the window. With no nick known, none is folded.
 - **A change of Self's nick the window does not hold leaves Self's older nick unknown,** so Self's lines under it may fold or be hidden.
 - **A Day stands before each item drawn on a different day from the one drawn before it, and before the first drawn.** A day begins at midnight in the offset from UTC that `rowsOf` is given, an item it cannot place starts no day, and with no offset there are no Days.
-- **A Message continues a run** when it is plain speech from the User of the row drawn just before it, by the nick as its colour folds it, no more than five minutes after it by the items' own times, with the same `bot`. Anything drawn between ends a run, an action or a notice is in none, an item a view hides ends nothing, and the first row continues nothing.
+- **A Message continues a run** when it is plain speech from the User of the row drawn just before it, by the nick as its colour folds it, no more than five minutes after it by the items' own times, with the same `bot` and `prefix`. Anything drawn between ends a run, an action or a notice is in none, an item a view hides ends nothing, and the first row continues nothing.
 - **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, is left out of the rows. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows
@@ -484,7 +484,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
 - **A reply's quotation is one plain line:** its sender's colour slot, how it was said, its text, and the position it stands at, for a view to go to.
 - **A Direct Message's `context`, the Channel it is about, is contained like any name.**
-- **A Message line says its sender is a bot** in `bot`.
+- **A Message line says its sender is a bot** in `bot`, and the prefix they held when it was said, contained, in `prefix`.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`.
 - **A refused action is a line of its own,** such as `Your topic change for #iirc was refused (482)`.

@@ -213,6 +213,7 @@ const Content = exactly<Content>()(
       kind: SayKind,
       live: Schema.Boolean,
       ours: Schema.UndefinedOr(Schema.Struct({ delivery: Delivery, intent: IntentId })),
+      prefix: Schema.UndefinedOr(Schema.String),
       sender: Schema.String,
       tags: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
       target: Schema.String,

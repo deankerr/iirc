@@ -682,6 +682,7 @@ const writeMessage = (news: Extract<News, { readonly _tag: "Message" }>, now: In
     // Ours is always Self's, so only Self said elsewhere is marked.
     ...(news.self && news.ours === undefined ? ["self"] : []),
     ...(news.bot ? ["bot"] : []),
+    ...(news.prefix === undefined ? [] : [`prefix=${atom(news.prefix)}`]),
     ...writeStamp(news.ignored),
     ...writeWhere(news.where),
     ...writeTags(news.tags),

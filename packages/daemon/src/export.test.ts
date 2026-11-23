@@ -23,6 +23,7 @@ const message = (
   kind,
   live: true,
   ours: delivery === undefined ? undefined : { delivery, intent: IntentId.make("i") },
+  prefix: undefined,
   sender,
   tags: [],
   target: "#iirc",

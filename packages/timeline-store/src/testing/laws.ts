@@ -128,6 +128,7 @@ const said = (
     delivery === undefined
       ? undefined
       : { delivery: { _tag: delivery }, intent: IntentId.make(`intent-${text}`) },
+  prefix: "@",
   sender: "peer",
   tags: [],
   target: "#a",
@@ -145,6 +146,7 @@ const reply = (text: string, answers: string, live = true): Content => ({
   kind: "Privmsg",
   live,
   ours: undefined,
+  prefix: undefined,
   sender: "pal",
   tags: [["+reply", answers]],
   target: "#a",
@@ -1720,6 +1722,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           kind: "Privmsg",
           live: true,
           ours: { delivery: { _tag: "Unconfirmed" }, intent: IntentId.make("intent-reply") },
+          prefix: undefined,
           sender: "peer",
           tags: [["+reply", "m2"]],
           target: "#a",

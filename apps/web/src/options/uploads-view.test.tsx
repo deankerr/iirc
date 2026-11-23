@@ -390,6 +390,7 @@ const ours = (
     kind: "Privmsg",
     live: true,
     ours: mine ? { delivery: { _tag: "Unconfirmed" }, intent: `web-${sequence}` } : null,
+    prefix: null,
     sender: mine ? "iirc" : "peer",
     tags: [],
     target,

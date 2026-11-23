@@ -118,6 +118,7 @@ const message = (
     kind: "Privmsg",
     live: true,
     ours: null,
+    prefix: null,
     sender: "peer",
     tags: [],
     target: names.get(timeline)?.[0] ?? "?",

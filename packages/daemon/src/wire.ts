@@ -1264,6 +1264,7 @@ const news = (source: News): WireNews => {
         live: source.live,
         ours:
           source.ours === undefined ? null : { echo: source.ours.echo, intent: source.ours.intent },
+        prefix: orNull(source.prefix),
         self: source.self,
         sender: source.sender,
         tags: [...source.tags].map(([key, value]) => ({ key, value })),
@@ -1749,6 +1750,7 @@ const itemContent = (source: Content): WireItemContent => {
           source.ours === undefined
             ? null
             : { delivery: delivery(source.ours.delivery), intent: source.ours.intent },
+        prefix: orNull(source.prefix),
         sender: source.sender,
         tags: source.tags.map(([key, value]) => ({ key, value })),
         target: source.target,

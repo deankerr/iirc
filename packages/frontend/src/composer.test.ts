@@ -797,6 +797,7 @@ const item = (
       kind: "Privmsg",
       live: true,
       ours: null,
+      prefix: null,
       sender: "alice",
       tags: [],
       target: "#iirc",

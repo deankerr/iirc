@@ -51,6 +51,7 @@ const message = (
     readonly answers?: string;
     readonly context?: string;
     readonly live?: boolean;
+    readonly prefix?: string;
   } = {}
 ): Extract<News, { readonly _tag: "Message" }> => ({
   _tag: "Message",
@@ -66,6 +67,7 @@ const message = (
     options.ours === undefined
       ? undefined
       : { echo: options.ours.echo, intent: IntentId.make(options.ours.intent) },
+  prefix: options.prefix,
   self: options.self ?? options.ours !== undefined,
   sender: "peer",
   tags: new Map([["+reply", "abc"]]),
@@ -224,11 +226,44 @@ describe("items", () => {
       kind: "Privmsg",
       live: true,
       ours: undefined,
+      prefix: undefined,
       sender: "peer",
       tags: [["+reply", "abc"]],
       target: "#iirc",
       text: "hi",
     });
+  });
+});
+
+describe("a sender's prefix", () => {
+  it("stays on the item as said, whatever the sender holds after", () => {
+    const modeChanged: News = {
+      _tag: "Activity",
+      activity: {
+        _tag: "ModeChanged",
+        by: "irc.test",
+        changes: [{ mode: "o", param: "peer", set: false }],
+        target: "#iirc",
+      },
+      at: known(later(1)),
+      id: unknown,
+      live: true,
+      where: [channel("#iirc")],
+    };
+
+    const { changes } = fold([
+      happened(1, [message([channel("#iirc")], { prefix: "@", text: "first" })]),
+      happened(2, [modeChanged, message([channel("#iirc")], { text: "second" })], later(1)),
+    ]);
+
+    const said = ofTag(changes, "Added").flatMap(({ content }) =>
+      content._tag === "Message" ? [[content.text, content.prefix]] : []
+    );
+
+    expect(said).toStrictEqual([
+      ["first", "@"],
+      ["second", undefined],
+    ]);
   });
 });
 

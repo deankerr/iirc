@@ -140,7 +140,7 @@ describe("casemapping", () => {
           "<< :irc.test 353 iirc = #DEV{OPS} :iirc @Peer[1]",
           "<< :irc.test 366 iirc #dev[ops] :End",
           "<< :peer{1}!u@h PRIVMSG #dev{ops} :hi",
-          "?? message Privmsg peer{1} #dev{ops} in=channel:#dev{ops} :hi"
+          '?? message Privmsg peer{1} #dev{ops} prefix="@" in=channel:#dev{ops} :hi'
         ),
       ],
     });

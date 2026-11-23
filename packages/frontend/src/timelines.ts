@@ -4509,10 +4509,18 @@ const saidByBot = (item: TimelineItem): boolean =>
   item.content._tag === "Message" && item.content.bot;
 
 /**
+ * The prefix an item says its sender held, which only a Message in a Channel does.
+ * @param item - The item.
+ * @returns The symbol, or `null` for none.
+ */
+const heldPrefix = (item: TimelineItem): string | null =>
+  item.content._tag === "Message" ? item.content.prefix : null;
+
+/**
  * Whether an item continues a run that the item drawn just before it is in: both are plain
  * speech, from one User, with no more than {@link runSpan} between their own times, in
  * either direction, since a Network's time can go back, and both say the same of whether
- * the sender is a bot, since only the head of a run shows its mark.
+ * the sender is a bot and of the prefix they held, since only the head of a run shows them.
  * @param item - The item.
  * @param before - The item drawn just before it.
  * @returns Whether it continues the run.
@@ -4524,6 +4532,7 @@ const continuesRun = (item: TimelineItem, before: TimelineItem): boolean => {
     said !== undefined &&
     said === speaker(before) &&
     saidByBot(item) === saidByBot(before) &&
+    heldPrefix(item) === heldPrefix(before) &&
     Math.abs(item.position.at - before.position.at) <= runSpan
   );
 };

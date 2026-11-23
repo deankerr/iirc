@@ -597,6 +597,13 @@ export type News =
        */
       readonly bot: boolean;
       /**
+       * The symbol of the highest prefix its sender held in the Channel as the Line was
+       * folded, by the order of `PREFIX`, such as `@`. Absent for a Direct Message, for a
+       * sender the Client does not know as a member, and for one who holds none. It is
+       * fixed when said, whatever the sender holds after.
+       */
+      readonly prefix: string | undefined;
+      /**
        * Whether it calls for the Owner: said live by a User other than Self, naming Self's
        * nick or one of the Configuration's `highlights` as a whole word.
        */
@@ -719,8 +726,9 @@ export type News =
 
 /**
  * News as the core reads it from a Line, before the step works out where it belongs,
- * whether a Message is a Highlight, whether Self said it, and which ignore masks its sender matches.
+ * whether a Message is a Highlight, which prefix its sender held, whether Self said it, and which
+ * ignore masks its sender matches.
  */
 export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
-  ? Omit<T, "where" | "highlight" | "self" | "ignored">
+  ? Omit<T, "where" | "highlight" | "prefix" | "self" | "ignored">
   : T;

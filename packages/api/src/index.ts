@@ -205,6 +205,7 @@ export {
   WidestLine,
   MembersWidth,
   NickBrackets,
+  NickPrefix,
   NickWidth,
   RowSpacing,
   UiInForce,

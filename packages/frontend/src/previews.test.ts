@@ -77,6 +77,7 @@ const said = (text: string) =>
     kind: "Privmsg",
     live: true,
     ours: null,
+    prefix: null,
     sender: "peer",
     tags: [],
     target: "#iirc",

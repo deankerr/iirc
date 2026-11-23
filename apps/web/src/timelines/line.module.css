@@ -570,6 +570,11 @@
   display: block;
 }
 
+/* The prefix its sender held, dim as a member's symbol is, and no part of the nick. */
+.prefix {
+  color: var(--color-muted);
+}
+
 .headNick {
   font-weight: bold;
 }

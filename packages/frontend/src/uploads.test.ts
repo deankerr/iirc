@@ -561,6 +561,7 @@ const message = (
       kind: "Privmsg",
       live: true,
       ours: ours ? { delivery, intent: "web-1" } : null,
+      prefix: null,
       sender: ours ? "iirc" : "peer",
       tags: [],
       target,

@@ -73,6 +73,11 @@ export type Content =
       readonly ours: OursItem | undefined;
       /** Whether its sender said it as a bot, by the `bot` tag. */
       readonly bot: boolean;
+      /**
+       * The symbol of the highest prefix its sender held in the Channel as it was said, by
+       * `PREFIX`, or `undefined` for none. It is the sender's then, and never changes.
+       */
+      readonly prefix: string | undefined;
     }
   | {
       readonly _tag: "Activity";

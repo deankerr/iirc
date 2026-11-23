@@ -30,6 +30,7 @@ const said = (text: string, sender = "alice"): Content => ({
   kind: "Privmsg",
   live: true,
   ours: undefined,
+  prefix: undefined,
   sender,
   tags: [],
   target: "#iirc",

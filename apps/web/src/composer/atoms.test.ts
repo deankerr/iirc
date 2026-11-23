@@ -172,6 +172,7 @@ const placeAt10 = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
         kind: "Privmsg",
         live: true,
         ours: { delivery: { _tag: "Unconfirmed" }, intent: "web-1" },
+        prefix: null,
         sender: "iirc",
         tags: [],
         target: "{bob}",
@@ -449,6 +450,7 @@ describe("saying", () => {
                   sender === "iirc"
                     ? { delivery: { _tag: "Unconfirmed" }, intent: "other-1" }
                     : null,
+                prefix: null,
                 sender,
                 tags: [],
                 target: sender === "iirc" ? name : "iirc",
