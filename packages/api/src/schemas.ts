@@ -292,6 +292,15 @@ export const CloseRequest = Schema.Struct({
 /** The decoded form of {@link CloseRequest}. */
 export type CloseRequest = typeof CloseRequest.Type;
 
+/**
+ * How far the Owner has read a Timeline named by its id: up to the instant `read`, in
+ * milliseconds since the Unix epoch, as {@link ReadRequest} reads a Target's.
+ */
+export const TimelineReadRequest = Schema.Struct({ read: Instant });
+
+/** The decoded form of {@link TimelineReadRequest}. */
+export type TimelineReadRequest = typeof TimelineReadRequest.Type;
+
 /** A Credential's value, `Redacted` from the moment it is decoded, and never sent back. */
 export const CredentialValue = Schema.Struct({
   value: Schema.RedactedFromValue(Schema.String.check(Schema.isNonEmpty())),

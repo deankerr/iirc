@@ -109,6 +109,7 @@ export {
   ProjectionVersion,
   Rank,
   ReadRequest,
+  TimelineReadRequest,
   CloseRequest,
   RefusedReason,
   Removed,

@@ -95,6 +95,7 @@ import {
   NewsEvent,
   ProjectionEvent,
   ReadRequest,
+  TimelineReadRequest,
   Removed,
   RemoveQuery,
   Resume,
@@ -329,6 +330,17 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
       error: [UnknownNetwork, UnknownTimeline, TimelinesFailed],
       query: SearchQuery,
       success: SearchResults,
+    }),
+    HttpApiEndpoint.post("read", "/timelines/:timeline/read", {
+      error: [UnknownTimeline, NetworkStopped, TimelinesFailed],
+      params: { timeline: TimelineId },
+      payload: TimelineReadRequest,
+      success: Journaled,
+    }),
+    HttpApiEndpoint.post("close", "/timelines/:timeline/close", {
+      error: [UnknownTimeline, NetworkStopped, TimelinesFailed],
+      params: { timeline: TimelineId },
+      success: Closed,
     })
   )
   .middleware(Authorization) {}
