@@ -139,6 +139,7 @@ export const clientFirst = (authcid: string): Effect.Effect<Answer<Exchange & { 
     }
 
     const bytes = yield* Effect.all(
+      // `nextIntBetween` includes both bounds: every byte, each as likely.
       Array.from({ length: nonceBytes }, () => Random.nextIntBetween(0, 255))
     );
 

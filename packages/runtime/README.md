@@ -151,7 +151,8 @@ Each Connection has its own Outbox, from `@iirc/outbox`, and one pump fiber, bot
 
 - **The client-first message begins an exchange.** At its turn, the pump makes a 15-byte nonce from Effect's `Random` and keeps it with the Connection, replacing any exchange before it.
 - **The client-final message answers only the exchange its nonce came from.** A server-first message that is not base64 of UTF-8, does not parse, names a mandatory extension, has a nonce that does not extend ours, or asks for more than 600,000 iterations is `Unanswerable`, and nothing is derived. Otherwise the pump SASLpreps the password, derives the salted password with PBKDF2 on WebCrypto, sends the proof, and keeps the server signature to check. A check that ended the exchange while it derived means the proof is never sent.
-- **The nonce, the salted password, and the proof are never journaled or logged.** The Journal holds the `SecretLine` with the Credential's name and what the Ircd sent, and the exchange is dropped with the Connection.
+- **Nothing the exchange makes or sends is journaled or logged:** the client messages, the salted password, and the proof. The Journal holds the `SecretLine` with the Credential's name, and the exchange is dropped with the Connection.
+- **What the Ircd sends is journaled whole, as every received Line is.** A login leaves the server-first message, holding the salt, the iteration count, and our nonce inside the Ircd's, and the server-final message, holding the server signature, in the Journal. Anyone who can read the Journal can test password guesses against them offline, as a passive listener on the wire could, and ADR 0019 accepts this rather than redact received Lines.
 - **A long message is split over `AUTHENTICATE` Lines** as `PLAIN`'s is, each spending a token.
 
 ### Restart
