@@ -18,7 +18,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
-**Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that belongs to no Network, such as an option or an Upload. _Avoid_: Update, mutation
+**Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that no Client takes in, such as an option, an Upload, or how far the Owner has read a Timeline no Client can name. _Avoid_: Update, mutation
 
 **Tail**: The most recent of what the Daemon logged, held in memory for any Frontend to read and gone when the Daemon restarts. Nothing is derived from it. _Avoid_: Log, Journal, console, core buffer
 
