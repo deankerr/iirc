@@ -382,11 +382,14 @@ export const formatted = (text: string, nicks: readonly NickSpan[] = []): readon
  * @returns Where each stood in the text with formatting stripped, in order, with its slot.
  */
 export const drawnNicks = (text: string, nicks: readonly NickSpan[]): readonly NickRun[] =>
-  piecesOf(text, nicks).flatMap((piece) =>
-    piece._tag === "Nick"
-      ? [{ colour: piece.colour, end: piece.at + piece.raw.length, start: piece.at }]
-      : []
-  );
+  // Text that names no one needs no formatting read nor links found.
+  nicks.length === 0
+    ? []
+    : piecesOf(text, nicks).flatMap((piece) =>
+        piece._tag === "Nick"
+          ? [{ colour: piece.colour, end: piece.at + piece.raw.length, start: piece.at }]
+          : []
+      );
 
 // Lines.
 
