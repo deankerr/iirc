@@ -25,7 +25,7 @@ import type {
 import { depth, makeOutbox, nextAt, offer, spend, take as takeLine, takeAll } from "@iirc/outbox";
 import type { Outbox, Pacing } from "@iirc/outbox";
 import { encode, fillSecret, isRejected } from "@iirc/protocol/line";
-import type { OutboundLine, SecretLine } from "@iirc/protocol/line";
+import type { CredentialName, OutboundLine, SecretLine } from "@iirc/protocol/line";
 import {
   Cause,
   Deferred,
@@ -41,12 +41,13 @@ import {
   Stream,
 } from "effect";
 
+import { parseCertificate } from "./certificate.ts";
 import { now, sleepUntil } from "./clock.ts";
 import { JournalFailed, Sequence } from "./journal.ts";
 import type { JournalService, NetworkId } from "./journal.ts";
 import { ClientThrew, lifeAfter, stepContained } from "./replay.ts";
 import type { Folded, InForce } from "./replay.ts";
-import type { Link, LinkEvent, TransportService } from "./transport.ts";
+import type { ClientCertificate, Link, LinkEvent, TransportService } from "./transport.ts";
 import type { VaultService } from "./vault.ts";
 
 /** Whether a Network's driver is running, or why it stopped. */
@@ -652,10 +653,56 @@ const drive = <S>(
         }
       });
 
+    // The client certificate a Dial names, revealed as the Connection is dialled and given
+    // to the Transport, which presents it. One that cannot be had is dialled without, and
+    // the log names the Credential and the reason, never the value.
+    const certificateFor = (
+      connection: ConnectionId,
+      credential: CredentialName
+    ): Effect.Effect<ClientCertificate | undefined> =>
+      Effect.gen(function* () {
+        const refuse = (reason: string) =>
+          Effect.as(
+            Effect.logWarning("The client certificate could not be had", {
+              connection,
+              credential,
+              reason,
+            }),
+            undefined
+          );
+
+        const revealed = yield* vault.reveal(credential).pipe(
+          Effect.map((value) => ({ _tag: "Revealed", value }) as const),
+          Effect.catchTags({
+            CredentialMissing: () =>
+              Effect.succeed({ _tag: "Refused", reason: "Missing" } as const),
+            VaultFailed: (error) =>
+              Effect.as(Effect.logWarning("The Vault failed", { reason: error.reason }), {
+                _tag: "Refused",
+                reason: "Unavailable",
+              } as const),
+          })
+        );
+
+        if (revealed._tag === "Refused") {
+          return yield* refuse(revealed.reason);
+        }
+
+        const parsed = parseCertificate(credential, revealed.value);
+
+        return parsed._tag === "Parsed" ? parsed.certificate : yield* refuse(parsed.reason);
+      });
+
     const dial = (connection: ConnectionId, output: Extract<Output, { _tag: "Dial" }>) =>
       Effect.gen(function* () {
         const own = yield* Scope.fork(scope);
-        const link = yield* transport.dial(output.ircd).pipe(Scope.provide(own));
+
+        const certificate =
+          output.certificate === undefined
+            ? undefined
+            : yield* certificateFor(connection, output.certificate);
+
+        const link = yield* transport.dial(output.ircd, certificate).pipe(Scope.provide(own));
 
         // Closing the Scope ends the Connection at once, with no hang-up to wait for: a
         // graceful end comes before it, from the Client's `Hangup`.

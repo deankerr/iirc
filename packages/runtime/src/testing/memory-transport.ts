@@ -3,11 +3,13 @@ import { Effect, Queue, Ref, Stream } from "effect";
 import type { Cause } from "effect";
 
 import { maxReceivedBytes } from "../transport.ts";
-import type { LinkEvent, TransportService } from "../transport.ts";
+import type { ClientCertificate, LinkEvent, TransportService } from "../transport.ts";
 
 /** The far end of one dialled Connection, played by a test. */
 export interface TestCall {
   readonly address: IrcdAddress;
+  /** The client certificate the dial was given, if any. */
+  readonly certificate: ClientCertificate | undefined;
   /**
    * Accepts the Connection. It returns once the Link has published `Opened`, though the
    * caller need not have read it yet, so a law may hang up right after.
@@ -52,7 +54,7 @@ const misuse = (what: string) => Effect.die(new Error(`TestCall: ${what}`));
 export const makeMemoryTransport: Effect.Effect<MemoryTransport> = Effect.gen(function* () {
   const calls = yield* Queue.unbounded<TestCall>();
 
-  const dial = (address: IrcdAddress) =>
+  const dial = (address: IrcdAddress, certificate?: ClientCertificate) =>
     Effect.gen(function* () {
       const events = yield* Queue.unbounded<LinkEvent, Cause.Done>();
       const heard = yield* Queue.unbounded<Uint8Array>();
@@ -76,6 +78,7 @@ export const makeMemoryTransport: Effect.Effect<MemoryTransport> = Effect.gen(fu
 
       yield* Queue.offer(calls, {
         address,
+        certificate,
         close: (reason) => close({ _tag: "Closed", reason }),
         heard: Queue.take(heard),
         open: Effect.flatMap(Ref.get(phase), (now) =>

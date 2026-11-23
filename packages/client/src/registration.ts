@@ -9,7 +9,7 @@ import { limitOf } from "@iirc/protocol/isupport";
 import { cap, isRejected, nick, quit, upperCaseAscii, user } from "@iirc/protocol/line";
 import type { Line, SecretLine } from "@iirc/protocol/line";
 
-import { declinedToRequest } from "./configuration.ts";
+import { declinedToRequest, saslRequired } from "./configuration.ts";
 import type { Registration } from "./feature.ts";
 import type { CapName, FeatureName } from "./ids.ts";
 import { CapName as CapNameSchema, Instant } from "./ids.ts";
@@ -480,11 +480,8 @@ export const recompute = (run: Run, was: Before): void => {
  * @param run - The step.
  * @returns Whether the login is still owed.
  */
-export const loginOwed = (run: Run): boolean => {
-  const login = run.state.configuration?.login;
-
-  return login?._tag === "Sasl" && login.required && openOf(run.state)?.loggedIn === false;
-};
+export const loginOwed = (run: Run): boolean =>
+  saslRequired(run.state.configuration?.login) && openOf(run.state)?.loggedIn === false;
 
 /**
  * A `Configured` arrived. While negotiation is still open before `CAP END`, Features hear

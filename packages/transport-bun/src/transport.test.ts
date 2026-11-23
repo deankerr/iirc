@@ -1,10 +1,12 @@
+import { X509Certificate } from "node:crypto";
 import * as Net from "node:net";
 import { TLSSocket } from "node:tls";
 
 import type { IrcdAddress } from "@iirc/client";
+import { CredentialName } from "@iirc/protocol/line";
 import { maxReceivedBytes } from "@iirc/runtime/transport";
-import type { LinkEvent } from "@iirc/runtime/transport";
-import { Deferred, Duration, Effect, Fiber, Latch, Stream } from "effect";
+import type { ClientCertificate, LinkEvent } from "@iirc/runtime/transport";
+import { Deferred, Duration, Effect, Fiber, Latch, Logger, Redacted, Stream } from "effect";
 import type { Scope } from "effect";
 import { constVoid } from "effect/Function";
 import { describe, expect, it, vi } from "vitest";
@@ -181,6 +183,105 @@ describe("a dial that fails", () => {
     );
 
     expect(events).toStrictEqual(["Closed TimedOut"]);
+  });
+});
+
+const credential = CredentialName.make("libera-cert");
+const mine = makeCertificate("iirc-client");
+const stranger = makeCertificate("someone-else");
+
+const held = (cert: string, key: string): ClientCertificate => ({
+  certificate: Redacted.make(cert),
+  credential,
+  key: Redacted.make(key),
+});
+
+const fingerprintOf = (pem: string) => new X509Certificate(pem).fingerprint256;
+
+// Dials a TLS Ircd that asks for a certificate, and says which one it was shown and
+// what the dial warned of.
+const presented = (address: IrcdAddress, given: ClientCertificate) =>
+  Effect.gen(function* () {
+    const warned: string[] = [];
+    const far = yield* Deferred.make<Net.Socket>();
+
+    const port = yield* listen(
+      certificate,
+      (socket) => {
+        Deferred.doneUnsafe(far, Effect.succeed(socket));
+      },
+      constVoid,
+      true
+    );
+
+    const link = yield* makeBunTransport({ route: to(port), trust: [certificate.cert] })
+      .dial(address, given)
+      .pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make(({ logLevel, message }) => {
+              if (logLevel === "Warn") {
+                warned.push(JSON.stringify(message));
+              }
+            }),
+          ])
+        )
+      );
+
+    const socket = yield* Deferred.await(far);
+    const events = yield* Stream.runHead(link.events);
+
+    const shown =
+      socket instanceof TLSSocket ? socket.getPeerCertificate().fingerprint256 : undefined;
+
+    return { events: events._tag === "Some" ? [show(events.value)] : [], shown, warned };
+  });
+
+describe("a client certificate", () => {
+  it("is presented in the handshake, so the Ircd sees it", async () => {
+    const result = await run(presented(tlsAddress, held(mine.cert, mine.key)));
+
+    expect(result).toStrictEqual({
+      events: ["Opened"],
+      shown: fingerprintOf(mine.cert),
+      warned: [],
+    });
+  });
+
+  it.each([
+    ["a key that is not its own", held(mine.cert, stranger.key)],
+    ["a certificate that is not one", held("not a certificate", mine.key)],
+    ["a key that is not one", held(mine.cert, "not a key")],
+  ])("with %s dials without it, and warns by the Credential's name only", async (_, given) => {
+    const result = await run(presented(tlsAddress, given));
+
+    expect(result.events).toStrictEqual(["Opened"]);
+    expect(result.shown).toBeUndefined();
+    expect(result.warned).toStrictEqual([expect.stringContaining("libera-cert")]);
+    expect(
+      [mine.key.split("\n")[1] ?? "", "not a key"].filter((secret) =>
+        (result.warned[0] ?? "").includes(secret)
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("is ignored by a plaintext dial", async () => {
+    const events = await run(
+      Effect.gen(function* () {
+        const far = yield* ircd(undefined);
+
+        const link = yield* makeBunTransport({ route: to(far.port) }).dial(
+          plainAddress,
+          held(mine.cert, mine.key)
+        );
+
+        (yield* far.accepted).end();
+
+        return (yield* Stream.runCollect(link.events)).map(show);
+      })
+    );
+
+    expect(events).toStrictEqual(["Opened", "Closed Ended"]);
   });
 });
 

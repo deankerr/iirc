@@ -34,6 +34,7 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Eff
   | `hangup` | `HungUp` |
 
 - **TLS is verified, always.** It verifies against the system's trust store (`tls.getCACertificates("system")`), or against Bun's bundled Mozilla roots where the system has none, plus any `trust` roots. `rejectUnauthorized` is always on. The certificate is always checked against the host that was dialled (`IrcdAddress.host`), never against where `route` sent the dial. SNI carries that host too, except for an IP, which SNI may not carry (RFC 6066). Then no SNI is sent, and the certificate must still name that IP. A TLS failure never falls back to plaintext.
+- **A client certificate is presented in the TLS handshake.** A dial given one passes its certificate and key to `node:tls`, unwrapping them only there. If `node:tls` rejects them, such as for a key that is not the certificate's, the dial goes without and logs a warning naming only the Credential. A plaintext dial ignores it. Whether the Ircd accepts the certificate is its own matter, as the server's trust in it is not verified.
 - **`Opened` over TLS comes after the handshake.** The handshake has its own timer, which starts once TCP is open.
 - **`hangup` is a bounded graceful close.** It ends the socket's write side and waits until everything already sent has been written, so a `QUIT` sent just before it arrives. Then it destroys the socket. The wait lasts at most `hangupTimeout`, so a peer that has stopped reading cannot hold it longer. The Connection still ends with one `Closed HungUp`, which is reported as soon as `hangup` starts. Interrupting a `hangup` cuts only the wait short, and the socket is destroyed anyway.
 - **Every other ending destroys the socket at once.** An error, a timer, or the closing of the Scope destroys the socket without waiting for unsent bytes, because a peer that never reads would never let them flush. No socket outlives its Connection. The tests check this after every way a Connection can end. Where the far end is paused, they check that our socket was destroyed while the far end was still paused, not merely that the far end later saw an end.
@@ -55,7 +56,7 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Eff
 - It does not decode, parse, or check Lines in either direction. `send` writes whatever bytes it is given.
 - It has no timers about Lines, such as silence or ping. Those belong to the Client.
 - It does not reconnect, choose another Ircd, or try plaintext after TLS fails. Those decisions belong to the Client.
-- It does not present client certificates (SASL `EXTERNAL`), use a proxy, or support STARTTLS. Nothing needs them yet.
+- It does not use a proxy or support STARTTLS. Nothing needs them yet.
 - It does not pick an address family or race addresses (Happy Eyeballs) beyond what Bun's `node:net` does.
 - A real SYN that is never answered is not tested, since loopback always answers one. The connect timer is tested with a `route` that never finishes, and it covers both cases.
 

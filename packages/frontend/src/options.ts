@@ -1834,21 +1834,32 @@ const setInMember = (
   const members = top?.kind._tag === "Tagged" ? top.kind.members : [];
   const current = plain[key];
   const having = members.filter((one) => fieldNamed(one.fields, second) !== undefined);
+  const inForce = having.find((one) => isRecord(current) && current._tag === one.tag);
 
-  const member = having.find((one) => isRecord(current) && current._tag === one.tag) ?? having[0];
+  const within = (member: Member): Parsed<Record> => {
+    const base =
+      member === inForce && isRecord(current)
+        ? parsed(current)
+        : startingMember(network, key, member, firstNick(plain));
 
-  if (member === undefined) {
-    return noOption(network, path);
+    return base._tag === "Invalid"
+      ? base
+      : parsed(withKey(plain, key, withKey(base.value, second, value)));
+  };
+
+  if (inForce !== undefined) {
+    return within(inForce);
   }
 
-  const base =
-    isRecord(current) && current._tag === member.tag
-      ? parsed(current)
-      : startingMember(network, key, member, firstNick(plain));
+  // No member in force: the first that holds the option and makes a valid Configuration,
+  // such as a SASL login rather than EXTERNAL where no certificate is named.
+  const tried = having.map(within);
 
-  return base._tag === "Invalid"
-    ? base
-    : parsed(withKey(plain, key, withKey(base.value, second, value)));
+  return (
+    tried.find((one) => one._tag !== "Invalid" && configurationOf(one.value)._tag !== "Invalid") ??
+    tried[0] ??
+    noOption(network, path)
+  );
 };
 
 /**

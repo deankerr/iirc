@@ -414,6 +414,7 @@ export const liberaConfiguration: ConfigurationOnWire = {
   nicks: ["iirc"],
   oper: { _tag: "None" },
   realname: "iirc",
+  tls: { _tag: "None" },
   userModes: "",
   username: "iirc",
   whoOnJoin: true,

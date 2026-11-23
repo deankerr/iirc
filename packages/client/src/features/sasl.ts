@@ -1,12 +1,17 @@
 /**
- * `sasl` with `PLAIN`: Self logs in to its account before registration ends. While the
- * exchange runs, this Feature holds registration open, so `CAP END` waits for it.
+ * `sasl`: Self logs in to its account before registration ends, with the mechanism the
+ * Configuration's login names: `PLAIN` for a `Sasl` login, or `EXTERNAL` for an `External`
+ * one, by the client certificate the Transport presented. While the exchange runs, this
+ * Feature holds registration open, so `CAP END` waits for it.
  *
  * - It begins when the cap turns on during registration and the Configuration names a
- *   login, unless the cap's value lists mechanisms and `PLAIN` is not among them. Then it
- *   does not try, and a required login gives up the Connection.
- * - It sends `AUTHENTICATE PLAIN`, and on `AUTHENTICATE +`, the Credential as a
- *   `SendSecret`. Any other challenge is not `PLAIN`'s, so it aborts with `AUTHENTICATE *`.
+ *   login, unless the cap's value lists mechanisms and the login's is not among them. Then
+ *   it does not try, and a required login gives up the Connection.
+ * - It sends `AUTHENTICATE` with the mechanism. On `AUTHENTICATE +`, `PLAIN` sends the
+ *   Credential as a `SendSecret`, and `EXTERNAL` sends `AUTHENTICATE +` as an ordinary
+ *   Line, since it carries no authorization identity and the Ircd uses the certificate's
+ *   account. Any other challenge is not the mechanism's, so it aborts with `AUTHENTICATE *`,
+ *   as it does when the login names another mechanism than the one it asked for.
  * - `903` lets registration go. `902` and `904` to `908` are a failed login, and so are
  *   an unfilled Credential and the core's deadline passing, after `AUTHENTICATE *`.
  * - A failed login lets registration go when the login is optional, and gives up the
@@ -23,6 +28,8 @@
  */
 import { authenticate, upperCaseAscii } from "@iirc/protocol/line";
 
+import type { Login } from "../configuration.ts";
+import { saslRequired } from "../configuration.ts";
 import type { Context, Effects, Feature, Sendable } from "../feature.ts";
 import { CapName, FeatureName } from "../ids.ts";
 
@@ -30,9 +37,9 @@ import { CapName, FeatureName } from "../ids.ts";
 type Exchange =
   /** Not begun, and it will not begin this Connection. */
   | { readonly _tag: "Idle" }
-  /** `AUTHENTICATE PLAIN` is sent, and `+` is awaited. */
-  | { readonly _tag: "Asked" }
-  /** The Credential is sent, and the result is awaited. */
+  /** `AUTHENTICATE` with the mechanism is sent, and `+` is awaited. */
+  | { readonly _tag: "Asked"; readonly mechanism: Mechanism }
+  /** The answer to `+` is sent, and the result is awaited. */
   | { readonly _tag: "Sent" }
   /** Over, logged in. */
   | { readonly _tag: "LoggedIn" }
@@ -54,56 +61,61 @@ const line = (argument: string): readonly Sendable[] => {
   return "_tag" in built ? [] : [{ _tag: "Line", line: built }];
 };
 
-// Whether `PLAIN` is offered: the cap lists it, or lists nothing, as SASL 3.1 does.
-const offersPlain = (value: string | undefined): boolean =>
+/** What a SASL login is, by the mechanism its kind names. */
+type Attempt = Extract<Login, { readonly _tag: "External" | "Sasl" }>;
+
+/** The mechanisms a login can name. */
+type Mechanism = "EXTERNAL" | "PLAIN";
+
+const attemptOf = (login: Login): Attempt | undefined =>
+  login._tag === "Sasl" || login._tag === "External" ? login : undefined;
+
+const mechanismOf = (attempt: Attempt): Mechanism =>
+  attempt._tag === "External" ? "EXTERNAL" : "PLAIN";
+
+// Whether the mechanism is offered: the cap lists it, or lists nothing, as SASL 3.1 does.
+const offers = (attempt: Attempt, value: string | undefined): boolean =>
   value === undefined ||
   value === "" ||
-  value.split(",").some((mechanism) => upperCaseAscii(mechanism) === "PLAIN");
+  value.split(",").some((mechanism) => upperCaseAscii(mechanism) === mechanismOf(attempt));
 
 // No login: go on without one, or give up when the Configuration requires it.
-const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Effects<Exchange> => {
-  const { login } = context.configuration;
-  const required = login._tag === "Sasl" && login.required;
-
-  return {
-    own: notLoggedIn,
-    registration: required
-      ? { _tag: "Abandon", reason: { _tag: "LoginFailed" } }
-      : { _tag: "Continue" },
-    send,
-  };
-};
+const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Effects<Exchange> => ({
+  own: notLoggedIn,
+  registration: saslRequired(context.configuration.login)
+    ? { _tag: "Abandon", reason: { _tag: "LoginFailed" } }
+    : { _tag: "Continue" },
+  send,
+});
 
 const running = (exchange: Exchange): boolean =>
   exchange._tag === "Asked" || exchange._tag === "Sent";
 
-const isRequired = (context: Context<Exchange>): boolean => {
-  const { login } = context.configuration;
-
-  return login._tag === "Sasl" && login.required;
-};
-
-// Begins a login, while registering, if the Configuration names one and PLAIN is offered.
+// Begins a login, while registering, if the Configuration names one and its mechanism is offered.
 const begin = (context: Context<Exchange>): Effects<Exchange> => {
-  const { login } = context.configuration;
+  const attempt = attemptOf(context.configuration.login);
 
-  if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
+  if (attempt === undefined || context.known.session._tag !== "Registering") {
     return {};
   }
 
-  if (!offersPlain(context.cap(sasl))) {
+  if (!offers(attempt, context.cap(sasl))) {
     return failed(context);
   }
 
-  return { own: { _tag: "Asked" }, registration: { _tag: "Hold" }, send: line("PLAIN") };
+  return {
+    own: { _tag: "Asked", mechanism: mechanismOf(attempt) },
+    registration: { _tag: "Hold" },
+    send: line(mechanismOf(attempt)),
+  };
 };
 
-/** The `sasl` Feature, with `PLAIN`. */
-export const saslPlain: Feature<Exchange> = {
+/** The `sasl` Feature, with `PLAIN` or `EXTERNAL`. */
+export const saslLogin: Feature<Exchange> = {
   // Off while registering, with a login required and none made: give up.
   absent: (context) =>
     context.known.session._tag === "Registering" &&
-    isRequired(context) &&
+    saslRequired(context.configuration.login) &&
     context.own._tag !== "LoggedIn"
       ? { own: notLoggedIn, registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } } }
       : {},
@@ -122,9 +134,9 @@ export const saslPlain: Feature<Exchange> = {
   react: (arrival, context) => {
     const { own, configuration } = context;
     const { command, params } = arrival.line;
-    const { login } = configuration;
+    const attempt = attemptOf(configuration.login);
 
-    if (!running(own) || login._tag !== "Sasl") {
+    if (!running(own) || attempt === undefined) {
       return {};
     }
 
@@ -140,9 +152,19 @@ export const saslPlain: Feature<Exchange> = {
       return {};
     }
 
-    // A challenge PLAIN does not make, or PLAIN withdrawn since it was asked for.
-    if (params[0] !== "+" || !offersPlain(context.cap(sasl))) {
+    // A challenge the mechanism does not make, the mechanism withdrawn since it was asked
+    // for, or a login that now names another: the answer would be to the wrong question.
+    if (
+      params[0] !== "+" ||
+      !offers(attempt, context.cap(sasl)) ||
+      mechanismOf(attempt) !== own.mechanism
+    ) {
       return failed(context, line("*"));
+    }
+
+    // `EXTERNAL` has nothing to prove: the certificate has, and an empty authzid asks for its account.
+    if (attempt._tag === "External") {
+      return { own: { _tag: "Sent" }, send: line("+") };
     }
 
     return {
@@ -152,9 +174,9 @@ export const saslPlain: Feature<Exchange> = {
           _tag: "Secret",
           line: {
             _tag: "AuthenticatePlain",
-            authcid: login.account,
-            authzid: login.account,
-            credential: login.credential,
+            authcid: attempt.account,
+            authzid: attempt.account,
+            credential: attempt.credential,
           },
         },
       ],

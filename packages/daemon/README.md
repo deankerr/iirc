@@ -303,7 +303,8 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **A hang-up drains for at most half of `stopTimeout`,** so the `QUIT` fits.
 - **Every log goes through `Effect.log*`,** annotated with the Network where there is one.
 - **Each Connection's dial, Session, and end is logged at `Info`,** with its Ircd and the reason it ended.
-- **A Credential is logged by name only,** when it is held or forgotten.
+- **A Credential is logged by name only,** when it is held or forgotten, or when a client certificate could not be had.
+- **A Connection presents the client certificate its Network's `tls.certificate` names,** revealed from the Vault as it dials and handed to the Transport, never journaled or logged, and so never in the Tail. One that cannot be had is dialled without.
 - **HTTP requests are not logged.**
 
 ## The handlers

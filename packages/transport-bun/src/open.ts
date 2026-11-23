@@ -16,7 +16,8 @@ import * as Tls from "node:tls";
  * @packageDocumentation
  */
 import type { IrcdAddress } from "@iirc/client";
-import { Deferred, Effect } from "effect";
+import type { ClientCertificate } from "@iirc/runtime/transport";
+import { Deferred, Effect, Redacted } from "effect";
 import type { Scope, Duration } from "effect";
 import { constVoid } from "effect/Function";
 import * as Socket from "effect/socket/Socket";
@@ -35,7 +36,50 @@ export interface Opening {
   readonly handshakeTimeout: Duration.Input;
   /** The roots to verify against, as PEM. */
   readonly roots: readonly string[];
+  /** The client certificate to present on a TLS dial, if there is one. */
+  readonly certificate?: ClientCertificate | undefined;
 }
+
+/** What TLS is given of a client certificate, which is the only place its values are unwrapped. */
+interface Presented {
+  readonly cert: string;
+  readonly key: string;
+}
+
+/**
+ * Unwraps a client certificate for TLS, once `node:tls` accepts it. One it rejects, such
+ * as a key that is not the certificate's, is warned of by the Credential's name alone
+ * and left out, so the Connection dials without it.
+ * @param certificate - The certificate, if there is one.
+ * @returns What to give TLS, which is nothing without a usable certificate.
+ */
+const presentable = (
+  certificate: ClientCertificate | undefined
+): Effect.Effect<Partial<Presented>> => {
+  if (certificate === undefined) {
+    return Effect.succeed({});
+  }
+
+  // Checked apart from the dial, which would fail the whole Connection instead. What
+  // `node:tls` says is dropped, since it may quote the PEM.
+  return Effect.try({
+    catch: () => ({ credential: certificate.credential }),
+    try: (): Partial<Presented> => {
+      const presented = {
+        cert: Redacted.value(certificate.certificate),
+        key: Redacted.value(certificate.key),
+      };
+
+      Tls.createSecureContext(presented);
+
+      return presented;
+    },
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.as(Effect.logWarning("The client certificate could not be used", error), {})
+    )
+  );
+};
 
 /** The error a timer ends a dial with. */
 const timedOut = new Socket.SocketError({
@@ -126,10 +170,13 @@ export const openSocket = (
       return raw;
     }
 
+    const presented = yield* presentable(opening.certificate);
+
     return yield* start(
       () =>
         Tls.connect({
           ca: [...opening.roots],
+          ...presented,
           // The identity to verify, which may be an IP that SNI cannot carry.
           checkServerIdentity: (_, certificate) =>
             Tls.checkServerIdentity(address.host, certificate),

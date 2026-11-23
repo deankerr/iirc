@@ -64,7 +64,7 @@ The changes `!! configure` takes, separated by one space:
 | `realname=new`, `nicks=one,two` | The realname registration sends, with no space, or the nicks it offers, in order. |
 | `highlights=release,iirc`, `highlights=` | The words that make a Message a Highlight, or none. |
 | `ignores=spam!*@*,*!*@bad.test`, `ignores=` | The masks of the Users to ignore, or none. A mask the schema would refuse is a transcript error. |
-| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw`, `login=service,NickServ,iirc,pw,5` | How Self logs in: not at all, with SASL to an account, with its Credential's name, required or optional, or by telling a service, named first, with the seconds Channels wait last. A login the Configuration's schema would refuse, such as a wait over its bound, is a transcript error. |
+| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw`, `login=external,required`, `login=external,optional`, `login=service,NickServ,iirc,pw,5` | How Self logs in: not at all, with SASL to an account, with its Credential's name, required or optional, with SASL EXTERNAL, required or optional, or by telling a service, named first, with the seconds Channels wait last. A login the Configuration's schema would refuse, such as a wait over its bound, is a transcript error. |
 | `oper=none`, `oper=admin,pw` | Whether Self opers as each Session begins: not at all, or as a name, with its Credential's name. One the schema would refuse is a transcript error. |
 
 Instants are written against the clock, which starts at the epoch, 2026-01-01T00:00:00.000Z: `t+13s`, `t+1500ms`, `t-5s`.

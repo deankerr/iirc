@@ -27,7 +27,9 @@ import {
   startRuntime,
   wrapJournal,
 } from "./testing/harness.ts";
+import type { World } from "./testing/harness.ts";
 import { VaultFailed } from "./vault.ts";
+import type { VaultService } from "./vault.ts";
 
 const libera = NetworkId.make("libera");
 const oftc = NetworkId.make("oftc");
@@ -469,6 +471,113 @@ describe("a SendSecret", () => {
       ],
     });
   });
+});
+
+describe("a client certificate", () => {
+  const name = CredentialName.make("libera-cert");
+  // Distinctive, so a search for it finds the PEM wherever it leaked to.
+  const keyBody = "TheKeyBodyNobodyMayEverSee0123456789abcdefghijklmnopqrstuvwxyz";
+  const certificateBody = "Q2VydGlmaWNhdGVCb2R5";
+
+  const pem =
+    `-----BEGIN CERTIFICATE-----\n${certificateBody}\n-----END CERTIFICATE-----\n` +
+    `-----BEGIN PRIVATE KEY-----\n${keyBody}\n-----END PRIVATE KEY-----\n`;
+
+  const withCertificate: Output = { ...dial, certificate: name };
+
+  // Dials with the Network's certificate Credential named, and gives the Ircd's end.
+  const dialled = (world: World, vault: VaultService) =>
+    Effect.gen(function* () {
+      const client = scripted([{ outputs: [withCertificate], when: "Configured" }]);
+
+      const { runtime } = yield* startRuntime({ ...world, vault }, client);
+
+      yield* runtime.configure(libera, configuration);
+
+      const call = yield* world.memory.ircd.accept;
+
+      yield* call.open;
+      yield* settle;
+
+      return call;
+    });
+
+  it("held is revealed as the Connection is dialled, and presented, and never journaled or logged", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* world.vault.hold(name, Redacted.make(pem));
+
+        const call = yield* dialled(world, world.vault);
+
+        const journaled = (yield* entries(world.journal)).map((entry) =>
+          Schema.encodeSync(Schema.fromJsonString(Schema.toCodecJson(Entry)))(entry)
+        );
+
+        return {
+          credential: call.certificate?.credential,
+          journaled: journaled.join("\n"),
+          key: call.certificate === undefined ? undefined : Redacted.value(call.certificate.key),
+          logged: JSON.stringify(world.logged),
+        };
+      })
+    );
+
+    expect(result.credential).toBe(name);
+    expect(result.key).toContain(keyBody);
+    expect(result.journaled).toContain("libera-cert");
+    // The Daemon's Tail keeps exactly what its Logger is given, so the log stands for it.
+    expect(
+      [keyBody, certificateBody].filter(
+        (secret) => result.journaled.includes(secret) || result.logged.includes(secret)
+      )
+    ).toStrictEqual([]);
+  });
+
+  const unusable: readonly [string, (world: World) => Effect.Effect<VaultService>, string][] = [
+    ["is not held", (world) => Effect.succeed(world.vault), "Missing"],
+    [
+      "is in a Vault that fails",
+      (world) =>
+        Effect.succeed({
+          ...world.vault,
+          reveal: () => Effect.fail(new VaultFailed({ reason: "the file is gone" })),
+        }),
+      "Unavailable",
+    ],
+    [
+      "is not a certificate",
+      (world) =>
+        Effect.as(
+          Effect.orDie(world.vault.hold(name, Redacted.make(`junk ${keyBody}`))),
+          world.vault
+        ),
+      "NoCertificate",
+    ],
+  ];
+
+  it.each(unusable)(
+    "that %s dials without one, and logs only the Credential's name and why",
+    async (_, setup, reason) => {
+      const result = await runTest((world) =>
+        Effect.gen(function* () {
+          const call = yield* dialled(world, yield* setup(world));
+
+          return {
+            certificate: call.certificate,
+            warned: world.logged
+              .filter((one) => one.level === "Warn")
+              .map((one) => JSON.stringify(one.message)),
+          };
+        })
+      );
+
+      expect(result.certificate).toBeUndefined();
+      expect(
+        result.warned.filter((one) => one.includes("libera-cert") && one.includes(reason))
+      ).toHaveLength(1);
+      expect(result.warned.join("\n")).not.toContain(keyBody);
+    }
+  );
 });
 
 describe("a Line `encode` rejects", () => {
