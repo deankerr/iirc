@@ -34,7 +34,7 @@ import {
 } from "./channels.ts";
 import { forgetPings, heardCtcp } from "./ctcp.ts";
 import type { Arrival, Meant } from "./feature.ts";
-import { identified, identify } from "./identify.ts";
+import { accountChanged, identified, identify } from "./identify.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import {
@@ -359,8 +359,13 @@ const settled = (run: Run, activity: Activity): void => {
       break;
     }
 
+    case "AccountChanged": {
+      accountChanged(run, activity);
+
+      break;
+    }
+
     case "Joined":
-    case "AccountChanged":
     case "HostChanged":
     case "StandardReply":
     case "CtcpRequest":

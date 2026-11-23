@@ -4,7 +4,8 @@
  * logged in, or until the Configuration's bound runs out. The wait is the Session's
  * `identifying`, and its timer is derived from it.
  *
- * Only the protocol's structure ends the wait early: a `900`, which says Self's account.
+ * Only the protocol's structure ends the wait early: a `900`, or an `ACCOUNT` for Self that
+ * names an account, each of which says Self's account.
  * No user mode counts, since none means "logged in" across the protocol: RFC 2812 gives
  * `r` as "restricted", which an Ircd may set as a Session begins, and a release cannot be
  * taken back. A `NOTICE` from the service is text for people, and ends nothing. The
@@ -20,6 +21,8 @@
 import { sendOwnStart } from "./acts.ts";
 import { joinWanted } from "./channels.ts";
 import { CapName, Instant } from "./ids.ts";
+import { isSelf } from "./meaning.ts";
+import type { Activity } from "./news.ts";
 import type { Run } from "./run.ts";
 import { sendSecret, updateOpen } from "./run.ts";
 import { negotiated, openOf, sessionOf } from "./views.ts";
@@ -84,6 +87,22 @@ export const identified = (run: Run): void => {
   waitUntil(run, undefined);
   sendOwnStart(run);
   joinWanted(run);
+};
+
+/**
+ * A User's account changed, live: when it is Self logging in, as a `900` says, the
+ * Channels need wait no longer. The account is not compared with the login's, since a
+ * service may spell it differently.
+ * @param run - The step.
+ * @param activity - The change.
+ */
+export const accountChanged = (
+  run: Run,
+  activity: Extract<Activity, { readonly _tag: "AccountChanged" }>
+): void => {
+  if (activity.account !== null && isSelf(run, activity.nick)) {
+    identified(run);
+  }
 };
 
 /**
