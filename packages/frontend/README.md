@@ -457,7 +457,7 @@ What the Composer can complete, as a reducer, and the list it shows above the Co
 - **The emoji names are the Frontend's to give** (`emoji` in the sources). `emojiWanted` says when they are needed and not held, and until then the list is empty and Tab waits.
 - **Entries are ranked as `Entries` says,** and Channels and nicks are matched by their start.
 - **The whole argument of `/go`, `/theme`, `/set ui.font`, `/network remove`, and `/alias` is completed as one,** its spaces collapsed, and a candidate replaces all of it. `/theme` completes after any flags.
-- **`/network remove` lists a removed Network whose Timelines were kept too.**
+- **`/network remove` lists a removed Network whose Timelines were kept too,** and writes a Network whose id is `keep` or `drop` with a choice after it, `drop` for a removed one and `keep` otherwise.
 - **`/alias` lists each alias with its line, and writes `add <name> <line>` to edit it.** After `/alias remove`, it writes only the name.
 - **A bare `/` lists every command once, by name,** those run recently first, and an alias of the Owner's own among them unless a built-in command takes its name. A command's fixed alias still finds its command.
 - **`/go` writes a name alone where it finds that Timeline from the Composer's Network,** the Network's id before it where it would not, and leaves out a Timeline it reaches neither way.

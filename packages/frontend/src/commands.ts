@@ -559,13 +559,30 @@ const unfocused = <A>(
   };
 };
 
+/** The choices `/network remove` reads after an id, or alone, and whether each keeps. */
+const removalChoices: ReadonlyMap<string | undefined, boolean | undefined> = new Map([
+  [undefined, undefined],
+  ["keep", true],
+  ["drop", false],
+]);
+
+/**
+ * The words after `/network remove` that name a Network: its id, with a choice after it
+ * when the id is itself one, since a lone choice is about the focused Network.
+ * @param network - The Network.
+ * @param keep - Whether the choice, if one is needed, keeps its Timelines.
+ * @returns The words.
+ */
+export const removalWords = (network: NetworkId, keep: boolean): string =>
+  removalChoices.has(network) ? `${network} ${keep ? "keep" : "drop"}` : network;
+
 /**
  * Why nothing is said or done in a removed Network's Timeline, in words.
  * @param network - The Network.
  * @returns The words.
  */
 const removedRefusal = (network: NetworkId) =>
-  `${network} was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove ${network} drops them.`;
+  `${network} was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove ${removalWords(network, false)} drops them.`;
 
 /**
  * Why nothing is said on a Network with no Session, in words: that it is not connected, or,
@@ -870,16 +887,10 @@ const removeUsage = "/network remove [id] [keep|drop]";
  * @returns The intent, or why there is none.
  */
 const removeArguments = (words: readonly string[], context: CommandContext): Parsed<Intent> => {
-  const choices: ReadonlyMap<string | undefined, boolean | undefined> = new Map([
-    [undefined, undefined],
-    ["keep", true],
-    ["drop", false],
-  ]);
-
   const [first, second, ...rest] =
-    words.length === 1 && choices.has(words[0]) ? [undefined, ...words] : words;
+    words.length === 1 && removalChoices.has(words[0]) ? [undefined, ...words] : words;
 
-  if (rest.length > 0 || !choices.has(second)) {
+  if (rest.length > 0 || !removalChoices.has(second)) {
     return invalid(`Usage: ${removeUsage}`);
   }
 
@@ -888,7 +899,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
 
     return network === undefined
       ? invalid(`Name a Network, or open one of its Timelines first. ${removeUsage}`)
-      : parsed({ _tag: "AskRemoval", keep: choices.get(second), network });
+      : parsed({ _tag: "AskRemoval", keep: removalChoices.get(second), network });
   }
 
   const network = networkIdOf(first);
@@ -897,7 +908,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
     ? invalid(
         `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${first}". ${removeUsage}`
       )
-    : parsed({ _tag: "AskRemoval", keep: choices.get(second), network });
+    : parsed({ _tag: "AskRemoval", keep: removalChoices.get(second), network });
 };
 
 /**

@@ -265,6 +265,21 @@ describe("reading a line", () => {
     });
   });
 
+  it("names a removed Network whose id is keep or drop with drop, in how to drop its Timelines", () => {
+    const removedAs = (["drop", "keep"] as const).map((id): CommandContext => ({
+      ...inChannel,
+      focus: { ...removedFocus, network: Schema.decodeSync(NetworkId)(id) },
+    }));
+
+    expect({
+      drop: message("hello", removedAs[0] ?? inChannel),
+      keep: message("hello", removedAs[1] ?? inChannel),
+    }).toStrictEqual({
+      drop: "drop was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove drop drop drops them.",
+      keep: "keep was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove keep drop drops them.",
+    });
+  });
+
   it("says and does nothing in a removed Network's Timeline, but reads it and moves on", () => {
     const removed: CommandContext = { ...inChannel, focus: removedFocus, session: false };
 
