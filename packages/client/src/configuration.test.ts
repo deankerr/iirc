@@ -1,7 +1,7 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { credentialsOf, IrcdAddress, NetworkConfiguration } from "./configuration.ts";
+import { credentialsOf, IrcdAddress, Login, NetworkConfiguration } from "./configuration.ts";
 
 const decode = Schema.decodeUnknownResult(IrcdAddress);
 
@@ -89,6 +89,28 @@ describe("answering CTCP", () => {
 
   it("starts on for a new Network", () => {
     expect(NetworkConfiguration.fields.answerCtcp.ast.annotations).toMatchObject({ default: true });
+  });
+});
+
+describe("a SASL login's mechanism", () => {
+  const old = { _tag: "Sasl", account: "iirc", credential: "sasl", required: true };
+
+  it("decodes as plain from a Configuration written before it existed, which logged in with PLAIN", () => {
+    const decode = Schema.decodeUnknownSync(Login);
+
+    expect([
+      decode(old),
+      decode({ ...old, mechanism: "auto" }),
+      decode({ ...old, mechanism: "scram-sha-256" }),
+    ]).toMatchObject([
+      { mechanism: "plain" },
+      { mechanism: "auto" },
+      { mechanism: "scram-sha-256" },
+    ]);
+  });
+
+  it("starts as auto for a new Network", () => {
+    expect(Login.cases.Sasl.fields.mechanism.ast.annotations).toMatchObject({ default: "auto" });
   });
 });
 

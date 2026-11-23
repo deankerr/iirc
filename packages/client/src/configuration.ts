@@ -67,14 +67,15 @@ export const Login = Schema.TaggedUnion({
       description: "The Credential holding the account's password.",
     }),
     /**
-     * A `Configured` written before the field existed decodes as `auto`, which logs in as
-     * the Client then did wherever the Ircd does not list `SCRAM-SHA-256`.
+     * A new Network starts with `auto`. A `Configured` written before the field existed
+     * decodes as `plain`, since the Client then logged in with `PLAIN`, so replaying an old
+     * Journal never tries `SCRAM-SHA-256` where `PLAIN` was used.
      */
     mechanism: Schema.optionalKey(SaslMechanism)
       .pipe(
         Schema.decodeTo(Schema.toType(SaslMechanism), {
           decode: SchemaGetter.transformOptional((given) =>
-            Option.orElseSome(given, () => "auto" as const)
+            Option.orElseSome(given, () => "plain" as const)
           ),
           encode: SchemaGetter.passthrough(),
         })

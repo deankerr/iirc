@@ -218,7 +218,7 @@ describe("the options, derived from the Schema", () => {
         starts: "libera.login.credential",
         value: { _tag: "Credential", held: true, name: "libera.sasl" },
       },
-      "login.mechanism": { starts: "auto", value: { _tag: "Shown", text: "auto" } },
+      "login.mechanism": { starts: "auto", value: { _tag: "Shown", text: "plain" } },
       "login.required": { starts: "off", value: { _tag: "Shown", text: "on" } },
       "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
       "login.wait": { starts: "5", value: { _tag: "Unset" } },

@@ -7,8 +7,9 @@
  * open, so `CAP END` waits for it.
  *
  * - It begins when the cap turns on during registration and the Configuration names a
- *   login, unless the cap's value lists mechanisms and the login's is not among them. Then
- *   it does not try, and a required login gives up the Connection.
+ *   login, unless the cap's value lists mechanisms and the login's is not among them, or
+ *   the login's is `SCRAM-SHA-256` and the cap lists nothing. Then it does not try, and a
+ *   required login gives up the Connection.
  * - It sends `AUTHENTICATE` with the mechanism. On `AUTHENTICATE +`, `PLAIN` sends the
  *   Credential as a `SendSecret`, and `EXTERNAL` sends `AUTHENTICATE +` as an ordinary
  *   Line, since it carries no authorization identity and the Ircd uses the certificate's
@@ -137,8 +138,18 @@ const mechanismOf = (attempt: Attempt, value: string | undefined): Mechanism => 
 };
 
 // Whether the mechanism is offered: the cap lists it, or lists nothing, as SASL 3.1 does.
+// `SCRAM-SHA-256` is tried only where it is listed.
 const offers = (mechanism: Mechanism, value: string | undefined): boolean =>
-  value === undefined || value === "" || lists(value, mechanism);
+  lists(value, mechanism) ||
+  (mechanism !== "SCRAM-SHA-256" && (value === undefined || value === ""));
+
+// Whether a `903` now would be a login the Ircd has not proved: a `SCRAM-SHA-256` exchange
+// before its server-final message is verified.
+const unproven = (exchange: Exchange): boolean =>
+  (exchange._tag === "Asked" && exchange.mechanism === "SCRAM-SHA-256") ||
+  exchange._tag === "ScramFirst" ||
+  exchange._tag === "ScramFinal" ||
+  exchange._tag === "ScramChecking";
 
 // No login. While registering, go on without one, or give up when the Configuration
 // requires it. During a Session, nothing more: the Session has already begun.
@@ -319,7 +330,7 @@ export const saslLogin: Feature<Exchange> = {
 
     // A SCRAM login is one only once the Ircd proved it held the Credential's keys.
     if (command === "903") {
-      return own._tag.startsWith("Scram") && own._tag !== "ScramVerified"
+      return unproven(own)
         ? failed(context)
         : { own: loggedIn, registration: { _tag: "Continue" } };
     }

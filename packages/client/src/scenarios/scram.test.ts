@@ -135,6 +135,15 @@ describe("choosing a mechanism", () => {
     expect.assertions(0);
   });
 
+  it("does not try a login pinned to SCRAM-SHA-256 where the cap lists nothing", () => {
+    play(client, {
+      configuration: login(true, "scram-sha-256"),
+      transcript: [offered(""), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
   it("reads a server-first message split over full AUTHENTICATE Lines", () => {
     const full = "A".repeat(400);
 
@@ -187,6 +196,22 @@ describe("a SCRAM-SHA-256 login that fails", () => {
     });
 
     expect(triedPlain(played)).toBeFalsy();
+  });
+
+  it("is no login when 903 comes before the first challenge", () => {
+    play(client, {
+      configuration: login(true),
+      transcript: [
+        offered(both),
+        lines(
+          ">> AUTHENTICATE SCRAM-SHA-256",
+          "<< :irc.test 903 iirc :SASL authentication successful"
+        ),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
   });
 
   it("is no login when 903 comes before the server is verified", () => {

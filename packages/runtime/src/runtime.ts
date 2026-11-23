@@ -550,6 +550,7 @@ export const makeRuntime = <S>(
     const ports: Ports<S> = {
       client,
       journal: yield* Journal,
+      random: yield* Random.Random,
       timing: {
         capacity: options.outboxCapacity ?? defaultCapacity,
         hangupDrain: millisOf(options.hangupDrain, defaultHangupDrain),

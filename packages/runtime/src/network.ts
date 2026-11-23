@@ -36,6 +36,7 @@ import {
   FiberMap,
   Latch,
   Queue,
+  Random,
   Ref,
   Schema,
   Scope,
@@ -245,6 +246,11 @@ export interface Ports<S> {
   readonly transport: TransportService;
   readonly vault: VaultService;
   readonly timing: Timing;
+  /**
+   * The Random the Runtime was made with, which every driver runs on, so a Network added
+   * later makes its SASL nonces from it rather than from whoever added it.
+   */
+  readonly random: Random.Random;
 }
 
 /**
@@ -1231,6 +1237,7 @@ export const startNetwork = <S>(
       // waiting is told the Network has stopped.
       Effect.onInterrupt(() => stop(network, runtimeClosed)),
       Effect.annotateLogs({ network: id }),
+      Effect.provideService(Random.Random, ports.random),
       Effect.forkScoped
     );
 

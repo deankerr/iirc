@@ -64,9 +64,11 @@ const login = (world: World, final: string) =>
   Effect.gen(function* () {
     yield* world.vault.hold(credential, Redacted.make("pencil"));
 
+    // The Runtime is made with the fixed Random, and the Network is added after, from a
+    // fiber without it, as the API adds one.
     const { runtime } = yield* startRuntime(world, client, {
       pacing: { burst: 100, interval: 1 },
-    });
+    }).pipe(Effect.provideService(Random.Random, fixedRandom()));
 
     yield* runtime.configure(libera, configuration);
     const call = yield* world.memory.ircd.accept;
@@ -112,7 +114,7 @@ const login = (world: World, final: string) =>
       refolded:
         folded?._tag === "Broken" ? undefined : client.inspect(folded?.state ?? client.initial),
     };
-  }).pipe(Effect.provideService(Random.Random, fixedRandom()));
+  });
 
 describe("a SCRAM-SHA-256 login", () => {
   it("answers each round from the exchange, sends `+` once verified, and journals no secret", async () => {
