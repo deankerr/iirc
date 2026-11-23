@@ -1,0 +1,26 @@
+{
+  "mono": {
+    "enlarge": {
+      "control": "28x28",
+      "iconInk": "10.5x10.5",
+      "iconCentreOffset": "dx=0.45 dy=0.00"
+    },
+    "close": {
+      "control": "28x28",
+      "iconInk": "8.5x8.5",
+      "iconCentreOffset": "dx=0.00 dy=0.16"
+    }
+  },
+  "sans": {
+    "enlarge": {
+      "control": "28x28",
+      "iconInk": "10.5x10.5",
+      "iconCentreOffset": "dx=0.45 dy=0.00"
+    },
+    "close": {
+      "control": "28x28",
+      "iconInk": "8.5x8.5",
+      "iconCentreOffset": "dx=0.00 dy=0.16"
+    }
+  }
+}

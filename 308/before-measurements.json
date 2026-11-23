@@ -1,0 +1,26 @@
+{
+  "mono": {
+    "enlarge": {
+      "control": "19.609375x17.015625",
+      "iconInk": "8.0x9.8",
+      "iconCentreOffset": "dx=0.01 dy=0.12"
+    },
+    "close": {
+      "control": "35x35",
+      "iconInk": "7.5x7.5",
+      "iconCentreOffset": "dx=0.00 dy=-0.59"
+    }
+  },
+  "sans": {
+    "enlarge": {
+      "control": "18.875x17.015625",
+      "iconInk": "8.0x9.8",
+      "iconCentreOffset": "dx=-0.11 dy=0.12"
+    },
+    "close": {
+      "control": "35x35",
+      "iconInk": "8.0x7.8",
+      "iconCentreOffset": "dx=0.00 dy=-0.47"
+    }
+  }
+}
