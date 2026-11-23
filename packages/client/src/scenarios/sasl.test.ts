@@ -267,6 +267,19 @@ describe("logging in with EXTERNAL", () => {
     expect(began(played)).toStrictEqual([]);
   });
 
+  it("aborts, rather than answer with a password, when the login turns to PLAIN after EXTERNAL was asked for", () => {
+    play(client, {
+      configuration: external(true),
+      transcript: [
+        askedExternal("=PLAIN,EXTERNAL"),
+        lines("!! configure login=required,iirc,pw", "<< AUTHENTICATE +", ">> AUTHENTICATE *"),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("aborts with AUTHENTICATE * on a challenge that is not +", () => {
     play(client, {
       configuration: external(true),

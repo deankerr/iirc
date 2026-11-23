@@ -10,7 +10,8 @@
  * - It sends `AUTHENTICATE` with the mechanism. On `AUTHENTICATE +`, `PLAIN` sends the
  *   Credential as a `SendSecret`, and `EXTERNAL` sends `AUTHENTICATE +` as an ordinary
  *   Line, since it carries no authorization identity and the Ircd uses the certificate's
- *   account. Any other challenge is not the mechanism's, so it aborts with `AUTHENTICATE *`.
+ *   account. Any other challenge is not the mechanism's, so it aborts with `AUTHENTICATE *`,
+ *   as it does when the login names another mechanism than the one it asked for.
  * - `903` lets registration go. `902` and `904` to `908` are a failed login, and so are
  *   an unfilled Credential and the core's deadline passing, after `AUTHENTICATE *`.
  * - A failed login lets registration go when the login is optional, and gives up the
@@ -37,7 +38,7 @@ type Exchange =
   /** Not begun, and it will not begin this Connection. */
   | { readonly _tag: "Idle" }
   /** `AUTHENTICATE` with the mechanism is sent, and `+` is awaited. */
-  | { readonly _tag: "Asked" }
+  | { readonly _tag: "Asked"; readonly mechanism: Mechanism }
   /** The answer to `+` is sent, and the result is awaited. */
   | { readonly _tag: "Sent" }
   /** Over, logged in. */
@@ -63,10 +64,13 @@ const line = (argument: string): readonly Sendable[] => {
 /** What a SASL login is, by the mechanism its kind names. */
 type Attempt = Extract<Login, { readonly _tag: "External" | "Sasl" }>;
 
+/** The mechanisms a login can name. */
+type Mechanism = "EXTERNAL" | "PLAIN";
+
 const attemptOf = (login: Login): Attempt | undefined =>
   login._tag === "Sasl" || login._tag === "External" ? login : undefined;
 
-const mechanismOf = (attempt: Attempt): string =>
+const mechanismOf = (attempt: Attempt): Mechanism =>
   attempt._tag === "External" ? "EXTERNAL" : "PLAIN";
 
 // Whether the mechanism is offered: the cap lists it, or lists nothing, as SASL 3.1 does.
@@ -100,7 +104,7 @@ const begin = (context: Context<Exchange>): Effects<Exchange> => {
   }
 
   return {
-    own: { _tag: "Asked" },
+    own: { _tag: "Asked", mechanism: mechanismOf(attempt) },
     registration: { _tag: "Hold" },
     send: line(mechanismOf(attempt)),
   };
@@ -148,8 +152,13 @@ export const saslLogin: Feature<Exchange> = {
       return {};
     }
 
-    // A challenge the mechanism does not make, or the mechanism withdrawn since it was asked for.
-    if (params[0] !== "+" || !offers(attempt, context.cap(sasl))) {
+    // A challenge the mechanism does not make, the mechanism withdrawn since it was asked
+    // for, or a login that now names another: the answer would be to the wrong question.
+    if (
+      params[0] !== "+" ||
+      !offers(attempt, context.cap(sasl)) ||
+      mechanismOf(attempt) !== own.mechanism
+    ) {
       return failed(context, line("*"));
     }
 

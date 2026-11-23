@@ -762,6 +762,23 @@ describe("editing", () => {
     });
   });
 
+  it("starts the login a member's option makes valid: SASL without a certificate, EXTERNAL with one", () => {
+    const certified = valueOf(set(libera, plain, ["tls"], "certificate"));
+
+    expect({
+      certified: valueOf(set(libera, certified, ["login", "required"], "on")).login,
+      plain: valueOf(set(libera, plain, ["login", "required"], "on")).login,
+    }).toStrictEqual({
+      certified: { _tag: "External", required: true },
+      plain: {
+        _tag: "Sasl",
+        account: "dean",
+        credential: "libera.login.credential",
+        required: true,
+      },
+    });
+  });
+
   it("keeps a Channel's key when the Channels are set again, and drops a Channel no longer named", () => {
     expect(valueOf(set(libera, full, ["channels"], "#new,#secret")).channels).toStrictEqual([
       { name: "#new" },
