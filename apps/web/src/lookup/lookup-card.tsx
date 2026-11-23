@@ -25,7 +25,7 @@ import type {
   UserShown,
 } from "@iirc/frontend/lookup";
 import type { KeyboardEvent } from "react";
-import { useId } from "react";
+import { useId, useRef } from "react";
 
 import { perform } from "../composer/atoms.ts";
 import { NickButton } from "../nick/nick-menu.tsx";
@@ -350,9 +350,17 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
   const more = useAtomSet(moreChannels);
   const headingId = useId();
 
-  // Back puts it away as Escape does, leaving the focus where it is.
+  const section = useRef<HTMLElement>(null);
+
+  // Back puts it away as Escape does, and the composer takes the focus if it was in it.
   useBackCloses(shown !== undefined, () => {
+    const inside = section.current?.contains(document.activeElement) === true;
+
     dismiss(pane);
+
+    if (inside) {
+      run([{ _tag: "FocusComposer", text: undefined }]);
+    }
   });
 
   if (shown === undefined) {
@@ -376,7 +384,12 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
 
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Escape anywhere in the card puts it away, as in a dialog.
-    <section aria-labelledby={headingId} className={styles.card} onKeyDown={onKeyDown}>
+    <section
+      aria-labelledby={headingId}
+      className={styles.card}
+      onKeyDown={onKeyDown}
+      ref={section}
+    >
       <div className={styles.head}>
         <h3 className={styles.heading} id={headingId}>
           <span className={styles.dim}>{kindWords[shown.kind]} </span>

@@ -198,7 +198,7 @@ const Members = ({
 /**
  * Members over a narrow Pane's Timeline, under its bar, for a moment: a dialog that takes
  * the focus but leaves the page usable. Escape puts it away and gives the focus back to
- * where it was, Back puts it away, and a press anywhere but on it or the Pane's toggle puts
+ * where it was, as Back does while the focus is in it, and a press anywhere but on it or the Pane's toggle puts
  * it away, unless a member's menu is open, which a press outside it closes first.
  * @param props - The Pane, whether a member's menu is open, and the members.
  * @returns The members.
@@ -216,9 +216,15 @@ const Floating = ({
   const panel = useRef<HTMLElement>(null);
   const before = useRef<HTMLElement | undefined>(undefined);
 
-  // Back puts it away as Escape does.
+  // Back puts it away as Escape does, giving the focus back too when it was in it.
   useBackCloses(true, () => {
+    const inside = panel.current?.contains(document.activeElement) === true;
+
     dismiss(undefined);
+
+    if (inside) {
+      before.current?.focus();
+    }
   });
 
   // Where the focus was before the dialog takes it, as it does once drawn.

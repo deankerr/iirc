@@ -668,19 +668,31 @@ describe("a Pane's members", () => {
     });
   });
 
-  // Catches Back leaving the page while members lie over a narrow Pane's Timeline.
+  // Catches Back leaving the page while members lie over a narrow Pane's Timeline, or
+  // dropping the focus that was in them.
   it("over a narrow Pane are put away by Back, and the page stays", async () => {
     pageEntered();
     const { registry } = await signedIn();
 
     await settled(() => toggle() !== undefined);
     await measure(registry, 400);
+    await act(async () => {
+      toggle()?.focus();
+      await Promise.resolve();
+    });
     await press(toggle());
     await settled(() => members() !== null);
+    await act(async () => {
+      members()?.querySelector<HTMLElement>('[data-key="peer"]')?.focus();
+      await Promise.resolve();
+    });
     await back();
     await settled(() => members() === null);
 
-    expect(left()).toBeFalsy();
+    expect({ focus: document.activeElement === toggle(), left: left() }).toStrictEqual({
+      focus: true,
+      left: false,
+    });
   });
 
   it("offer a menu on a member, Query first, so Enter twice opens their Direct Message and puts the members away", async () => {

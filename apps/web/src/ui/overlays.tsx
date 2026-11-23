@@ -43,7 +43,9 @@ const useOverlayBack = ({
  * @param props - React Aria's, but `defaultOpen`.
  * @returns The overlay.
  */
-export const ModalOverlay = (props: Omit<ModalOverlayProps, "defaultOpen">) => {
+export const ModalOverlay = (
+  props: Omit<ModalOverlayProps, "defaultOpen"> & { readonly defaultOpen?: never }
+) => {
   useOverlayBack(props);
 
   return <AriaModalOverlay {...props} />;
@@ -55,7 +57,9 @@ export const ModalOverlay = (props: Omit<ModalOverlayProps, "defaultOpen">) => {
  * @param props - React Aria's, but `defaultOpen`.
  * @returns The popover.
  */
-export const Popover = (props: Omit<PopoverProps, "defaultOpen">) => {
+export const Popover = (
+  props: Omit<PopoverProps, "defaultOpen"> & { readonly defaultOpen?: never }
+) => {
   useOverlayBack(props);
 
   return <AriaPopover {...props} />;
