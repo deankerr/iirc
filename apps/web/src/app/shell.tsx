@@ -17,7 +17,7 @@ import type { Attempt } from "@iirc/frontend/sign-in";
 import { Atom } from "effect/reactivity";
 import { useContext, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
-import { Dialog, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, Modal } from "react-aria-components";
 
 import { composerFocus } from "../composer/atoms.ts";
 import { MainComposer } from "../composer/composer.tsx";
@@ -42,6 +42,7 @@ import { sidebarNetworks } from "../timelines/atoms.ts";
 import { LeaveDialog } from "../timelines/leave-dialog.tsx";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { IconButton } from "../ui/button.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { projectionStopped } from "./projection.ts";
 
 import styles from "./shell.module.css";

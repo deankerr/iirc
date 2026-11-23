@@ -27,7 +27,6 @@ import {
   GridListLoadMoreItem,
   ListLayout,
   Modal,
-  ModalOverlay,
   Virtualizer,
 } from "react-aria-components";
 import type { Key } from "react-aria-components";
@@ -39,6 +38,7 @@ import { Nick } from "../timelines/line.tsx";
 import { BotMark } from "../ui/bot-mark.tsx";
 import { IconButton } from "../ui/button.tsx";
 import { ColumnEdge } from "../ui/column-edge.tsx";
+import { ModalOverlay } from "../ui/overlays.tsx";
 import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
