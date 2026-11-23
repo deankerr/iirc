@@ -120,14 +120,17 @@ const pressRefusals: ReadonlySet<string> = new Set([...refusals, "NotWaiting"]);
 
 /**
  * Presses a link the Daemon holds for a press, so it is fetched, and folds in its item as
- * the Daemon answered. A failure is pressed again until it is answered, except a refusal,
- * after which its Message is asked again, to draw what the Daemon holds, and
- * `Unauthorized`, which signs the page out.
+ * the Daemon answered. A failure is pressed again until it is answered, unless `once`,
+ * except a refusal, after which its Message is asked again, to draw what the Daemon holds,
+ * and `Unauthorized`, which signs the page out.
  * @param registry - The registry.
  * @param press - The press.
+ * @param once - Whether a failure is never pressed again, as for a link that failed, which
+ *   the Daemon fetches anew on every press that reaches it, so a press whose answer was
+ *   lost is not repeated, and its Message is asked again instead.
  * @returns The press, which never fails.
  */
-const performPress = (registry: AtomRegistry.AtomRegistry, press: PreviewsPress) =>
+const performPress = (registry: AtomRegistry.AtomRegistry, press: PreviewsPress, once = false) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const schedule = yield* retrying;
@@ -140,7 +143,8 @@ const performPress = (registry: AtomRegistry.AtomRegistry, press: PreviewsPress)
       .pipe(
         Effect.retry({
           schedule,
-          while: (error) => error._tag !== "Unauthorized" && !pressRefusals.has(error._tag),
+          while: (error) =>
+            !once && error._tag !== "Unauthorized" && !pressRefusals.has(error._tag),
         }),
         Effect.match({
           onFailure: (error) => {
@@ -188,7 +192,7 @@ export const retryPreview = runtime
 
       happened(registry, { _tag: "Pressing", press });
 
-      return performPress(registry, press);
+      return performPress(registry, press, true);
     },
     { concurrent: true }
   )

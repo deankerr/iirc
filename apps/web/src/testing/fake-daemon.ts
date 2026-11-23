@@ -819,6 +819,8 @@ export const fakeDaemon = () => {
     ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Whether a press reaches the fake and is held, but its answer is lost on the way back, as a 502. */
+    pressAnswersLost: false,
     /** Each press of a link waiting for one, by its Timeline, its place, and its index, refused or not. */
     presses,
     /** Each ask for a Message's Previews, by its Timeline and its place, refused or not. */
@@ -2169,7 +2171,7 @@ export const fakeDaemon = () => {
       items.map((one, index) => (index === link ? fetching : one))
     );
 
-    return Response.json(fetching);
+    return daemon.pressAnswersLost ? new Response(null, { status: 502 }) : Response.json(fetching);
   };
 
   /**

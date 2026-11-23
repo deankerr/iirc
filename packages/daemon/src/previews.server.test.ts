@@ -2802,12 +2802,15 @@ describe("a Direct Message's press and a Timeline's override over a real server"
 
         const pressed = decodeItem(yield* bodyOf(yield* expecting(press(served, place, 0), 200)));
 
+        // Once the press's fetch is over, so a fetch an ask began would be counted too.
+        const later = titles(yield* live(settled(served, place)));
+
         return {
           asked,
           askedFetches,
           failed,
           fetched: yield* served.asked,
-          later: titles(yield* live(settled(served, place))),
+          later,
           pressed: pressed.state,
         };
       })
