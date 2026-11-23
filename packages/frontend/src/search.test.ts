@@ -514,6 +514,35 @@ describe("marking what was found", () => {
     ]);
   });
 
+  it("leaves uncoloured what a Timeline would not draw as a nick: under a mIRC colour, or inside a link", () => {
+    const under = foundOf(
+      message(5, "\u00034alice\u0003 alice", "peer", [
+        { end: 5, start: 0 },
+        { end: 11, start: 6 },
+      ]),
+      "zzz"
+    );
+
+    const link = foundOf(
+      message(6, "https://example.test/bob bob", "peer", [
+        { end: 24, start: 21 },
+        { end: 28, start: 25 },
+      ]),
+      "zzz"
+    );
+
+    expect({ link: link?.runs, under: under?.runs }).toStrictEqual({
+      link: [
+        { colour: undefined, match: false, text: "https://example.test/bob " },
+        { colour: nickColour("bob"), match: false, text: "bob" },
+      ],
+      under: [
+        { colour: undefined, match: false, text: "alice " },
+        { colour: nickColour("alice"), match: false, text: "alice" },
+      ],
+    });
+  });
+
   it("finds the spans of the confirmed text for one of ours the Ircd confirmed", () => {
     const item = message(4, "hello", "iirc", [], {
       _tag: "Confirmed",

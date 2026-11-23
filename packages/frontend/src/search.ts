@@ -27,7 +27,7 @@ import {
 import { Option, Schema } from "effect";
 
 import type { Parsed, SayKind } from "./commands.ts";
-import { nickColour, nickRuns, plainCharacters, plainWithOffsets } from "./render.ts";
+import { drawnNicks, nickColour, plainCharacters, plainWithOffsets } from "./render.ts";
 
 /** How many results a page of a search asks for. */
 export const searchPage = 100;
@@ -917,9 +917,9 @@ const foundAt = (folded: readonly string[], needle: readonly string[], at: numbe
  * found as the Daemon finds it, each character lower-cased by `foldForSearch`, one code
  * point to one, so a run's characters are the text's own. The text is the plain text a
  * notification shows, with formatting stripped and controls dropped, and nothing here is
- * markup: a view puts each run in a text node. A run that names a User who counts has the
- * slot of that nick as the text wrote it, whatever formatting there was, since a result
- * draws none.
+ * markup: a view puts each run in a text node. A run that a Timeline draws as a nick has
+ * the slot of that nick as the text wrote it, so one that a link holds or a mIRC colour
+ * covers has none.
  * @param text - The Message's text, as the Network sent it.
  * @param sought - What was searched for.
  * @param nicks - The spans of the text that name a User, as UTF-16 offsets into it with
@@ -935,7 +935,7 @@ export const matchRuns = (
   const characters = kept.map(({ character }) => character);
   const folded = characters.map((character) => foldForSearch(character));
   const needle = codePoints(foldForSearch(sought));
-  const named = nickRuns(text, nicks);
+  const named = drawnNicks(text, nicks);
   const runs: MatchRun[] = [];
 
   const colourAt = (index: number): number | undefined => {

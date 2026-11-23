@@ -186,7 +186,7 @@ export interface NickRun {
  * @param nicks - The spans, as UTF-16 offsets into the text with formatting stripped.
  * @returns The spans, with their slots.
  */
-export const nickRuns = (text: string, nicks: readonly NickSpan[]): readonly NickRun[] => {
+const nickRuns = (text: string, nicks: readonly NickSpan[]): readonly NickRun[] => {
   if (nicks.length === 0) {
     return [];
   }
@@ -217,28 +217,49 @@ const coloured = (style: Style): boolean =>
   style.foreground !== undefined || style.background !== undefined || style.reverse;
 
 /**
+ * A piece of text as it is drawn, before it is made safe to show, and where it stood in the
+ * text with formatting stripped.
+ */
+type Piece =
+  | { readonly _tag: "Text"; readonly raw: string; readonly at: number; readonly style: Style }
+  | {
+      readonly _tag: "Nick";
+      readonly raw: string;
+      readonly at: number;
+      readonly style: Style;
+      readonly colour: number;
+    }
+  | {
+      readonly _tag: "Link";
+      readonly raw: string;
+      readonly at: number;
+      readonly style: Style;
+      readonly href: string;
+    };
+
+/**
  * Some text of one run, split at the spans that name a User, which are `Nick`s unless a
  * mIRC colour covers them.
  * @param text - The part of the run to split.
  * @param style - The run's style.
  * @param at - Where `text` begins, as an offset into the stripped text.
  * @param nicks - The spans, as {@link nickRuns} gives them.
- * @returns Its inlines.
+ * @returns Its pieces.
  */
 const nicked = (
   text: string,
   style: Style,
   at: number,
   nicks: readonly NickRun[]
-): readonly Inline[] => {
-  const textOf = (from: number, to: number): Inline[] =>
-    to > from ? [{ _tag: "Text", style, text: contained(text.slice(from, to)) }] : [];
+): readonly Piece[] => {
+  const textOf = (from: number, to: number): Piece[] =>
+    to > from ? [{ _tag: "Text", at: at + from, raw: text.slice(from, to), style }] : [];
 
   if (coloured(style)) {
     return textOf(0, text.length);
   }
 
-  const inlines: Inline[] = [];
+  const pieces: Piece[] = [];
   let from = 0;
 
   for (const nick of nicks) {
@@ -246,17 +267,18 @@ const nicked = (
     const end = Math.min(nick.end - at, text.length);
 
     if (end > start) {
-      inlines.push(...textOf(from, start), {
+      pieces.push(...textOf(from, start), {
         _tag: "Nick",
+        at: at + start,
         colour: nick.colour,
+        raw: text.slice(start, end),
         style,
-        text: contained(text.slice(start, end)),
       });
       from = end;
     }
   }
 
-  return [...inlines, ...textOf(from, text.length)];
+  return [...pieces, ...textOf(from, text.length)];
 };
 
 /**
@@ -265,32 +287,51 @@ const nicked = (
  * @param style - Its style.
  * @param at - Where the run begins, as an offset into the stripped text.
  * @param nicks - The spans that name a User.
- * @returns Its inlines.
+ * @returns Its pieces.
  */
 const linked = (
   text: string,
   style: Style,
   at: number,
   nicks: readonly NickRun[]
-): readonly Inline[] => {
-  const inlines: Inline[] = [];
+): readonly Piece[] => {
+  const pieces: Piece[] = [];
   let from = 0;
 
   const textUpTo = (end: number) => {
     if (end > from) {
-      inlines.push(...nicked(text.slice(from, end), style, at + from, nicks));
+      pieces.push(...nicked(text.slice(from, end), style, at + from, nicks));
     }
   };
 
   for (const link of linksInRun(text)) {
     textUpTo(link.index);
-    inlines.push({ _tag: "Link", href: link.href, style, text: link.text });
+    pieces.push({ _tag: "Link", at: at + link.index, href: link.href, raw: link.text, style });
     from = link.index + link.text.length;
   }
 
   textUpTo(text.length);
 
-  return inlines;
+  return pieces;
+};
+
+/**
+ * Text split as it is drawn: each run of one style into text, nicks, and links.
+ * @param text - The text, as it arrived.
+ * @param nicks - The spans of it that name a User, with formatting stripped.
+ * @returns Its pieces, in order.
+ */
+const piecesOf = (text: string, nicks: readonly NickSpan[]): readonly Piece[] => {
+  const runs = nickRuns(text, nicks);
+  let at = 0;
+
+  return parseFormatting(text).flatMap((span) => {
+    const pieces = linked(span.text, span.style, at, runs);
+
+    at += span.text.length;
+
+    return pieces;
+  });
 };
 
 /**
@@ -305,18 +346,47 @@ const linked = (
  * text with formatting stripped.
  * @returns Its inlines, in order.
  */
-export const formatted = (text: string, nicks: readonly NickSpan[] = []): readonly Inline[] => {
-  const runs = nickRuns(text, nicks);
-  let at = 0;
+export const formatted = (text: string, nicks: readonly NickSpan[] = []): readonly Inline[] =>
+  piecesOf(text, nicks).map((piece): Inline => {
+    switch (piece._tag) {
+      case "Link": {
+        return { _tag: "Link", href: piece.href, style: piece.style, text: piece.raw };
+      }
 
-  return parseFormatting(text).flatMap((span) => {
-    const inlines = linked(span.text, span.style, at, runs);
+      case "Nick": {
+        return {
+          _tag: "Nick",
+          colour: piece.colour,
+          style: piece.style,
+          text: contained(piece.raw),
+        };
+      }
 
-    at += span.text.length;
+      case "Text": {
+        return { _tag: "Text", style: piece.style, text: contained(piece.raw) };
+      }
 
-    return inlines;
+      default: {
+        return piece satisfies never;
+      }
+    }
   });
-};
+
+/**
+ * The parts of some text that {@link formatted} draws as a `Nick`: what a view shows in a
+ * nick's colour, which is not what the Client found where a link holds it or a mIRC colour
+ * covers it.
+ * @param text - The text, as it arrived.
+ * @param nicks - The spans of it that name a User who counts, as UTF-16 offsets into the
+ * text with formatting stripped.
+ * @returns Where each stood in the text with formatting stripped, in order, with its slot.
+ */
+export const drawnNicks = (text: string, nicks: readonly NickSpan[]): readonly NickRun[] =>
+  piecesOf(text, nicks).flatMap((piece) =>
+    piece._tag === "Nick"
+      ? [{ colour: piece.colour, end: piece.at + piece.raw.length, start: piece.at }]
+      : []
+  );
 
 // Lines.
 

@@ -453,8 +453,8 @@ const prefixOfSender = (run: Run, sender: string, target: string): string | unde
 /**
  * The spans of a Message's text that name a User who counts: the members of each Channel
  * Self is in that it is said to, and, for each Direct Message it is, the partner and Self.
- * What belongs to the Network's own Timeline, and what the Ircd or another server said,
- * names no one.
+ * What belongs to the Network's own Timeline names no one. What the Ircd or another
+ * server says to a Channel is read as a User's is.
  * @param run - The step, before the Message is folded in.
  * @param message - Who said it, by nick, the Target as said, and what was said.
  * @param fromUser - Whether a User said it, rather than the Ircd or another server.
@@ -465,15 +465,13 @@ const nicksOf = (
   message: { readonly sender: string; readonly target: string; readonly text: string },
   fromUser: boolean
 ): readonly NickSpan[] => {
-  if (!fromUser) {
-    return [];
-  }
-
   const naming = namingNow(run);
   const fold = folder(run.state);
-  const nick = parseNick(naming, message.sender);
+  const nick = fromUser ? parseNick(naming, message.sender) : undefined;
+  const self = sessionOf(run.state)?.nick;
   const members: ((folded: string) => boolean)[] = [];
   const partners = new Set<string>();
+  let selfCounts = false;
 
   for (const target of parseTargets(naming, message.target)) {
     const where = targetWhere(run, nick, target);
@@ -483,16 +481,17 @@ const nicksOf = (
 
       if (phase?._tag === "Joined") {
         members.push(memberLookup(phase));
+        // Self is a member of a Channel it is joined to, whatever a listing said.
+        selfCounts = true;
       }
     } else if (where._tag === "Direct") {
-      const self = sessionOf(run.state)?.nick;
-
       partners.add(fold(where.name));
-
-      if (self !== undefined) {
-        partners.add(fold(self));
-      }
+      selfCounts = true;
     }
+  }
+
+  if (selfCounts && self !== undefined) {
+    partners.add(fold(self));
   }
 
   return members.length === 0 && partners.size === 0

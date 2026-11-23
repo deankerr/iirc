@@ -191,6 +191,36 @@ describe("the spans of a Message that name a Channel's members", () => {
 
     expect.assertions(0);
   });
+
+  it("are found in what the Ircd says to the Channel, as in what a User says", () => {
+    run([
+      ...inChannel(["peer", "bob"]),
+      lines(
+        "<< :irc.test NOTICE #iirc :peer and iirc and bob",
+        "?? message Notice irc.test #iirc nicks=0-4,9-13,18-21 in=channel:#iirc :peer and iirc and bob"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("count Self in a Channel whose listing left Self out", () => {
+    run([
+      registered(base),
+      lines(
+        "!! configure +#iirc",
+        ">> JOIN #iirc",
+        "<< :iirc!~iirc@iirc.test JOIN #iirc",
+        ">> MODE #iirc",
+        "<< :irc.test 353 iirc = #iirc :bob",
+        "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+        "<< :peer!u@h PRIVMSG #iirc :iirc and bob",
+        "?? message Privmsg peer #iirc highlight nicks=0-4,9-12 in=channel:#iirc :iirc and bob"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
 });
 
 describe("the spans of a Direct Message", () => {
@@ -228,9 +258,7 @@ describe("the spans of a Message that belongs to the Network's own Timeline", ()
         "<< :irc.test NOTICE iirc :peer and iirc and bob",
         "?? message Notice irc.test iirc in=network :peer and iirc and bob",
         "<< :peer!u@h NOTICE $*.test :peer and iirc and bob",
-        "?? message Notice peer $*.test highlight in=network :peer and iirc and bob",
-        "<< :irc.test NOTICE #iirc :peer and iirc and bob",
-        "?? message Notice irc.test #iirc in=channel:#iirc :peer and iirc and bob"
+        "?? message Notice peer $*.test highlight in=network :peer and iirc and bob"
       ),
     ]);
 
