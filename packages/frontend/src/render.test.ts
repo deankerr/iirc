@@ -1037,9 +1037,9 @@ describe("lines", () => {
       failed("irc.example.net", 7000, false, closed("Ended")),
       failed("irc.example.net", 6697, true, closed("Tls")),
     ]).toStrictEqual([
-      "Could not connect to irc.example.net/6697 plain: the server closed the connection. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
-      "Could not connect to irc.example.net/6697 plain: the server stopped answering. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
-      "Could not connect to irc.example.net/6667: TLS failed. Port 6667 is usually plaintext: try `/set network.libera.ircds irc.example.net/6667 plain`",
+      "Could not connect to irc.example.net/6697 plain: the server closed the connection. Port 6697 is usually TLS: try `/set network.libera.servers irc.example.net/6697`",
+      "Could not connect to irc.example.net/6697 plain: the server stopped answering. Port 6697 is usually TLS: try `/set network.libera.servers irc.example.net/6697`",
+      "Could not connect to irc.example.net/6667: TLS failed. Port 6667 is usually plaintext: try `/set network.libera.servers irc.example.net/6667 plain`",
       "Could not connect to irc.example.net/6697 plain: the connection was refused",
       "Could not connect to irc.example.net/6697 plain: the connection timed out",
       "Could not connect to irc.example.net/6697 plain: the connection was reset",

@@ -57,10 +57,10 @@ const configurationOf = (...channels: readonly string[]) =>
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["dean"],
     realname: "Dean",
+    servers: [{ host: "irc.libera.chat", port: 6697, tls: true }],
     username: "dean",
     whoOnJoin: true,
   });

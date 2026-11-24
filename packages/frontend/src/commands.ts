@@ -262,7 +262,7 @@ export interface Act {
  * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
  *   with none: for every device, through the Daemon, made from the options read, or with
  *   `device`, for this device alone, which keeps it and never sends it.
- * - `ChangeOwner`: set an option under `store`, `uploads`, or `previews` to a value, as JSON its Schema
+ * - `ChangeOwner`: set an option under `storage`, `uploads`, or `previews` to a value, as JSON its Schema
  *   took, or unset it with none, through the Daemon, made from the options read. No device
  *   overrides one.
  * - `UseTheme`: set `option` to the theme named, for every device, or with `device`, for
@@ -273,12 +273,12 @@ export interface Act {
  * - `EditAliases`: read the aliases made, apply the edit, and send them whole, made from
  *   the options read, applying it once more after a conflict, as `EditThemes` does.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
- * - `ChoosePreviews`: set a Timeline's own choice in `ui.previews.timelines` to `mode`, or
+ * - `ChoosePreviews`: set a Timeline's own choice in `ui.previews.conversations` to `mode`, or
  *   remove it with none, so it follows `ui.previews`: the option read, the choice made,
  *   and the option sent whole, made once more after a conflict, as `EditThemes` is.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it: a Network's, by its Network and
- *   path, or one under `store`, `uploads`, or `previews`, by its name. A value never goes through the
+ *   path, or one under `storage`, `uploads`, or `previews`, by its name. A value never goes through the
  *   composer, nor through an intent.
  * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
  * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
@@ -670,7 +670,7 @@ const setUi = (name: string, text: string | undefined, device: boolean): Parsed<
 };
 
 /**
- * An option under `store`, `uploads`, or `previews` set to a value given as text. A Credential option's
+ * An option under `storage`, `uploads`, or `previews` set to a value given as text. A Credential option's
  * value is never typed: `/set` and its name alone asks for it in a password prompt.
  * @param name - The option's name.
  * @param text - The value.
@@ -961,21 +961,21 @@ const networkArguments = (args: string, context: CommandContext): Parsed<Intent>
     return ircd;
   }
 
-  const configuration = starting(network, { ircds: [ircd.value], nicks: [nick] });
+  const configuration = starting(network, { nicks: [nick], servers: [ircd.value] });
 
   return configuration._tag === "Invalid"
     ? configuration
     : parsed({ _tag: "AddNetwork", configuration: configuration.value, network });
 };
 
-const closeUsage = "/close-timeline [#channel|nick]";
+const closeUsage = "/close-conversation [#channel|nick]";
 
 /**
- * What `/close-timeline` closes: a Channel or a nick given, as a Target the Network's Client
+ * What `/close-conversation` closes: a Channel or a nick given, as a Target the Network's Client
  * resolves by the Network's own naming, or else the one in focus, by its id, so one that no
  * Target names is closed all the same. The focused one is never a Network's own, which is
  * never closed.
- * @param args - The text after `/close-timeline`.
+ * @param args - The text after `/close-conversation`.
  * @param context - The context.
  * @returns The intent, or why there is none.
  */
@@ -1871,7 +1871,7 @@ const rawCredentialRefused =
   "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.";
 
 const rawOperRefused =
-  "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
+  "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
 
 /**
  * Why a raw Line with a command is refused, or nothing when it is not: `OPER` is
@@ -2918,9 +2918,9 @@ export const commands: readonly Command[] = [
     arguments: "Optional",
     description:
       "Close a channel you left or a direct message, and remove it from the sidebar until something new arrives. This closes the open one unless you name another. If you are in the channel, you are asked to leave it instead.",
-    id: "timeline.close",
+    id: "conversation.close",
     intents: (intent: CloseTimeline | CloseTarget) => [intent],
-    name: "close-timeline",
+    name: "close-conversation",
     parse: closeArguments,
     usage: closeUsage,
     when: [{ _tag: "Focused" }],
@@ -2945,7 +2945,7 @@ export const commands: readonly Command[] = [
     arguments: "Required",
     description:
       "Reset an option to its starting value, or leave it not set. With -device, stop this device overriding a ui option.",
-    id: "options.unset",
+    id: "settings.unset",
     intents: (intent: Intent) => [intent],
     name: "unset",
     parse: unsetArguments,
@@ -2992,7 +2992,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "None",
     description: "Jump to the latest message in the open conversation and follow it.",
-    id: "timeline.latest",
+    id: "conversation.latest",
     intents: (_: undefined, focus) => [{ _tag: "Latest", timeline: focus.timeline }],
     name: "latest",
     parse: (args) =>
@@ -3005,7 +3005,7 @@ export const commands: readonly Command[] = [
     arguments: "Required",
     description:
       "Go to a date or time in the open conversation: a day in your time zone, or a time with its zone. This opens the first item at or after it, the beginning if it's earlier, or the latest if it's later.",
-    id: "timeline.date",
+    id: "conversation.date",
     intents: (moment: Moment, focus) => [{ _tag: "GoToDate", moment, timeline: focus.timeline }],
     name: "date",
     parse: (args) => {
@@ -3024,7 +3024,7 @@ export const commands: readonly Command[] = [
     arguments: "Optional",
     description:
       "Save the open conversation as a text file, all of it or between two dates or times. A date alone covers the whole day.",
-    id: "timeline.export",
+    id: "conversation.export",
     intents: (range: ExportRange, focus) => [
       { _tag: "Export", since: range.since, timeline: focus.timeline, until: range.until },
     ],
@@ -3038,7 +3038,7 @@ export const commands: readonly Command[] = [
     arguments: "Required",
     description:
       "Move the open conversation up or down in the sidebar on every device, among the pinned, the networks, or its network's conversations.",
-    id: "timeline.move",
+    id: "conversation.move",
     intents: (direction: "Up" | "Down", focus) => [
       { _tag: "Arrange", edit: { _tag: "Move", direction, timeline: focus.timeline } },
     ],
@@ -3054,7 +3054,7 @@ export const commands: readonly Command[] = [
     arguments: "None",
     description:
       "Pin the open conversation above the networks in the sidebar on every device, or unpin it if it is pinned.",
-    id: "timeline.pin",
+    id: "conversation.pin",
     intents: (edit: ArrangeEdit) => [{ _tag: "Arrange", edit }],
     name: "pin",
     parse: pinArguments,
@@ -3065,7 +3065,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "None",
     description: "Open the next conversation in the sidebar.",
-    id: "timeline.next",
+    id: "conversation.next",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
     name: "next",
@@ -3077,7 +3077,7 @@ export const commands: readonly Command[] = [
     aliases: ["prev"],
     arguments: "None",
     description: "Open the previous conversation in the sidebar.",
-    id: "timeline.previous",
+    id: "conversation.previous",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
     name: "previous",
@@ -3090,7 +3090,7 @@ export const commands: readonly Command[] = [
     arguments: "None",
     description:
       "Open the conversation that needs you most: highlights first, then direct messages, then other unread messages.",
-    id: "timeline.unread",
+    id: "conversation.unread",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
     name: "next-unread",
@@ -3103,7 +3103,7 @@ export const commands: readonly Command[] = [
     arguments: "Required",
     description:
       "Open a conversation by its name in the focused pane, on the current conversation's network unless you name another.",
-    id: "timeline.go",
+    id: "conversation.go",
     intents: (to: TimelineId) => [{ _tag: "Open", timeline: to }],
     name: "go",
     parse: (args, context) =>
@@ -3116,7 +3116,7 @@ export const commands: readonly Command[] = [
     arguments: "Optional",
     description:
       "Mark the open conversation read up to its latest, or every conversation with /read all, for every device.",
-    id: "timeline.read",
+    id: "conversation.read",
     intents: (marks: readonly MarkRead[]) => marks,
     name: "read",
     parse: readArguments,
@@ -3154,7 +3154,7 @@ export const commands: readonly Command[] = [
     arguments: "Required",
     description:
       "Open the direct message with a nick, or start one with /msg if there are no messages yet.",
-    id: "timeline.query",
+    id: "conversation.query",
     intents: (name: string, focus) => [{ _tag: "Query", name, network: focus.network }],
     name: "query",
     parse: queryArguments,
@@ -3205,7 +3205,7 @@ export const commands: readonly Command[] = [
   formatCommand("bold", "bold"),
   formatCommand("italic", "italic"),
   formatCommand("underline", "underline"),
-  formatCommand("monospace", "fixed pitch"),
+  formatCommand("monospace", "monospace"),
   formatCommand("reverse", "reversed colors"),
   formatCommand("strikethrough", "strikethrough"),
   unfocused({
@@ -3247,11 +3247,11 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "None",
     description: "Show the daemon's recent logs in the focused pane.",
-    id: "tail.open",
+    id: "logs.open",
     intents: () => [{ _tag: "OpenTail" }],
-    name: "tail",
-    parse: nothingAfter("tail"),
-    usage: "/tail",
+    name: "logs",
+    parse: nothingAfter("logs"),
+    usage: "/logs",
     when: [],
   }),
   paneCommand({
@@ -3340,7 +3340,7 @@ export const commands: readonly Command[] = [
     arguments: "Optional",
     description:
       "Focus the message input. With text, start there with its suggestions open and set your draft aside until the command runs or you press Escape.",
-    id: "composer.focus",
+    id: "input.focus",
     intents: (text: string | undefined) => [
       text === undefined ? { _tag: "FocusComposer", text } : { _tag: "StartCommand", text },
     ],
@@ -3361,7 +3361,7 @@ const byId: ReadonlyMap<string, Command> = new Map(commands.map((one) => [one.id
 
 /**
  * The command with an id, as a keybinding names it.
- * @param id - Its id, such as `timeline.next`.
+ * @param id - Its id, such as `conversation.next`.
  * @returns The command, or none.
  */
 export const commandWithId = (id: string): Command | undefined => byId.get(id);

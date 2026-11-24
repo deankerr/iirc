@@ -349,8 +349,8 @@ const offered = (container: HTMLElement) =>
 const withPublicUrl = (fake: ReturnType<typeof fakeDaemon>) => {
   fake.daemon.owner = {
     options: {
-      "previews.maxTotal": 1_073_741_824,
-      "uploads.maxSize": 104_857_600,
+      "previews.maxTotal": 1_000_000_000,
+      "uploads.maxSize": 100_000_000,
       "uploads.publicUrl": "https://files.example.com",
     },
     sequence: 1,
@@ -567,8 +567,8 @@ describe("the Uploads view", () => {
 
     fake.daemon.owner = {
       options: {
-        "previews.maxTotal": 1_073_741_824,
-        "uploads.maxSize": 104_857_600,
+        "previews.maxTotal": 1_000_000_000,
+        "uploads.maxSize": 100_000_000,
         "uploads.publicUrl": "https://files.example.com",
       },
       sequence: 1,

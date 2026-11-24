@@ -160,11 +160,11 @@ export type Switch =
 
 /** The options Uploads need, in the order an `Off` names them. */
 const needed = [
-  "store.s3.endpoint",
-  "store.s3.bucket",
-  "store.s3.region",
-  "store.s3.accessKeyId",
-  "store.s3.secretAccessKey",
+  "storage.s3.endpoint",
+  "storage.s3.bucket",
+  "storage.s3.region",
+  "storage.s3.accessKeyId",
+  "storage.s3.secretAccessKey",
   "uploads.publicUrl",
 ] as const satisfies readonly OwnerOptionName[];
 
@@ -176,11 +176,11 @@ const needed = [
  */
 export const switchOf = (options: OwnerOptions): Switch => {
   const {
-    "store.s3.accessKeyId": accessKeyId,
-    "store.s3.bucket": bucket,
-    "store.s3.endpoint": endpoint,
-    "store.s3.region": region,
-    "store.s3.secretAccessKey": secretAccessKey,
+    "storage.s3.accessKeyId": accessKeyId,
+    "storage.s3.bucket": bucket,
+    "storage.s3.endpoint": endpoint,
+    "storage.s3.region": region,
+    "storage.s3.secretAccessKey": secretAccessKey,
     "uploads.listen": listen,
     "uploads.maxSize": maxSize,
     "uploads.publicUrl": publicUrl,

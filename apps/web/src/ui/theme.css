@@ -5,10 +5,10 @@
  * height, and font are `ui.font.size`, `ui.font.lineHeight`, and `ui.font`, each set on the root's own
  * style, which wins over these. Until then each colour is light-dark(), so the first
  * paint follows the device's own setting, and the text is in the defaults' size, line
- * height, and font. The widest line, `ui.timeline.maxWidth`, is `--widest-line` there too, in `ch`, and
+ * height, and font. The widest line, `ui.conversation.maxWidth`, is `--widest-line` there too, in `ch`, and
  * is never set here or while it is `none`, so a line then runs the width of its Pane. The
  * nick column and the members' panel are `--nick-width` and `--members-width`, in `ch`, and
- * the room between a Timeline's rows, `ui.timeline.spacing`, is `--row-spacing`, a multiple
+ * the room between a Timeline's rows, `ui.conversation.spacing`, is `--row-spacing`, a multiple
  * of the text's size.
  */
 :root {
@@ -25,7 +25,7 @@
   --font-mono: var(--font-device);
   /* Every common rank's symbol, one a line, which the members' symbols are as wide as. */
   --rank-samples: "~\A&\A@\A%\A+";
-  /* `ui.timeline.nickWidth` and `ui.members.width` as they start, until the page runs. */
+  /* `ui.conversation.nickWidth` and `ui.members.width` as they start, until the page runs. */
   --nick-width: 16ch;
   --members-width: 18ch;
   --row-spacing: 0.3;

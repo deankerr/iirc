@@ -237,11 +237,11 @@ describe("the keymap", () => {
 
   it("drops a binding that does not parse or names no command, keeping the rest", () => {
     const keymap = keymapOf([
-      { command: "timeline.next", keys: "alt+n" },
-      { command: "timeline.next", keys: "alt+" },
+      { command: "conversation.next", keys: "alt+n" },
+      { command: "conversation.next", keys: "alt+" },
       { command: "no.such.command", keys: "alt+m" },
-      { command: "timeline.next", keys: "alt+o", when: "editing || palette" },
-      { command: "timeline.previous", keys: "alt+p", when: "!editing" },
+      { command: "conversation.next", keys: "alt+o", when: "editing || palette" },
+      { command: "conversation.previous", keys: "alt+p", when: "!editing" },
     ]);
 
     expect(keymap.map((binding) => formatChord(binding.keys))).toStrictEqual(["alt+n", "alt+p"]);
@@ -307,7 +307,7 @@ describe("the keymap", () => {
       { command: "say.privmsg", keys: "alt+s" },
       { args: "hello", command: "say.privmsg", keys: "alt+h" },
       { command: "options.set", keys: "alt+o" },
-      { command: "timeline.go", keys: "alt+g" },
+      { command: "conversation.go", keys: "alt+g" },
     ]);
 
     const offline: CommandContext = { ...inChannel, session: false };
@@ -426,9 +426,7 @@ describe("the keymap", () => {
   });
 
   it("does not fire a binding meant for outside a field while typing in one, so the key is typed", () => {
-    const keymap = keymapOf([
-      { command: "composer.focus", keys: "j", when: "!editing && !palette" },
-    ]);
+    const keymap = keymapOf([{ command: "input.focus", keys: "j", when: "!editing && !palette" }]);
 
     const j = press("j", "KeyJ");
 
@@ -477,8 +475,8 @@ describe("the keymap", () => {
   it("respects the bound command's own conditions, and lets a later binding win", () => {
     const keymap = keymapOf([
       { args: "hello", command: "say.privmsg", keys: "alt+h" },
-      { command: "timeline.next", keys: "alt+n" },
-      { command: "timeline.previous", keys: "alt+n" },
+      { command: "conversation.next", keys: "alt+n" },
+      { command: "conversation.previous", keys: "alt+n" },
     ]);
 
     const hello = press("h", "KeyH", { alt: true });
@@ -506,9 +504,9 @@ describe("the keymap", () => {
 
   it("lists the chords bound to a command with the arguments given, none unless said", () => {
     expect({
-      focus: chordsFor(defaultKeymap, "composer.focus"),
-      go: chordsFor(defaultKeymap, "timeline.go").map(formatChord),
-      slash: chordsFor(defaultKeymap, "composer.focus", "/").map(formatChord),
+      focus: chordsFor(defaultKeymap, "input.focus"),
+      go: chordsFor(defaultKeymap, "conversation.go").map(formatChord),
+      slash: chordsFor(defaultKeymap, "input.focus", "/").map(formatChord),
     }).toStrictEqual({ focus: [], go: ["mod+k"], slash: ["mod+shift+p"] });
     expect(chordsFor(defaultKeymap, "say.privmsg")).toStrictEqual([]);
     expect(key("Up")).toBe("arrowup");
@@ -626,9 +624,9 @@ describe("the default bindings", () => {
 describe("keys from layouts other than QWERTY", () => {
   const layoutKeymap = keymapOf([
     ...defaultBindings,
-    { command: "timeline.next", keys: "\u00E9", when: "!editing" },
-    { command: "timeline.previous", keys: "mod+alt+q" },
-    { command: "timeline.next", keys: "mod+alt+k" },
+    { command: "conversation.next", keys: "\u00E9", when: "!editing" },
+    { command: "conversation.previous", keys: "mod+alt+q" },
+    { command: "conversation.next", keys: "mod+alt+k" },
   ]);
 
   // AZERTY: \u00E9 is unshifted on the key QWERTY has 2 on, and Shift gives 2.
@@ -821,7 +819,7 @@ describe("the panes' keys", () => {
 
   it("gives a typed key to the composer where nothing takes text or keeps its keys, and a bound key to the keymap", () => {
     const a = press("a", "KeyA");
-    const bound = keymapOf([{ command: "timeline.next", keys: "a" }]);
+    const bound = keymapOf([{ command: "conversation.next", keys: "a" }]);
 
     expect({
       bound: typesInComposer(bound, at(), a),
@@ -830,7 +828,7 @@ describe("the panes' keys", () => {
       free: typesInComposer(defaultKeymap, at(), a),
       listOpen: typesInComposer(defaultKeymap, at({ palette: true }), a),
       noComposer: typesInComposer(defaultKeymap, at({ composer: false }), a),
-      // A binding that cannot run here, as `timeline.next` with no Timelines, takes nothing.
+      // A binding that cannot run here, as `conversation.next` with no Timelines, takes nothing.
       unrunnable: typesInComposer(
         bound,
         at({}, { ...inChannel, open: undefined, timelines: [] }),

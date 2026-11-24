@@ -28,12 +28,12 @@ const configurations = [
   configured({ channels: [{ name: "#iirc" }, { key: CredentialName.make("k"), name: "#secret" }] }),
   configured({
     channels: [{ name: "#Dev[Ops]" }],
-    ircds: [
+    nicks: ["one", "two"],
+    password: CredentialName.make("pass"),
+    servers: [
       { host: "a.test", port: 6697, tls: true },
       { host: "b.test", port: 6667, tls: false },
     ],
-    nicks: ["one", "two"],
-    password: CredentialName.make("pass"),
   }),
   configured({ enabled: false }),
   configured({ highlights: ["text", "Peer"] }),

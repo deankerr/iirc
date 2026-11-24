@@ -375,10 +375,10 @@ const uiOptionRoute = new RegExp(`^/api/ui/(?<option>${uiOptionNames.join("|")})
 
 const UiBody = Schema.fromJsonString(Schema.Struct({ value: Schema.Json }));
 
-/** The options under `store`, `uploads`, and `previews` before any Change: each at its default, if any. */
+/** The options under `storage`, `uploads`, and `previews` before any Change: each at its default, if any. */
 const noOwnerChange: typeof OwnerInForce.Encoded = { options: ownerDefaults, sequence: 0 };
 
-/** The route of one option under `store`, `uploads`, or `previews`, for each option the contract has. */
+/** The route of one option under `storage`, `uploads`, or `previews`, for each option the contract has. */
 const ownerOptionRoute = new RegExp(
   `^/api/options/(?<option>${ownerOptionNames.map((name) => name.replaceAll(".", String.raw`\.`)).join("|")})$`,
   "u"
@@ -401,17 +401,17 @@ export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
   bot: false,
   channels: [{ name: "#iirc" }],
+  commands: [],
   declined: [],
   enabled: true,
   fallbackEncoding: "windows-1252",
   highlights: [],
   ignores: [],
-  ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
-  lines: [],
   login: { _tag: "None" },
   nicks: ["iirc"],
   oper: { _tag: "None" },
   realname: "iirc",
+  servers: [{ host: "irc.libera.chat", port: 6697, tls: true }],
   tls: { _tag: "None" },
   userModes: "",
   username: "iirc",
@@ -811,11 +811,11 @@ export const fakeDaemon = () => {
     networksHeld,
     /** The sequence the next `say` is journaled at. */
     nextSequence: 10,
-    /** The options under `store`, `uploads`, and `previews` in force, as the wire carries them, and the sequence of the last Change. */
+    /** The options under `storage`, `uploads`, and `previews` in force, as the wire carries them, and the sequence of the last Change. */
     owner: noOwnerChange,
-    /** Each change of an option under `store`, `uploads`, or `previews` asked for, as `PUT` or `DELETE` and its option, and its `ifSequence`. */
+    /** Each change of an option under `storage`, `uploads`, or `previews` asked for, as `PUT` or `DELETE` and its option, and its `ifSequence`. */
     ownerChanges,
-    /** Each follower of the options under `store`, `uploads`, and `previews`. */
+    /** Each follower of the options under `storage`, `uploads`, and `previews`. */
     ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
@@ -1648,7 +1648,7 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * Sends the options under `store`, `uploads`, and `previews` in force to every follower of them, as one
+   * Sends the options under `storage`, `uploads`, and `previews` in force to every follower of them, as one
    * `changed` event.
    */
   const sendOwner = () => {
@@ -1660,7 +1660,7 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * The options under `store`, `uploads`, and `previews`: read, changed one at a time made from a
+   * The options under `storage`, `uploads`, and `previews`: read, changed one at a time made from a
    * sequence, a value their Schema refuses refused, and followed, the options in force
    * first, or nothing for any other route.
    * @param url - The request's URL.

@@ -25,7 +25,7 @@ const libera = NetworkId.make("libera");
 
 const floor = configured({
   channels: [{ name: "#iirc" }],
-  ircds: [{ host: "irc.test", port: 6667, tls: false }],
+  servers: [{ host: "irc.test", port: 6667, tls: false }],
 });
 
 /** 2026-01-01T00:00:00Z, where every test's clock starts. */

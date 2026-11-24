@@ -49,7 +49,7 @@ const policiesOf = (state: State): ReadonlyMap<string, StsPolicy> => client.insp
 
 describe("learning a policy over TLS", () => {
   it("takes a CAP NEW while CAP LS is still listing", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -112,7 +112,7 @@ describe("learning a policy over TLS", () => {
   });
 
   it("removes one with duration=0, so Configuration applies again", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -129,7 +129,7 @@ describe("learning a policy over TLS", () => {
   });
 
   it("ignores a port key over TLS", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -229,7 +229,7 @@ describe("malformed values", () => {
   it.each(["sts=port=abc", "sts=port=0", "sts=duration=600"])(
     "does not upgrade on %s over plaintext, and registers",
     (value) => {
-      const base = configured({ ircds: [plain("irc.test")] });
+      const base = configured({ servers: [plain("irc.test")] });
 
       play(client, {
         configuration: base,
@@ -243,7 +243,7 @@ describe("malformed values", () => {
 
 describe("upgrading from plaintext", () => {
   it("upgrades on CAP NEW while CAP LS is still listing", () => {
-    const base = configured({ ircds: [plain("irc.test")] });
+    const base = configured({ servers: [plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -266,7 +266,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("hangs up at once, sends nothing more, and dials TLS on the port given", () => {
-    const base = configured({ ircds: [plain("irc.test"), tls("other.test")] });
+    const base = configured({ servers: [plain("irc.test"), tls("other.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -289,7 +289,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("upgrades from the first Line of a CAP LS spread over several", () => {
-    const base = configured({ ircds: [plain("irc.test")] });
+    const base = configured({ servers: [plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -306,7 +306,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("upgrades a Session when CAP NEW gives a port", () => {
-    const base = configured({ ircds: [plain("irc.test")] });
+    const base = configured({ servers: [plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -328,7 +328,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("then learns the policy over TLS, and keeps to it", () => {
-    const base = configured({ ircds: [plain("irc.test")] });
+    const base = configured({ servers: [plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -347,7 +347,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("upgrades an IP literal too, and keeps no policy for it", () => {
-    const base = configured({ ircds: [plain("127.0.0.1")] });
+    const base = configured({ servers: [plain("127.0.0.1")] });
 
     const played = play(client, {
       configuration: base,
@@ -364,7 +364,7 @@ describe("upgrading from plaintext", () => {
   });
 
   it("backs off after the upgrade's TLS fails, never retrying it in plaintext at once", () => {
-    const base = configured({ ircds: [plain("irc.test")] });
+    const base = configured({ servers: [plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -387,7 +387,7 @@ describe("upgrading from plaintext", () => {
 
 describe("dialling under a policy", () => {
   it("dials TLS on the policy's port, whatever Configuration says, matching case and a trailing dot", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("Irc.TEST.", 6668)] });
+    const base = configured({ servers: [tls("irc.test"), plain("Irc.TEST.", 6668)] });
 
     play(client, {
       configuration: base,
@@ -403,7 +403,7 @@ describe("dialling under a policy", () => {
   });
 
   it("retries TLS after a TLS failure, and never dials plaintext", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -425,7 +425,7 @@ describe("dialling under a policy", () => {
   });
 
   it("applies to Retry, to Configured, and after Started", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     play(client, {
       configuration: base,
@@ -447,7 +447,7 @@ describe("dialling under a policy", () => {
   });
 
   it("lets Configuration apply again once it expires", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -469,7 +469,7 @@ describe("dialling under a policy", () => {
 
   it("keeps each host under its own policy as it rotates", () => {
     const base = configured({
-      ircds: [tls("a.test"), tls("b.test", 7000), plain("a.test"), plain("B.test")],
+      servers: [tls("a.test"), tls("b.test", 7000), plain("a.test"), plain("B.test")],
     });
 
     const played = play(client, {
@@ -509,7 +509,7 @@ describe("rescheduling", () => {
   });
 
   it("keeps a policy that expires during its Connection, and moves it at the close", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -528,7 +528,7 @@ describe("rescheduling", () => {
   });
 
   it("does not move it for a Connection that never opened", () => {
-    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+    const base = configured({ servers: [tls("irc.test"), plain("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -547,7 +547,7 @@ describe("rescheduling", () => {
   });
 
   it("does not revive an expired policy for a Connection dialled after it", () => {
-    const base = configured({ ircds: [tls("irc.test")] });
+    const base = configured({ servers: [tls("irc.test")] });
 
     const played = play(client, {
       configuration: base,
@@ -567,7 +567,7 @@ describe("rescheduling", () => {
 describe("persistence", () => {
   it("folds the same in a fresh process", async () => {
     const played = play(client, {
-      configuration: configured({ ircds: [plain("irc.test"), plain("irc.test")] }),
+      configuration: configured({ servers: [plain("irc.test"), plain("irc.test")] }),
       transcript: [
         "!! configure\n",
         dial(plain("irc.test")),
@@ -598,10 +598,10 @@ const keyOf = (host: string): string => host.toLowerCase().replace(/\.$/u, "");
 
 const worlds = [
   configured({
-    ircds: [tls("a.test"), plain("A.test."), tls("b.test", 7000), plain("B.TEST", 6668)],
+    servers: [tls("a.test"), plain("A.test."), tls("b.test", 7000), plain("B.TEST", 6668)],
   }),
-  configured({ enabled: false, ircds: [plain("a.test"), tls("b.test", 7000)] }),
-  configured({ ircds: [plain("a.test")] }),
+  configured({ enabled: false, servers: [plain("a.test"), tls("b.test", 7000)] }),
+  configured({ servers: [plain("a.test")] }),
 ];
 
 // Lines an Ircd might send, with and without STS, in every place negotiation may be.

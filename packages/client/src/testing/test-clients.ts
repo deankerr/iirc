@@ -304,7 +304,7 @@ const dial = (
   before: ToyState,
   after: ToyState,
   at: number,
-  ircd: NetworkConfiguration["ircds"][0],
+  ircd: NetworkConfiguration["servers"][0],
   news: readonly News[] = []
 ): Step<ToyState> => {
   const connection = before.connection + 1;
@@ -331,7 +331,7 @@ const started = (state: ToyState, at: number): Step<ToyState> => {
   const idle = { ...state, channels: new Map(), enabled: [], phase: "Idle" as const };
 
   return configuration?.enabled === true
-    ? dial(state, idle, at, configuration.ircds[0], news)
+    ? dial(state, idle, at, configuration.servers[0], news)
     : finish(state, idle, at, [], news);
 };
 
@@ -340,7 +340,7 @@ const configured = (
   input: Extract<Input, { readonly _tag: "Configured" }>
 ): Step<ToyState> => {
   const next = { ...state, configuration: input.configuration };
-  const [ircd] = input.configuration.ircds;
+  const [ircd] = input.configuration.servers;
 
   if (!input.configuration.enabled) {
     // Disabled while connected: hang up, and wait for the `Closed`.
@@ -661,7 +661,7 @@ export const seededClient: Client<{ readonly dialled: boolean }> = {
             {
               _tag: "Dial",
               connection: ConnectionId.make(Math.floor(seed * 1e9)),
-              ircd: input.configuration.ircds[0],
+              ircd: input.configuration.servers[0],
             },
           ],
           state: { dialled: true },

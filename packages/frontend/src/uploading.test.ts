@@ -563,13 +563,13 @@ describe("adding files", () => {
       ...arrived(
         0,
         [file("a")],
-        { _tag: "Off", maxSize: 100, missing: ["store.s3.bucket", "uploads.publicUrl"] },
+        { _tag: "Off", maxSize: 100, missing: ["storage.s3.bucket", "uploads.publicUrl"] },
         place
       )
     );
 
     expect({ note: noteIn(state, place), pending: state.pending }).toStrictEqual({
-      note: ["store.s3.bucket", "uploads.publicUrl"],
+      note: ["storage.s3.bucket", "uploads.publicUrl"],
       pending: [],
     });
   });
@@ -593,11 +593,11 @@ describe("adding files", () => {
     const state = fold(addedAt(0, file("a")), {
       _tag: "Off",
       key: "a",
-      missing: ["store.s3.bucket"],
+      missing: ["storage.s3.bucket"],
     });
 
     expect({ note: noteIn(state, place), pending: state.pending }).toStrictEqual({
-      note: ["store.s3.bucket"],
+      note: ["storage.s3.bucket"],
       pending: [],
     });
   });
@@ -670,7 +670,7 @@ describe("sending a draft while its files upload", () => {
   });
 
   it("holds nothing back for a draft typing a password's value, so it is let go of", () => {
-    const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
+    const credential = typed(initialComposers, "/set storage.s3.secretAccessKey hunter2");
 
     expect(heldBack(addedAt(0, file("a")), credential, place, [])).toBeUndefined();
   });
@@ -757,8 +757,8 @@ describe("the note while uploads are off", () => {
   });
 
   it("names more options as a list", () => {
-    expect(offNote(["store.s3.bucket", "store.s3.accessKeyId", "uploads.publicUrl"])).toBe(
-      "Uploads are off until store.s3.bucket, store.s3.accessKeyId, and uploads.publicUrl are set."
+    expect(offNote(["storage.s3.bucket", "storage.s3.accessKeyId", "uploads.publicUrl"])).toBe(
+      "Uploads are off until storage.s3.bucket, storage.s3.accessKeyId, and uploads.publicUrl are set."
     );
   });
 

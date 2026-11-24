@@ -173,7 +173,7 @@ const editIn = async (
 };
 
 /**
- * Presses Enter in the composer, which sends under `ui.composer.enter` `send`, as it starts.
+ * Presses Enter in the composer, which sends under `ui.input.enter` `send`, as it starts.
  * @param container - The page.
  */
 const enter = async (container: HTMLElement) => {
@@ -427,7 +427,7 @@ describe("uploading from the Composer", () => {
     daemon.uploadsStatus = {
       _tag: "Off",
       maxSize: 100,
-      missing: ["store.s3.bucket", "uploads.publicUrl"],
+      missing: ["storage.s3.bucket", "uploads.publicUrl"],
     };
     await typeIn(container, "hi");
     await paste(container, image("cat.png"));
@@ -454,7 +454,7 @@ describe("uploading from the Composer", () => {
       value: composerOf(container).value,
     }).toStrictEqual({
       main: "Options",
-      note: "Uploads are off until store.s3.bucket and uploads.publicUrl are set.",
+      note: "Uploads are off until storage.s3.bucket and uploads.publicUrl are set.",
       sent: [],
       value: "hi",
     });

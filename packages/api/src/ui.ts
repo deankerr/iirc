@@ -871,37 +871,37 @@ const aliasesKept = keptByName(Alias, aliasesCap);
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   aliases: Aliases,
-  "composer.enter": EnterKey,
-  "composer.nickSuffix": NickSuffix,
-  "composer.spellcheck": SpellcheckShown,
+  "conversation.activity": ActivityShown,
+  "conversation.colors": ColoursShown,
+  "conversation.dateFormat": DayShown,
+  "conversation.layout": LineLayout,
+  "conversation.maxWidth": WidestLine,
+  "conversation.nickBrackets": NickBrackets,
+  "conversation.nickPrefix": NickPrefix,
+  "conversation.nickWidth": NickWidth,
+  "conversation.spacing": RowSpacing,
+  "conversation.timeFormat": TimeShown,
   font: FontShown,
   "font.lineHeight": Leading,
   "font.size": TextSize,
+  "input.enter": EnterKey,
+  "input.nickSuffix": NickSuffix,
+  "input.spellcheck": SpellcheckShown,
+  logs: TailShown,
   "members.width": MembersWidth,
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
+  "previews.conversations": PreviewsByTimeline,
   "previews.mediaHeight": PreviewsMediaHeight,
   "previews.players": PreviewsPlayers,
   "previews.start": PreviewsStart,
-  "previews.timelines": PreviewsByTimeline,
   "sidebar.networks": SidebarNetworks,
   "sidebar.order": SidebarOrder,
   "sidebar.pinned": SidebarPinned,
-  tail: TailShown,
   theme: ThemeShown,
   "theme.dark": themeForScheme("dark", "solarized-dark"),
   "theme.imported": Themes,
   "theme.light": themeForScheme("light", "solarized-light"),
-  "timeline.activity": ActivityShown,
-  "timeline.colours": ColoursShown,
-  "timeline.dateFormat": DayShown,
-  "timeline.layout": LineLayout,
-  "timeline.maxWidth": WidestLine,
-  "timeline.nickBrackets": NickBrackets,
-  "timeline.nickPrefix": NickPrefix,
-  "timeline.nickWidth": NickWidth,
-  "timeline.spacing": RowSpacing,
-  "timeline.timeFormat": TimeShown,
   "unread.markRead": ReadRule,
   "unread.muted": TimelinesMuted,
   "unread.quietBots": QuietBots,
@@ -952,44 +952,18 @@ export type UiInForce = typeof UiInForce.Type;
 /** A `ui` option's value, decoded by its Schema. */
 export type UiOptionValue = UiOptions[UiOptionName];
 
-/**
- * The names options under `ui` had before, each with the name it has now, so a Change
- * journaled, or an override a device kept, under the name before is still that option's.
- */
-const namedBefore: ReadonlyMap<string, UiOptionName> = new Map([
-  ["activity", "timeline.activity"],
-  ["colours", "timeline.colours"],
-  ["dark", "theme.dark"],
-  ["day", "timeline.dateFormat"],
-  ["enter", "composer.enter"],
-  ["leading", "font.lineHeight"],
-  ["light", "theme.light"],
-  ["line", "timeline.layout"],
-  ["muted", "unread.muted"],
-  ["previews.folded", "previews.start"],
-  ["quietBots", "unread.quietBots"],
-  ["read", "unread.markRead"],
-  ["size", "font.size"],
-  ["spellcheck", "composer.spellcheck"],
-  ["suffix", "composer.nickSuffix"],
-  ["themes", "theme.imported"],
-  ["time", "timeline.timeFormat"],
-  ["width", "timeline.maxWidth"],
-]);
-
 const decodeUiOptionName = Schema.decodeUnknownOption(UiOptionName);
 
 /**
  * A `ui` option's name read from one kept before, as a journaled Change or a device's
- * override names it: a name `ui` has, or one an option had before, as the name it has now.
- * Any other is none.
+ * override names it: a name `ui` has. Any other is none.
  * @param name - The name kept.
  * @returns The option's name now, or none.
  */
 export const uiNameKept = (name: string): UiOptionName | undefined => {
   const now = decodeUiOptionName(name);
 
-  return now._tag === "Some" ? now.value : namedBefore.get(name);
+  return now._tag === "Some" ? now.value : undefined;
 };
 
 const decodeJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json));
@@ -1017,7 +991,7 @@ const valueNamedNow = (option: UiOptionName, value: Schema.Json): Schema.Json =>
     return closedBefore.has(value) ? "closed" : value;
   }
 
-  const byTimeline = option === "previews.timelines" ? decodeJsonRecord(value) : undefined;
+  const byTimeline = option === "previews.conversations" ? decodeJsonRecord(value) : undefined;
 
   return byTimeline?._tag === "Some"
     ? Object.fromEntries(

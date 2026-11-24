@@ -25,10 +25,10 @@ describe("highlight words", () => {
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
   };
 
@@ -45,10 +45,10 @@ describe("ignore masks", () => {
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
   };
 
@@ -70,10 +70,10 @@ describe("answering CTCP", () => {
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
   };
 
@@ -93,7 +93,7 @@ describe("answering CTCP", () => {
 });
 
 describe("a SASL login's mechanism", () => {
-  const old = { _tag: "Sasl", account: "iirc", credential: "sasl", required: true };
+  const old = { _tag: "Sasl", account: "iirc", password: "sasl", required: true };
 
   it("decodes as plain from a Configuration written before it existed, which logged in with PLAIN", () => {
     const decode = Schema.decodeUnknownSync(Login);
@@ -120,10 +120,10 @@ describe("asking who is in each Channel on joining it", () => {
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
   };
 
@@ -148,10 +148,10 @@ describe("a client certificate", () => {
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
   };
 
@@ -184,10 +184,10 @@ describe("the Credentials a Configuration names", () => {
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
-      ircds: [{ host: "irc.test", port: 6697, tls: true }],
       login: { _tag: "External", required: true },
       nicks: ["iirc"],
       realname: "iirc",
+      servers: [{ host: "irc.test", port: 6697, tls: true }],
       tls: { _tag: "Certificate", certificate: "cert" },
       username: "iirc",
     });
@@ -201,11 +201,11 @@ describe("the Credentials a Configuration names", () => {
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
-      ircds: [{ host: "irc.test", port: 6697, tls: true }],
       login: { _tag: "None" },
       nicks: ["iirc"],
-      oper: { _tag: "Login", credential: "operpw", name: "admin" },
+      oper: { _tag: "Login", name: "admin", password: "operpw" },
       realname: "iirc",
+      servers: [{ host: "irc.test", port: 6697, tls: true }],
       username: "iirc",
     });
 
@@ -218,17 +218,17 @@ describe("the Credentials a Configuration names", () => {
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
-      ircds: [{ host: "irc.test", port: 6697, tls: true }],
       login: {
         _tag: "Sasl",
         account: "iirc",
-        credential: "sasl",
         mechanism: "auto",
+        password: "sasl",
         required: false,
       },
       nicks: ["iirc"],
       password: "pass",
       realname: "iirc",
+      servers: [{ host: "irc.test", port: 6697, tls: true }],
       username: "iirc",
     });
 
@@ -241,16 +241,16 @@ describe("the Credentials a Configuration names", () => {
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
-      ircds: [{ host: "irc.test", port: 6697, tls: true }],
       login: {
         _tag: "Service",
         account: "iirc",
-        credential: "nickserv",
+        password: "nickserv",
         service: "NickServ",
         wait: 5,
       },
       nicks: ["iirc"],
       realname: "iirc",
+      servers: [{ host: "irc.test", port: 6697, tls: true }],
       username: "iirc",
     });
 
@@ -263,10 +263,10 @@ const serviceLogin = (service: string, account = "acct") => ({
   declined: [],
   enabled: true,
   fallbackEncoding: "windows-1252",
-  ircds: [{ host: "irc.test", port: 6697, tls: true }],
-  login: { _tag: "Service", account, credential: "pw", service, wait: 5 },
+  login: { _tag: "Service", account, password: "pw", service, wait: 5 },
   nicks: ["iirc"],
   realname: "iirc",
+  servers: [{ host: "irc.test", port: 6697, tls: true }],
   username: "iirc",
 });
 

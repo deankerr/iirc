@@ -248,7 +248,7 @@
 
 /*
  * With no columns, the Previews run the Timeline's width under the words: in a Timeline too
- * narrow for columns, and under `ui.timeline.layout` inline or stacked, as the Timeline's
+ * narrow for columns, and under `ui.conversation.layout` inline or stacked, as the Timeline's
  * `data-line` says.
  */
 :global([data-line]) .previews {

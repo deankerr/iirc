@@ -138,7 +138,7 @@ describe("what a draft ran", () => {
 
     expect([asked.ran, confirm(asked.state, channel, []).ran]).toStrictEqual([
       [],
-      ["command:timeline.next"],
+      ["command:conversation.next"],
     ]);
   });
 });
@@ -205,7 +205,7 @@ describe("submitting", () => {
       "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.";
 
     const oper =
-      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
 
     expect([
       refusedOne("/quote PASS one"),
@@ -1133,7 +1133,7 @@ describe("a command started over a draft", () => {
       answering: reply,
       aside: undefined,
       history: ["/next"],
-      ran: ["command:timeline.next"],
+      ran: ["command:conversation.next"],
       recalled: "/next",
       text: "hello",
     });

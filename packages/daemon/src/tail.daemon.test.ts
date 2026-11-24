@@ -82,7 +82,7 @@ describe("the Tail, through a Daemon", () => {
       Effect.gen(function* () {
         yield* api.networks.configure({
           params: { network },
-          payload: configured({ ircds: [{ host: loopback, port: freePort(), tls: false }] }),
+          payload: configured({ servers: [{ host: loopback, port: freePort(), tls: false }] }),
           query: {},
         });
 
@@ -107,14 +107,14 @@ describe("the Tail, through a Daemon", () => {
           Stream.takeUntil((event) => {
             seen.push(event);
 
-            return changed(lineOf(event), "timeline.timeFormat");
+            return changed(lineOf(event), "conversation.timeFormat");
           }),
           // The start line is held, so the stream is open once it is seen, and this
           // line is logged after, so it can only arrive as it is logged.
           Stream.tap((event) =>
             lineOf(event)?.n === 1
               ? api.ui.set({
-                  params: { option: "timeline.timeFormat" },
+                  params: { option: "conversation.timeFormat" },
                   payload: { value: "none" },
                   query: {},
                 })
@@ -149,7 +149,7 @@ describe("the Tail, through a Daemon", () => {
         // Two lines logged after the last the Frontend saw, one before it follows, and
         // one as it follows.
         yield* api.ui.set({
-          params: { option: "timeline.timeFormat" },
+          params: { option: "conversation.timeFormat" },
           payload: { value: "none" },
           query: {},
         });

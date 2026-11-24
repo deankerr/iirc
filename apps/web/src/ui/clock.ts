@@ -1,5 +1,5 @@
 /**
- * The Owner's clock: how a time of day is drawn, as `ui.timeline.timeFormat` says, in the device's own
+ * The Owner's clock: how a time of day is drawn, as `ui.conversation.timeFormat` says, in the device's own
  * language and time zone, which only a view reads. Every time of day the web frontend draws
  * comes from here, so no two places can disagree on the form.
  *
@@ -59,7 +59,7 @@ const datedClocks: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
 };
 
 /**
- * The format that draws a date and a time of day, as `ui.timeline.timeFormat` says: the day, the month,
+ * The format that draws a date and a time of day, as `ui.conversation.timeFormat` says: the day, the month,
  * and the year, then the clock. Where a time shows beyond a line's own, such as on hover, a
  * search result, a topic's, or a signon, it is this.
  * @param shown - How a line's time shows.
@@ -68,7 +68,7 @@ const datedClocks: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
 export const datedClockFor = (shown: TimeShown): Intl.DateTimeFormat => datedClocks[formOf(shown)];
 
 /**
- * The format that draws a time of day, as `ui.timeline.timeFormat` says.
+ * The format that draws a time of day, as `ui.conversation.timeFormat` says.
  * @param shown - How a line's time shows.
  * @returns The format, which is `HH:mm`'s for `none`.
  */

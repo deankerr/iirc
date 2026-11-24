@@ -40,7 +40,7 @@ export const oper = (run: Run): void => {
     return;
   }
 
-  sendSecret(run, { _tag: "Oper", credential: login.credential, name: login.name });
+  sendSecret(run, { _tag: "Oper", credential: login.password, name: login.name });
   awaiting(run, true);
 };
 

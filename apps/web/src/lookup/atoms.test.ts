@@ -214,7 +214,7 @@ describe("a Lookup", () => {
     ]);
   });
 
-  it("shows a signon in the form ui.timeline.timeFormat gives, as HH:mm under none", async () => {
+  it("shows a signon in the form ui.conversation.timeFormat gives, as HH:mm under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const signon = new Date(2026, 10, 15, 15, 7, 9);
 
@@ -232,7 +232,7 @@ describe("a Lookup", () => {
     await until(registry, paneCard("p0"), (shown) => shown?.body._tag === "Profiles");
 
     const drawn = (time: TimeShown) => {
-      registry.set(deviceUi, { "timeline.timeFormat": time });
+      registry.set(deviceUi, { "conversation.timeFormat": time });
       const card = registry.get(paneCard("p0"));
 
       return card?.body._tag === "Profiles" ? card.body.profiles[0]?.signon : undefined;

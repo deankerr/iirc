@@ -14,7 +14,7 @@ const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\
 
 const opering = configured({
   channels: [{ name: "#iirc" }],
-  oper: { _tag: "Login", credential: CredentialName.make("operpw"), name: "admin" },
+  oper: { _tag: "Login", name: "admin", password: CredentialName.make("operpw") },
 });
 
 const opened = lines(
@@ -237,7 +237,7 @@ describe("an operator login", () => {
       login: {
         _tag: "Service",
         account: "acct",
-        credential: CredentialName.make("pw"),
+        password: CredentialName.make("pw"),
         service: "NickServ",
         wait: 5,
       },

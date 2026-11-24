@@ -114,7 +114,7 @@ export const addressFor = (state: State, ircd: IrcdAddress, at: Instant): IrcdAd
 };
 
 // Sets or removes one host's policy. No policy that holds is ever dropped to make room:
-// only the hosts of Connections the Client dialled, from the Owner's \`ircds\`, have one.
+// only the hosts of Connections the Client dialled, from the Owner's \`servers\`, have one.
 const withPolicy = (state: State, key: string, policy: StsPolicy | undefined): State => {
   const policies = new Map(state.policies);
 

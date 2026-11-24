@@ -883,7 +883,7 @@ export const sendOwnStart = (run: Run): void => {
     send(run, mode(session.nick, [configuration.userModes]), "MODE");
   }
 
-  for (const text of configuration.lines) {
+  for (const text of configuration.commands) {
     const planned = rawLines(run, { _tag: "Raw", line: text });
 
     if (planned === undefined) {

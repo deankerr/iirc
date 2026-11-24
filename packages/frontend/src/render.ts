@@ -1181,12 +1181,12 @@ const failedParts = (
   content: ItemContent & { readonly _tag: "ConnectionFailed" },
   network: NetworkId
 ): readonly Part[] => {
-  const ircds: Kind = { _tag: "Ircds" };
+  const servers: Kind = { _tag: "Ircds" };
   const instead = mismatchedTls(content);
 
   const failed = [
     words("Could not connect to "),
-    { _tag: "Name", text: contained(showText(ircds, [content.ircd])) } as const,
+    { _tag: "Name", text: contained(showText(servers, [content.ircd])) } as const,
     words(`: ${endReason(content.reason)}`),
   ];
 
@@ -1201,7 +1201,7 @@ const failedParts = (
     words(`. Port ${instead.port} is usually ${usually}: try `),
     {
       _tag: "Command",
-      text: contained(`/set ${optionName(network, ["ircds"])} ${showText(ircds, [instead])}`),
+      text: contained(`/set ${optionName(network, ["servers"])} ${showText(servers, [instead])}`),
     },
   ];
 };

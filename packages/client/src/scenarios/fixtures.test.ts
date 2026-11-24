@@ -32,20 +32,20 @@ const fixtures = [
     "ergo/first-features",
     ergoFeatures,
     configured({
-      ircds: [ergo(6697, true)],
       login: {
         _tag: "Sasl",
         account: "iirc",
-        credential: CredentialName.make("iirc"),
         mechanism: "plain",
+        password: CredentialName.make("iirc"),
         required: true,
       },
+      servers: [ergo(6697, true)],
     }),
   ],
-  ["ergo/floor", ergoFloor, configured({ ircds: [ergo(6667, false)] })],
-  ["ngircd/first-features", ngircdFeatures, configured({ ircds: [ngircd] })],
-  ["ngircd/floor", ngircdFloor, configured({ ircds: [ngircd] })],
-  ["hybrid/watch", hybridWatch, configured({ ircds: [hybrid] })],
+  ["ergo/floor", ergoFloor, configured({ servers: [ergo(6667, false)] })],
+  ["ngircd/first-features", ngircdFeatures, configured({ servers: [ngircd] })],
+  ["ngircd/floor", ngircdFloor, configured({ servers: [ngircd] })],
+  ["hybrid/watch", hybridWatch, configured({ servers: [hybrid] })],
 ] as const;
 
 // The transcript up to the first line that starts with the marker, as a peer's comment
@@ -186,8 +186,8 @@ const login = configured({
   login: {
     _tag: "Sasl",
     account: "iirc",
-    credential: CredentialName.make("pw"),
     mechanism: "plain",
+    password: CredentialName.make("pw"),
     required: true,
   },
 });
@@ -278,7 +278,7 @@ describe("a long scenario with every Feature on", () => {
 describe("the recorded WATCH Session", () => {
   it("tells a partner coming and going, as MONITOR's would", () => {
     const played = replay(client, {
-      configuration: configured({ ircds: [hybrid] }),
+      configuration: configured({ servers: [hybrid] }),
       transcript: hybridWatch,
     });
 

@@ -210,7 +210,7 @@ const answer = (attempt: Attempt, mechanism: Mechanism): Effects<Exchange> => {
     return { own: { _tag: "Sent" }, send: line("+") };
   }
 
-  const { account, credential } = attempt;
+  const { account, password: credential } = attempt;
 
   if (mechanism === "PLAIN") {
     return {
@@ -254,7 +254,7 @@ const readScram = (
         send: [
           {
             _tag: "Secret",
-            line: { _tag: "ScramFinal", credential: attempt.credential, serverFirst: read },
+            line: { _tag: "ScramFinal", credential: attempt.password, serverFirst: read },
           },
         ],
       }

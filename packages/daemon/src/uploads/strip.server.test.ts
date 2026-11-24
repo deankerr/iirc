@@ -104,11 +104,11 @@ const serve = Effect.gen(function* () {
   yield* put("/api/credentials/bucket-secret", "s3cr3t", 204);
 
   for (const [option, value] of [
-    ["store.s3.endpoint", "http://bucket.test"],
-    ["store.s3.bucket", "uploads"],
-    ["store.s3.region", "us-east-1"],
-    ["store.s3.accessKeyId", "bucket-key-id"],
-    ["store.s3.secretAccessKey", "bucket-secret"],
+    ["storage.s3.endpoint", "http://bucket.test"],
+    ["storage.s3.bucket", "uploads"],
+    ["storage.s3.region", "us-east-1"],
+    ["storage.s3.accessKeyId", "bucket-key-id"],
+    ["storage.s3.secretAccessKey", "bucket-secret"],
     ["uploads.publicUrl", publicUrl],
   ] as const) {
     yield* put(`/api/options/${option}`, value, 200);

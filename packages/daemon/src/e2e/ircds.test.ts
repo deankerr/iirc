@@ -148,8 +148,8 @@ const stopGracefully = (ircd: Ircd, nick: string) =>
 
     const configuration = configured({
       channels: [{ name: channel }],
-      ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
       nicks: ["iirc"],
+      servers: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
     });
 
     const peer = yield* Effect.promise(
@@ -224,8 +224,8 @@ const masksOn = (ircd: Ircd) =>
       params: { network },
       payload: configured({
         channels: [{ name: ours }, { name: theirs }],
-        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
         nicks: ["lister"],
+        servers: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
       }),
       query: {},
     });
@@ -312,8 +312,8 @@ const peopleOn = (ircd: Ircd) =>
       params: { network },
       payload: configured({
         channels: [{ name: ours }],
-        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
         nicks: ["asker"],
+        servers: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
       }),
       query: {},
     });
@@ -396,8 +396,8 @@ const directoryOn = (ircd: Ircd) =>
     yield* api.networks.configure({
       params: { network },
       payload: configured({
-        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
         nicks: ["lister"],
+        servers: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
       }),
       query: {},
     });
@@ -480,8 +480,8 @@ describe("ngircd, on the floor", () => {
   const floor = () =>
     configured({
       channels: [{ name: channel }],
-      ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
       nicks: ["iirc"],
+      servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
     });
 
   // Opers with a Credential set through the API, and reads the answer from News. The
@@ -501,9 +501,9 @@ describe("ngircd, on the floor", () => {
       yield* api.networks.configure({
         params: { network },
         payload: configured({
-          ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           nicks: [nick],
-          oper: { _tag: "Login", credential, name: ngircdOperName },
+          oper: { _tag: "Login", name: ngircdOperName, password: credential },
+          servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
         }),
         query: {},
       });
@@ -839,8 +839,8 @@ describe("ngircd, on the floor", () => {
           params: { network },
           payload: configured({
             channels: [{ name: acting }],
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1116,8 +1116,8 @@ describe("ngircd, paced and stopped gracefully", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1268,15 +1268,15 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: "ergo.test", port: tlsPort, tls: true }],
             login: {
               _tag: "Sasl",
               account: "iirc",
-              credential,
               mechanism: "plain",
+              password: credential,
               required: true,
             },
             nicks: ["iirc"],
+            servers: [{ host: "ergo.test", port: tlsPort, tls: true }],
           }),
           query: {},
         });
@@ -1438,15 +1438,15 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             login: {
               _tag: "Sasl",
               account: "scramacct",
-              credential,
               mechanism: "auto",
+              password: credential,
               required: true,
             },
             nicks: ["scramnick"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1534,15 +1534,15 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             login: {
               _tag: "Service",
               account: "svcacct",
-              credential,
+              password: credential,
               service: "NickServ",
               wait: 5,
             },
             nicks: ["servicenick"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1617,8 +1617,8 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1723,8 +1723,8 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             whoOnJoin: true,
           }),
           query: {},
@@ -1781,8 +1781,8 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           }),
           query: {},
         });
@@ -1891,7 +1891,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
 
         yield* daemon.api.networks.configure({
           params: { network },
-          payload: configured({ ircds: [{ host: "ergo.test", port: tlsPort, tls: true }] }),
+          payload: configured({ servers: [{ host: "ergo.test", port: tlsPort, tls: true }] }),
           query: {},
         });
 

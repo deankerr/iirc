@@ -152,10 +152,10 @@ describe("the web frontend on iirc daemon --web", () => {
             declined: [],
             enabled: false,
             fallbackEncoding: "windows-1252",
-            ircds: [{ host: "127.0.0.1", port: 1, tls: false }],
             login: { _tag: "None" },
             nicks: ["iirc"],
             realname: "iirc",
+            servers: [{ host: "127.0.0.1", port: 1, tls: false }],
             username: "iirc",
           }),
           headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
@@ -493,12 +493,12 @@ describe("the web frontend on iirc daemon --web", () => {
         await composer.press("ArrowUp");
         const recalled = await composer.inputValue();
 
-        // With ui.composer.enter newline on this device, Enter begins a line, a send button shows, and
+        // With ui.input.enter newline on this device, Enter begins a line, a send button shows, and
         // Mod+Enter sends both lines.
         const sendButton = page.getByRole("button", { exact: true, name: "send" });
         const buttonBefore = await sendButton.count();
 
-        await composer.fill("/set -device ui.composer.enter newline");
+        await composer.fill("/set -device ui.input.enter newline");
         await composer.press("Enter");
         await sendButton.waitFor();
         await composer.fill("one");

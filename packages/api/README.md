@@ -52,7 +52,7 @@ Every route is under `/api`. Every one but signing a browser in and out, and ask
 | `PUT /api/ui/{option}?ifSequence=` | Sets one option under `ui` to `{ value }`, for every device. With `ifSequence`, only if it was made from the options in force | `{ sequence }` | `UiChanged`, `JournalFailed` |
 | `DELETE /api/ui/{option}?ifSequence=` | Unsets one, back to its default, likewise | `{ sequence }` | `UiChanged`, `JournalFailed` |
 | `GET /api/ui/changes?after=` | Server-Sent Events of the options under `ui`, whole, each time they change, then live | `changed` and `heartbeat` events |  |
-| `GET /api/options` | The options beyond `ui` in force, by full name, such as `store.s3.bucket`: each one set, or with a default, and none other. The sequence is of the last Change of one, `0` before any | `{ options, sequence }` |  |
+| `GET /api/options` | The options beyond `ui` in force, by full name, such as `storage.s3.bucket`: each one set, or with a default, and none other. The sequence is of the last Change of one, `0` before any | `{ options, sequence }` |  |
 | `PUT /api/options/{option}?ifSequence=` | Sets one to `{ value }`, as for `ui` | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
 | `DELETE /api/options/{option}?ifSequence=` | Unsets one, back to its default or to none, likewise | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
 | `GET /api/options/changes?after=` | Server-Sent Events of them, whole, as for `ui` | `changed` and `heartbeat` events |  |
@@ -100,15 +100,15 @@ Every route can also answer `InvalidRequest` (400), and every route behind the K
 - **Configuration is one `PUT` of the whole of it.** There is no `PATCH`, and a Channel is joined by a `PUT` that names it.
 - **The Schema says what each option is.** A Frontend walks `NetworkConfiguration`, `UiOptions` in `@iirc/api/ui`, and `OwnerOptions` in `@iirc/api/options` to offer every field as an option, with its description, default, and bounds, so a new field needs no work in any Frontend.
 - **The options under `ui` are the Owner's, shared by every device.** A device may override any but those `uiSharedOnly` names, which a Frontend offers no override of, and ignores one a device kept.
-- **The options beyond `ui` are the Owner's too, and no device overrides them.** Each is named in full, such as `store.s3.bucket`, and their sequence is their own, apart from `ui`'s.
-- **A value is parsed by its option's Schema before it is journaled,** so a URL is journaled in the one form it reads as. A key inside a `ui` option's value that the option does not know is dropped, but for `previews.timelines`, which refuses the value.
+- **The options beyond `ui` are the Owner's too, and no device overrides them.** Each is named in full, such as `storage.s3.bucket`, and their sequence is their own, apart from `ui`'s.
+- **A value is parsed by its option's Schema before it is journaled,** so a URL is journaled in the one form it reads as. A key inside a `ui` option's value that the option does not know is dropped, but for `previews.conversations`, which refuses the value.
 - **An option that needs a secret names a Credential,** never holds its value.
 - **A name or a value an option under `ui` had before is still read where it was kept.** `uiNameKept` and `uiValueKept` read a journaled Change, or an override a device kept, as the option is now. A request names an option only by the name it has now.
 - **The options are streamed whole.** Each `changed` event is every option in force under its roots, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
 
 ### Uploads
 
-- **Uploads are on exactly when the Store and `uploads.publicUrl` are set:** `store.s3.endpoint`, `bucket`, `region`, and both keys. Otherwise the status is `Off`, naming each that is not set, and an upload is `UploadsOff`.
+- **Uploads are on exactly when the Store and `uploads.publicUrl` are set:** `storage.s3.endpoint`, `bucket`, `region`, and both keys. Otherwise the status is `Off`, naming each that is not set, and an upload is `UploadsOff`.
 - **An upload's body is the file.** It is never multipart, its `Content-Type` is never read, and its type is read from its bytes. It has at least one byte.
 - **An upload past `uploads.maxSize` is cut off unread,** as `UploadTooLarge`, and one that would take the distinct bytes live Uploads hold past `uploads.maxTotal` is `StoreFull`. Nothing is kept, and nothing is evicted to make room.
 - **A JPEG, PNG, GIF, WebP, HEIC, AVIF, MP4, or MOV is kept without its metadata,** so `size` and `hash` are of the bytes kept. Every other type is kept as it was sent.
@@ -135,7 +135,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the K
 - **A Preview is fetched by the Daemon, never the browser,** and only once a Frontend asks for a Message's Previews.
 - **A Message's Previews are its first three distinct `http` or `https` links,** in its order, one item each. A Message with none answers an empty list.
 - **An ask fetches a link the Daemon does not hold, or holds too old.** An ask while it is being fetched answers `Pending` and starts nothing.
-- **A Direct Message waits for a press.** With no entry in `ui.previews.timelines`, a link of its not yet fetched answers `WaitingForPress` until `press` fetches it. A press of any other link is `NotWaiting`.
+- **A Direct Message waits for a press.** With no entry in `ui.previews.conversations`, a link of its not yet fetched answers `WaitingForPress` until `press` fetches it. A press of any other link is `NotWaiting`.
 - **An item is its link's, wherever it is posted.** Its `id` is the same for one link in any Message and for any Frontend, and opaque.
 - **A Preview's `image` is `null` or an image the Daemon kept,** served at `GET /api/previews/images/{hash}`, with its `dimensions` where its bytes state them, so a Frontend can reserve its box.
 - **A video or a sound is streamed through the Daemon, and kept nowhere.** `GET /api/previews/{id}/stream` plays only the `stream` the Daemon recorded for a ready Preview of kind `video` or `audio`, and passes on a single `Range`. A Timeline whose mode is `text` is `PreviewsText`.
@@ -229,7 +229,7 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `UiChanged` | 409 | A change of an option under `ui` was made from other options than those in force: another Change was journaled since, at `sequence`, the last. Nothing was journaled. |
 | `OptionsChanged` | 409 | The same, for an option beyond `ui`. |
 | `UnknownMessage` | 404 | No Message stands at that position in the Timeline: nothing does, or an Activity does. |
-| `PreviewsOff` | 409 | The Timeline's mode is `off`, its own in `ui.previews.timelines` or else `ui.previews`, so nothing was fetched. |
+| `PreviewsOff` | 409 | The Timeline's mode is `off`, its own in `ui.previews.conversations` or else `ui.previews`, so nothing was fetched. |
 | `NotWaiting` | 409 | The link pressed is past the Message's previewable links, or is kept, being fetched, or in a Timeline that does not wait, so nothing was fetched. |
 | `PreviewsText` | 409 | The Timeline's mode is `text`, so no video or sound is streamed. |
 | `UnknownStream` | 404 | No link of the Message has a ready Preview of a video or a sound with that id. |

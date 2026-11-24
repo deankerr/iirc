@@ -54,7 +54,7 @@ const fixedRandom = (): Random.Random => {
 };
 
 const configuration = configured({
-  login: { _tag: "Sasl", account: "user", credential, mechanism: "auto", required: true },
+  login: { _tag: "Sasl", account: "user", mechanism: "auto", password: credential, required: true },
   nicks: ["user"],
 });
 

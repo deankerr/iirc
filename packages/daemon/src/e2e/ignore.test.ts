@@ -118,8 +118,8 @@ describe("ngircd, ignoring by mask", () => {
           configured({
             channels: [{ name: channel }],
             ignores: ignores.map((mask) => IgnoreMask.make(mask)),
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           });
 
         // A mask that matches Self too, which never hides what Self says.

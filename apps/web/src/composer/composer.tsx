@@ -1,13 +1,13 @@
 /**
  * The composer under the Panes, the focused Pane's Timeline's or, with none open, one where
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
- * Enter sends, or begins a new line, as `ui.composer.enter` says, and the other is Enter with a
+ * Enter sends, or begins a new line, as `ui.input.enter` says, and the other is Enter with a
  * modifier; where Enter begins a new line a button sends too, as a phone's keyboard has no
  * modifier. Up and Down recall what was sent from the first and last lines. What it can
  * complete is listed above it, a listbox it owns while the textarea keeps the focus: as a
  * draft that starts with `/` is typed, or on Tab for anything else, a nick at the start of
- * a line followed by `ui.composer.nickSuffix`. Tab and the arrows move through it while it is open. Spelling is checked as
- * `ui.composer.spellcheck` says. What a draft answers is shown dim above its line, cut to the line,
+ * a line followed by `ui.input.nickSuffix`. Tab and the arrows move through it while it is open. Spelling is checked as
+ * `ui.input.spellcheck` says. What a draft answers is shown dim above its line, cut to the line,
  * with a button that drops it. Escape lets go of an error or a confirmation, or, with
  * neither, of what the draft answers, or, with none, closes what stands in front of the focused Pane's Timeline, the options, the
  * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
@@ -134,7 +134,7 @@ const AwayMark = ({ network }: { readonly network: string | undefined }) => {
 const CommandButton = () => {
   const start = useAtomSet(perform);
   const keymap = useAtomValue(keymapState);
-  const keys = chordsFor(keymap, "composer.focus", "/").map((chord) => showChord(chord, platform));
+  const keys = chordsFor(keymap, "input.focus", "/").map((chord) => showChord(chord, platform));
 
   return (
     <IconButton

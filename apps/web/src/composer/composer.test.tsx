@@ -310,8 +310,8 @@ describe("the Composer's habits", () => {
     }).toStrictEqual({ button: null, left: false, said: ["hello"], spellcheck: "true" });
   });
 
-  it("under ui.composer.enter newline, leaves Enter to begin a line and sends on Ctrl+Enter", async () => {
-    const { container, daemon } = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, leaves Enter to begin a line and sends on Ctrl+Enter", async () => {
+    const { container, daemon } = await signedIn({ "input.enter": "newline" });
 
     await typeIn(container, "one");
 
@@ -337,8 +337,8 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("draws a send button only under ui.composer.enter newline, which sends as Ctrl+Enter does", async () => {
-    const { container, daemon, registry } = await signedIn({ "composer.enter": "newline" });
+  it("draws a send button only under ui.input.enter newline, which sends as Ctrl+Enter does", async () => {
+    const { container, daemon, registry } = await signedIn({ "input.enter": "newline" });
     const button = sendButton(container);
 
     await typeIn(container, "from a phone");
@@ -349,7 +349,7 @@ describe("the Composer's habits", () => {
     await settled(() => daemon.says.length === 1);
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.enter": "send" });
+      registry.set(deviceUi, { "input.enter": "send" });
       await Promise.resolve();
     });
 
@@ -361,7 +361,7 @@ describe("the Composer's habits", () => {
   });
 
   it("names the chord that sends in a paste's confirmation, which that chord or the button confirms", async () => {
-    const { container, daemon, registry } = await signedIn({ "composer.enter": "newline" });
+    const { container, daemon, registry } = await signedIn({ "input.enter": "newline" });
     const lines = ["1", "2", "3", "4", "5", "6"];
 
     await typeIn(container, lines.join("\n"));
@@ -374,7 +374,7 @@ describe("the Composer's habits", () => {
     const newline = alert();
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.enter": "send" });
+      registry.set(deviceUi, { "input.enter": "send" });
       await Promise.resolve();
     });
 
@@ -393,8 +393,8 @@ describe("the Composer's habits", () => {
     }).toStrictEqual({ newline: true, plainEnter: false, said: lines, send: true });
   });
 
-  it("under ui.composer.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
-    const shown = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
+    const shown = await signedIn({ "input.enter": "newline" });
     const secret = "hunter2-held-by-the-vault";
     const typed = `hello\n/set network.libera.password ${secret}`;
 
@@ -427,8 +427,8 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("under ui.composer.enter newline, lets go of a Credential in any line at once on the send button, and sends nothing", async () => {
-    const shown = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, lets go of a Credential in any line at once on the send button, and sends nothing", async () => {
+    const shown = await signedIn({ "input.enter": "newline" });
     const secret = "hunter2-held-by-the-vault";
 
     await typeIn(shown.container, `/set network.libera.password ${secret}\nhello`);
@@ -450,12 +450,12 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("checks spelling only as ui.composer.spellcheck says", async () => {
-    const { container, registry } = await signedIn({ "composer.spellcheck": false });
+  it("checks spelling only as ui.input.spellcheck says", async () => {
+    const { container, registry } = await signedIn({ "input.spellcheck": false });
     const off = composerOf(container).getAttribute("spellcheck");
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.spellcheck": true });
+      registry.set(deviceUi, { "input.spellcheck": true });
       await Promise.resolve();
     });
 
@@ -465,8 +465,8 @@ describe("the Composer's habits", () => {
     ]);
   });
 
-  it("puts ui.composer.nickSuffix after a nick completed at the start of a line", async () => {
-    const { container } = await signedIn({ "composer.nickSuffix": ", " });
+  it("puts ui.input.nickSuffix after a nick completed at the start of a line", async () => {
+    const { container } = await signedIn({ "input.nickSuffix": ", " });
 
     await typeIn(container, "pe");
     await pressIn(container, "Tab");

@@ -246,33 +246,36 @@ describe("reading a line", () => {
     const named = [{ kind: "Direct", name: "Bob", network, timeline: held }] as const;
 
     expect({
-      channel: interpret("/close-timeline", inChannel),
+      channel: interpret("/close-conversation", inChannel),
       // A Direct Message that no longer follows its partner has no Target, and closes by its id.
-      detached: interpret("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
-      direct: interpret("/close-timeline", inDirect),
-      list: message("/close-timeline #a,#b", inChannel),
+      detached: interpret("/close-conversation", {
+        ...inDirect,
+        focus: focus("Direct", "x", true),
+      }),
+      direct: interpret("/close-conversation", inDirect),
+      list: message("/close-conversation #a,#b", inChannel),
       // A name is a Target, which the Network's Client resolves by its own naming, held or not.
-      named: interpret("/close-timeline  bob ", { ...inNetwork, named }),
-      network: message("/close-timeline", inNetwork),
-      notHeld: interpret("/close-timeline @#elsewhere", { ...inNetwork, named }),
+      named: interpret("/close-conversation  bob ", { ...inNetwork, named }),
+      network: message("/close-conversation", inNetwork),
+      notHeld: interpret("/close-conversation @#elsewhere", { ...inNetwork, named }),
       // Offline, it is closed all the same: the Daemon journals it.
-      offline: interpret("/close-timeline", offline),
-      own: interpret("/close-timeline libera", {
+      offline: interpret("/close-conversation", offline),
+      own: interpret("/close-conversation libera", {
         ...inChannel,
         named: [{ kind: "Network", name: "libera", network, timeline: held }],
       }),
       // `/close` closes a Pane, and never a Timeline.
       pane: message("/close", inChannel),
       // What a removed Network kept is closed too.
-      removed: interpret("/close-timeline", { ...inChannel, focus: removedFocus }),
+      removed: interpret("/close-conversation", { ...inChannel, focus: removedFocus }),
     }).toStrictEqual({
       channel: closing(timeline),
       detached: closing(timeline),
       direct: closing(timeline),
-      list: "Close one conversation at a time. /close-timeline [#channel|nick]",
+      list: "Close one conversation at a time. /close-conversation [#channel|nick]",
       named: closingTarget("bob"),
       network:
-        "A network's own conversation can't be closed. Name a channel or nick, or open one. /close-timeline [#channel|nick]",
+        "A network's own conversation can't be closed. Name a channel or nick, or open one. /close-conversation [#channel|nick]",
       notHeld: closingTarget("@#elsewhere"),
       offline: closing(timeline),
       own: closingTarget("libera"),
@@ -1276,7 +1279,7 @@ describe("acting on a network", () => {
     ]).toStrictEqual([
       "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
       "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
-      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
       true,
       true,
       true,
@@ -1294,8 +1297,8 @@ describe("acting on a network", () => {
       typesCredential("/operator x", []),
       typesCredential("//oper admin pw", []),
     ]).toStrictEqual([
-      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
-      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
       true,
       true,
       false,

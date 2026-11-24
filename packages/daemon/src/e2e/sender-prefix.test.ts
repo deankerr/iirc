@@ -66,8 +66,8 @@ describe("ergo, a Message's sender prefix", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           }),
           query: {},
         });

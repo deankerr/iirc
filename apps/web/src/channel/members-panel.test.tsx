@@ -408,7 +408,7 @@ describe("a topic's time", () => {
     }
   });
 
-  it("is drawn as ui.timeline.timeFormat says, HH:mm under none", async () => {
+  it("is drawn as ui.conversation.timeFormat says, HH:mm under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const set = new Date(2026, 10, 15, 15, 7, 9);
     const { registry } = await signedIn(set.getTime());
@@ -422,7 +422,7 @@ describe("a topic's time", () => {
 
     const drawn = async (time: TimeShown) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.timeFormat": time });
+        registry.set(deviceUi, { "conversation.timeFormat": time });
         await Promise.resolve();
       });
 
@@ -620,7 +620,7 @@ describe("a Pane's members", () => {
     await settled(() => daemon.uiChanges.length === 2);
     restore();
 
-    expect({ meanwhile, written: daemon.ui.options["timeline.nickWidth"] }).toStrictEqual({
+    expect({ meanwhile, written: daemon.ui.options["conversation.nickWidth"] }).toStrictEqual({
       meanwhile: "19",
       written: 19,
     });

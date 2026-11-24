@@ -412,8 +412,8 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = widestLine();
 
-    await type("/set ui.timeline.maxWidth 72");
-    await until(registry, uiInEffect, (ui) => ui["timeline.maxWidth"] === 72);
+    await type("/set ui.conversation.maxWidth 72");
+    await until(registry, uiInEffect, (ui) => ui["conversation.maxWidth"] === 72);
     const shared = widestLine();
 
     stop();
@@ -426,12 +426,12 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = columnWidths();
 
-    await type("/set ui.timeline.nickWidth 24");
+    await type("/set ui.conversation.nickWidth 24");
     await type("/set ui.members.width 30");
     await until(
       registry,
       uiInEffect,
-      (ui) => ui["timeline.nickWidth"] === 24 && ui["members.width"] === 30
+      (ui) => ui["conversation.nickWidth"] === 24 && ui["members.width"] === 30
     );
     const set = columnWidths();
 
@@ -452,8 +452,8 @@ describe("themes", () => {
     await until(registry, uiInEffect, (ui) => ui["font.lineHeight"] === 1.8);
     const leading = { leading: lineHeight(), spacing: rowSpacing() };
 
-    await type("/set ui.timeline.spacing 1");
-    await until(registry, uiInEffect, (ui) => ui["timeline.spacing"] === 1);
+    await type("/set ui.conversation.spacing 1");
+    await until(registry, uiInEffect, (ui) => ui["conversation.spacing"] === 1);
     const spaced = { leading: lineHeight(), spacing: rowSpacing() };
 
     stop();

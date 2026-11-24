@@ -105,8 +105,8 @@ describe("ngircd, a Timeline read and closed by its id", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           }),
           query: {},
         });

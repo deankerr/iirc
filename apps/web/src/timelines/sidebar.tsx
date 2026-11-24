@@ -762,7 +762,7 @@ const TailRow = () => {
       selectedKeys={chosen._tag === "Tail" ? ["Tail"] : []}
       selectionMode="single"
     >
-      <ViewItem command="tail.open" name="logs" pane={others.get("Tail")} view="Tail" />
+      <ViewItem command="logs.open" name="logs" pane={others.get("Tail")} view="Tail" />
     </ListBox>
   );
 };

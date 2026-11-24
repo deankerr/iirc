@@ -21,10 +21,10 @@ export const startsAsFirstNick = { startsAs: "FirstNick" } as const;
 /** One Ircd to reach a Network through. */
 export const IrcdAddress = Schema.Struct({
   host: Schema.String.check(Schema.isNonEmpty()).annotate({
-    description: "The Ircd's host name or IP address.",
+    description: "The server's host name or IP address.",
   }),
   port: Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 1 })).annotate({
-    description: "The Ircd's port.",
+    description: "The server's port.",
   }),
   tls: Schema.Boolean.annotate({ description: "Whether to connect over TLS." }),
 }).annotate({ identifier: "IrcdAddress" });
@@ -54,7 +54,7 @@ export const Login = Schema.TaggedUnion({
   External: {
     required: Schema.Boolean.annotate({
       default: false,
-      description: "Whether a failed login ends the Connection rather than going on without it.",
+      description: "Whether a failed login ends the connection rather than going on without it.",
     }),
   },
   None: {},
@@ -62,9 +62,6 @@ export const Login = Schema.TaggedUnion({
     account: Schema.String.annotate({
       description: "The account to log in to with SASL.",
       ...startsAsFirstNick,
-    }),
-    credential: CredentialName.annotate({
-      description: "The Credential holding the account's password.",
     }),
     /**
      * A new Network starts with `auto`. A `Configured` written before the field existed
@@ -83,22 +80,25 @@ export const Login = Schema.TaggedUnion({
       .annotate({
         default: "auto",
         description:
-          "The SASL mechanism: auto, which uses scram-sha-256 where the Ircd lists it and plain otherwise, or plain or scram-sha-256 alone. A scram-sha-256 login never sends the password, and one that fails never falls back to plain.",
+          "The SASL mechanism: auto, which uses scram-sha-256 where the server lists it and plain otherwise, or plain or scram-sha-256 alone. A scram-sha-256 login never sends the password, and one that fails never falls back to plain.",
       }),
+    password: CredentialName.annotate({
+      description: "The secret holding the account's password.",
+    }),
     required: Schema.Boolean.annotate({
       default: false,
-      description: "Whether a failed login ends the Connection rather than going on without it.",
+      description: "Whether a failed login ends the connection rather than going on without it.",
     }),
   },
   Service: {
     account: Schema.optionalKey(
       IdentifyWord.annotate({
         description:
-          "The account to log in to by telling the service, one word. Left out, Self tells the service the password alone, which logs in to the account of the nick Self holds.",
+          "The account to log in to by telling the service, one word. Left out, you tell the service the password alone, which logs in to the account of the nick you hold.",
       })
     ),
-    credential: CredentialName.annotate({
-      description: "The Credential holding the account's password.",
+    password: CredentialName.annotate({
+      description: "The secret holding the account's password.",
     }),
     service: ServiceTarget.annotate({
       default: "NickServ",
@@ -107,7 +107,7 @@ export const Login = Schema.TaggedUnion({
     wait: Schema.Int.check(Schema.isBetween({ maximum: maxServiceWait, minimum: 0 })).annotate({
       default: 5,
       description:
-        "How many seconds Channels wait for the Ircd to say Self is logged in, before they are joined anyway.",
+        "How many seconds channels wait for the server to say you are logged in, before they are joined anyway.",
     }),
   },
 });
@@ -130,12 +130,12 @@ export const saslRequired = (login: Login | undefined): boolean =>
  */
 export const Oper = Schema.TaggedUnion({
   Login: {
-    credential: CredentialName.annotate({
-      description: "The Credential holding the operator's password.",
-    }),
     name: OperName.annotate({
       description: "The operator name to send with OPER, one word.",
       ...startsAsFirstNick,
+    }),
+    password: CredentialName.annotate({
+      description: "The secret holding the operator's password.",
     }),
   },
   None: {},
@@ -154,7 +154,7 @@ export const ClientTls = Schema.TaggedUnion({
   Certificate: {
     certificate: CredentialName.annotate({
       description:
-        "The Credential holding a PEM client certificate and its private key, presented when connecting over TLS.",
+        "The secret holding a PEM client certificate and its private key, presented when connecting over TLS.",
     }),
   },
   None: {},
@@ -168,9 +168,9 @@ const noTls: ClientTls = { _tag: "None" };
 /** A Channel the Owner wants Self in, with its key named as a Credential. */
 export const WantedChannel = Schema.Struct({
   key: Schema.optionalKey(
-    CredentialName.annotate({ description: "The Credential holding the Channel's key." })
+    CredentialName.annotate({ description: "The secret holding the channel's key." })
   ),
-  name: Schema.String.annotate({ description: "The Channel's name, such as #iirc." }),
+  name: Schema.String.annotate({ description: "The channel's name, such as #iirc." }),
 });
 
 /** The decoded form of {@link WantedChannel}. */
@@ -185,7 +185,7 @@ const maxHighlights = 64;
  */
 const Highlights = Schema.Array(
   Schema.String.check(Schema.isMaxLength(maxHighlights)).annotate({
-    description: "A word that makes a Message a Highlight, of at most 64 characters.",
+    description: "A word that makes a message a highlight, of at most 64 characters.",
   })
 ).check(Schema.isMaxLength(maxHighlights));
 
@@ -204,7 +204,7 @@ const maxLines = 16;
 /** A Line written as text, which `/quote` would send. */
 const QuotedLine = Schema.String.check(
   Schema.makeFilter((text: string) =>
-    quoted(text) === undefined ? "must be a Line /quote would send" : true
+    quoted(text) === undefined ? "must be a raw command /quote would send" : true
   )
 );
 
@@ -267,25 +267,41 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: false,
       description:
-        "Whether Self says it is a bot, by setting the bot mode as each Session begins. It is set only where the Ircd names a bot mode.",
+        "Whether to say you are a bot, by setting the bot mode as each connection begins. It is set only where the server names a bot mode.",
     }),
   channels: Schema.Array(WantedChannel).annotate({
     default: [],
-    description: "The Channels to be in, joined on connecting and whenever one is added.",
+    description: "The channels to be in, joined on connecting and whenever one is added.",
   }),
+  /**
+   * Lines the Owner sends as each Session begins. A Journal written before the field
+   * existed holds `Configured` inputs without it, which decode as none.
+   */
+  commands: Schema.optionalKey(Schema.Array(Schema.String))
+    .pipe(
+      Schema.decodeTo(OwnLines, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => [])),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: [],
+      description:
+        "Raw commands to send as each connection begins, written as /quote takes them, in order, after any login and before channels are joined. At most 16. They are kept in the clear, so put no password in one.",
+    }),
   /** Features the Owner has turned off, even where an Ircd offers them. */
   declined: Schema.Array(FeatureName).annotate({
     default: [],
-    description: "Features to leave off, even where an Ircd offers them, such as echo-message.",
+    description: "Features to leave off, even where a server offers them, such as echo-message.",
   }),
   enabled: Schema.Boolean.annotate({
     default: true,
-    description: "Whether to stay connected to the Network.",
+    description: "Whether to stay connected to the network.",
   }),
   /** The WHATWG label to read bytes that are not UTF-8 with, until the Ircd says `UTF8ONLY`. */
   fallbackEncoding: FallbackEncoding.annotate({
     default: "windows-1252",
-    description: "The encoding to read text that is not UTF-8 in, until the Ircd says UTF8ONLY.",
+    description: "The encoding to read text that is not UTF-8 in, until the server says UTF8ONLY.",
   }),
   /**
    * Words that make a Message a Highlight, as Self's nick does. A Journal written before
@@ -301,7 +317,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: [],
       description:
-        "Words that make a Message a Highlight, as Self's nick does, matched as whole words in any case. At most 64, of at most 64 characters each.",
+        "Words that make a message a highlight, as your nick does, matched as whole words in any case. At most 64, of at most 64 characters each.",
     }),
   /**
    * Masks of the Users to ignore. A Journal written before the field existed holds
@@ -319,29 +335,10 @@ export const NetworkConfiguration = Schema.Struct({
       description:
         "Users to ignore, each by a mask such as nick!user@host, in which * and ? match anything. What they say is kept, but not shown, counted, or notified. At most 64.",
     }),
-  ircds: Schema.NonEmptyArray(IrcdAddress).annotate({
-    description: "The Ircds to connect to, tried in turn.",
-  }),
-  /**
-   * Lines the Owner sends as each Session begins. A Journal written before the field
-   * existed holds `Configured` inputs without it, which decode as none.
-   */
-  lines: Schema.optionalKey(Schema.Array(Schema.String))
-    .pipe(
-      Schema.decodeTo(OwnLines, {
-        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => [])),
-        encode: SchemaGetter.passthrough(),
-      })
-    )
-    .annotate({
-      default: [],
-      description:
-        "Lines to send as each Session begins, written as /quote takes them, in order, after any login and before Channels are joined. At most 16. They are kept in the clear, so put no password in one.",
-    }),
   login: Login.annotate({
     default: { _tag: "None" },
     description:
-      "How to log in to an account: none, sasl, external, which uses SASL EXTERNAL by the client certificate and needs tls.certificate, or service, which tells a service such as NickServ. The options under it say the rest.",
+      "How to log in to an account: none, sasl, external, which uses SASL EXTERNAL with the client certificate and needs tls.certificate, or service, which tells a service such as NickServ. The options under it say the rest.",
   }),
   nicks: Schema.NonEmptyArray(Schema.String).annotate({
     description: "The nicks to use, the first preferred and the rest tried in turn.",
@@ -360,16 +357,19 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: noOper,
       description:
-        "Whether to log in as an IRC operator as each Session begins: none, or login, with the options under it.",
+        "Whether to log in as an IRC operator as each connection begins: none, or login, with the options under it.",
     }),
   password: Schema.optionalKey(
     CredentialName.annotate({
-      description: "The Credential holding the Ircd's password, sent as PASS, if it needs one.",
+      description: "The secret holding the server's password, sent as PASS, if it needs one.",
     })
   ),
   realname: Schema.String.annotate({
-    description: "The real name other Users see in WHOIS.",
+    description: "The real name other users see in WHOIS.",
     ...startsAsFirstNick,
+  }),
+  servers: Schema.NonEmptyArray(IrcdAddress).annotate({
+    description: "The servers to connect to, tried in turn.",
   }),
   /**
    * Whether Self presents a client certificate over TLS. A `Configured` written before the
@@ -385,7 +385,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: noTls,
       description:
-        "Whether to present a client certificate when connecting over TLS: none, or certificate, with the Credential under it.",
+        "Whether to present a client certificate when connecting over TLS: none, or certificate, with the secret under it.",
     }),
   /**
    * User modes to set on Self as each Session begins. A Journal written before the field
@@ -401,10 +401,10 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: "",
       description:
-        "User modes to set on Self as each Session begins, such as +ix-w, before any of the Lines are sent. At most 64 characters. Empty sets none.",
+        "User modes to set on you as each connection begins, such as +ix-w, before any raw commands are sent. At most 64 characters. Empty sets none.",
     }),
   username: Schema.String.annotate({
-    description: "The username, the part of Self's mask before the @.",
+    description: "The username, the part of your mask before the @.",
     ...startsAsFirstNick,
   }),
   /**
@@ -422,7 +422,7 @@ export const NetworkConfiguration = Schema.Struct({
     .annotate({
       default: true,
       description:
-        "Whether to ask who is in each Channel on joining it, to learn who is away and who is logged in. Turn it off for a Network whose Channels are so large that asking is rude.",
+        "Whether to ask who is in each channel on joining it, to learn who is away and who is logged in. Turn it off for a network whose channels are so large that asking is rude.",
     }),
 }).check(
   Schema.makeFilter((configuration) =>
@@ -473,9 +473,9 @@ export const declinedToRequest = (
 export const credentialsOf = (configuration: NetworkConfiguration): ReadonlySet<CredentialName> =>
   new Set([
     ...(configuration.password === undefined ? [] : [configuration.password]),
-    ...("credential" in configuration.login ? [configuration.login.credential] : []),
+    ...("password" in configuration.login ? [configuration.login.password] : []),
     ...(configuration.tls._tag === "Certificate" ? [configuration.tls.certificate] : []),
-    ...(configuration.oper._tag === "None" ? [] : [configuration.oper.credential]),
+    ...(configuration.oper._tag === "None" ? [] : [configuration.oper.password]),
     ...configuration.channels.flatMap((channel) =>
       channel.key === undefined ? [] : [channel.key]
     ),

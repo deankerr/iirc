@@ -681,7 +681,7 @@ describe("closing a Timeline from the sidebar", () => {
     fake.daemon.joined.set("libera", ["#iirc"]);
     const registry = await signedIn(undefined, fake);
 
-    // What `/close-timeline @#iirc` asks.
+    // What `/close-conversation @#iirc` asks.
     registry.set(perform, [
       { _tag: "CloseTarget", network: Schema.decodeSync(NetworkId)("libera"), target: "@#iirc" },
     ]);
@@ -876,7 +876,7 @@ describe("a Timeline's own Previews, from the sidebar", () => {
     const fake = fakeDaemon();
 
     fake.daemon.ui = {
-      options: { ...uiDefaults, "previews.timelines": { [other]: "off" } },
+      options: { ...uiDefaults, "previews.conversations": { [other]: "off" } },
       sequence: 4,
     };
 
@@ -904,13 +904,13 @@ describe("a Timeline's own Previews, from the sidebar", () => {
       before,
       changes: fake.daemon.uiChanges,
       network: buttonNamed("More for libera") !== undefined,
-      now: fake.daemon.ui.options["previews.timelines"],
+      now: fake.daemon.ui.options["previews.conversations"],
       otherMarked,
     }).toStrictEqual({
       before: ["✓default"],
       changes: [
-        { ifSequence: "4", route: "PUT previews.timelines" },
-        { ifSequence: String(fake.daemon.ui.sequence - 1), route: "PUT previews.timelines" },
+        { ifSequence: "4", route: "PUT previews.conversations" },
+        { ifSequence: String(fake.daemon.ui.sequence - 1), route: "PUT previews.conversations" },
       ],
       network: true,
       now: { [iirc]: "on" },
@@ -934,7 +934,7 @@ describe("a Timeline's own Previews, from the sidebar", () => {
     await chooseFromMenu("text");
     await settled(() => fake.daemon.uiReadsHeld.length === 1);
     fake.daemon.ui = {
-      options: { ...uiDefaults, "previews.timelines": { [other]: "off" } },
+      options: { ...uiDefaults, "previews.conversations": { [other]: "off" } },
       sequence: 9,
     };
     fake.daemon.holdUiReads = false;
@@ -948,7 +948,7 @@ describe("a Timeline's own Previews, from the sidebar", () => {
 
     expect({
       changes: fake.daemon.uiChanges.map((one) => one.ifSequence),
-      now: fake.daemon.ui.options["previews.timelines"],
+      now: fake.daemon.ui.options["previews.conversations"],
     }).toStrictEqual({
       changes: ["4", "9"],
       now: { [iirc]: "text", [other]: "off" },

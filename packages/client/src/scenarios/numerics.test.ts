@@ -217,7 +217,7 @@ describe("a numeric shown once", () => {
 
   it("never shows the answer to Self's OPER, which is reported as itself", () => {
     const configuration = configured({
-      oper: { _tag: "Login", credential: CredentialName.make("oper"), name: "admin" },
+      oper: { _tag: "Login", name: "admin", password: CredentialName.make("oper") },
     });
 
     const played = play(client, {

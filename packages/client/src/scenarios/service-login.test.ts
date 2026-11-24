@@ -17,7 +17,7 @@ const service = configured({
   login: {
     _tag: "Service",
     account: "acct",
-    credential: CredentialName.make("pw"),
+    password: CredentialName.make("pw"),
     service: "NickServ",
     wait: 5,
   },
@@ -113,7 +113,7 @@ describe("a service login", () => {
         channels: service.channels,
         login: {
           _tag: "Service",
-          credential: CredentialName.make("pw"),
+          password: CredentialName.make("pw"),
           service: "NickServ",
           wait: 5,
         },
@@ -173,7 +173,7 @@ describe("a service login", () => {
       login: {
         _tag: "Service",
         account: "acct",
-        credential: CredentialName.make("pw"),
+        password: CredentialName.make("pw"),
         service: "NickServ",
         wait: 0,
       },

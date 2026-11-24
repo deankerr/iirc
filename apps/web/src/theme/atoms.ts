@@ -160,7 +160,7 @@ export const drawnTheme = Atom.make((get) => {
   const ui = get(uiInEffect);
   const palette = get(previewed) ?? paletteNamed(ui.theme, ui, get(prefersDark));
 
-  return drawn(palette, ui["timeline.colours"]);
+  return drawn(palette, ui["conversation.colors"]);
 });
 
 /**
@@ -184,11 +184,11 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
     ["--font-mono", monoStack(font)],
     [
       "--widest-line",
-      ui["timeline.maxWidth"] === "none" ? undefined : `${ui["timeline.maxWidth"]}ch`,
+      ui["conversation.maxWidth"] === "none" ? undefined : `${ui["conversation.maxWidth"]}ch`,
     ],
-    ["--nick-width", `${widths["timeline.nickWidth"]}ch`],
+    ["--nick-width", `${widths["conversation.nickWidth"]}ch`],
     ["--members-width", `${widths["members.width"]}ch`],
-    ["--row-spacing", String(ui["timeline.spacing"])],
+    ["--row-spacing", String(ui["conversation.spacing"])],
   ];
 });
 

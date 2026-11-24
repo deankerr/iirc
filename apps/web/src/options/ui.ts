@@ -42,16 +42,16 @@ export const uiInEffect = Atom.make((get) =>
 );
 
 /** How a line's time shows on this device, alone, so a line draws again only when it changes. */
-export const timeShown = Atom.make((get) => get(uiInEffect)["timeline.timeFormat"]);
+export const timeShown = Atom.make((get) => get(uiInEffect)["conversation.timeFormat"]);
 
 /** How a day is written where the day changes on this device, alone, as `timeShown` is. */
-export const dayShown = Atom.make((get) => get(uiInEffect)["timeline.dateFormat"]);
+export const dayShown = Atom.make((get) => get(uiInEffect)["conversation.dateFormat"]);
 
 /** Which Activity a Channel shows on this device, alone, as `timeShown` is. */
-export const activityShown = Atom.make((get) => get(uiInEffect)["timeline.activity"]);
+export const activityShown = Atom.make((get) => get(uiInEffect)["conversation.activity"]);
 
 /** The least level of the Tail's lines the `iirc` view shows, alone, as `timeShown` is. */
-export const tailLeast = Atom.make((get) => leastShown(get(uiInEffect).tail));
+export const tailLeast = Atom.make((get) => leastShown(get(uiInEffect).logs));
 
 /** The text's size on this device, in pixels, alone, as `timeShown` is. */
 export const sizeShown = Atom.make((get) => get(uiInEffect)["font.size"]);
@@ -63,22 +63,22 @@ export const leadingShown = Atom.make((get) => get(uiInEffect)["font.lineHeight"
  * The room between a Timeline's rows on this device, as a multiple of the text's size, alone,
  * as `timeShown` is.
  */
-export const spacingShown = Atom.make((get) => get(uiInEffect)["timeline.spacing"]);
+export const spacingShown = Atom.make((get) => get(uiInEffect)["conversation.spacing"]);
 
 /** Whether a sender's nick stands in `<` and `>` on this device, alone, as `timeShown` is. */
-export const bracketsShown = Atom.make((get) => get(uiInEffect)["timeline.nickBrackets"]);
+export const bracketsShown = Atom.make((get) => get(uiInEffect)["conversation.nickBrackets"]);
 
 /** Whether a sender's nick has their prefix before it on this device, alone, as `timeShown` is. */
-export const prefixShown = Atom.make((get) => get(uiInEffect)["timeline.nickPrefix"]);
+export const prefixShown = Atom.make((get) => get(uiInEffect)["conversation.nickPrefix"]);
 
 /** How a line is laid out on this device, alone, as `timeShown` is. */
-export const lineShown = Atom.make((get) => get(uiInEffect)["timeline.layout"]);
+export const lineShown = Atom.make((get) => get(uiInEffect)["conversation.layout"]);
 
 /** What Enter does in the Composer on this device, alone, as `timeShown` is. */
-export const enterShown = Atom.make((get) => get(uiInEffect)["composer.enter"]);
+export const enterShown = Atom.make((get) => get(uiInEffect)["input.enter"]);
 
 /** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
-export const spellcheckShown = Atom.make((get) => get(uiInEffect)["composer.spellcheck"]);
+export const spellcheckShown = Atom.make((get) => get(uiInEffect)["input.spellcheck"]);
 
 /** Whether animated images play on their own on this device, alone, as `timeShown` is. */
 export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);

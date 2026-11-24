@@ -57,10 +57,10 @@ export const privateNetwork = async (
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
-      ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
       login: { _tag: "None" },
       nicks: ["iirc"],
       realname: "iirc",
+      servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
       username: "iirc",
     })
   );

@@ -22,14 +22,14 @@ import { deviceUi } from "./device.ts";
 import { changeUi, uiInEffect } from "./ui.ts";
 
 /** An option a grip resizes. */
-export type WidthOption = "timeline.nickWidth" | "members.width";
+export type WidthOption = "conversation.nickWidth" | "members.width";
 
 /** The least and the most each option may be, in the font's own `0`. */
 export const widthBounds: Readonly<
   Record<WidthOption, { readonly minimum: number; readonly maximum: number }>
 > = {
+  "conversation.nickWidth": nickWidthBounds,
   "members.width": membersWidthBounds,
-  "timeline.nickWidth": nickWidthBounds,
 };
 
 /**
@@ -55,9 +55,9 @@ export const widthsShown = Atom.make((get): Readonly<Record<WidthOption, number>
   const dragged = get(widthDragged);
 
   return {
+    "conversation.nickWidth":
+      dragged?.option === "conversation.nickWidth" ? dragged.width : ui["conversation.nickWidth"],
     "members.width": dragged?.option === "members.width" ? dragged.width : ui["members.width"],
-    "timeline.nickWidth":
-      dragged?.option === "timeline.nickWidth" ? dragged.width : ui["timeline.nickWidth"],
   };
 });
 

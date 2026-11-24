@@ -4,7 +4,7 @@
  * stream of their changes. A Message is asked for only once it was shown, and only once
  * while the stream is followed, since the Daemon fetches on the ask. Whether a Message is
  * asked for, and what it shows, follows its Timeline's own mode: its choice in
- * `ui.previews.timelines`, or else `ui.previews`. Each Preview is open or closed, as the
+ * `ui.previews.conversations`, or else `ui.previews`. Each Preview is open or closed, as the
  * toggle after its link leaves it, or else as `ui.previews.start` says, and a Message is
  * asked for only while one of its Previews is open, since a closed one fetches nothing. A
  * link the Daemon holds for a press is fetched only once the Owner opens it. A window's
@@ -233,7 +233,7 @@ export const previewsModesOf = (shared: UiInForce | undefined): PreviewsModes | 
     : {
         players: shared.options["previews.players"],
         shown: shared.options.previews,
-        timelines: shared.options["previews.timelines"],
+        timelines: shared.options["previews.conversations"],
       };
 
 /**

@@ -254,13 +254,13 @@ describe("ui.previews", () => {
     }).toStrictEqual({
       sharedOnly: [
         "aliases",
+        "logs",
         "previews",
+        "previews.conversations",
         "previews.players",
-        "previews.timelines",
         "sidebar.networks",
         "sidebar.order",
         "sidebar.pinned",
-        "tail",
         "unread.muted",
       ],
       taken: [true, true, true, false, false, false],
@@ -324,7 +324,7 @@ describe("ui.previews.players", () => {
   });
 });
 
-describe("ui.previews.timelines", () => {
+describe("ui.previews.conversations", () => {
   const timeline = "0000000000001a-00000000-00000001";
   const other = "0000000000001b-00000000-00000000";
 
@@ -334,8 +334,8 @@ describe("ui.previews.timelines", () => {
     const given = (each: Schema.Json) =>
       Option.getOrNull(
         Option.map(
-          options({ ...uiDefaults, "previews.timelines": each }),
-          (one) => one["previews.timelines"]
+          options({ ...uiDefaults, "previews.conversations": each }),
+          (one) => one["previews.conversations"]
         )
       );
 
@@ -366,8 +366,8 @@ describe("ui.previews.timelines", () => {
     const options = Schema.decodeUnknownSync(UiOptions);
 
     expect(
-      options({ ...uiDefaults, "previews.timelines": { "#iirc": "on", [timeline]: "off" } })[
-        "previews.timelines"
+      options({ ...uiDefaults, "previews.conversations": { "#iirc": "on", [timeline]: "off" } })[
+        "previews.conversations"
       ]
     ).toStrictEqual({ [timeline]: "off" });
   });

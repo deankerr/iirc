@@ -37,20 +37,20 @@ describe("folding the options under store, uploads, and previews", () => {
   it("takes the latest Change of each option, and an unset back to its default or to none", () => {
     expect(
       fold([
-        set("store.s3.bucket", "first"),
+        set("storage.s3.bucket", "first"),
         set("uploads.maxSize", 1024),
-        set("store.s3.bucket", "second"),
-        set("store.s3.accessKeyId", "bucket-key"),
+        set("storage.s3.bucket", "second"),
+        set("storage.s3.accessKeyId", "bucket-key"),
         set("uploads.publicUrl", "https://files.example.com"),
         unset("uploads.maxSize"),
         unset("uploads.publicUrl"),
       ])
     ).toStrictEqual({
       options: {
-        "previews.maxTotal": 1_073_741_824,
-        "store.s3.accessKeyId": "bucket-key",
-        "store.s3.bucket": "second",
-        "uploads.maxSize": 104_857_600,
+        "previews.maxTotal": 1_000_000_000,
+        "storage.s3.accessKeyId": "bucket-key",
+        "storage.s3.bucket": "second",
+        "uploads.maxSize": 100_000_000,
       },
       sequence: 7,
     });
@@ -63,12 +63,12 @@ describe("folding the options under store, uploads, and previews", () => {
         set("uploads.maxSize", 0),
         set("uploads.maxSize", 1.5),
         set("uploads.publicUrl", "ftp://files.example.com"),
-        set("store.s3.bucket", "Not A Bucket"),
-        set("store.s3.colour", "blue"),
+        set("storage.s3.bucket", "Not A Bucket"),
+        set("storage.s3.colour", "blue"),
         unset("nope"),
       ])
     ).toStrictEqual({
-      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 2048 },
+      options: { "previews.maxTotal": 1_000_000_000, "uploads.maxSize": 2048 },
       sequence: 7,
     });
   });
@@ -78,9 +78,9 @@ describe("folding the options under store, uploads, and previews", () => {
       fold([set("uploads.expireAfter", 30), { _tag: "UiSet", option: "time", value: "none" }])
     ).toStrictEqual({
       options: {
-        "previews.maxTotal": 1_073_741_824,
+        "previews.maxTotal": 1_000_000_000,
         "uploads.expireAfter": 30,
-        "uploads.maxSize": 104_857_600,
+        "uploads.maxSize": 100_000_000,
       },
       sequence: 1,
     });
@@ -107,11 +107,11 @@ describe("the options under store, uploads, and previews, kept", () => {
           const options = yield* OwnerConfiguration;
           const ui = yield* UiConfiguration;
 
-          yield* options.change(set("store.s3.bucket", "uploads"), 0);
+          yield* options.change(set("storage.s3.bucket", "uploads"), 0);
           yield* journal.append(retry);
           yield* ui.change({ _tag: "UiSet", option: "time", value: "none" }, 0);
-          yield* options.change(set("store.s3.secretAccessKey", "bucket-secret"), 1);
-          const stale = yield* options.change(unset("store.s3.bucket"), 1).pipe(Effect.flip);
+          yield* options.change(set("storage.s3.secretAccessKey", "bucket-secret"), 1);
+          const stale = yield* options.change(unset("storage.s3.bucket"), 1).pipe(Effect.flip);
 
           const uiStale = yield* ui
             .change({ _tag: "UiUnset", option: "time" }, 4)
@@ -135,10 +135,10 @@ describe("the options under store, uploads, and previews, kept", () => {
 
     const inForce = {
       options: {
-        "previews.maxTotal": 1_073_741_824,
-        "store.s3.bucket": "uploads",
-        "store.s3.secretAccessKey": "bucket-secret",
-        "uploads.maxSize": 104_857_600,
+        "previews.maxTotal": 1_000_000_000,
+        "storage.s3.bucket": "uploads",
+        "storage.s3.secretAccessKey": "bucket-secret",
+        "uploads.maxSize": 100_000_000,
       },
       sequence: 4,
     };

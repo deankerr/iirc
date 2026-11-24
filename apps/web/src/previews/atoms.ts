@@ -344,7 +344,7 @@ const conflict = { _tag: "Conflict" } as const;
 
 /**
  * One try at a Timeline's own choice: the options read, the choice made in
- * `ui.previews.timelines`, and the option sent whole, made from the sequence read.
+ * `ui.previews.conversations`, and the option sent whole, made from the sequence read.
  * @param registry - The registry.
  * @param intent - The Timeline, and its choice or none.
  * @returns What it came to, or a conflict to try again.
@@ -358,9 +358,9 @@ const tryChoice = (
     const read = yield* readShared(registry);
 
     yield* client.ui.set({
-      params: { option: "previews.timelines" },
+      params: { option: "previews.conversations" },
       payload: {
-        value: choicesJson(choosing(read.options["previews.timelines"], timeline, mode)),
+        value: choicesJson(choosing(read.options["previews.conversations"], timeline, mode)),
       },
       query: { ifSequence: read.sequence },
     });

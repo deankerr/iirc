@@ -389,7 +389,7 @@ describe("marking read", () => {
 
     const changing = run(registry, changeUiOption, {
       device: false,
-      option: "timeline.timeFormat",
+      option: "conversation.timeFormat",
       value: "HH:mm:ss",
     });
 

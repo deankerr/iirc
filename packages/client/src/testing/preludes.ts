@@ -40,10 +40,10 @@ export const configured = (overrides: Overrides = {}): NetworkConfiguration =>
     declined: [],
     enabled: true,
     fallbackEncoding: "windows-1252",
-    ircds: [{ host: "irc.test", port: 6697, tls: true }],
     login: { _tag: "None" },
     nicks: ["iirc"],
     realname: "iirc",
+    servers: [{ host: "irc.test", port: 6697, tls: true }],
     username: "iirc",
     ...overrides,
   });
@@ -111,7 +111,7 @@ const sasl = (
   return [
     sent(authenticate("PLAIN")),
     "<< AUTHENTICATE +",
-    `>> {AuthenticatePlain credential=${login.credential} authcid=${login.account} authzid=${login.account}}`,
+    `>> {AuthenticatePlain credential=${login.password} authcid=${login.account} authzid=${login.account}}`,
     `<< :${server} 900 * * ${login.account} :You are now logged in as ${login.account}`,
     `<< :${server} 903 * :SASL authentication successful`,
   ];
@@ -122,10 +122,10 @@ const sasl = (
 const told = ({ login, oper }: NetworkConfiguration) => [
   ...(login._tag === "Service"
     ? [
-        `>> {Identify credential=${login.credential}${login.account === undefined ? "" : ` account=${login.account}`} service=${login.service}}`,
+        `>> {Identify credential=${login.password}${login.account === undefined ? "" : ` account=${login.account}`} service=${login.service}}`,
       ]
     : []),
-  ...(oper._tag === "Login" ? [`>> {Oper credential=${oper.credential} name=${oper.name}}`] : []),
+  ...(oper._tag === "Login" ? [`>> {Oper credential=${oper.password} name=${oper.name}}`] : []),
 ];
 
 // After the last `005`, the Ircd says Self is logged in to the service with `900`.
@@ -158,7 +158,7 @@ export const registered = (
   configuration: NetworkConfiguration,
   { offered = [], requested, isupport = floorIsupport, server = "irc.test" }: Registration = {}
 ): string => {
-  const [ircd] = configuration.ircds;
+  const [ircd] = configuration.servers;
   const [nick] = configuration.nicks;
   const names = offered.map(capName);
   const asked = requested ?? names;

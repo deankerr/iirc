@@ -98,7 +98,7 @@ export const atLeast = (level: TailLevel, least: TailLevel): boolean =>
 export const linesShown = (held: HeldTail, least: TailLevel): readonly TailLine[] =>
   held.lines.filter((line) => atLeast(line.level, least));
 
-/** The least level each value of `ui.tail` names. */
+/** The least level each value of `ui.logs` names. */
 const leastOf: Readonly<Record<TailShown, TailLevel>> = {
   debug: "Debug",
   error: "Error",
@@ -107,7 +107,7 @@ const leastOf: Readonly<Record<TailShown, TailLevel>> = {
 };
 
 /**
- * The least level a view shows under a value of `ui.tail`.
+ * The least level a view shows under a value of `ui.logs`.
  * @param shown - The value.
  * @returns The level.
  */

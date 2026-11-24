@@ -214,11 +214,11 @@ const turnOn = (served: Served, port?: number) =>
   Effect.gen(function* () {
     yield* holdCredential(served, "bucket-key-id", "AKIA-test");
     yield* holdCredential(served, "bucket-secret", "s3cr3t");
-    yield* setOption(served, "store.s3.endpoint", "http://bucket.test");
-    yield* setOption(served, "store.s3.bucket", "uploads");
-    yield* setOption(served, "store.s3.region", "us-east-1");
-    yield* setOption(served, "store.s3.accessKeyId", "bucket-key-id");
-    yield* setOption(served, "store.s3.secretAccessKey", "bucket-secret");
+    yield* setOption(served, "storage.s3.endpoint", "http://bucket.test");
+    yield* setOption(served, "storage.s3.bucket", "uploads");
+    yield* setOption(served, "storage.s3.region", "us-east-1");
+    yield* setOption(served, "storage.s3.accessKeyId", "bucket-key-id");
+    yield* setOption(served, "storage.s3.secretAccessKey", "bucket-secret");
     yield* setOption(served, "uploads.publicUrl", publicUrl);
 
     if (port !== undefined) {
@@ -394,11 +394,11 @@ const raw = (served: Served, head: string) =>
   });
 
 const allOff = [
-  "store.s3.endpoint",
-  "store.s3.bucket",
-  "store.s3.region",
-  "store.s3.accessKeyId",
-  "store.s3.secretAccessKey",
+  "storage.s3.endpoint",
+  "storage.s3.bucket",
+  "storage.s3.region",
+  "storage.s3.accessKeyId",
+  "storage.s3.secretAccessKey",
   "uploads.publicUrl",
 ];
 
@@ -413,7 +413,7 @@ describe("Uploads over the API", () => {
         const before = yield* status;
         const refused = yield* upload(served, png, "cat.png");
 
-        yield* setOption(served, "store.s3.bucket", "uploads");
+        yield* setOption(served, "storage.s3.bucket", "uploads");
         yield* setOption(served, "uploads.publicUrl", publicUrl);
         const partly = yield* status;
 
@@ -434,17 +434,17 @@ describe("Uploads over the API", () => {
     );
 
     expect(result).toStrictEqual({
-      before: { _tag: "Off", maxSize: 104_857_600, missing: allOff },
+      before: { _tag: "Off", maxSize: 100_000_000, missing: allOff },
       journaled: [],
-      on: { _tag: "On", maxSize: 104_857_600 },
+      on: { _tag: "On", maxSize: 100_000_000 },
       partly: {
         _tag: "Off",
-        maxSize: 104_857_600,
+        maxSize: 100_000_000,
         missing: [
-          "store.s3.endpoint",
-          "store.s3.region",
-          "store.s3.accessKeyId",
-          "store.s3.secretAccessKey",
+          "storage.s3.endpoint",
+          "storage.s3.region",
+          "storage.s3.accessKeyId",
+          "storage.s3.secretAccessKey",
         ],
       },
       refused: [409, "close", { _tag: "UploadsOff", missing: allOff }],
@@ -785,10 +785,10 @@ describe("Uploads over the API", () => {
     const result = await run((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
-        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+        yield* setOption(served, "storage.s3.endpoint", unreachableEndpoint);
         const unreachable = yield* upload(served, png, "cat.png");
 
-        yield* setOption(served, "store.s3.endpoint", "http://bucket.test");
+        yield* setOption(served, "storage.s3.endpoint", "http://bucket.test");
         yield* expecting(
           served.request("/api/credentials/bucket-secret", { method: "DELETE" }),
           204
@@ -829,7 +829,7 @@ describe("Uploads over the API", () => {
         yield* setOption(served, "uploads.publicUrl", "https://files.example/u/");
         const moved = yield* link;
 
-        yield* unsetOption(served, "store.s3.accessKeyId");
+        yield* unsetOption(served, "storage.s3.accessKeyId");
         const off = yield* link;
 
         yield* unsetOption(served, "uploads.publicUrl");
@@ -1432,10 +1432,10 @@ describe("an Upload's bytes on the API", () => {
             ])
         );
 
-        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+        yield* setOption(served, "storage.s3.endpoint", unreachableEndpoint);
         const unreachable = yield* answer;
 
-        yield* setOption(served, "store.s3.endpoint", "http://bucket.test");
+        yield* setOption(served, "storage.s3.endpoint", "http://bucket.test");
         const { store } = served.world.bytes;
 
         // A store that holds the bytes, and then fails the read before any arrives.
@@ -1457,7 +1457,7 @@ describe("an Upload's bytes on the API", () => {
         );
 
         Object.assign(served.world.bytes, { store });
-        yield* unsetOption(served, "store.s3.bucket");
+        yield* unsetOption(served, "storage.s3.bucket");
 
         return { off: yield* answer, reset, resetAsked, unreachable };
       })
@@ -2628,7 +2628,7 @@ describe("an Upload whose bytes are missing", () => {
 
         yield* lose(served, lost.hash);
         yield* contentStatus(served, lost.id);
-        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+        yield* setOption(served, "storage.s3.endpoint", unreachableEndpoint);
 
         return {
           answered: [yield* contentStatus(served, held.id), yield* contentStatus(served, lost.id)],
@@ -2759,7 +2759,7 @@ describe("an Upload whose bytes are missing", () => {
         yield* contentStatus(served, record.id);
         const marked = (yield* readRecord(served, record.id)).missing;
 
-        yield* setOption(served, "store.s3.bucket", "elsewhere");
+        yield* setOption(served, "storage.s3.bucket", "elsewhere");
 
         const moved = yield* settled(
           readRecord(served, record.id),
@@ -2851,7 +2851,7 @@ describe("an Upload whose bytes are missing", () => {
         const old = yield* Effect.forkChild(contentStatus(served, record.id));
 
         yield* answered.await;
-        yield* setOption(served, "store.s3.bucket", "elsewhere");
+        yield* setOption(served, "storage.s3.bucket", "elsewhere");
         yield* lose(served, record.hash);
 
         const marked = yield* settled(
@@ -3156,7 +3156,9 @@ const joined = (served: Served, network: string) =>
   Effect.gen(function* () {
     yield* expecting(
       served.request(`/api/networks/${network}`, {
-        body: JSON.stringify(configured({ ircds: [{ host: "irc.test", port: 6667, tls: false }] })),
+        body: JSON.stringify(
+          configured({ servers: [{ host: "irc.test", port: 6667, tls: false }] })
+        ),
         headers: { "content-type": "application/json" },
         method: "PUT",
       }),

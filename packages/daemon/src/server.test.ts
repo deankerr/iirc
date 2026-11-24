@@ -38,7 +38,7 @@ import {
 } from "./testing/world.ts";
 import type { World } from "./testing/world.ts";
 
-const floor = configured({ ircds: [{ host: "irc.test", port: 6667, tls: false }] });
+const floor = configured({ servers: [{ host: "irc.test", port: 6667, tls: false }] });
 
 /** What a test over a real server gets. */
 interface Served {
@@ -741,13 +741,13 @@ describe("the API over a real server", () => {
       Effect.gen(function* () {
         return {
           kept: (yield* putConfiguration(served, {
-            lines: ["PRIVMSG HostServ :ON"],
+            commands: ["PRIVMSG HostServ :ON"],
             userModes: "+ix-w",
           }))[0],
           modes: (yield* putConfiguration(served, { userModes: "ix" }))[0],
-          pass: yield* putConfiguration(served, { lines: ["PING a", "PASS correct-horse"] }),
+          pass: yield* putConfiguration(served, { commands: ["PING a", "PASS correct-horse"] }),
           tooMany: (yield* putConfiguration(served, {
-            lines: Array.from({ length: 17 }, () => "PING a"),
+            commands: Array.from({ length: 17 }, () => "PING a"),
           }))[0],
         };
       })
@@ -757,7 +757,7 @@ describe("the API over a real server", () => {
       200, 400, 400, 400,
     ]);
     expect(JSON.parse(result.pass[1])).toMatchObject({
-      issues: [{ path: ["payload", "lines", 1] }],
+      issues: [{ path: ["payload", "commands", 1] }],
     });
     expect(result.pass[1].includes("correct-horse")).toBeFalsy();
   });
@@ -769,12 +769,12 @@ describe("the API over a real server", () => {
           readEvents(response, (events) => events.some((event) => event.event === "changed"))
         );
 
-        const set = yield* served.request("/api/ui/timeline.timeFormat?ifSequence=0", {
+        const set = yield* served.request("/api/ui/conversation.timeFormat?ifSequence=0", {
           method: "PUT",
           ...json('{"value":"HH:mm:ss"}'),
         });
 
-        const stale = yield* served.request("/api/ui/timeline.timeFormat?ifSequence=0", {
+        const stale = yield* served.request("/api/ui/conversation.timeFormat?ifSequence=0", {
           method: "DELETE",
         });
 
@@ -783,7 +783,7 @@ describe("the API over a real server", () => {
           ...json('{"value":"dusk"}'),
         });
 
-        const badValue = yield* served.request("/api/ui/timeline.activity", {
+        const badValue = yield* served.request("/api/ui/conversation.activity", {
           method: "PUT",
           ...json('{"value":"loud"}'),
         });
@@ -849,7 +849,7 @@ describe("the API over a real server", () => {
     expect(result).toStrictEqual({
       badValue: [
         400,
-        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.timeline.activity","path":["payload","value"]}]}',
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.conversation.activity","path":["payload","value"]}]}',
       ],
       finer: [
         400,
@@ -857,7 +857,7 @@ describe("the API over a real server", () => {
       ],
       first: [
         {
-          data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+          data: '{"options":{"aliases":[],"conversation.activity":"all","conversation.colors":"theme","conversation.dateFormat":"full","conversation.layout":"columns","conversation.maxWidth":"none","conversation.nickBrackets":true,"conversation.nickPrefix":true,"conversation.nickWidth":16,"conversation.spacing":0.3,"conversation.timeFormat":"HH:mm","font":"system","font.lineHeight":1.45,"font.size":14,"input.enter":"send","input.nickSuffix":": ","input.spellcheck":true,"logs":"info","members.width":18,"previews":"off","previews.animate":true,"previews.conversations":{},"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -872,7 +872,7 @@ describe("the API over a real server", () => {
       ],
       resumed: [
         {
-          data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":1}',
+          data: '{"options":{"aliases":[],"conversation.activity":"all","conversation.colors":"theme","conversation.dateFormat":"full","conversation.layout":"columns","conversation.maxWidth":"none","conversation.nickBrackets":true,"conversation.nickPrefix":true,"conversation.nickWidth":16,"conversation.spacing":0.3,"conversation.timeFormat":"HH:mm:ss","font":"system","font.lineHeight":1.45,"font.size":14,"input.enter":"send","input.nickSuffix":": ","input.spellcheck":true,"logs":"info","members.width":18,"previews":"off","previews.animate":true,"previews.conversations":{},"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":1}',
           event: "changed",
           id: "1",
         },
@@ -898,12 +898,12 @@ describe("the API over a real server", () => {
           readEvents(response, (events) => events.some((event) => event.event === "changed"))
         );
 
-        const bucket = yield* served.request("/api/options/store.s3.bucket?ifSequence=0", {
+        const bucket = yield* served.request("/api/options/storage.s3.bucket?ifSequence=0", {
           method: "PUT",
           ...json('{"value":"uploads"}'),
         });
 
-        const key = yield* served.request("/api/options/store.s3.accessKeyId?ifSequence=1", {
+        const key = yield* served.request("/api/options/storage.s3.accessKeyId?ifSequence=1", {
           method: "PUT",
           ...json('{"value":"bucket-key"}'),
         });
@@ -913,12 +913,12 @@ describe("the API over a real server", () => {
           ...json('{"value":1024}'),
         });
 
-        const unknown = yield* served.request("/api/options/store.s3.colour", {
+        const unknown = yield* served.request("/api/options/storage.s3.colour", {
           method: "PUT",
           ...json('{"value":"blue"}'),
         });
 
-        const uiByName = yield* served.request("/api/options/ui.timeline.timeFormat", {
+        const uiByName = yield* served.request("/api/options/ui.conversation.timeFormat", {
           method: "PUT",
           ...json('{"value":"none"}'),
         });
@@ -938,7 +938,7 @@ describe("the API over a real server", () => {
           ...json('{"value":"https://files.example.com/?x=1"}'),
         });
 
-        const unset = yield* served.request("/api/options/store.s3.bucket?ifSequence=2", {
+        const unset = yield* served.request("/api/options/storage.s3.bucket?ifSequence=2", {
           method: "DELETE",
         });
 
@@ -979,7 +979,7 @@ describe("the API over a real server", () => {
       bucket: [200, '{"sequence":1}'],
       first: [
         {
-          data: '{"options":{"previews.maxTotal":1073741824,"uploads.maxSize":104857600},"sequence":0}',
+          data: '{"options":{"previews.maxTotal":1000000000,"uploads.maxSize":100000000},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -989,11 +989,11 @@ describe("the API over a real server", () => {
       notWhole: refused("uploads.maxSize"),
       read: [
         200,
-        '{"options":{"previews.maxTotal":1073741824,"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+        '{"options":{"previews.maxTotal":1000000000,"storage.s3.accessKeyId":"bucket-key","uploads.maxSize":100000000},"sequence":3}',
       ],
       resumed: [
         {
-          data: '{"options":{"previews.maxTotal":1073741824,"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+          data: '{"options":{"previews.maxTotal":1000000000,"storage.s3.accessKeyId":"bucket-key","uploads.maxSize":100000000},"sequence":3}',
           event: "changed",
           id: "3",
         },
