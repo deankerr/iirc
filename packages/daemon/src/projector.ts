@@ -120,7 +120,7 @@ const resume = Effect.gen(function* () {
     return { after, directory: yield* store.directory };
   }
 
-  yield* Effect.logInfo("Folding the Timelines again from the start of the Journal").pipe(
+  yield* Effect.logInfo("Rebuilding conversation history from the journal").pipe(
     Effect.annotateLogs({ found: folded.version ?? "none", version: projectionVersion })
   );
   yield* store.reset(projectionVersion);
@@ -194,7 +194,7 @@ export const layerProjector = Layer.effect(Projector)(
 
         yield* SubscriptionRef.set(status, { _tag: "Stopped", reason });
         yield* Effect.logError(
-          "The Timelines stopped being folded, until the Daemon restarts"
+          "Conversation history stopped updating until the daemon restarts"
         ).pipe(Effect.annotateLogs({ reason }));
       });
 

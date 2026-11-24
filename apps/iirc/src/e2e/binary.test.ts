@@ -188,7 +188,7 @@ describe("the compiled iirc", () => {
     expect(refused).toStrictEqual({
       code: 1,
       stderr:
-        "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist.\n",
+        "This build of iirc has no built-in web app, so --web needs a directory, such as --web=apps/web/dist.\n",
       stdout: "",
     });
   });
@@ -415,7 +415,7 @@ describe("the compiled iirc", () => {
           route: [route.status, await route.text()],
           well,
         }).toStrictEqual({
-          gone: { code: 1, stderr: `Nothing answered at 127.0.0.1:${port}.\n`, stdout: "" },
+          gone: { code: 1, stderr: `No response from 127.0.0.1:${port}.\n`, stdout: "" },
           others: 401,
           route: [200, '{"_tag":"Well"}'],
           well: { code: 0, stderr: "", stdout: "" },

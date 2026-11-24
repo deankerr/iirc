@@ -18,8 +18,8 @@ const after = (...events: readonly RemovalEvent[]): Removal => {
   return state;
 };
 
-describe("removing a Network", () => {
-  it("asks first, keeping the Timelines unless the Owner chooses to drop them", () => {
+describe("removing a network", () => {
+  it("asks first, keeping the conversations unless the Owner chooses to drop them", () => {
     const asked = after({ _tag: "Asked", keep: undefined, life: 1, network: libera });
     const dropping = reduceRemoval(asked, { _tag: "Chose", keep: false });
 
@@ -35,7 +35,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("only drops the Timelines of a Network removed with them kept, which frees its name", () => {
+  it("only drops the conversations of a network removed with them kept, which frees its name", () => {
     const asked = after({ _tag: "Asked", keep: true, life: 1, network: libera });
 
     expect({
@@ -43,16 +43,16 @@ describe("removing a Network", () => {
       sent: removalOf(asked, "Kept"),
     }).toStrictEqual({
       question: {
-        body: "libera was removed, and its Timelines were kept to read. Dropping them deletes them for every Frontend, and lets a new Network take the name libera.",
+        body: "libera was removed, and its conversations were kept to read. Dropping them deletes them on every device and frees the name libera for a new network.",
         choosing: false,
-        confirm: "Drop them",
-        title: "Drop libera's Timelines?",
+        confirm: "drop them",
+        title: "Drop libera's conversations?",
       },
       sent: { keep: false, life: 1, network: libera },
     });
   });
 
-  it("sends nothing when cancelled, and closes once the Daemon removed it", () => {
+  it("sends nothing when cancelled, and closes once the daemon removed it", () => {
     const cancelled = after(
       { _tag: "Asked", keep: undefined, life: 1, network: libera },
       { _tag: "Closed" }
@@ -110,17 +110,17 @@ describe("removing a Network", () => {
       vault: failed("VaultFailed"),
     }).toStrictEqual({
       failures: [
-        ["The Daemon has no Network libera, so nothing was removed.", false],
-        ["libera has stopped, so it cannot be removed until the Daemon starts again.", false],
+        ["The daemon has no network libera, so nothing was removed.", false],
+        ["libera has stopped, so it cannot be removed until the daemon starts again.", false],
         [
-          "The Daemon did not answer, so whether libera was removed is unknown. Removing it again is safe.",
+          "The daemon did not answer, so it's unknown whether libera was removed. Removing it again is safe.",
           false,
         ],
       ],
       vault: {
         _tag: "Told",
         message:
-          "libera was removed, but the Daemon could not forget every Credential its Configuration named.",
+          "libera was removed, but the daemon could not delete every password in its settings.",
         network: libera,
       },
     });
@@ -138,14 +138,14 @@ describe("removing a Network", () => {
       changed: {
         _tag: "Told",
         message:
-          "libera was removed or added again since you were asked, so nothing was removed. Ask again about it as it is now.",
+          "libera was removed or added again since you were asked, so nothing was removed. Try again with its current state.",
         network: libera,
       },
       // The `Removed` may stand though what followed it could not be journaled.
       journal: {
         _tag: "Told",
         message:
-          "The Daemon could not write its Journal, so whether libera was removed is unknown. The Networks are read again to show where it stands, and if it was removed, the Daemon forgets its Credentials when it next starts.",
+          "The daemon could not write its history, so it's unknown whether libera was removed. The networks are reloaded to show where it stands, and if it was removed, the daemon forgets its passwords when it next starts.",
         network: libera,
       },
     });

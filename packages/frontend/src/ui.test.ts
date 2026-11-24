@@ -258,7 +258,7 @@ describe("a device's overrides", () => {
     });
   });
 
-  it("know when a Timeline is marked read only once this device or the shared options say", () => {
+  it("know when a conversation is marked read only once this device or the shared options say", () => {
     const asked = {
       ...shared,
       options: { ...shared.options, "unread.markRead": "asked" as const },
@@ -347,8 +347,8 @@ const quit = (sequence: number, at: number, nick: string) =>
 
 const minute = 60_000;
 
-describe("which items a Timeline shows", () => {
-  it("in a Channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {
+describe("which items a conversation shows", () => {
+  it("in a channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {
     const parted = happened(2, 2, { _tag: "Parted", channel: "#iirc", nick: "peer", reason: null });
 
     const kicked = happened(4, 4, {
@@ -376,7 +376,7 @@ describe("which items a Timeline shows", () => {
     ]);
   });
 
-  it("under spoke, in a Channel's, shows a join, part, or quit only of Self's or of a User who spoke up to five minutes before it, and every one while Self's nick is unknown", () => {
+  it("under spoke, in a channel's, shows a join, part, or quit only of your or of a user who spoke up to five minutes before it, and every one while your nick is unknown", () => {
     const items = [
       said(1, 0, "alice"),
       said(2, 0, "Bob", "Action"),
@@ -431,7 +431,7 @@ describe("which items a Timeline shows", () => {
     });
   });
 
-  it("under spoke, follows a User across a change of nick, and measures from their latest Message", () => {
+  it("under spoke, follows a user across a change of nick, and measures from their latest message", () => {
     const items = [
       said(1, 0, "bob"),
       happened(2, minute, { _tag: "NickChanged", from: "bob", to: "bobby" }),
@@ -452,7 +452,7 @@ describe("which items a Timeline shows", () => {
     ]);
   });
 
-  it("under spoke, leaves a Network's and a Direct Message's Timeline alone", () => {
+  it("under spoke, leaves a network's and a direct message's conversation alone", () => {
     const items = [quit(1, 0, "erin")];
 
     expect(

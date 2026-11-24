@@ -52,8 +52,8 @@ export const previewStore = Effect.gen(function* () {
           new ByteStoreUnavailable({
             reason:
               error._tag === "CredentialMissing"
-                ? `the Credential ${error.credential} is not held`
-                : "the Credentials could not be read",
+                ? `the credential ${error.credential} is not held`
+                : "the credentials could not be read",
           })
       )
     );

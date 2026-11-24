@@ -752,7 +752,7 @@ export const parseIrcd = (text: string): Parsed<Ircd> => {
 
   if (host === "") {
     return invalid(
-      `An Ircd needs a host, as host/port, with the word plain after it for plaintext, not "${text}".`
+      `A server needs a host, as host/port, with the word plain after it for plaintext, not "${text}".`
     );
   }
 
@@ -764,7 +764,7 @@ export const parseIrcd = (text: string): Parsed<Ircd> => {
 
   return port >= 1 && port <= 65_535
     ? parsed({ host, port, tls })
-    : invalid(`An Ircd's port is 1 to 65535, not "${withPort.port}".`);
+    : invalid(`A server's port is 1 to 65535, not "${withPort.port}".`);
 };
 
 /**
@@ -808,7 +808,7 @@ const parseIrcds = (text: string): Parsed<Json> => {
     ircds.push(ircd.value);
   }
 
-  return ircds.length === 0 ? invalid("Give at least one Ircd, as host/port.") : parsed(ircds);
+  return ircds.length === 0 ? invalid("Give at least one server, as host/port.") : parsed(ircds);
 };
 
 /**
@@ -977,7 +977,7 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
     case "Toggle": {
       const value = toggles.get(lower(text.trim()));
 
-      return value === undefined ? invalid(`Say on or off, not "${text}".`) : parsed(value);
+      return value === undefined ? invalid(`Use on or off, not "${text}".`) : parsed(value);
     }
 
     case "Text": {
@@ -1007,7 +1007,9 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
     }
 
     case "Credential": {
-      return invalid("A Credential is set by giving its value, which the Vault holds.");
+      return invalid(
+        "Enter a password in a password prompt. iirc stores it securely and never shows it."
+      );
     }
 
     case "Texts": {
@@ -1211,7 +1213,7 @@ const optionsAreNamed =
 const networkIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
 /**
- * Whether text is a Network's id, as the API takes it: 1 to 64 lower-case letters,
+ * Whether text is a Network's id, as the API takes it: 1 to 64 lowercase letters,
  * digits, `.`, `_`, or `-`, starting with a letter or digit. The pattern is the API's own.
  * @param text - The text.
  * @returns Whether it is one.
@@ -1319,7 +1321,7 @@ export const resolve = (name: string): Parsed<Resolved> => {
     return invalid(`There is no option ${name}.`);
   }
 
-  return found.length === 1 ? parsed(only) : invalid(`${name} could name more than one option.`);
+  return found.length === 1 ? parsed(only) : invalid(`${name} matches more than one option.`);
 };
 
 // The options under `ui`.
@@ -1582,7 +1584,7 @@ const ownerValueJson = (option: OwnerOptionName, value: OwnerOptions[OwnerOption
  * What the Credential option under `store`, `uploads`, or `previews` that names none starts naming:
  * `Owner.` and the option's name, such as `Owner.store.s3.accessKeyId`. No Network's
  * Credential is ever named so, as a Network's id, which each of theirs starts with, starts
- * with a lower-case letter or a digit.
+ * with a lowercase letter or a digit.
  * @param option - The option.
  * @returns The name.
  */
@@ -1697,7 +1699,7 @@ export const derivedCredential = (network: string, path: Path): Parsed<string> =
   return credentialPattern.test(name)
     ? parsed(name)
     : invalid(
-        `A Credential for ${optionName(network, path)} would be named ${name}, which is too long.`
+        `A password for ${optionName(network, path)} would be named ${name}, which is too long.`
       );
 };
 
@@ -1804,7 +1806,7 @@ const configurationOf = (plain: Record): Parsed<Configuration> => {
 
   return Exit.isSuccess(decoded)
     ? parsed(decoded.value)
-    : invalid(`That would not be a valid Configuration. ${String(decoded.cause)}`);
+    : invalid(`That is not a valid setting. ${String(decoded.cause)}`);
 };
 
 const firstNick = (plain: Record): string | undefined => texts(plain.nicks)[0];
@@ -1977,7 +1979,7 @@ const channelOf = (network: string, text: string, naming: Naming): Parsed<string
     return rfcPrefixes.includes(first) && first !== ""
       ? parsed(text)
       : invalid(
-          `${network} has not said what its Channels start with, so give ${text} with its prefix, such as #${text}.`
+          `${network} has not said what its channel names start with, so include the prefix, such as #${text}.`
         );
   }
 
@@ -1989,7 +1991,7 @@ const channelOf = (network: string, text: string, naming: Naming): Parsed<string
   const prefix = code === undefined ? undefined : String.fromCodePoint(code);
 
   return prefix === undefined
-    ? invalid(`${network} says it has no Channels.`)
+    ? invalid(`${network} says it has no channels.`)
     : parsed(`${prefix}${text}`);
 };
 
@@ -2009,10 +2011,10 @@ export const channelsOf = (text: string): Parsed<readonly string[]> => {
   const bad = names.find((name) => /[\s\u0000-\u001F\u007F]/u.test(name));
 
   if (bad !== undefined) {
-    return invalid(`"${bad}" is not a Channel's name.`);
+    return invalid(`"${bad}" is not a channel's name.`);
   }
 
-  return names.length === 0 ? invalid("Name a Channel, such as #iirc.") : parsed(names);
+  return names.length === 0 ? invalid("Name a channel, such as #iirc.") : parsed(names);
 };
 
 /**
@@ -2052,13 +2054,13 @@ const entryFor = (
   }
 
   if (only === undefined) {
-    return invalid(`${name} is not among the Channels of ${network}.`);
+    return invalid(`${name} is not among the channels of ${network}.`);
   }
 
   return folded.length === 1
     ? parsed(only)
     : invalid(
-        `${name} could be any of ${folded.map(nameOf).join(", ")} on ${network}. Part one by its exact name.`
+        `${name} could be any of ${folded.map(nameOf).join(", ")} on ${network}. Leave one by its exact name.`
       );
 };
 
@@ -2151,7 +2153,7 @@ const unsetAt = (network: string, plain: Record, path: Path): Parsed<Record> => 
     const off = union?.starts._tag === "Value" ? showText(union.kind, union.starts.value) : "none";
 
     return invalid(
-      `${optionName(network, path)} is the Credential ${key} uses, so it cannot be unset. /set ${optionName(network, [key])} ${off} turns ${key} off.`
+      `${optionName(network, path)} is the password ${key} uses, so it can't be unset. /set ${optionName(network, [key])} ${off} turns ${key} off.`
     );
   }
 
@@ -2331,7 +2333,7 @@ const edited = (network: string, plain: Record, edit: Edit, naming: Naming): Par
     case "Point": {
       return resolvePath(edit.path.join("."))?.field.kind._tag === "Credential"
         ? setAt(network, plain, edit.path, edit.credential)
-        : invalid(`${optionName(network, edit.path)} is not a Credential.`);
+        : invalid(`${optionName(network, edit.path)} is not a password.`);
     }
 
     case "Join": {

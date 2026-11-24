@@ -139,7 +139,7 @@ const page = async (fake: ReturnType<typeof fakeDaemon>) => {
  * @returns It, or none.
  */
 const view = (container: ParentNode) =>
-  container.querySelector<HTMLElement>('main section[aria-label="iirc"]');
+  container.querySelector<HTMLElement>('main section[aria-label="logs"]');
 
 /**
  * The Tail's lines the view shows, each its time, words, annotations, and cause, line by
@@ -196,7 +196,7 @@ const banner = (container: ParentNode) => {
 };
 
 /**
- * The sidebar's `iirc` row.
+ * The sidebar's `logs` row.
  * @returns It.
  */
 const tailRow = () => {
@@ -249,7 +249,7 @@ const composerDoes = async (container: HTMLElement, text?: string, key?: string)
  */
 const hintOf = (container: HTMLElement) => {
   const parts = [...(view(container)?.querySelectorAll("h2, p") ?? [])];
-  const hint = parts.findIndex((one) => one.textContent.startsWith("Choose a Timeline"));
+  const hint = parts.findIndex((one) => one.textContent.startsWith("Choose a conversation"));
 
   return hint === -1
     ? undefined
@@ -456,7 +456,7 @@ describe("the iirc view", () => {
     expect({ none: hintOf(none.container), some: hintOf(some.container) }).toStrictEqual({
       none: {
         after: true,
-        text: "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.",
+        text: "Choose a conversation, or add a network with /network add <id> <host>[/port] [plain] <nick>. /set opens settings.",
       },
       some: undefined,
     });
@@ -572,12 +572,12 @@ describe("the iirc row", () => {
     await settled(() => marks()[1] === "false");
 
     expect({ chosen, elsewhere: marks(), empty, first, headings, neither }).toStrictEqual({
-      chosen: ["iirc", "true"],
-      elsewhere: ["iirc, in Pane 2", "false"],
-      empty: ["iirc", "true"],
+      chosen: ["logs", "true"],
+      elsewhere: ["logs, in pane 2", "false"],
+      empty: ["logs", "true"],
       first: true,
       headings: [],
-      neither: ["iirc", "false"],
+      neither: ["logs", "false"],
     });
   });
 

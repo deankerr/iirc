@@ -246,7 +246,7 @@ const keptFlags = (walk: Walk) =>
  */
 export const stripWebp = (bytes: Uint8Array): Stripped => {
   if (!asciiAt(bytes, 0, "RIFF") || !asciiAt(bytes, 8, "WEBP")) {
-    return unreadable("a WebP begins with its RIFF header");
+    return unreadable("invalid WebP: missing RIFF header");
   }
 
   // The RIFF header, then each kept chunk as the walk reaches it, with the sizes of the RIFF
@@ -303,12 +303,12 @@ export const stripWebp = (bytes: Uint8Array): Stripped => {
   );
 
   if (walk.kind === undefined || walk.kind === "refused") {
-    return unreadable("a WebP begins with VP8, VP8L, or a whole VP8X");
+    return unreadable("invalid WebP: missing VP8, VP8L, or complete VP8X chunk");
   }
 
   if (walk.kind === "extended") {
     if (!walk.imaged) {
-      return unreadable(whole ? "a WebP holds no image data" : "a WebP chunk runs past the end");
+      return unreadable(whole ? "WebP has no image data" : "WebP chunk runs past the end of file");
     }
 
     patch(out, walk.vp8xAt, Uint8Array.of(keptFlags(walk)));

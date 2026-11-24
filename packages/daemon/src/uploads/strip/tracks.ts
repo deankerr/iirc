@@ -40,9 +40,9 @@ const only = (bytes: Uint8Array, parent: Box, type: number): Box | undefined => 
   return found.length === 1 ? found[0] : undefined;
 };
 
-const missing = () => bad("a dropped track's sample table is missing");
+const missing = () => bad("removed track's sample table is missing");
 
-const disagrees = () => bad("a dropped track's sample table disagrees with itself");
+const disagrees = () => bad("removed track's sample table is inconsistent");
 
 // The one box of either of two types that mean the same thing, such as `stco` and `co64`.
 const oneOf = (bytes: Uint8Array, parent: Box, a: number, b: number): Box | Unreadable => {

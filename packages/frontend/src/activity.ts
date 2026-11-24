@@ -232,7 +232,7 @@ export const muting = (
   return muted.length >= mutedCap
     ? {
         _tag: "Invalid",
-        message: `At most ${mutedCap} Timelines can be muted. /unmute one first.`,
+        message: `You can mute at most ${mutedCap} conversations. /unmute one first.`,
       }
     : { _tag: "Parsed", value: [...muted, timeline] };
 };

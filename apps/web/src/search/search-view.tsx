@@ -117,20 +117,20 @@ const useStanding = (): string => {
   }
 
   if (search.searched === undefined) {
-    return "Type at least three characters and press Enter. from:<nick>, in:<#channel|nick>, network:<id>, since:<date>, and until:<date> narrow it, and quotes keep a phrase whole.";
+    return "Type at least three characters and press Enter. Narrow it with from:<nick>, in:<#channel|nick>, network:<id>, since:<date>, and until:<date>, and use quotes to keep a phrase whole.";
   }
 
   if (count === 0) {
-    return search.wanted || search.reading ? "Searching…" : "Nothing found.";
+    return search.wanted || search.reading ? "Searching…" : "No results.";
   }
 
   if (isCapped) {
-    return `The newest ${count} found are shown. Narrow the search to find older ones.`;
+    return `Showing the newest ${count} results. Narrow the search to find older ones.`;
   }
 
   return search.more
-    ? `${count} found, newest first, more as you scroll.`
-    : `${count} found, newest first.`;
+    ? `${count} results, newest first. Scroll for more.`
+    : `${count} results, newest first.`;
 };
 
 /**
@@ -289,7 +289,7 @@ export const SearchView = ({ pane }: { readonly pane: string }) => {
           }}
         >
           <label className={styles.label} htmlFor={`${id}-query`}>
-            Search
+            search
           </label>
           <input
             aria-describedby={search.error === undefined ? undefined : errorId}

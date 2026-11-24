@@ -159,7 +159,7 @@ export const layerTail = (version: string) => Layer.effect(Tail)(make(version));
  */
 export const layerTailLogging = (version: string) =>
   Layer.effectDiscard(
-    Effect.logInfo("Starting the Daemon").pipe(Effect.annotateLogs({ version }))
+    Effect.logInfo("Starting daemon").pipe(Effect.annotateLogs({ version }))
   ).pipe(
     Layer.provideMerge(
       Layer.merge(

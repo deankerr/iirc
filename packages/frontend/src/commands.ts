@@ -457,7 +457,7 @@ const command = <A>(
       const { focus } = context;
 
       if (focus === undefined) {
-        return invalid("Open a Timeline first.");
+        return invalid("Open a conversation first.");
       }
 
       const value = parse(args, focus);
@@ -481,7 +481,7 @@ interface ExportRange {
  */
 const exportArguments = (args: string): Parsed<ExportRange> => {
   const usage =
-    "/export takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00, to start from, and another to stop at, each optional.";
+    "/export takes an optional start and an optional end. Each is a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
 
   const words = args.split(/\s+/u).filter((word) => word !== "");
 
@@ -521,7 +521,7 @@ const exportArguments = (args: string): Parsed<ExportRange> => {
 const textOf =
   (usage: string) =>
   (args: string): Parsed<string> =>
-    args === "" ? invalid(`Say what? ${usage}`) : parsed(args);
+    args === "" ? invalid(`Add a message. ${usage}`) : parsed(args);
 
 /**
  * A Target and text to say to it: one name, with no space or `,`, then the text.
@@ -536,15 +536,15 @@ const targetAndText =
     const text = space === -1 ? "" : args.slice(space + 1);
 
     if (target === "") {
-      return invalid(`To whom? ${usage}`);
+      return invalid(`Add a channel or user. ${usage}`);
     }
 
     // A list of Targets is never one Timeline, and the Client sends none.
     if (target.includes(",")) {
-      return invalid("Say it to one Target at a time.");
+      return invalid("Send to one channel or user at a time.");
     }
 
-    return text === "" ? invalid(`Say what? ${usage}`) : parsed({ target, text });
+    return text === "" ? invalid(`Add a message. ${usage}`) : parsed({ target, text });
   };
 
 /**
@@ -593,7 +593,7 @@ export const removalWords = (network: NetworkId, keep: boolean): string =>
  * @returns The words.
  */
 const removedRefusal = (network: NetworkId) =>
-  `${network} was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove ${removalWords(network, false)} drops them.`;
+  `${network} was removed, so its conversations are read-only. /network remove ${removalWords(network, false)} drops them.`;
 
 /**
  * Why nothing is said on a Network with no Session, in words: that it is not connected, or,
@@ -604,8 +604,8 @@ const removedRefusal = (network: NetworkId) =>
  */
 const noSession = (network: string, session: false | undefined) =>
   session === false
-    ? `${network} is not connected, so nothing can be said there now.`
-    : `Whether ${network} is connected is not known yet, so nothing can be said there now.`;
+    ? `${network} is not connected, so you can't send there now.`
+    : `Whether ${network} is connected is not known yet, so you can't send there now.`;
 
 /**
  * Why a Credential's value typed after `/set` is refused, in words.
@@ -613,7 +613,7 @@ const noSession = (network: string, session: false | undefined) =>
  * @returns The words.
  */
 const credentialRefused = (name: string) =>
-  `A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set ${name} alone, which asks for it in a password prompt.`;
+  `Don't type a password into the message input. It was cleared and nothing was sent. Use /set ${name} alone to enter it in a password prompt.`;
 
 /** What `/set` and `/unset` take first to change an option under `ui` on this device alone. */
 const deviceFlag = "-device";
@@ -628,7 +628,7 @@ const afterDevice = (args: string): string | undefined =>
     ? args.slice(deviceFlag.length).trimStart()
     : undefined;
 
-const deviceOnlyUi = `Only an option under ui is kept for this device, as in /set ${deviceFlag} ui.theme light.`;
+const deviceOnlyUi = `Only ui options can be set for this device alone, as in /set ${deviceFlag} ui.theme light.`;
 
 /**
  * Why an option every device shares only is refused for this device alone, in words.
@@ -636,7 +636,7 @@ const deviceOnlyUi = `Only an option under ui is kept for this device, as in /se
  * @returns The words.
  */
 const sharedOnlyUi = (name: string) =>
-  `${name} is shared by every device, so no device overrides it. Use /set ${name} without ${deviceFlag}.`;
+  `${name} is shared by all your devices, so one device can't override it. Use /set ${name} without ${deviceFlag}.`;
 
 /**
  * An option under `ui` set to a value given as text, for every device or this one.
@@ -860,7 +860,7 @@ const enabledArguments =
       const network = focus?.network ?? draft?.network;
 
       return network === undefined
-        ? invalid(`Name a Network, or open one of its Timelines first. ${usage}`)
+        ? invalid(`Name a network, or open one of its conversations first. ${usage}`)
         : parsed(network);
     }
 
@@ -868,7 +868,7 @@ const enabledArguments =
 
     return network === undefined
       ? invalid(
-          `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${id}". ${usage}`
+          `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${id}". ${usage}`
         )
       : parsed(network);
   };
@@ -909,7 +909,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
     const network = context.focus?.network ?? context.draft?.network;
 
     return network === undefined
-      ? invalid(`Name a Network, or open one of its Timelines first. ${removeUsage}`)
+      ? invalid(`Name a network, or open one of its conversations first. ${removeUsage}`)
       : parsed({ _tag: "AskRemoval", keep: removalChoices.get(second), network });
   }
 
@@ -917,7 +917,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
 
   return network === undefined
     ? invalid(
-        `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${first}". ${removeUsage}`
+        `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${first}". ${removeUsage}`
       )
     : parsed({ _tag: "AskRemoval", keep: removalChoices.get(second), network });
 };
@@ -947,12 +947,12 @@ const networkArguments = (args: string, context: CommandContext): Parsed<Intent>
 
   if (network === undefined) {
     return invalid(
-      `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${id}". ${networkUsage}`
+      `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${id}". ${networkUsage}`
     );
   }
 
   if (nick === undefined || ircdText === "") {
-    return invalid(`Give an Ircd and a nick. ${networkUsage}`);
+    return invalid(`Give a server and a nick. ${networkUsage}`);
   }
 
   const ircd = parseIrcd(ircdText);
@@ -986,7 +986,7 @@ const closeArguments = (
   const { focus } = context;
 
   if (focus === undefined) {
-    return invalid("Open a Timeline first.");
+    return invalid("Open a conversation first.");
   }
 
   const name = args.trim();
@@ -994,7 +994,7 @@ const closeArguments = (
   if (name !== "") {
     // A list of Targets is never one Timeline.
     if (/[\s,]/u.test(name)) {
-      return invalid(`Close one Timeline at a time. ${closeUsage}`);
+      return invalid(`Close one conversation at a time. ${closeUsage}`);
     }
 
     return parsed({ _tag: "CloseTarget", network: focus.network, target: name });
@@ -1002,7 +1002,7 @@ const closeArguments = (
 
   return focus.kind === "Network"
     ? invalid(
-        `A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. ${closeUsage}`
+        `A network's own conversation can't be closed. Name a channel or nick, or open one. ${closeUsage}`
       )
     : parsed({ _tag: "CloseTimeline", network: focus.network, timeline: focus.timeline });
 };
@@ -1030,7 +1030,7 @@ const ignoredMask =
     return Schema.is(IgnoreMask)(text)
       ? parsed(text)
       : invalid(
-          `${given} is neither a nick nor a mask of nick!user@host, with each part given, at most 255 characters, and no space or comma.`
+          `${given} is not a nick or a nick!user@host mask. Give every part, in at most 255 characters, with no space or comma.`
         );
   };
 
@@ -1059,7 +1059,7 @@ const partArguments = (args: string, focus: Focus): Parsed<Edit> => {
 
   return focus.kind === "Channel" && focus.key !== undefined
     ? parsed({ _tag: "PartTimeline", key: focus.key, name: focus.name })
-    : invalid("Name a Channel to part, such as /part #iirc, or open the Channel.");
+    : invalid("Name a channel to part, such as /part #iirc, or open the channel.");
 };
 
 /**
@@ -1079,7 +1079,7 @@ const stepped =
     }
 
     if (count === 0) {
-      return invalid("There are no Timelines yet. Add a Network with /network add.");
+      return invalid("There are no conversations yet. Add a network with /network add.");
     }
 
     const at = open === undefined ? -1 : timelines.indexOf(open);
@@ -1102,7 +1102,7 @@ const moveArguments = (args: string): Parsed<"Up" | "Down"> => {
     return parsed("Up");
   }
 
-  return way === "down" ? parsed("Down") : invalid("Move it which way? /move up|down");
+  return way === "down" ? parsed("Down") : invalid("Move it up or down: /move up|down");
 };
 
 /**
@@ -1121,12 +1121,12 @@ const pinArguments = (args: string, context: CommandContext): Parsed<ArrangeEdit
   }
 
   if (focus === undefined) {
-    return invalid("Open a Timeline first.");
+    return invalid("Open a conversation first.");
   }
 
   if (focus.kind === "Network") {
     return invalid(
-      `${focus.network}'s own Timeline is the Network's row, so it is not pinned. /move moves the Network.`
+      `${focus.network}'s own conversation is the network's row, so it can't be pinned. /move moves the network.`
     );
   }
 
@@ -1165,11 +1165,11 @@ export const timelineNamed = (
     .filter((one) => one !== "");
 
   if (first === undefined) {
-    return invalid(`Name a Timeline. Usage: ${goUsage}`);
+    return invalid(`Name a conversation. Usage: ${goUsage}`);
   }
 
   if (rest.length > 0) {
-    return invalid(`Give a name, or a Network's id and a name. Usage: ${goUsage}`);
+    return invalid(`Give a name, or a network's id and a name. Usage: ${goUsage}`);
   }
 
   if (second !== undefined) {
@@ -1177,7 +1177,7 @@ export const timelineNamed = (
     const found = named.find((one) => one.network === network && sameName(one.name, second));
 
     return found === undefined
-      ? invalid(`There is no Timeline ${second} on ${network}. Usage: ${goUsage}`)
+      ? invalid(`There is no conversation ${second} on ${network}. Usage: ${goUsage}`)
       : parsed(found.timeline);
   }
 
@@ -1192,9 +1192,9 @@ export const timelineNamed = (
   }
 
   return networks.length === 0
-    ? invalid(`There is no Timeline named ${first}. Usage: ${goUsage}`)
+    ? invalid(`There is no conversation named ${first}. Usage: ${goUsage}`)
     : invalid(
-        `${first} is on ${networks.join(", ")}. Name its Network, as in /go ${networks[0] ?? ""} ${first}. Usage: ${goUsage}`
+        `${first} is on ${networks.join(", ")}. Name its network, as in /go ${networks[0] ?? ""} ${first}. Usage: ${goUsage}`
       );
 };
 
@@ -1219,7 +1219,7 @@ const schemeOf = (option: Exclude<ThemeOption, "theme">): "dark" | "light" =>
 /**
  * What `/theme` was given before a theme's name: `-device`, and `-light` or `-dark`, in
  * either order, each at most once.
- * @param words - The words after `/theme`, lower-cased.
+ * @param words - The words after `/theme`, lowercased.
  * @returns The flags, and how many words they took, or none for a flag given twice.
  */
 export const themeFlags = (
@@ -1315,7 +1315,7 @@ const themeArguments = (args: string): Parsed<Intent> => {
     const scheme = schemeOf(flags.option);
 
     return invalid(
-      `system follows the device, so it is never the theme drawn while the device is ${scheme}. Name a theme, such as ${scheme}.`
+      `system follows the device, so it can't be the theme for a ${scheme} device. Name a theme, such as ${scheme}.`
     );
   }
 
@@ -1342,7 +1342,7 @@ const formatCommand = (flag: Flag, what: string): Command =>
   unfocused({
     aliases: [],
     arguments: "None",
-    description: `Turn ${what} on or off over the composer's selection, or for what is typed next.`,
+    description: `Turn ${what} on or off for the selected text, or for what you type next.`,
     id: `format.${flag}`,
     intents: () => [{ _tag: "Format", format: flag }],
     name: flag,
@@ -1374,13 +1374,13 @@ const readArguments = (args: string, context: CommandContext): Parsed<readonly M
   }
 
   if (what !== "") {
-    return invalid("Use /read for the open Timeline, or /read all for every Timeline.");
+    return invalid("Use /read for the open conversation, or /read all for every conversation.");
   }
 
   const { focus } = context;
 
   return focus === undefined
-    ? invalid("Open a Timeline first, or use /read all.")
+    ? invalid("Open a conversation first, or use /read all.")
     : parsed(
         marksOf(
           [...context.unread, ...context.unreadClosed].filter(
@@ -1591,11 +1591,11 @@ const queryArguments = (args: string): Parsed<string> => {
   const name = args.trim();
 
   if (name === "") {
-    return invalid("With whom? /query <nick>");
+    return invalid("Add a nick. /query <nick>");
   }
 
   if (/[\s,]/u.test(name)) {
-    return invalid("Give one nick. To say something to them, use /msg <nick> <text>.");
+    return invalid("Give one nick. To message them, use /msg <nick> <text>.");
   }
 
   return parsed(name);
@@ -1623,7 +1623,7 @@ const lookupCommand = (kind: UserKind, description: string): Command => {
       const { focus, head } = context;
 
       if (focus === undefined) {
-        return invalid("Open a Timeline first.");
+        return invalid("Open a conversation first.");
       }
 
       const nick = parseLookupNick(kind, args, nickRulesOf(head));
@@ -1669,7 +1669,7 @@ const listCommand = (kind: ListKind, aliases: readonly string[], description: st
       const { focus } = context;
 
       if (focus === undefined) {
-        return invalid("Open a Timeline first.");
+        return invalid("Open a conversation first.");
       }
 
       const head = focusHead(context);
@@ -1697,14 +1697,14 @@ const listCommand = (kind: ListKind, aliases: readonly string[], description: st
 const namesCommand = (): Command => ({
   aliases: [],
   arguments: "Optional",
-  description: "List a Channel's members, the open one or another, with their prefixes.",
+  description: "List the members of the open channel or another, with their ranks.",
   id: "lookup.names",
   name: "names",
   run: (args, context) => {
     const { focus } = context;
 
     if (focus === undefined) {
-      return invalid("Open a Timeline first.");
+      return invalid("Open a conversation first.");
     }
 
     const head = focusHead(context);
@@ -1725,14 +1725,14 @@ const namesCommand = (): Command => ({
 const whoCommand = (): Command => ({
   aliases: [],
   arguments: "Required",
-  description: "List the Users on the open Timeline's Network that match a mask.",
+  description: "List the users on the open conversation's network that match a mask.",
   id: "lookup.who",
   name: "who",
   run: (args, context) => {
     const { focus } = context;
 
     if (focus === undefined) {
-      return invalid("Open a Timeline first.");
+      return invalid("Open a conversation first.");
     }
 
     const mask = parseWhoMask(args);
@@ -1753,14 +1753,15 @@ const whoCommand = (): Command => ({
 const directoryCommand = (): Command => ({
   aliases: [],
   arguments: "Optional",
-  description: "List the Channels on the open Timeline's Network, the largest first, to join one.",
+  description:
+    "List the channels on the open conversation's network, the largest first, to join one.",
   id: "lookup.list",
   name: "list",
   run: (args, context) => {
     const { focus } = context;
 
     if (focus === undefined) {
-      return invalid("Open a Timeline first.");
+      return invalid("Open a conversation first.");
     }
 
     const conditions = parseConditions(args);
@@ -1790,8 +1791,8 @@ const muteCommand = (muted: boolean): Command => {
     aliases: [],
     arguments: "None",
     description: muted
-      ? "Mute the open Timeline, which then shows no count of unread Messages and notifies of nothing but a Highlight, for every device."
-      : "Unmute the open Timeline, for every device.",
+      ? "Mute the open conversation on every device. It shows no unread count and only notifies you of highlights."
+      : "Unmute the open conversation, for every device.",
     id: `timeline.${name}`,
     intents: (_none: undefined, focus) => [{ _tag: "Mute", muted, timeline: focus.timeline }],
     name,
@@ -1832,7 +1833,7 @@ const acting = (
       const { focus } = context;
 
       if (focus === undefined) {
-        return invalid("Open a Timeline first.");
+        return invalid("Open a conversation first.");
       }
 
       const head = context.head?.timeline === focus.timeline ? context.head : undefined;
@@ -1867,10 +1868,10 @@ const wordsOf = (text: string): readonly string[] => text.split(/\s+/u).filter((
 const credentialCommands: ReadonlySet<string> = new Set(["AUTHENTICATE", "OPER", "PASS"]);
 
 const rawCredentialRefused =
-  "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+  "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.";
 
 const rawOperRefused =
-  "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.";
+  "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
 
 /**
  * Why a raw Line with a command is refused, or nothing when it is not: `OPER` is
@@ -1889,7 +1890,7 @@ const rawRefusalOf = (command: string): string | undefined => {
 /**
  * A text in lower case, ASCII letters only, as a command's name is matched.
  * @param text - The text.
- * @returns It, lower-cased.
+ * @returns It, lowercased.
  */
 const lowerCaseAscii = (text: string): string =>
   text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
@@ -1990,7 +1991,7 @@ const kickArguments = (args: string, focus: Focus): Parsed<ActionRequest> => {
   const [first, ...rest] = list.split(",");
 
   if (first === undefined || first === "") {
-    return invalid("Kick whom? /kick <nick>[,<nick>…] [reason]");
+    return invalid("Add a nick. /kick <nick>[,<nick>…] [reason]");
   }
 
   if (rest.includes("")) {
@@ -2030,7 +2031,7 @@ const rulesOf = (head: ChannelHeader | undefined): ModeRules | undefined =>
     : { chanmodes: head.chanmodes, chantypes: head.chantypes, ranks: head.ranks };
 
 const rulesUnknown = (focus: Focus) =>
-  `The modes ${focus.network} has are not known yet: open a Channel on it, wait for its head to be read, and try again.`;
+  `The modes ${focus.network} supports are not known yet. Open a channel on it, wait for it to load, and try again.`;
 
 /**
  * Whether a Channel's mode takes a parameter when set or unset, by `PREFIX` and
@@ -2133,9 +2134,7 @@ const onChannelOf = (
     const sign = change.set ? "+" : "-";
 
     if (takes === undefined) {
-      return invalid(
-        `${focus.network} has no Channel mode ${change.mode}, as its CHANMODES and PREFIX say.`
-      );
+      return invalid(`${focus.network} does not support the channel mode ${change.mode}.`);
     }
 
     const param = takes ? given.shift() : undefined;
@@ -2148,13 +2147,13 @@ const onChannelOf = (
   }
 
   if (given.length > 0) {
-    return invalid(`Nothing takes ${given.join(" ")}. ${modeUsage}`);
+    return invalid(`No mode takes ${given.join(" ")}. ${modeUsage}`);
   }
 
   const [one, ...others] = requests;
 
   return one === undefined
-    ? invalid(`Change which modes? ${modeUsage}`)
+    ? invalid(`Give the modes to change. ${modeUsage}`)
     : parsed({ _tag: "Mode", changes: [one, ...others], target });
 };
 
@@ -2181,11 +2180,11 @@ const modeArguments = (
   const named = namesTarget(first, second, chantypes);
 
   if (first === "") {
-    return invalid(`Change which modes? ${modeUsage}`);
+    return invalid(`Give the modes to change. ${modeUsage}`);
   }
 
   if (!named && focus.kind !== "Channel") {
-    return invalid(`Name whose modes to change, or open the Channel. ${modeUsage}`);
+    return invalid(`Name a nick or channel, or open a channel. ${modeUsage}`);
   }
 
   const target = named ? first : focus.name;
@@ -2202,11 +2201,11 @@ const modeArguments = (
     const [one, ...others] = changes.value.map((change) => ({ ...change, param: null }));
 
     if (params.length > 0) {
-      return invalid(`Self's modes take no parameters here. Use /quote MODE ${target} … for that.`);
+      return invalid(`Your modes take no parameters here. Use /quote MODE ${target} … for that.`);
     }
 
     return one === undefined
-      ? invalid(`Change which modes? ${modeUsage}`)
+      ? invalid(`Give the modes to change. ${modeUsage}`)
       : parsed({ _tag: "Mode", changes: [one, ...others], target });
   }
 
@@ -2236,7 +2235,7 @@ const ranked = (mode: string, set: boolean, usage: string) => {
     const [first, ...rest] = wordsOf(args.replaceAll(",", " "));
 
     if (first === undefined) {
-      return invalid(`Whom? ${usage}`);
+      return invalid(`Add a nick. ${usage}`);
     }
 
     if (head === undefined) {
@@ -2247,7 +2246,7 @@ const ranked = (mode: string, set: boolean, usage: string) => {
       const ranks = head.ranks.map((one) => `${one.symbol} (${one.mode})`).join(", ");
 
       return invalid(
-        `${focus.network} has no ${rankNames.get(mode) ?? mode} rank (${mode}): its PREFIX gives ${ranks === "" ? "none" : ranks}.`
+        `${focus.network} has no ${rankNames.get(mode) ?? mode} rank (${mode}). Its ranks are ${ranks === "" ? "none" : ranks}.`
       );
     }
 
@@ -2280,7 +2279,7 @@ const banned = (set: boolean, usage: string) => {
     const [first, ...rest] = wordsOf(args);
 
     if (first === undefined) {
-      return invalid(`Whom? ${usage}`);
+      return invalid(`Add a nick. ${usage}`);
     }
 
     const rules = rulesOf(head);
@@ -2290,7 +2289,7 @@ const banned = (set: boolean, usage: string) => {
     }
 
     if (!rules.chanmodes.list.includes("b")) {
-      return invalid(`${focus.network} has no ban list (b) in its CHANMODES.`);
+      return invalid(`${focus.network} does not support bans.`);
     }
 
     return parsed({
@@ -2322,7 +2321,7 @@ const bannedByAccount = (
   const [nick, ...more] = rest;
 
   if (nick === undefined) {
-    return invalid(`Ban whose account? ${banAccountUsage}`);
+    return invalid(`Name the nick whose account to ban. ${banAccountUsage}`);
   }
 
   if (more.length > 0) {
@@ -2336,11 +2335,11 @@ const bannedByAccount = (
   }
 
   if (!rules.chanmodes.list.includes("b")) {
-    return invalid(`${focus.network} has no ban list (b) in its CHANMODES.`);
+    return invalid(`${focus.network} does not support bans.`);
   }
 
   if (head.accountBan === null) {
-    return invalid(`${focus.network} offers no ban by account (no ACCOUNTEXTBAN in its ISUPPORT).`);
+    return invalid(`${focus.network} does not support bans by account.`);
   }
 
   const nickRules = nickRulesOf(head);
@@ -2353,7 +2352,7 @@ const bannedByAccount = (
 
   return isLookupNick(nickRules, nick)
     ? parsed({ _tag: "BanAccount", channel: focus.name, nick })
-    : invalid(`A ban by account takes one nick, never a Channel or a mask. ${banAccountUsage}`);
+    : invalid(`A ban by account takes one nick, never a channel or a mask. ${banAccountUsage}`);
 };
 
 /**
@@ -2397,15 +2396,15 @@ const inviteArguments = (args: string, focus: Focus): Parsed<ActionRequest> => {
   const [nick, channel, ...rest] = wordsOf(args);
 
   if (nick === undefined) {
-    return invalid("Invite whom? /invite <nick> [channel]");
+    return invalid("Add a nick. /invite <nick> [channel]");
   }
 
   if (rest.length > 0) {
-    return invalid("Invite one nick to one Channel: /invite <nick> [channel]");
+    return invalid("Invite one nick to one channel: /invite <nick> [channel]");
   }
 
   if (channel === undefined && focus.kind !== "Channel") {
-    return invalid("To which Channel? /invite <nick> <channel>, or open the Channel.");
+    return invalid("Add a channel. /invite <nick> <channel>, or open the channel.");
   }
 
   const to = oneName(channel ?? focus.name, "Channel");
@@ -2442,7 +2441,7 @@ const ctcpNick = (nick: string, head: ChannelHeader | undefined, usage: string):
 
   return isLookupNick(rules, nick)
     ? parsed(nick)
-    : invalid(`A CTCP request goes to one nick, never a Channel, a mask, or a list. ${usage}`);
+    : invalid(`A CTCP request goes to one nick, never a channel, a mask, or a list. ${usage}`);
 };
 
 /**
@@ -2462,11 +2461,11 @@ const ctcpArguments = (
   const { nick = "", command = "", text = "" } = read ?? {};
 
   if (nick === "") {
-    return invalid(`To whom? ${ctcpUsage}`);
+    return invalid(`Add a nick. ${ctcpUsage}`);
   }
 
   if (command === "") {
-    return invalid(`Which request? ${ctcpUsage}`);
+    return invalid(`Add a request. ${ctcpUsage}`);
   }
 
   const verb = command.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
@@ -2501,7 +2500,7 @@ const pingArguments = (
   const [nick, ...rest] = wordsOf(args);
 
   if (nick === undefined) {
-    return invalid(`To whom? ${pingUsage}`);
+    return invalid(`Add a nick. ${pingUsage}`);
   }
 
   if (rest.length > 0) {
@@ -2518,19 +2517,19 @@ const quoteCommand = acting({
   aliases: ["raw"],
   arguments: "Required",
   description:
-    "Send a Line written as text to the open Timeline's Network, for what no other command covers.",
+    "Send a raw command to the open conversation's network, for anything no other command covers.",
   id: "act.quote",
   name: "quote",
   parse: (args) => {
     if (args.trim() === "") {
-      return invalid("Send what? /quote <raw line>");
+      return invalid("Add a raw command. /quote <raw command>");
     }
 
     const refusal = rawRefusalOf(rawCommandOf(args));
 
     return refusal === undefined ? parsed({ _tag: "Raw", line: args }) : invalid(refusal);
   },
-  usage: "/quote <raw line>",
+  usage: "/quote <raw command>",
   when: anywhereActing,
 });
 
@@ -2542,7 +2541,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Set the open Channel's topic, clear it with -delete, or, with nothing, edit the topic as it is.",
+      "Set the open channel's topic, clear it with -delete, or edit the current topic when you add nothing.",
     id: "act.topic",
     name: "topic",
     parse: topicArguments,
@@ -2552,7 +2551,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Kick nicks from the open Channel, with a reason or none.",
+    description: "Kick nicks from the open channel, with a reason or none.",
     id: "act.kick",
     name: "kick",
     parse: kickArguments,
@@ -2562,7 +2561,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Change modes of the open Channel, another target, or Self.",
+    description: "Change modes on the open channel, another channel or user, or yourself.",
     id: "act.mode",
     name: "mode",
     parse: modeArguments,
@@ -2572,7 +2571,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Make nicks operators of the open Channel.",
+    description: "Make nicks operators of the open channel.",
     id: "act.op",
     name: "op",
     parse: ranked("o", true, "/op <nick>…"),
@@ -2582,7 +2581,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Take operator from nicks in the open Channel.",
+    description: "Take operator from nicks in the open channel.",
     id: "act.deop",
     name: "deop",
     parse: ranked("o", false, "/deop <nick>…"),
@@ -2592,7 +2591,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Give nicks voice in the open Channel.",
+    description: "Give nicks voice in the open channel.",
     id: "act.voice",
     name: "voice",
     parse: ranked("v", true, "/voice <nick>…"),
@@ -2602,7 +2601,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Take voice from nicks in the open Channel.",
+    description: "Take voice from nicks in the open channel.",
     id: "act.devoice",
     name: "devoice",
     parse: ranked("v", false, "/devoice <nick>…"),
@@ -2613,7 +2612,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Ban masks from the open Channel; a bare nick bans nick!*@*. With -a, ban a nick's account where the Network names one in a ban.",
+      "Ban masks from the open channel. A bare nick bans nick!*@*. With -a, ban a nick's account where the network supports it.",
     id: "act.ban",
     name: "ban",
     parse: banArguments,
@@ -2623,7 +2622,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Lift bans from the open Channel; a bare nick lifts nick!*@*.",
+    description: "Lift bans from the open channel. A bare nick lifts nick!*@*.",
     id: "act.unban",
     name: "unban",
     parse: banned(false, "/unban <mask>…"),
@@ -2633,7 +2632,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "Required",
-    description: "Invite a nick to the open Channel, or to another.",
+    description: "Invite a nick to the open channel, or to another.",
     id: "act.invite",
     name: "invite",
     parse: inviteArguments,
@@ -2644,7 +2643,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Send a CTCP request, such as VERSION or TIME, to a nick on the open Timeline's Network, and show its reply.",
+      "Send a CTCP request, such as VERSION or TIME, to a nick on the open conversation's network, and show its reply.",
     id: "act.ctcp",
     name: "ctcp",
     parse: ctcpArguments,
@@ -2655,7 +2654,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Send a CTCP PING to a nick on the open Timeline's Network, and show how long its reply took.",
+      "Send a CTCP PING to a nick on the open conversation's network, and show how long its reply took.",
     id: "act.ping",
     name: "ping",
     parse: pingArguments,
@@ -2666,7 +2665,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Be away on the open Timeline's Network, with a message, kept across reconnects; with none, be back.",
+      "Mark yourself away on the open conversation's network, with a message that persists across reconnects. With no message, you come back.",
     id: "act.away",
     name: "away",
     parse: (args) => parsed({ _tag: "Away", message: args.trim() === "" ? null : args }),
@@ -2676,7 +2675,7 @@ const actions: readonly Command[] = [
   acting({
     aliases: [],
     arguments: "None",
-    description: "Be back on the open Timeline's Network, no longer away.",
+    description: "Mark yourself back on the open conversation's network.",
     id: "act.back",
     name: "back",
     parse: (args) =>
@@ -2690,7 +2689,7 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Change Self's nick on the open Timeline's Network for this Session; set network.<id>.nicks to keep it.",
+      "Change your nick on the open conversation's network for this connection. Set network.<id>.nicks to keep it.",
     id: "act.nick",
     name: "nick",
     parse: (args) => {
@@ -2705,12 +2704,12 @@ const actions: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Change Self's real name on the open Timeline's Network for this Session, where the Network offers setname.",
+      "Change your real name on the open conversation's network for this connection, where the network supports it.",
     id: "act.setname",
     name: "setname",
     parse: (args) =>
       args.trim() === ""
-        ? invalid("Set it to what? /setname <real name>")
+        ? invalid("Add a name. /setname <real name>")
         : parsed({ _tag: "Setname", realname: args }),
     usage: "/setname <real name>",
     when: anywhereActing,
@@ -2731,7 +2730,7 @@ const say = (focus: Focus, kind: SayKind, text: string): Say => ({
 const sayCommand = command({
   aliases: [],
   arguments: "Required",
-  description: "Say a Message to the open Channel or Direct Message.",
+  description: "Send a message to the open channel or direct message.",
   id: "say.privmsg",
   intents: (text: string, focus) => [say(focus, "Privmsg", text)],
   name: "say",
@@ -2772,7 +2771,7 @@ const inDraft = (
   }
 
   if (text === "") {
-    return invalid(`Say what? Type it after ${name}.`);
+    return invalid(`Add a message after ${name}.`);
   }
 
   if (context.session !== true) {
@@ -2789,7 +2788,7 @@ const setCommand = unfocused({
   aliases: [],
   arguments: "Optional",
   description:
-    "Open the options, filtered by a pattern such as network.libera.* or *nick*, set an option to a value, set an option under ui for this device alone with -device, or ask for a Credential's value in a password prompt.",
+    "Open settings, filtered by a pattern such as network.libera.* or *nick*. Set an option to a value, set a ui option for this device alone with -device, or enter a password in a password prompt.",
   id: "options.set",
   intents: (intent: Intent) => [intent],
   name: "set",
@@ -2805,7 +2804,7 @@ const aliasesCommand = unfocused({
   aliases: [],
   arguments: "Optional",
   description:
-    "List the aliases of your own, add one that stands for a command line, with $1 to $9 for the words typed after it and $* for all of them, or remove one.",
+    "List your aliases, add one that stands for a command, or remove one. Use $1 to $9 for the words after it and $* for all of them.",
   id: "aliases.edit",
   intents: (intent: Intent) => [intent],
   name: "alias",
@@ -2821,7 +2820,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: ["action"],
     arguments: "Required",
-    description: "Say what you are doing, as a CTCP ACTION, to the open Channel or Direct Message.",
+    description: "Act in the open channel or direct message, as in /me waves.",
     id: "say.action",
     intents: (text: string, focus) => [say(focus, "Action", text)],
     name: "me",
@@ -2832,7 +2831,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: ["privmsg"],
     arguments: "Required",
-    description: "Say a Message to any Target, and open the Direct Message with a nick.",
+    description: "Message any channel or user, and open the direct message with a nick.",
     id: "say.to",
     intents: ({ target: to, text }, focus) => [
       { _tag: "Say", kind: "Privmsg", network: focus.network, opens: true, target: to, text },
@@ -2845,7 +2844,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: [],
     arguments: "Required",
-    description: "Send a NOTICE to any Target.",
+    description: "Send a NOTICE to any channel or user.",
     id: "say.notice",
     intents: ({ target: to, text }, focus) => [
       { _tag: "Say", kind: "Notice", network: focus.network, opens: false, target: to, text },
@@ -2859,7 +2858,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Join Channels on the open Timeline's Network, by adding them to its Configuration.",
+      "Join channels on the open conversation's network, by adding them to its settings.",
     id: "channels.join",
     intents: (channels: readonly string[], focus) => [
       { _tag: "Configure", edit: { _tag: "Join", channels }, network: focus.network },
@@ -2868,7 +2867,7 @@ export const commands: readonly Command[] = [
     parse: (args) =>
       args.trim().includes(" ")
         ? invalid(
-            "Give Channels comma-separated. A key is a Credential: set it with /set network.<id>.channels.<channel>.key <key>."
+            "Separate channels with commas. A channel key is a password: set it with /set network.<id>.channels.<channel>.key <key>."
           )
         : channelsOf(args),
     usage: "/join <#channel>[,<#channel>…]",
@@ -2877,7 +2876,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: ["leave"],
     arguments: "Optional",
-    description: "Part Channels, or the open one, by taking them from its Network's Configuration.",
+    description: "Part channels, or the open one, by taking them from its network's settings.",
     id: "channels.part",
     intents: (edit: Edit, focus) => [{ _tag: "Configure", edit, network: focus.network }],
     name: "part",
@@ -2889,7 +2888,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Hide what a User says and does on the open Timeline's Network, by a nick or a nick!user@host mask, or list the masks ignored there.",
+      "Hide a user's messages and activity on the open conversation's network, by nick or nick!user@host mask, or list the masks you ignore there.",
     id: "ignores.ignore",
     intents: (mask: IgnoreMask | undefined, focus) => [
       mask === undefined
@@ -2904,8 +2903,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: [],
     arguments: "Required",
-    description:
-      "Show again what a User says and does on the open Timeline's Network, by the nick or mask ignored.",
+    description: "Stop ignoring a nick or mask on the open conversation's network.",
     id: "ignores.unignore",
     intents: (mask: IgnoreMask, focus) => [
       { _tag: "Configure", edit: { _tag: "Unignore", mask }, network: focus.network },
@@ -2919,7 +2917,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Close a Channel you left, or a Direct Message, the open one unless named, taking it out of the sidebar until something arrives in it. A Channel you are in offers to leave it instead.",
+      "Close a channel you left or a direct message, and remove it from the sidebar until something new arrives. This closes the open one unless you name another. If you are in the channel, you are asked to leave it instead.",
     id: "timeline.close",
     intents: (intent: CloseTimeline | CloseTarget) => [intent],
     name: "close-timeline",
@@ -2934,7 +2932,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "List the themes, draw in one for every device or with -device for this one, choose with -light or -dark the one system draws while the device is light or dark, import one from a terminal's theme file, or remove one imported.",
+      "List themes, switch to one for every device or just this one with -device, choose the theme system uses in light or dark mode with -light or -dark, import one from a terminal theme file, or remove an imported one.",
     id: "theme.set",
     intents: (intent: Intent) => [intent],
     name: "theme",
@@ -2946,7 +2944,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Return an option to what it starts as, or leave it unset, or with -device, stop this device overriding an option under ui.",
+      "Reset an option to its starting value, or leave it not set. With -device, stop this device overriding a ui option.",
     id: "options.unset",
     intents: (intent: Intent) => [intent],
     name: "unset",
@@ -2958,7 +2956,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Add a Network, enabled, with one Ircd and one nick, and everything else as a new Network starts, or remove one, asking first whether its Timelines stay readable.",
+      "Add a network with one server and one nick, or remove one. Removing asks first whether its conversations stay readable.",
     id: "network.manage",
     intents: (intent: Intent) => [intent],
     name: "network",
@@ -2970,7 +2968,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Connect to a Network, the focused one unless named, by setting network.<id>.enabled on.",
+      "Connect to a network, the focused one unless named, by setting network.<id>.enabled on.",
     id: "network.connect",
     intents: (network: NetworkId) => [enabling(network, true)],
     name: "connect",
@@ -2982,7 +2980,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Disconnect from a Network, the focused one unless named, by setting network.<id>.enabled off.",
+      "Disconnect from a network, the focused one unless named, by setting network.<id>.enabled off.",
     id: "network.disconnect",
     intents: (network: NetworkId) => [enabling(network, false)],
     name: "disconnect",
@@ -2993,7 +2991,7 @@ export const commands: readonly Command[] = [
   command({
     aliases: [],
     arguments: "None",
-    description: "Jump to the open Timeline's latest, and follow it from there.",
+    description: "Jump to the latest message in the open conversation and follow it.",
     id: "timeline.latest",
     intents: (_: undefined, focus) => [{ _tag: "Latest", timeline: focus.timeline }],
     name: "latest",
@@ -3006,17 +3004,17 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Go to a date in the open Timeline, a day in your time zone, or a time with its zone: its first item at or after it, its beginning when before that, or its latest when after.",
+      "Go to a date or time in the open conversation: a day in your time zone, or a time with its zone. This opens the first item at or after it, the beginning if it's earlier, or the latest if it's later.",
     id: "timeline.date",
     intents: (moment: Moment, focus) => [{ _tag: "GoToDate", moment, timeline: focus.timeline }],
     name: "date",
     parse: (args) => {
       const usage =
-        "/date takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
+        "/date takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
 
       const value = args.trim();
 
-      return value === "" ? invalid(`Go to when? ${usage}`) : parseMoment(value, usage);
+      return value === "" ? invalid(`Add a date or time. ${usage}`) : parseMoment(value, usage);
     },
     usage: "/date <date|time>",
     when: focused,
@@ -3025,7 +3023,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Save the open Timeline as a text file, the whole of it, or from a date or a time with its zone, up to another, a day taken whole.",
+      "Save the open conversation as a text file, all of it or between two dates or times. A date alone covers the whole day.",
     id: "timeline.export",
     intents: (range: ExportRange, focus) => [
       { _tag: "Export", since: range.since, timeline: focus.timeline, until: range.until },
@@ -3039,7 +3037,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Move the open Timeline one place up or down in the sidebar, among the pinned, among the Networks if it is a Network's own, or among its Network's, for every device.",
+      "Move the open conversation up or down in the sidebar on every device, among the pinned, the networks, or its network's conversations.",
     id: "timeline.move",
     intents: (direction: "Up" | "Down", focus) => [
       { _tag: "Arrange", edit: { _tag: "Move", direction, timeline: focus.timeline } },
@@ -3055,7 +3053,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "None",
     description:
-      "Pin the open Timeline above the Networks in the sidebar, or unpin it when it is pinned, for every device.",
+      "Pin the open conversation above the networks in the sidebar on every device, or unpin it if it is pinned.",
     id: "timeline.pin",
     intents: (edit: ArrangeEdit) => [{ _tag: "Arrange", edit }],
     name: "pin",
@@ -3066,7 +3064,7 @@ export const commands: readonly Command[] = [
   unfocused({
     aliases: [],
     arguments: "None",
-    description: "Open the next Timeline in the sidebar.",
+    description: "Open the next conversation in the sidebar.",
     id: "timeline.next",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
@@ -3078,7 +3076,7 @@ export const commands: readonly Command[] = [
   unfocused({
     aliases: ["prev"],
     arguments: "None",
-    description: "Open the previous Timeline in the sidebar.",
+    description: "Open the previous conversation in the sidebar.",
     id: "timeline.previous",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
@@ -3091,7 +3089,7 @@ export const commands: readonly Command[] = [
     aliases: ["jump"],
     arguments: "None",
     description:
-      "Open the Timeline with the most calling for you: Highlights, then Direct Messages, then Messages.",
+      "Open the conversation that needs you most: highlights first, then direct messages, then other unread messages.",
     id: "timeline.unread",
     intents: (to: TimelineId | undefined) =>
       to === undefined ? [] : [{ _tag: "Open", timeline: to }],
@@ -3104,7 +3102,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Open a Timeline by its name in the focused Pane, on the Network of the one in focus unless another is named.",
+      "Open a conversation by its name in the focused pane, on the current conversation's network unless you name another.",
     id: "timeline.go",
     intents: (to: TimelineId) => [{ _tag: "Open", timeline: to }],
     name: "go",
@@ -3117,7 +3115,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Mark the open Timeline read up to its latest, or every Timeline with /read all, for every Frontend.",
+      "Mark the open conversation read up to its latest, or every conversation with /read all, for every device.",
     id: "timeline.read",
     intents: (marks: readonly MarkRead[]) => marks,
     name: "read",
@@ -3129,7 +3127,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Choose whether the open Timeline's links are previewed, over ui.previews, for every device: off, text, on, or default to follow ui.previews. A Direct Message chosen text or on is previewed without a press.",
+      "Choose whether links in the open conversation show previews on every device: off, text, on, or default to follow ui.previews. In a direct message, text or on shows previews without a click.",
     id: "previews.choose",
     intents: (mode: PreviewsShown | undefined, focus) => [
       { _tag: "ChoosePreviews", mode, timeline: focus.timeline },
@@ -3143,7 +3141,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Notify on this device of Highlights and Direct Messages you are not looking at, or stop.",
+      "Notify this device of highlights and direct messages you are not looking at, or stop.",
     id: "notify.set",
     intents: (on: boolean) => [{ _tag: "Notify", on }],
     name: "notify",
@@ -3155,7 +3153,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Open the Direct Message with a nick, or start /msg to them when nothing was said yet.",
+      "Open the direct message with a nick, or start one with /msg if there are no messages yet.",
     id: "timeline.query",
     intents: (name: string, focus) => [{ _tag: "Query", name, network: focus.network }],
     name: "query",
@@ -3165,27 +3163,27 @@ export const commands: readonly Command[] = [
   }),
   lookupCommand(
     "Whois",
-    "Look a nick up on the open Timeline's Network: who they are, where, and in which Channels."
+    "Show who a nick is on the open conversation's network: their name, server, and channels."
   ),
-  lookupCommand("Whowas", "Look up who used a nick on the open Timeline's Network before."),
+  lookupCommand("Whowas", "Show who last used a nick on the open conversation's network."),
   namesCommand(),
   whoCommand(),
   directoryCommand(),
-  listCommand("Bans", [], "List a Channel's bans, the open one or another, and lift them."),
+  listCommand("Bans", [], "List the bans on the open channel or another, and lift them."),
   listCommand(
     "Exceptions",
     ["excepts"],
-    "List a Channel's ban exceptions, the open one or another, and remove them."
+    "List the ban exceptions on the open channel or another, and remove them."
   ),
   listCommand(
     "Invitations",
     ["invitations"],
-    "List a Channel's invitation masks, which let a match join while it is invite-only."
+    "List the invitation masks on the open channel or another. A match can join while the channel is invite-only."
   ),
   unfocused({
     aliases: [],
     arguments: "Optional",
-    description: "Show or hide the open Channel's members, on this device.",
+    description: "Show or hide the open channel's members, on this device.",
     id: "members.toggle",
     intents: (shown: boolean | undefined) => [{ _tag: "ShowMembers", shown }],
     name: "members",
@@ -3196,7 +3194,7 @@ export const commands: readonly Command[] = [
   unfocused({
     aliases: [],
     arguments: "Optional",
-    description: "Show or hide the sidebar of Networks and their Timelines, on this device.",
+    description: "Show or hide the sidebar of networks and their conversations, on this device.",
     id: "sidebar.toggle",
     intents: (shown: boolean | undefined) => [{ _tag: "ShowSidebar", shown }],
     name: "sidebar",
@@ -3208,13 +3206,12 @@ export const commands: readonly Command[] = [
   formatCommand("italic", "italic"),
   formatCommand("underline", "underline"),
   formatCommand("monospace", "fixed pitch"),
-  formatCommand("reverse", "reversed colours"),
+  formatCommand("reverse", "reversed colors"),
   formatCommand("strikethrough", "strikethrough"),
   unfocused({
     aliases: [],
     arguments: "None",
-    description:
-      "Choose a format or a colour for the text selected in the composer, or for what is typed next.",
+    description: "Choose a format or a color for the selected text, or for what you type next.",
     id: "format.open",
     intents: () => [{ _tag: "ChooseFormat" }],
     name: "format",
@@ -3226,7 +3223,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Search the Messages of every Timeline, newest first, narrowed by from:<nick>, in:<#channel|nick>, network:<id>, since:<date>, and until:<date>, or show the last search.",
+      "Search the messages of every conversation, newest first, narrowed by from:<nick>, in:<#channel|nick>, network:<id>, since:<date>, and until:<date>, or show the last search.",
     id: "search.open",
     intents: (query: string | undefined) => [{ _tag: "Search", query }],
     name: "search",
@@ -3238,7 +3235,7 @@ export const commands: readonly Command[] = [
   unfocused({
     aliases: [],
     arguments: "None",
-    description: "Show the files uploaded to be shared by link, to copy, rename, or delete.",
+    description: "Show your uploads, which you can copy a link to, rename, or delete.",
     id: "uploads.open",
     intents: () => [{ _tag: "OpenUploads" }],
     name: "uploads",
@@ -3249,8 +3246,7 @@ export const commands: readonly Command[] = [
   unfocused({
     aliases: [],
     arguments: "None",
-    description:
-      "Show iirc's own view in the focused Pane: the most recent of what the Daemon logged.",
+    description: "Show the daemon's recent logs in the focused pane.",
     id: "tail.open",
     intents: () => [{ _tag: "OpenTail" }],
     name: "tail",
@@ -3262,7 +3258,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Split the focused Pane, side by side or one above another, opening what calls for you most.",
+      "Split the focused pane side by side or one above the other, and open the conversation that needs you most.",
     id: "pane.split",
     name: "split",
     parse: splitArguments,
@@ -3272,7 +3268,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "None",
-    description: "Close the focused Pane, the Pane beside it taking its place.",
+    description: "Close the focused pane. The pane beside it takes its place.",
     id: "pane.close",
     name: "close",
     parse: ofPanes("close", { _tag: "Close" }),
@@ -3282,7 +3278,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "Required",
-    description: "Focus the Pane to the left, right, above, or below.",
+    description: "Focus the pane to the left, right, above, or below.",
     id: "pane.focus",
     name: "pane",
     parse: towards("pane", (direction) => ({ _tag: "Move", direction })),
@@ -3292,7 +3288,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "Required",
-    description: "Swap what the focused Pane shows with the Pane in a direction, and follow it.",
+    description: "Swap the focused pane with the pane in a direction, and follow it.",
     id: "pane.swap",
     name: "swap",
     parse: towards("swap", (direction) => ({ _tag: "Swap", direction })),
@@ -3302,7 +3298,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "None",
-    description: "Give every Pane an equal share of the space it splits.",
+    description: "Make every pane the same size.",
     id: "pane.equalize",
     name: "equalize",
     parse: ofPanes("equalize", { _tag: "Equalize" }),
@@ -3312,7 +3308,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "None",
-    description: "Show the focused Pane alone, or every Pane again.",
+    description: "Show the focused pane alone, or every pane again.",
     id: "pane.zoom",
     name: "zoom",
     parse: ofPanes("zoom", { _tag: "Zoom" }),
@@ -3322,7 +3318,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "None",
-    description: "Make the focused Pane larger, by a step.",
+    description: "Make the focused pane larger.",
     id: "pane.grow",
     name: "grow",
     parse: ofPanes("grow", { _tag: "Grow" }),
@@ -3332,7 +3328,7 @@ export const commands: readonly Command[] = [
   paneCommand({
     aliases: [],
     arguments: "None",
-    description: "Make the focused Pane smaller, by a step.",
+    description: "Make the focused pane smaller.",
     id: "pane.shrink",
     name: "shrink",
     parse: ofPanes("shrink", { _tag: "Shrink" }),
@@ -3343,7 +3339,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Put the caret in the composer, to type into it, or with text, start it there with its list open, setting a draft aside until it runs or Escape.",
+      "Focus the message input. With text, start there with its suggestions open and set your draft aside until the command runs or you press Escape.",
     id: "composer.focus",
     intents: (text: string | undefined) => [
       text === undefined ? { _tag: "FocusComposer", text } : { _tag: "StartCommand", text },
@@ -3458,15 +3454,15 @@ export const typesCredential = (line: string, aliases: Aliases): boolean =>
  */
 const noTarget = (focus: Focus | undefined): string | undefined => {
   if (focus === undefined) {
-    return "Open a Channel or a Direct Message first.";
+    return "Open a channel or a direct message first.";
   }
 
   if (focus.kind === "Network") {
-    return "The Network's own Timeline has no Target to say it to. Open a Channel or a Direct Message, or use /msg <target> <text>.";
+    return "You can't send from the network's own conversation. Open a channel or a direct message, or use /msg <target> <text>.";
   }
 
   return focus.detached
-    ? "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>."
+    ? "The other person changed nick, so this direct message no longer follows them. Use /msg <nick> <text>."
     : undefined;
 };
 
@@ -3481,7 +3477,7 @@ const unmetOne = (condition: Condition, context: CommandContext): string | undef
 
   switch (condition._tag) {
     case "Focused": {
-      return focus === undefined ? "Open a Timeline first." : undefined;
+      return focus === undefined ? "Open a conversation first." : undefined;
     }
 
     case "Target": {
@@ -3489,13 +3485,13 @@ const unmetOne = (condition: Condition, context: CommandContext): string | undef
     }
 
     case "Channel": {
-      return focus?.kind === "Channel" ? undefined : "Open a Channel first.";
+      return focus?.kind === "Channel" ? undefined : "Open a channel first.";
     }
 
     case "Session": {
       return context.session === true
         ? undefined
-        : noSession(focus?.network ?? "The Network", context.session);
+        : noSession(focus?.network ?? "The network", context.session);
     }
 
     case "Live": {
@@ -3503,12 +3499,12 @@ const unmetOne = (condition: Condition, context: CommandContext): string | undef
     }
 
     case "Panes": {
-      return context.panes < 2 ? "There is only one Pane. /split makes another." : undefined;
+      return context.panes < 2 ? "There is only one pane. /split makes another." : undefined;
     }
 
     case "Keeps": {
       return listMode(focusHead(context), condition.list) === null
-        ? `${focus?.network ?? "The Network"} keeps no ${listWords[condition.list]}, by its ISUPPORT.`
+        ? `${focus?.network ?? "The network"} does not support ${listWords[condition.list]}.`
         : undefined;
     }
 
@@ -3564,7 +3560,7 @@ const decodeAliasLine = Schema.decodeUnknownOption(AliasLine);
  */
 const unknownCommand = (name: string): string =>
   rawRefusalOf(upperCaseAscii(name)) ??
-  `There is no command /${name}. Start with // to say text that begins with /.`;
+  `There is no command /${name}. Start with // to send text that begins with /.`;
 
 /**
  * An alias's name as typed, in any ASCII case.
@@ -3577,7 +3573,7 @@ const parseAliasName = (text: string): Parsed<AliasName> => {
   return name._tag === "Some"
     ? parsed(name.value)
     : invalid(
-        `${text} is not an alias's name: 1 to 32 lower-case letters and digits, in words joined by -, such as j or join-quiet.`
+        `${text} is not a valid alias name. Use 1 to 32 lowercase letters and digits, with words joined by -, such as j or join-quiet.`
       );
 };
 
@@ -3591,7 +3587,7 @@ const parseAliasName = (text: string): Parsed<AliasName> => {
 const parseAliasLine = (text: string): Parsed<AliasLine> => {
   if (text.startsWith("//")) {
     return invalid(
-      "A line that starts with // says text, not a command. An alias stands for a command, such as /join $1."
+      "A line that starts with // sends text, not a command. An alias stands for a command, such as /join $1."
     );
   }
 
@@ -3599,7 +3595,7 @@ const parseAliasLine = (text: string): Parsed<AliasLine> => {
 
   if (line._tag === "None") {
     return invalid(
-      `${text} is not a command line: one line of at most 512 characters, / and a command's name, then its arguments.`
+      `${text} is not a command. Use one line of at most 512 characters: / and the command's name, then its arguments.`
     );
   }
 
@@ -3607,7 +3603,7 @@ const parseAliasLine = (text: string): Parsed<AliasLine> => {
 
   if (commandNamed(name) === undefined) {
     return invalid(
-      `/${name} is no command. An alias stands for one command, and never for another alias.`
+      `/${name} is not a command. An alias stands for one command, not another alias.`
     );
   }
 
@@ -3655,7 +3651,7 @@ const aliasArguments = (args: string): Parsed<Intent> => {
 
   if (commandNamed(name.value) !== undefined) {
     return invalid(
-      `/${name.value} is a command's name, and a command always runs before an alias, so no alias is named it. Give it another name.`
+      `/${name.value} is a command name, and commands run before aliases. Give the alias another name.`
     );
   }
 
@@ -3701,7 +3697,7 @@ const runExpanded = (line: string, context: CommandContext): Parsed<readonly Int
 const aliasCommand = (alias: Alias): Command => ({
   aliases: [],
   arguments: takes(alias.line).words > 0 ? "Required" : "Optional",
-  description: `An alias of your own: ${alias.line}`,
+  description: `Your alias: ${alias.line}`,
   id: `alias.${alias.name}`,
   name: alias.name,
   run: (args, context) => {
@@ -3766,7 +3762,7 @@ export const interpret = (line: string, context: CommandContext): Parsed<readonl
   const args = space === -1 ? "" : line.slice(space + 1);
 
   if (name === "") {
-    return invalid("Type a command after /, or start with // to say text that begins with /.");
+    return invalid("Type a command after /, or start with // to send text that begins with /.");
   }
 
   const found = commandRunBy(name, context.aliases);

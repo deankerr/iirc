@@ -95,10 +95,10 @@ import draftStyles from "./draft.module.css";
  */
 const offerLabel = (offer: Offer) => {
   if (offer._tag === "CheckAgain") {
-    return "Check again";
+    return "check again";
   }
 
-  return offer.intent === undefined ? "Send the rest" : "Send again";
+  return offer.intent === undefined ? "send the rest" : "send again";
 };
 
 /**
@@ -141,7 +141,7 @@ const CommandButton = () => {
       className={styles.command}
       icon="command"
       keys={keys.length === 0 ? undefined : keys.join(" ")}
-      label="Start a command"
+      label="start a command"
       onPress={() => {
         start([{ _tag: "StartCommand", text: "/" }]);
       }}
@@ -181,7 +181,7 @@ const AnsweringLine = ({
         {quoted.kind === "Notice" ? <>-{nick}-</> : null}
         {quoted.kind === "Privmsg" ? <>{nick}:</> : null} <bdi>{quoted.text}</bdi>
       </span>
-      <IconButton icon="close" keys="Esc" label="Stop replying" onPress={onDrop} size="small" />
+      <IconButton icon="close" keys="Esc" label="stop replying" onPress={onDrop} size="small" />
     </div>
   );
 };
@@ -239,7 +239,7 @@ const FileButtons = ({ add }: { readonly add: (files: readonly File[]) => void }
       />
       <IconButton
         icon="attach"
-        label="Upload files"
+        label="upload files"
         onPress={() => {
           picker.current?.click();
         }}
@@ -248,7 +248,7 @@ const FileButtons = ({ add }: { readonly add: (files: readonly File[]) => void }
       <IconButton
         className={styles.camera}
         icon="camera"
-        label="Take a photo"
+        label="take a photo"
         onPress={() => {
           camera.current?.click();
         }}
@@ -289,7 +289,7 @@ const sayable = (context: CommandContext): Sayable => {
   if (focus?.removed === true) {
     return {
       offline: undefined,
-      placeholder: `${focus.network} was removed: nothing can be said here`,
+      placeholder: `${focus.network} was removed, so you can't send messages here.`,
     };
   }
 
@@ -299,7 +299,7 @@ const sayable = (context: CommandContext): Sayable => {
     offline:
       network === undefined || session !== false
         ? undefined
-        : `${network} is not connected: nothing can be said there until it is.`,
+        : `${network} is not connected, so you can't send there now.`,
     placeholder: undefined,
   };
 };
@@ -313,7 +313,7 @@ const sayable = (context: CommandContext): Sayable => {
 const optionId = (list: string, index: number) => `${list}-${index}`;
 
 /** What a Timeline is, in a few words. */
-const kinds = { Channel: "Channel", Direct: "Direct Message", Network: "Network" } as const;
+const kinds = { Channel: "channel", Direct: "direct message", Network: "network" } as const;
 
 /**
  * What a candidate says beyond its name, dim: a command's usage,
@@ -351,7 +351,7 @@ const About = ({ candidate }: { readonly candidate: Candidate }) => {
       return (
         <span className={styles.detail}>
           {candidate.current
-            ? `${themeDescription(candidate)}, in effect`
+            ? `${themeDescription(candidate)}, current`
             : themeDescription(candidate)}
         </span>
       );
@@ -361,7 +361,7 @@ const About = ({ candidate }: { readonly candidate: Candidate }) => {
       return (
         <span className={styles.detail}>
           {candidate.current
-            ? `${fontDescription(candidate.name)}, in effect`
+            ? `${fontDescription(candidate.name)}, current`
             : fontDescription(candidate.name)}
         </span>
       );
@@ -769,7 +769,7 @@ const FormatList = ({
         format="Colour"
         id={id}
         lit={(column) => lit(1, column)}
-        name="Text colours"
+        name="text colors"
         onPick={onPick}
         row={1}
       />
@@ -777,7 +777,7 @@ const FormatList = ({
         format="Background"
         id={id}
         lit={(column) => lit(2, column)}
-        name="Backgrounds"
+        name="backgrounds"
         onPick={onPick}
         row={2}
       />
@@ -1240,8 +1240,8 @@ const Composer = ({
       {confirming === undefined ? null : (
         <div className={styles.notice} id={noticeId} role="alert">
           <p>
-            Send {confirming.lines} lines to <bdi>{name}</bdi>? {sendKeys} sends them, Escape keeps
-            them here.
+            Send {confirming.lines} lines to <bdi>{name}</bdi>? {sendKeys} sends them, and Escape
+            keeps them in the message input.
           </p>
           <Button
             onPress={() => {
@@ -1250,7 +1250,7 @@ const Composer = ({
             size="small"
             variant="primary"
           >
-            Send {confirming.lines} lines
+            send {confirming.lines} lines
           </Button>
         </div>
       )}
@@ -1270,7 +1270,7 @@ const Composer = ({
           <IconButton
             icon="close"
             keys="Esc"
-            label="Dismiss"
+            label="dismiss"
             onPress={() => {
               dismissNow(timeline);
             }}
@@ -1329,7 +1329,7 @@ const Composer = ({
           <textarea
             {...controlling(controlled(choosing, formatsId, list, listId))}
             // Among several Panes, the number shown is said with what it is.
-            aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
+            aria-label={number === undefined ? undefined : `pane ${number}: ${name}`}
             aria-describedby={describedBy}
             aria-invalid={notice === undefined ? undefined : true}
             autoComplete="off"
@@ -1377,7 +1377,7 @@ const Composer = ({
           <IconButton
             icon="send"
             keys={sendKeys}
-            label="Send"
+            label="send"
             onPress={() => {
               sendFrom(input.current);
               input.current?.focus();
@@ -1425,7 +1425,7 @@ export const MainComposer = ({ before }: { readonly before?: ReactNode }) => {
     return (
       <Composer
         before={before}
-        name={name ?? shown.description?.name ?? "Timeline"}
+        name={name ?? shown.description?.name ?? "Conversation"}
         number={number}
         timeline={shown.timeline}
       />

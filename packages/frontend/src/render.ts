@@ -955,7 +955,7 @@ const attemptedParts = (attempted: Attempted): readonly Part[] => {
     }
 
     case "Part": {
-      return [words("Your leaving of "), name(attempted.channel)];
+      return [words("Your request to leave "), name(attempted.channel)];
     }
 
     case "Mode": {
@@ -981,12 +981,12 @@ const attemptedParts = (attempted: Attempted): readonly Part[] => {
     }
 
     case "Away": {
-      return [words(attempted.away ? "Marking you away" : "Marking you back")];
+      return [words(attempted.away ? "Marking you as away" : "Marking you as back")];
     }
 
     case "Raw": {
       return attempted.command === null
-        ? [words("Your raw line")]
+        ? [words("Your raw command")]
         : [words("Your raw "), name(attempted.command)];
     }
 
@@ -1048,13 +1048,13 @@ export const attemptedText = (attempted: Attempted): string =>
     .join("");
 
 const closeReasons: Readonly<Record<Extract<EndReason, { _tag: "Closed" }>["reason"], string>> = {
-  Ended: "the Ircd closed the connection",
-  HungUp: "we hung up",
+  Ended: "the server closed the connection",
+  HungUp: "you disconnected",
   Refused: "the connection was refused",
   Reset: "the connection was reset",
   TimedOut: "the connection timed out",
   Tls: "TLS failed",
-  Unreachable: "the Ircd could not be reached",
+  Unreachable: "the server could not be reached",
 };
 
 /**
@@ -1069,11 +1069,11 @@ export const endReason = (reason: EndReason): string => {
     }
 
     case "Disabled": {
-      return "the Network was disabled";
+      return "the network was disabled";
     }
 
     case "Error": {
-      return "the Ircd sent ERROR";
+      return "the server sent ERROR";
     }
 
     case "LoginFailed": {
@@ -1081,11 +1081,11 @@ export const endReason = (reason: EndReason): string => {
     }
 
     case "Restarted": {
-      return "the Daemon restarted";
+      return "the daemon restarted";
     }
 
     case "Silent": {
-      return "the Ircd stopped answering";
+      return "the server stopped answering";
     }
 
     case "Upgrading": {

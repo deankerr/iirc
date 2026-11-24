@@ -55,7 +55,7 @@ export const readItems = (bytes: Uint8Array, iinf: Box): Items | Unreadable => {
   const version = bytes[at] ?? 0;
 
   if (at + 4 > iinf.end || version > 1) {
-    return bad("an iinf is cut short, or of a version unknown");
+    return bad("truncated iinf box or unknown version");
   }
 
   const infos = readBoxes(bytes, at + (version === 0 ? 6 : 8), iinf.end);
@@ -74,13 +74,13 @@ export const readItems = (bytes: Uint8Array, iinf: Box): Items | Unreadable => {
       const infoVersion = bytes[q] ?? 0;
 
       if (infoVersion > 3 || info.end - q < infeLength(infoVersion)) {
-        return bad("an infe is cut short, or of a version unknown");
+        return bad("truncated infe box or unknown version");
       }
 
       const id = infoVersion === 3 ? u32(bytes, q + 4) : u16(bytes, q + 4);
 
       if (seen.has(id)) {
-        return bad("two items share an id");
+        return bad("two items share an ID");
       }
 
       seen.add(id);
@@ -139,7 +139,7 @@ const readEntry = (
   let at = start;
 
   if (at + widths.id + methodWidth + 2 + widths.base + 2 > end) {
-    return bad("an iloc entry is cut short");
+    return bad("truncated iloc entry");
   }
 
   const id = readBe(bytes, at, widths.id);
@@ -159,7 +159,7 @@ const readEntry = (
   at += 4 + widths.base;
 
   if (at + count * extentWidth > end) {
-    return bad("an iloc entry is cut short");
+    return bad("truncated iloc entry");
   }
 
   for (let e = 0; e < count; e += 1) {
@@ -167,7 +167,7 @@ const readEntry = (
     const length = readBe(bytes, at + widths.index + widths.offset, widths.length);
 
     if (offset + length > Number.MAX_SAFE_INTEGER) {
-      return bad("an iloc extent is beyond what a number holds");
+      return bad("iloc extent is too large");
     }
 
     extents.push({ length, offset });
@@ -188,7 +188,7 @@ export const readLocations = (bytes: Uint8Array, iloc: Box): Locations | Unreada
   const version = bytes[p] ?? 0;
 
   if (p + 8 > iloc.end || version > 2) {
-    return bad("an iloc is cut short, or of a version unknown");
+    return bad("truncated iloc box or unknown version");
   }
 
   const widths: Widths = {
@@ -201,13 +201,13 @@ export const readLocations = (bytes: Uint8Array, iloc: Box): Locations | Unreada
   };
 
   if ([widths.base, widths.index, widths.length, widths.offset].some((width) => width > 8)) {
-    return bad("an iloc with a number wider than 8 bytes");
+    return bad("iloc number wider than 8 bytes");
   }
 
   const countAt = p + 6;
 
   if (countAt + widths.id > iloc.end) {
-    return bad("an iloc is cut short");
+    return bad("truncated iloc box");
   }
 
   const count = readBe(bytes, countAt, widths.id);
@@ -230,13 +230,13 @@ export const readLocations = (bytes: Uint8Array, iloc: Box): Locations | Unreada
   // The entries are all there is, to the end of the box, whatever the count says: a count
   // below them would leave items unlocated, so their data could not be found to be zeroed.
   if (at !== iloc.end) {
-    return bad("an iloc has more than its count of entries");
+    return bad("iloc has more entries than its count");
   }
 
   const located = new Set(entries.map(({ id }) => id));
 
   if (located.size !== entries.length) {
-    return bad("an iloc lists an item twice");
+    return bad("iloc lists an item twice");
   }
 
   return { countAt, countWidth: widths.id, entries };
@@ -355,16 +355,16 @@ const droppedRuns = (
   for (const { dataReference, extents, id, method } of entries) {
     if (!keptIds.has(id)) {
       if (dataReference !== 0) {
-        return bad("a dropped item's data is in another file");
+        return bad("removed item's data is in another file");
       }
 
       if (method > 2) {
-        return bad("a dropped item's data is where nothing here knows");
+        return bad("removed item's data is in an unknown location");
       }
 
       for (const { length, offset } of method === 2 ? [] : extents) {
         if (length === 0) {
-          return bad("a dropped item has an extent of no length");
+          return bad("removed item has an empty extent");
         }
 
         (method === 1 ? idat : file).push({ end: offset + length, start: offset });
@@ -401,29 +401,29 @@ export const zeroing = (
 
   for (const range of dropped.file) {
     if (range.end > where.fileSize) {
-      return bad("a dropped item's data runs past the end of the file");
+      return bad("removed item's data runs past the end of the file");
     }
 
     if (range.start < where.meta.end && range.end > where.meta.start) {
-      return bad("a dropped item's data is in meta");
+      return bad("removed item's data is in meta");
     }
 
     if (!insideOne(where.mdats, mdatStarts, range)) {
-      return bad("a dropped item's data is not in an mdat");
+      return bad("removed item's data is not in an mdat box");
     }
 
     if (runsInto(keeping.file, range)) {
-      return bad("a dropped item's data overlaps a kept item's");
+      return bad("removed item's data overlaps a kept item's");
     }
   }
 
   for (const range of dropped.idat) {
     if (range.end > idatSize) {
-      return bad("a dropped item's data runs past its idat");
+      return bad("removed item's data runs past its idat box");
     }
 
     if (runsInto(keeping.idat, range)) {
-      return bad("a dropped item's data overlaps a kept item's");
+      return bad("removed item's data overlaps a kept item's");
     }
   }
 

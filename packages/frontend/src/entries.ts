@@ -106,16 +106,16 @@ export const themeDescription = (theme: { readonly builtIn: boolean }) =>
  */
 export const fontDescription = (font: FontShown) => {
   if (!isFontName(font)) {
-    return "font: a family on this device";
+    return "font: a font family on this device";
   }
 
   switch (font) {
     case "system": {
-      return "font: the device's own monospace font";
+      return "font: this device's monospace font";
     }
 
     case "system-sans": {
-      return "font: the device's own sans font";
+      return "font: this device's sans-serif font";
     }
 
     case "ibm-plex-sans":
@@ -146,8 +146,8 @@ export const fontDescription = (font: FontShown) => {
  */
 export const networkDescription = (entry: { readonly removed: boolean }) =>
   entry.removed
-    ? "network: drop the Timelines kept since it was removed, which frees its name"
-    : "network: remove it, asking first whether its Timelines stay readable";
+    ? "network: delete its kept conversations and free its name"
+    : "network: remove it, asking first whether to keep its conversations to read";
 
 /**
  * What an entry is matched by: its names, best first, and its description.

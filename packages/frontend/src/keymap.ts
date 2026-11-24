@@ -219,7 +219,7 @@ export const parseChord = (text: string): Parsed<Chord> => {
     }
 
     if (held[modifier]) {
-      return invalid(`"${text}" holds ${modifier} twice.`);
+      return invalid(`"${text}" uses ${modifier} twice.`);
     }
 
     held[modifier] = true;

@@ -214,7 +214,7 @@ describe("saying", () => {
 
     expect({ notice: notice()?.message, says: daemon.says }).toStrictEqual({
       notice:
-        "Not said to #iirc: the Network had no Session when it arrived. Nothing after it was sent.",
+        "Not sent to #iirc: the network had no connection at the time. Nothing after it was sent.",
       says: [said("#iirc", "waves", "web-1", "Action")],
     });
   });
@@ -239,7 +239,7 @@ describe("saying", () => {
       says: daemon.says.map((one) => [one.intent, one.text]),
     }).toStrictEqual({
       journaled:
-        "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery. What came after it was not sent.",
+        "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Its item in the conversation shows whether it was delivered. Nothing after it was sent.",
       journaledOffer: {
         _tag: "SendAgain",
         intent: undefined,
@@ -255,7 +255,7 @@ describe("saying", () => {
         ],
       },
       offered: [
-        "The Network stopped before this was journaled, so it was not said.",
+        "The network stopped before this was saved, so it was not sent.",
         "SendAgain",
         "web-1",
       ],
@@ -285,9 +285,9 @@ describe("saying", () => {
       says: daemon.says.map((one) => [one.intent, one.text]),
     }).toStrictEqual({
       checked:
-        "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery.",
+        "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Its item in the conversation shows whether it was delivered.",
       first: [
-        "The Daemon did not answer, so whether this was said is unknown. Nothing after it was sent.",
+        "The daemon did not answer, so it's unknown whether this was sent. Nothing after it was sent.",
         "CheckAgain",
       ],
       says: [["web-1", "lost"]],
@@ -318,7 +318,7 @@ describe("saying", () => {
     daemon.sayAnswers.push("UnknownNetwork");
     await type("hello");
 
-    expect(notice()?.message).toBe("The Daemon has no Network libera.");
+    expect(notice()?.message).toBe("The daemon has no network libera.");
   });
 
   it("sends many lines only once confirmed, in order", async () => {
@@ -667,7 +667,7 @@ describe("acting", () => {
     }).toStrictEqual({
       acts: 1,
       notice:
-        "Your kick of peer from #iirc was not sent: the Network had no Session when it arrived. Nothing after it was sent.",
+        "Your kick of peer from #iirc was not sent: the network had no connection at the time. Nothing after it was sent.",
       says: [],
     });
   });
@@ -685,8 +685,8 @@ describe("acting", () => {
     await type("/away gone");
 
     expect([offered, notice()?.message]).toStrictEqual([
-      "The Network stopped before this was journaled, so it was not sent.",
-      "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too.",
+      "The network stopped before this was saved, so it was not sent.",
+      "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Check the conversation for what the server did, including any refusal.",
     ]);
   });
 

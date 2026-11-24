@@ -17,11 +17,11 @@ import { Cursor, Untrusted, windowLimit } from "./schemas.ts";
  * a Frontend reads nothing into it.
  */
 export const PreviewId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{32}$/u, { message: "must be 32 lower-case hex digits" })
+  Schema.isPattern(/^[0-9a-f]{32}$/u, { message: "must be 32 lowercase hex digits" })
 )
   .pipe(Schema.brand("PreviewId"))
   .annotate({
-    description: "A Preview's id, the same for one link wherever it is posted. It is opaque.",
+    description: "A preview's id, the same for one link wherever it is posted. It is opaque.",
     identifier: "PreviewId",
   });
 
@@ -53,9 +53,9 @@ export type PreviewKind = typeof PreviewKind.Type;
  * digits, which names it at `GET /api/previews/images/{hash}`.
  */
 export const ImageHash = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{64}$/u, { message: "must be 64 lower-case hex digits" })
+  Schema.isPattern(/^[0-9a-f]{64}$/u, { message: "must be 64 lowercase hex digits" })
 ).annotate({
-  description: "The SHA-256 of an image a Preview holds, which names it on the images route.",
+  description: "The SHA-256 hash of a preview image, which names it on the images route.",
   identifier: "ImageHash",
 });
 

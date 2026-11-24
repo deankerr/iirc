@@ -3949,7 +3949,7 @@ describe("what each fetch for a Preview came to, in the Tail as a Frontend reads
           // Each line is logged as its fetch's Scope closes, before its Preview settles.
           const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
 
-          return lines.filter((line) => line.message === "Fetched a link for a Preview");
+          return lines.filter((line) => line.message === "Fetched link for preview");
         })
       )
     );

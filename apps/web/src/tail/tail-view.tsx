@@ -34,7 +34,7 @@ const art = [
 
 /** How to start, while no Network is configured. */
 const hint =
-  "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.";
+  "Choose a conversation, or add a network with /network add <id> <host>[/port] [plain] <nick>. /set opens settings.";
 
 /**
  * Whether no Network is configured, as the Network list read says: none until it is read,
@@ -88,9 +88,9 @@ export const TailView = () => {
   const none = useAtomValue(noNetworks);
 
   return (
-    <section aria-label="iirc" className={styles.view}>
+    <section aria-label="logs" className={styles.view}>
       <div
-        aria-label="What the Daemon logged"
+        aria-label="Daemon logs"
         className={styles.scroller}
         role="log"
         // The log scrolls by keyboard, as any page does.

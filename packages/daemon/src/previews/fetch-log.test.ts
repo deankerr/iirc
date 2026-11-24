@@ -84,7 +84,7 @@ describe(logged, () => {
           video: "no",
         },
         level: "Debug",
-        message: "Fetched a link for a Preview",
+        message: "Fetched link for preview",
       }),
     ]);
     expect(JSON.stringify(lines)).not.toContain(secret);

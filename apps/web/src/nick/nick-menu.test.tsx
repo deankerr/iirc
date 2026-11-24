@@ -414,20 +414,20 @@ const offeredHolding = async (held: readonly string[]) => {
 };
 
 const everyone = (nick: string) => [
-  `Query ${nick}`,
-  `Whois ${nick}`,
-  `Mention ${nick}`,
-  `Ignore ${nick}`,
+  `query ${nick}`,
+  `whois ${nick}`,
+  `mention ${nick}`,
+  `ignore ${nick}`,
 ];
 
 const operator = (nick: string) => [
   ...everyone(nick),
-  `Ban ${nick}`,
-  `Op ${nick}`,
-  `Deop ${nick}`,
-  `Voice ${nick}`,
-  `Devoice ${nick}`,
-  `Kick ${nick}`,
+  `ban ${nick}`,
+  `op ${nick}`,
+  `deop ${nick}`,
+  `voice ${nick}`,
+  `devoice ${nick}`,
+  `kick ${nick}`,
 ];
 
 describe("the menu on a nick", () => {
@@ -449,7 +449,7 @@ describe("the menu on a nick", () => {
     const label = menu()?.getAttribute("aria-label");
     const offered = entries();
 
-    await press(document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Op peer"]'));
+    await press(document.querySelector<HTMLElement>('[role="menuitem"][aria-label="op peer"]'));
     await settled(() => daemon.acts.length === 1);
 
     expect({
@@ -492,7 +492,7 @@ describe("the menu on a nick", () => {
     const offered = entries();
 
     const word = document.querySelector<HTMLElement>(
-      '[role="menuitem"][aria-label="Ban peer\'s account"]'
+      '[role="menuitem"][aria-label="ban peer\'s account"]'
     );
 
     await press(word);
@@ -502,13 +502,13 @@ describe("the menu on a nick", () => {
       act: { _tag: "BanAccount", channel: "#iirc", nick: "peer" },
       offered: [
         ...everyone("peer"),
-        "Ban peer",
-        "Ban peer's account",
-        "Op peer",
-        "Deop peer",
-        "Voice peer",
-        "Devoice peer",
-        "Kick peer",
+        "ban peer",
+        "ban peer's account",
+        "op peer",
+        "deop peer",
+        "voice peer",
+        "devoice peer",
+        "kick peer",
       ],
       word: "ban account",
     });
@@ -523,7 +523,7 @@ describe("the menu on a nick", () => {
     await settled(() => nickIn("line 2") !== undefined);
     await press(nickIn("line 2"));
     await settled(() => daemon.held.members.length === 1);
-    await settled(() => rows().includes("Reading what else can be done with peer"));
+    await settled(() => rows().includes("Loading more actions for peer"));
 
     const waiting = rows();
 
@@ -541,7 +541,7 @@ describe("the menu on a nick", () => {
 
     expect({ arrived: rows(), waiting }).toStrictEqual({
       arrived: operator("peer"),
-      waiting: [...everyone("peer"), "Ban peer", "Reading what else can be done with peer"],
+      waiting: [...everyone("peer"), "ban peer", "Loading more actions for peer"],
     });
   });
 
@@ -551,9 +551,9 @@ describe("the menu on a nick", () => {
     await settled(() => nickIn("line 3") !== undefined);
     await press(nickIn("line 3"));
     await settled(() => daemon.membersRead.some((query) => query.includes("prefix=gone")));
-    await settled(() => entries().includes("Ban gone"));
+    await settled(() => entries().includes("ban gone"));
 
-    expect(entries()).toStrictEqual([...everyone("gone"), "Ban gone"]);
+    expect(entries()).toStrictEqual([...everyone("gone"), "ban gone"]);
   });
 
   it("offers nothing to operate where Self holds a rank below operator", async () => {
@@ -647,11 +647,11 @@ describe("the menu on a nick", () => {
       await Promise.resolve();
     });
     await key(nick, "Enter");
-    await settled(() => entries().includes("Kick peer"));
+    await settled(() => entries().includes("kick peer"));
 
     const focused = registry.get(focusedId);
 
-    await press(document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Kick peer"]'));
+    await press(document.querySelector<HTMLElement>('[role="menuitem"][aria-label="kick peer"]'));
     await settled(() => daemon.acts.length === 1);
 
     expect({ act: daemon.acts[0]?.action, focused }).toStrictEqual({

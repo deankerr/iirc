@@ -75,12 +75,12 @@ const Asking = ({
   };
 
   return (
-    <Form aria-label={`Hold ${prompt.name}`} className={styles.prompt} onSubmit={onSubmit}>
+    <Form aria-label={`Save ${prompt.name}`} className={styles.prompt} onSubmit={onSubmit}>
       <PasswordField
         autoComplete="new-password"
         autoFocus
         errorId={notice === undefined ? undefined : noticeId}
-        label={`New value for ${prompt.name}`}
+        label={`new value for ${prompt.name}`}
         name="value"
       />
       {notice === undefined ? null : (
@@ -90,7 +90,7 @@ const Asking = ({
       )}
       <div className={styles.actions}>
         <Button onKeyDown={onKeyDown} type="submit" variant="primary">
-          Hold it
+          save
         </Button>
         <Button
           onKeyDown={onKeyDown}
@@ -98,7 +98,7 @@ const Asking = ({
             close(undefined);
           }}
         >
-          Cancel
+          cancel
         </Button>
       </div>
     </Form>

@@ -147,7 +147,7 @@ describe("the larger view", () => {
     it("closes on a press of the close control in its corner, and focus returns", async () => {
       const control = await opened(video);
 
-      await pressed(larger()?.querySelector<HTMLButtonElement>('button[aria-label="Close"]'));
+      await pressed(larger()?.querySelector<HTMLButtonElement>('button[aria-label="close"]'));
 
       await expect(closedTo(control)).resolves.toStrictEqual({ focused: true, gone: true });
     });

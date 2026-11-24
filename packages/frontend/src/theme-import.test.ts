@@ -231,23 +231,23 @@ describe("importing a theme", () => {
       unquoted: refusal(gruvbox.replace('base0A: "#fabd2f"', "base0A: 0")),
       yaml: refusal('base00: "#282828"\n  - [unbalanced'),
     }).toStrictEqual({
-      alacrittyBad: "colors.normal.red is not a colour as #rrggbb.",
+      alacrittyBad: "colors.normal.red is not a color in #rrggbb form.",
       alacrittyMissing: "colors.bright.cyan is missing.",
-      alacrittyNumber: "colors.normal.red is not a colour as #rrggbb.",
-      badHex: "color3 is not a colour as #rrggbb.",
+      alacrittyNumber: "colors.normal.red is not a color in #rrggbb form.",
+      badHex: "color3 is not a color in #rrggbb form.",
       empty:
-        "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme.",
+        "This is not a theme iirc can read: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's config file, or a Windows Terminal scheme.",
       ghosttyMissing: "palette 5 is missing.",
       iterm: "Ansi 4 Color is missing.",
       json: "This JSON cannot be read: it is not JSON.",
-      named: "color6 is not a colour as #rrggbb.",
+      named: "color6 is not a color in #rrggbb form.",
       prose:
-        "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme.",
+        "This is not a theme iirc can read: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's config file, or a Windows Terminal scheme.",
       schemes: "This is a settings file with 2 schemes. Paste one scheme, the object in braces.",
       terminalMissing: "brightPurple is missing.",
       toml: "This TOML cannot be read: Expected a value at line 2, column 14.",
-      unclosed: "This plist ends before its last value does.",
-      unquoted: "palette.base0A is not a colour as #rrggbb.",
+      unclosed: "This plist ends before its last value is complete.",
+      unquoted: "palette.base0A is not a color in #rrggbb form.",
       yaml: "This YAML cannot be read: Unexpected indentation of 2 spaces at line 2.",
     });
   });
@@ -286,10 +286,10 @@ describe("importing a theme", () => {
       instructionAfter: refusal(`${nordIterm}<?php echo 1 ?>\n`),
     }).toStrictEqual({
       before: "read",
-      declarationAfter: "This plist goes on after </plist>, which only comments may.",
-      doctypeAfter: "This plist goes on after </plist>, which only comments may.",
+      declarationAfter: "This plist continues after </plist>, where only comments are allowed.",
+      doctypeAfter: "This plist continues after </plist>, where only comments are allowed.",
       inside: "This plist has a dict whose entries are not a key, then a value.",
-      instructionAfter: "This plist goes on after </plist>, which only comments may.",
+      instructionAfter: "This plist continues after </plist>, where only comments are allowed.",
     });
   });
 
@@ -301,7 +301,7 @@ describe("importing a theme", () => {
       noEnd: refusal(nordIterm.replace("</plist>", "")),
       wrongEnd: refusal(nordIterm.replace("</plist>", "</dict>")),
     }).toStrictEqual({
-      afterEnd: "This plist goes on after </plist>, which only comments may.",
+      afterEnd: "This plist continues after </plist>, where only comments are allowed.",
       comment: "read",
       crossed: "This plist's <dict> is closed by </array>.",
       noEnd: "This plist's <plist> is not closed after its one value.",

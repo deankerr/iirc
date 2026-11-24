@@ -87,7 +87,7 @@ const singles = (children: readonly Box[]): Parts | Unreadable => {
     const found = children.filter((child) => child.type === types[name]);
 
     if (found.length > 1) {
-      return bad(`more than one ${name} in a meta`);
+      return bad(`more than one ${name} in a meta box`);
     }
 
     [parts[name]] = found;
@@ -126,7 +126,7 @@ const rebuildAssociations = (
   const p = payloadAt(ipma);
 
   if (p + 8 > ipma.end) {
-    return bad("an ipma is cut short");
+    return bad("truncated ipma box");
   }
 
   const idWidth = (bytes[p] ?? 0) < 1 ? 2 : 4;
@@ -139,7 +139,7 @@ const rebuildAssociations = (
     const end = at + idWidth + 1 + (bytes[at + idWidth] ?? 0) * indexWidth;
 
     if (end > ipma.end) {
-      return bad("an ipma entry is cut short");
+      return bad("truncated ipma entry");
     }
 
     if (kept.has(readBe(bytes, at, idWidth))) {
@@ -149,7 +149,7 @@ const rebuildAssociations = (
         const index = association - (essential ? 128 * 256 ** (indexWidth - 1) : 0);
 
         if (essential && retyped.has(index)) {
-          return bad("a kept item needs a property that is dropped");
+          return bad("a kept item needs a removed property");
         }
       }
 
@@ -160,7 +160,7 @@ const rebuildAssociations = (
   }
 
   if (at !== ipma.end) {
-    return bad("an ipma has more than its count of entries");
+    return bad("ipma has more entries than its count");
   }
 
   const begin = open(out, bytes, ipma);
@@ -240,7 +240,7 @@ const rebuildPropertyBox = (
   const ipcos = children.filter((child) => child.type === types.ipco);
 
   if (ipcos.length > 1) {
-    return bad("more than one ipco in an iprp");
+    return bad("more than one ipco box in an iprp box");
   }
 
   const retyped = retypedIndices(bytes, ipcos[0]);
@@ -280,18 +280,18 @@ const referencesKept = (
   const q = payloadAt(reference);
 
   if (q + idWidth + 2 > reference.end) {
-    return bad("an iref reference is cut short");
+    return bad("truncated iref reference");
   }
 
   const count = readBe(bytes, q + idWidth, 2);
 
   if (q + idWidth + 2 + count * idWidth > reference.end) {
-    return bad("an iref reference is cut short");
+    return bad("truncated iref reference");
   }
 
   for (let n = 0; n < count; n += 1) {
     if (!kept.has(readBe(bytes, q + idWidth + 2 + n * idWidth, idWidth))) {
-      return bad("a kept item refers to a dropped item");
+      return bad("a kept item refers to a removed item");
     }
   }
 
@@ -310,7 +310,7 @@ const rebuildReferences = (
   const version = bytes[p] ?? 0;
 
   if (p + 4 > iref.end || version > 1) {
-    return bad("an iref is cut short, or of a version unknown");
+    return bad("truncated iref box or unknown version");
   }
 
   const idWidth = version === 0 ? 2 : 4;
@@ -326,7 +326,7 @@ const rebuildReferences = (
 
   for (const reference of references) {
     if (payloadAt(reference) + idWidth > reference.end) {
-      return bad("an iref reference is cut short");
+      return bad("truncated iref reference");
     }
 
     if (kept.has(readBe(bytes, payloadAt(reference), idWidth))) {
@@ -460,7 +460,7 @@ const decide = (
     hdlr.end - payloadAt(hdlr) < 12 ||
     readBe(bytes, payloadAt(hdlr) + 8, 4) !== pict
   ) {
-    return bad("a meta that does not hold a picture");
+    return bad("meta box has no picture");
   }
 
   const items =
@@ -473,7 +473,7 @@ const decide = (
   }
 
   if (pitm !== undefined && !primaryIsKept(bytes, pitm, items.kept)) {
-    return bad("the primary item is dropped or missing");
+    return bad("primary item is removed or missing");
   }
 
   const locations = iloc === undefined ? undefined : readLocations(bytes, iloc);
@@ -487,7 +487,7 @@ const decide = (
 
   for (const id of items.listed) {
     if (!items.kept.has(id) && !located.has(id)) {
-      return bad("an item is listed in iinf and not located in iloc");
+      return bad("an item is listed in iinf but not located in iloc");
     }
   }
 
@@ -516,7 +516,7 @@ export const walkMeta = (
   file: File
 ): readonly Patch[] | Unreadable => {
   if (header + 4 > bytes.length) {
-    return bad("a meta is cut short");
+    return bad("truncated meta box");
   }
 
   const children = readBoxes(bytes, header + 4, bytes.length);
@@ -551,7 +551,7 @@ export const walkMeta = (
   const rest = bytes.length - out.length;
 
   if (rest > 0 && rest < 8) {
-    return bad("a meta that shrinks too little to hold a free box");
+    return bad("meta box is too small to hold a free box");
   }
 
   const patches: Patch[] = [{ at: base, bytes: written(out) }];

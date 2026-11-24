@@ -35,7 +35,7 @@ const drawnRoot = () => ({
 const drawing = (container: HTMLElement) => {
   const shell = container.querySelector("nav[aria-label='Networks']") !== null;
 
-  return { shell, wait: !shell && container.textContent.includes("Reading…") };
+  return { shell, wait: !shell && container.textContent.includes("loading…") };
 };
 
 /**
@@ -121,7 +121,7 @@ describe("the page as it starts", () => {
     const { container } = await render(registry);
 
     const button = [...container.querySelectorAll("button")].find(
-      (one) => one.textContent === "Sign out"
+      (one) => one.textContent === "sign out"
     );
 
     await act(async () => {
@@ -133,7 +133,7 @@ describe("the page as it starts", () => {
 
     const confirm = [
       ...(document.querySelector('[role="alertdialog"]')?.querySelectorAll("button") ?? []),
-    ].find((one) => one.textContent === "Sign out");
+    ].find((one) => one.textContent === "sign out");
 
     await act(async () => {
       confirm?.click();

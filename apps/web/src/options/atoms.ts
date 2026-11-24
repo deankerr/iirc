@@ -139,37 +139,37 @@ const failedWith = (tag: string, network: NetworkId): Outcome => {
     }
 
     case "UnknownNetwork": {
-      return notDone(`The Daemon has no Network ${network}. Add one with /network add.`);
+      return notDone(`Network ${network} not found. Add one with /network add.`);
     }
 
     case "NetworkStopped": {
       return notDone(
-        `${network} has stopped, so whether this was changed is unknown. Look at its options again.`
+        `${network} has stopped, so it's unknown whether this was changed. Check its settings again.`
       );
     }
 
     case "VaultFailed": {
-      return notDone("The Daemon could not write its Credentials, so nothing was held.");
+      return notDone("The daemon could not write its passwords, so nothing was saved.");
     }
 
     case "InvalidRequest": {
-      return notDone("The Daemon could not read this as a Configuration.");
+      return notDone("The daemon could not read this as a network setting.");
     }
 
     case "TimelinesKept": {
       return notDone(
-        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove ${removalWords(network, false)} drops them.`
+        `${network} was removed but its conversations were kept, so no network can take its name until you drop them. /network remove ${removalWords(network, false)} drops them.`
       );
     }
 
     case "ConfigurationChanged": {
       return notDone(
-        `${network}'s Configuration changed while this was being made, twice, so nothing was changed. Try again.`
+        `${network}'s settings changed while this was being saved, so nothing was changed. Try again.`
       );
     }
 
     default: {
-      return notDone("The Daemon did not answer, so whether this was changed is unknown.");
+      return notDone("The daemon did not answer, so it's unknown whether this was changed.");
     }
   }
 };
@@ -253,7 +253,7 @@ const readFailed = (
   // The Networks and the names held are read together, so one failure's words never hide
   // the other's.
   const before = registry.get(optionsState).notice;
-  const said = `${message} Open the options again to read them.`;
+  const said = `${message} Open settings again to load them.`;
 
   happened(registry, {
     _tag: "Noticed",
@@ -286,7 +286,7 @@ const readNetworks = (registry: AtomRegistry.AtomRegistry) =>
 
               happened(registry, {
                 _tag: "ReadFailed",
-                message: outcome._tag === "NotDone" ? outcome.message : "Not read.",
+                message: outcome._tag === "NotDone" ? outcome.message : "Not loaded.",
                 network,
               });
             })
@@ -300,7 +300,7 @@ const readNetworks = (registry: AtomRegistry.AtomRegistry) =>
         readFailed(
           registry,
           error._tag,
-          "The Daemon did not list its Networks, so their options are not shown.",
+          "The daemon did not list its networks, so their settings are not shown.",
           () => {
             if (registry.get(optionsState).networks === undefined) {
               happened(registry, { _tag: "Listed", networks: [] });
@@ -329,7 +329,7 @@ const readHeldOrSay = (registry: AtomRegistry.AtomRegistry) =>
         readFailed(
           registry,
           error._tag,
-          "The Daemon did not say which Credentials it holds, so whether each is held is not known.",
+          "The daemon did not say which passwords are saved, so it's unknown whether each is set.",
           () => {
             happened(registry, { _tag: "HeldFailed" });
           }
@@ -583,7 +583,7 @@ const holdCredential = (
     const name = credentialName(named.value);
 
     if (Option.isNone(name)) {
-      return notDone(`${named.value} cannot name a Credential the Daemon holds.`);
+      return notDone(`${named.value} can't name a password the daemon keeps.`);
     }
 
     yield* client.credentials

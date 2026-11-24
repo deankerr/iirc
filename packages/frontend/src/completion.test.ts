@@ -235,7 +235,7 @@ describe("completing", () => {
     });
   });
 
-  it("completes an option's name after /set, a Channel's name, and keeps what follows the caret", () => {
+  it("completes an option's name after /set, a channel's name, and keeps what follows the caret", () => {
     const middle = reduceCompletion(
       initialCompletion,
       { _tag: "Tabbed", backwards: false, caret: 8, place: iirc, text: "join #ii now" },
@@ -258,7 +258,7 @@ describe("completing", () => {
     });
   });
 
-  it("asks the members route for a nick in a Channel, once however often Tab is pressed, then cycles", () => {
+  it("asks the members route for a nick in a channel, once however often Tab is pressed, then cycles", () => {
     const asking = play("al", [tab, tab]);
     const wanted = nicksWanted(asking.state);
 
@@ -372,7 +372,7 @@ describe("completing", () => {
     });
   });
 
-  it("tells a Channel's name from a nick by the Network's CHANTYPES, RFC 2811's while unknown", () => {
+  it("tells a channel's name from a nick by the network's CHANTYPES, RFC 2811's while unknown", () => {
     const listed: Sources = {
       ...sources,
       channels: ["[old", "#iirc", "&local"],
@@ -527,7 +527,7 @@ describe("the list", () => {
     });
   });
 
-  it("lists what a command takes where completion knows it: an option after /set, a Channel after /join or /part", () => {
+  it("lists what a command takes where completion knows it: an option after /set, a channel after /join or /part", () => {
     expect({
       join: listed(play("", [type("/join ")])),
       joinNarrowed: listed(play("", [type("/JOIN #I")])),
@@ -704,7 +704,7 @@ describe("the list as it follows typing", () => {
 });
 
 describe("ordering nicks", () => {
-  it("puts those who spoke latest first, then the route's order, and Self last", () => {
+  it("puts those who spoke latest first, then the route's order, and you last", () => {
     expect(
       orderNicks(["Ann", "bob", "Carl", "me", "dee"], {
         ...sources,
@@ -872,7 +872,7 @@ describe("the sources", () => {
     return state;
   };
 
-  it("are the Network's Channels, the open Channel's members, and who spoke there, latest first", () => {
+  it("are the network's channels, the open channel's members, and who spoke there, latest first", () => {
     const state = world();
     const channel = sourcesOf(state, iirc, held);
     const direct = sourcesOf(state, peer, held);
@@ -915,7 +915,7 @@ describe("the sources", () => {
     expect(made.commands.slice(0, commands.length)).toStrictEqual(commands);
   });
 
-  it("take a Network's CHANTYPES only as read during the Session it is in now", () => {
+  it("take a network's CHANTYPES only as read during the connection it is in now", () => {
     const state = world();
     const during = new Map([[network, { chantypes: "#", since: 1 }]]);
     const before = new Map([[network, { chantypes: "#", since: 0 }]]);
@@ -1110,7 +1110,7 @@ describe("everything the Composer's list ranks", () => {
    */
   const sent = (index: number) => interpret(picking(index).edit?.text ?? "", context);
 
-  it("lists every Timeline on every Network after /go, open then closed, each with its Network and kind", () => {
+  it("lists every conversation on every network after /go, open then closed, each with its network and kind", () => {
     expect(
       opened("/go ").map((one) =>
         one._tag === "Timeline" ? [one.name, one.network, one.kind] : one._tag
@@ -1126,7 +1126,7 @@ describe("everything the Composer's list ranks", () => {
     ]);
   });
 
-  it("writes for /go the name alone where it finds that Timeline from where the composer is, else its Network too", () => {
+  it("writes for /go the name alone where it finds that conversation from where the composer is, else its network too", () => {
     expect({
       here: pickedIn("/go #ii", 0),
       nowhere: opened("/go ", nowhere).map((one) => one.text),
@@ -1138,7 +1138,7 @@ describe("everything the Composer's list ranks", () => {
     });
   });
 
-  it("sends from each /go candidate exactly the Timeline it lists, from a Timeline or from nowhere", () => {
+  it("sends from each /go candidate exactly the conversation it lists, from a conversation or from nowhere", () => {
     const timelines = namedIn(bar).map((one) => [{ _tag: "Open", timeline: one.timeline }]);
 
     const sent = (given: Sources, at: CommandContext) =>
@@ -1154,7 +1154,7 @@ describe("everything the Composer's list ranks", () => {
     });
   });
 
-  it("lists no /go candidate it cannot reach, as the second of two that share a name on one Network", () => {
+  it("lists no /go candidate it cannot reach, as the second of two that share a name on one network", () => {
     const shared: Sources = {
       ...everywhere,
       timelines: namedIn([
@@ -1348,7 +1348,7 @@ describe("everything the Composer's list ranks", () => {
           {
             _tag: "Command",
             chords: [],
-            description: "An alias of your own: /msg $1 $*",
+            description: "Your alias: /msg $1 $*",
             name: "/tell",
             takes: "<1> […]",
             text: "/tell",
@@ -1392,7 +1392,7 @@ describe("everything the Composer's list ranks", () => {
     });
   });
 
-  it("lists the Networks after /network remove, a removed one whose Timelines were kept too, and writes the id", () => {
+  it("lists the networks after /network remove, a removed one whose conversations were kept too, and writes the id", () => {
     expect({
       listed: opened("/network remove ").map((one) =>
         one._tag === "Network" ? [one.name, one.removed, one.text] : one._tag
@@ -1407,7 +1407,7 @@ describe("everything the Composer's list ranks", () => {
     });
   });
 
-  it("asks first only once /network remove <id> is sent, for a live Network and a removed one", () => {
+  it("asks first only once /network remove <id> is sent, for a live network and a removed one", () => {
     expect([sent(0), sent(1)]).toStrictEqual([
       {
         _tag: "Parsed",
@@ -1420,7 +1420,7 @@ describe("everything the Composer's list ranks", () => {
     ]);
   });
 
-  it("names a Network whose id is keep or drop with a choice, so sending it asks about that Network", () => {
+  it("names a network whose id is keep or drop with a choice, so sending it asks about that network", () => {
     const [drop, keep] = (
       [
         ["drop", true],

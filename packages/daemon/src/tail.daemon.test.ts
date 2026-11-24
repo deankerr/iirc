@@ -51,7 +51,7 @@ const lineOf = (event: TailEvent): TailLine | undefined =>
 
 // The line the Daemon logs as a `ui` option changes, which names it among its words.
 const changed = (line: TailLine | undefined, option: string) =>
-  line?.message.startsWith("Changed a ui option") === true && line.message.includes(`"${option}"`);
+  line?.message.startsWith("Changed ui option") === true && line.message.includes(`"${option}"`);
 
 describe("the Tail, through a Daemon", () => {
   it("refuses a request with no key and no sign-in, and answers one with a key", async () => {

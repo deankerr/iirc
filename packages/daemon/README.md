@@ -227,7 +227,7 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 
 ### The fetch log
 
-- **Each fetch logs one line once its Scope closes,** in `src/previews/fetch-log.ts`: `Fetched a link for a Preview` at `Debug`, so the Tail keeps it and stderr never prints it.
+- **Each fetch logs one line once its Scope closes,** in `src/previews/fetch-log.ts`: `Fetched link for preview` at `Debug`, so the Tail keeps it and stderr never prints it.
 - **The line says what the fetch came to:** the `link` asked, what it was fetched `as`, a stream's range, the link that `answered` after redirects, its `status` and `type`, how many `bytes` were read, and how long it `took`, its wait for a turn included.
 - **A page's line says whether it gave** a `title`, a `description`, an `image`, a `player`, a `video` file, and an `oembed` address, as `yes` or `no`, never what they say.
 - **A failed fetch's line says so** as `failed`, its reason's tag, with `why`, the reason's words, where it has them.
@@ -289,7 +289,7 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **Following reads the lines held, then goes live, with none missed or doubled.**
 - **A follower that falls more than 4096 lines behind loses the oldest,** as the Tail itself does.
 - **stderr is not the Tail.** `layerLogger` writes `Info` and above whatever the minimum level, so the Tail's `Debug` lines never reach it.
-- **An option's change is logged once at `Info`,** as `Changed a ui option` or `Changed an option`, with the option's name and never its value.
+- **An option's change is logged once at `Info`,** as `Changed ui option` or `Changed option`, with the option's name and never its value.
 
 ## Composition
 
@@ -303,7 +303,7 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 - **A hang-up drains for at most half of `stopTimeout`,** so the `QUIT` fits.
 - **Every log goes through `Effect.log*`,** annotated with the Network where there is one.
 - **Each Connection's dial, Session, and end is logged at `Info`,** with its Ircd and the reason it ended.
-- **A Credential is logged by name only,** when it is held or forgotten, or when a client certificate could not be had.
+- **A Credential is logged by name only,** when it is saved or deleted, or when a client certificate could not be loaded.
 - **A Connection presents the client certificate its Network's `tls.certificate` names,** revealed from the Vault as it dials and handed to the Transport, never journaled or logged, and so never in the Tail. One that cannot be had is dialled without.
 - **HTTP requests are not logged.**
 

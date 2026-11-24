@@ -65,7 +65,7 @@ describe("the Tail held", () => {
     });
   });
 
-  it("lets go of the Tail held when the stream is of a Daemon that started anew, and keeps it for the same", () => {
+  it("lets go of the Tail held when the stream is of a daemon that started anew, and keeps it for the same", () => {
     const held = read([1, 2]);
 
     const opened = (at: number) =>

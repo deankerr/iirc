@@ -428,7 +428,7 @@ const closed = (reason: "Ended" | "Refused" | "Tls" | "Reset" | "TimedOut") =>
 const markerOf = (shown: ItemContent) => {
   const line = lineOf(shown);
 
-  return line._tag === "Description" ? line.marker : "a Message";
+  return line._tag === "Description" ? line.marker : "a message";
 };
 
 /**
@@ -485,7 +485,7 @@ describe("nicks in text", () => {
   const alice = nickColour("alice");
   const withAlice = { _tag: "Nick", colour: alice, text: "alice" };
 
-  it("draws a span that names a User as a Nick in the slot of the nick as written", () => {
+  it("draws a span that names a user as a Nick in the slot of the nick as written", () => {
     expect(formatted("hi ALICE!", [{ end: 8, start: 3 }])).toStrictEqual([
       { _tag: "Text", style: plainStyle, text: "hi " },
       { _tag: "Nick", colour: nickColour("ALICE"), style: plainStyle, text: "ALICE" },
@@ -544,7 +544,7 @@ describe("nicks in text", () => {
     ]);
   });
 
-  it("uses the confirmed text's spans for one of ours the Ircd confirmed", () => {
+  it("uses the confirmed text's spans for one of ours the server confirmed", () => {
     const line = lineOf(
       message(
         "iirc",
@@ -570,7 +570,7 @@ describe("nicks in text", () => {
 });
 
 describe("lines", () => {
-  it("shows a Message by its sender, in their colour", () => {
+  it("shows a message by its sender, in their colour", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
       _tag: "Message",
       bot: false,
@@ -586,7 +586,7 @@ describe("lines", () => {
   });
 
   // Catches a view that marks every sender, or none, by what the Message says of them.
-  it("says a Message's sender is a bot only when the Message says so", () => {
+  it("says a message's sender is a bot only when the message says so", () => {
     expect(
       [saidBy(false), saidBy(true)].map((line) => line._tag === "Message" && line.bot)
     ).toStrictEqual([false, true]);
@@ -598,12 +598,12 @@ describe("lines", () => {
       [null, "@", "+\u202E"].map((prefix) => {
         const line = lineOf(heldBy(prefix));
 
-        return line._tag === "Message" ? line.prefix : "not a Message";
+        return line._tag === "Message" ? line.prefix : "not a message";
       })
     ).toStrictEqual([undefined, "@", contained("+\u202E")]);
   });
 
-  it("says which Channel a Direct Message is about, contained, and nothing for one that names none", () => {
+  it("says which channel a direct message is about, contained, and nothing for one that names none", () => {
     const about = lineOf(
       content({
         _tag: "Message",
@@ -624,7 +624,7 @@ describe("lines", () => {
       })
     );
 
-    expect(about._tag === "Message" ? about.context : "not a Message").toBe(
+    expect(about._tag === "Message" ? about.context : "not a message").toBe(
       contained("#iirc\u202E")
     );
   });
@@ -646,7 +646,7 @@ describe("lines", () => {
     });
   });
 
-  it("shows how one of ours stands, saying nothing once confirmed or while it cannot be, and the Ircd's own text once confirmed", () => {
+  it("shows how one of ours stands, saying nothing once confirmed or while it cannot be, and the server's own text once confirmed", () => {
     const pending = lineOf(message("iirc", "hello", { _tag: "Pending" }));
 
     const confirmed = lineOf(
@@ -694,7 +694,7 @@ describe("lines", () => {
     expect(line._tag === "Message" && line.nick).toBe("\u202Eevil\u2407\u202C");
   });
 
-  it("marks each Activity in the senders' column as WeeChat does, and a Session not at all", () => {
+  it("marks each Activity in the senders' column as WeeChat does, and a connection not at all", () => {
     expect([
       markerOf(activity({ _tag: "Joined", channel: "#iirc", nick: "peer" })),
       markerOf(activity({ _tag: "Parted", channel: "#iirc", nick: "peer", reason: null })),
@@ -722,7 +722,7 @@ describe("lines", () => {
       "--",
       "--",
       undefined,
-      "a Message",
+      "a message",
     ]);
   });
 
@@ -772,7 +772,7 @@ describe("lines", () => {
     }
   );
 
-  it("draws the formatting and links in a message of the day as a Message's text has them", () => {
+  it("draws the formatting and links in a message of the day as a message's text has them", () => {
     const line = lineOf(
       activity({ _tag: "Motd", cut: false, lines: ["- \u0002see\u0002 https://example.test/x"] })
     );
@@ -904,7 +904,7 @@ describe("lines", () => {
     ]);
   });
 
-  it("shows an answer to Self's OPER by its numeric alone, a refusal as refused", () => {
+  it("shows an answer to your OPER by its numeric alone, a refusal as refused", () => {
     expect(
       [
         activity({ _tag: "OperGranted", nick: "iirc" }),
@@ -940,7 +940,7 @@ describe("lines", () => {
     ]);
   });
 
-  it("shows an invitation by who invited and where, with an offer to join that Channel", () => {
+  it("shows an invitation by who invited and where, with an offer to join that channel", () => {
     const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#elsewhere" }));
 
     expect([
@@ -954,7 +954,7 @@ describe("lines", () => {
     ]);
   });
 
-  it("shows another User's invitation by who invited whom and where, with nothing to join", () => {
+  it("shows another user's invitation by who invited whom and where, with nothing to join", () => {
     const line = lineOf(
       activity({ _tag: "UserInvited", by: "peer", channel: "#iirc", nick: "friend" })
     );
@@ -990,7 +990,7 @@ describe("lines", () => {
     }
   );
 
-  it("offers to join the Channel as the Network said it, and shows its name contained", () => {
+  it("offers to join the channel as the network said it, and shows its name contained", () => {
     const line = lineOf(activity({ _tag: "Invited", by: "peer", channel: "#a\u202Eb" }));
 
     expect(line._tag === "Description" ? line.parts : []).toContainEqual({
@@ -1001,7 +1001,7 @@ describe("lines", () => {
     expect(read(line)).toContain("#a\u202Eb\u202C ");
   });
 
-  it("describes a Session's start and end, and a failed Connection, never in an Ircd's words", () => {
+  it("describes a connection's start and end, and a failed Connection, never in a server's words", () => {
     const wire: readonly (typeof ItemContent.Encoded)[] = [
       { _tag: "SessionBegan", at: 0, nick: "iirc" },
       { _tag: "SessionEnded", at: 0, reason: { _tag: "Closed", reason: "Reset" } },
@@ -1037,14 +1037,14 @@ describe("lines", () => {
       failed("irc.example.net", 7000, false, closed("Ended")),
       failed("irc.example.net", 6697, true, closed("Tls")),
     ]).toStrictEqual([
-      "Could not connect to irc.example.net/6697 plain: the Ircd closed the connection. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
-      "Could not connect to irc.example.net/6697 plain: the Ircd stopped answering. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
+      "Could not connect to irc.example.net/6697 plain: the server closed the connection. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
+      "Could not connect to irc.example.net/6697 plain: the server stopped answering. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
       "Could not connect to irc.example.net/6667: TLS failed. Port 6667 is usually plaintext: try `/set network.libera.ircds irc.example.net/6667 plain`",
       "Could not connect to irc.example.net/6697 plain: the connection was refused",
       "Could not connect to irc.example.net/6697 plain: the connection timed out",
       "Could not connect to irc.example.net/6697 plain: the connection was reset",
       "Could not connect to irc.example.net/6667: the connection was reset",
-      "Could not connect to irc.example.net/7000 plain: the Ircd closed the connection",
+      "Could not connect to irc.example.net/7000 plain: the server closed the connection",
       "Could not connect to irc.example.net/6697: TLS failed",
     ]);
     expect(
@@ -1056,7 +1056,7 @@ describe("lines", () => {
     ).toBeUndefined();
   });
 
-  it("describes a refused action calmly, by what it tried and the Ircd's code, never its text", () => {
+  it("describes a refused action calmly, by what it tried and the server's code, never its text", () => {
     const wire: readonly (typeof ItemContent.Encoded)[] = [
       refused({ _tag: "Topic", channel: "#iirc" }),
       refused({ _tag: "Kick", channel: "#iirc", nicks: ["a", "b"] }, { _tag: "Unsent" }),
@@ -1088,12 +1088,12 @@ describe("lines", () => {
       ["Refused", "Your mode change +o-v on #iirc was refused (482)"],
       ["Refused", "Your invite of <peer> to #iirc was refused (443)"],
       ["Refused", "Your nick change to <taken> was refused (433)"],
-      ["Refused", "Marking you away was not sent: its connection ended first"],
+      ["Refused", "Marking you as away was not sent: its connection ended first"],
       ["Refused", "Your raw FROB was refused (421)"],
-      ["Refused", "Your raw line was refused (\u202E1\u202C)"],
+      ["Refused", "Your raw command was refused (\u202E1\u202C)"],
       ["Refused", "Your CTCP VERSION to <nobody> was refused (401)"],
       ["Refused", "Your PING of <peer> was not sent: its connection ended first"],
-      ["Refused", "Your leaving of #iirc was not sent: its connection ended first"],
+      ["Refused", "Your request to leave #iirc was not sent: its connection ended first"],
       ["Refused", "Your real name change was refused (INVALID_REALNAME)"],
     ]);
   });
@@ -1120,10 +1120,10 @@ describe("lines", () => {
     ]).toStrictEqual([
       "Your mode change +ov-k on #iirc",
       "Your raw WHOIS",
-      "Marking you back",
+      "Marking you as back",
       "Your CTCP FINGER to peer",
       "Your PING of peer",
-      "Your leaving of #iirc",
+      "Your request to leave #iirc",
       "Your real name change",
     ]);
   });
@@ -1135,7 +1135,7 @@ const quit = (nick: string): Churn => ({ _tag: "Quit", nick, reason: null });
 const renamed = (from: string, to: string): Churn => ({ _tag: "NickChanged", from, to });
 
 describe("a run of joins, parts, quits, and changes of nick as one line", () => {
-  it("counts each kind, in a fixed order and only those there were, and names up to five Users, the rest counted", () => {
+  it("counts each kind, in a fixed order and only those there were, and names up to five users, the rest counted", () => {
     const line = churnLine([
       joined("alice"),
       joined("bob"),
@@ -1154,7 +1154,7 @@ describe("a run of joins, parts, quits, and changes of nick as one line", () => 
     });
   });
 
-  it("names each User once however they are written, by the nick a change of nick had, and a few Users with no more", () => {
+  it("names each user once however they are written, by the nick a change of nick had, and a few users with no more", () => {
     expect(
       read(churnLine([joined("Alice"), quit("alice"), renamed("bob", "bobby"), joined("BOB")]))
     ).toBe("2 joined, 1 quit, 1 changed nick: <Alice>, <bob>");

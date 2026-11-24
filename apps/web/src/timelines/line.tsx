@@ -84,7 +84,7 @@ export const NickEdge = ({ onHeld }: { readonly onHeld: (held: boolean) => void 
       <ColumnEdge
         className={styles.edge}
         grows="Right"
-        label="Resize the nick column"
+        label="resize nick column"
         onHeld={onHeld}
         option="timeline.nickWidth"
       />
@@ -125,7 +125,7 @@ export const Time = ({
         data-sample={sample}
         // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a later Message of a run shows its time only while focused.
         tabIndex={focusable ? 0 : undefined}
-        title="Time unavailable"
+        title="Unknown time"
       >
         {hasSeconds(shown) ? "--:--:--" : "--:--"}
       </span>
@@ -199,7 +199,7 @@ const Answered = ({ item }: { readonly item: TimelineItem }) => {
     <>
       <div className={styles.answered}>
         <Button
-          aria-label="Go to the message this answers"
+          aria-label="Go to the replied message"
           onPress={() => {
             jump({ position: quoted.position, timeline: item.timeline });
           }}
@@ -301,8 +301,8 @@ const Piece = ({ part, timeline }: { readonly part: Part; readonly timeline: Tim
 const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }) => {
   const format = useAtomValue(timeShown);
   const shown = clockFor(format);
-  const from = formattedAt(shown, gap.from.at) ?? "an unknown time";
-  const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "an unknown time");
+  const from = formattedAt(shown, gap.from.at) ?? "unknown time";
+  const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "unknown time");
 
   const span =
     to === undefined ? `not connected since ${from}` : `not connected from ${from} to ${to}`;
@@ -351,7 +351,7 @@ const DayLine = ({ at }: { readonly at: number }) => {
       <span aria-hidden className={styles.rule} />
       <span className={styles.dayText}>
         {written === undefined ? (
-          "an unknown day"
+          "unknown day"
         ) : (
           <AriaButton
             aria-label={`${written}: go to another day`}
@@ -383,8 +383,8 @@ const RepeatedWords = ({
   readonly to: number;
 }) => {
   const shown = clockFor(useAtomValue(timeShown));
-  const first = formattedAt(shown, from) ?? "an unknown time";
-  const latest = formattedAt(shown, to) ?? "an unknown time";
+  const first = formattedAt(shown, from) ?? "unknown time";
+  const latest = formattedAt(shown, to) ?? "unknown time";
 
   return <span className={styles.repeated}>{` \u00D7${count}, ${first}\u2013${latest}`}</span>;
 };
@@ -446,9 +446,9 @@ const MessageMenu = ({
             onClose();
             reply({ answering, timeline });
           }}
-          textValue="Reply"
+          textValue="reply"
         >
-          Reply
+          reply
         </MenuItem>
       </Menu>
     </Popover>

@@ -210,7 +210,7 @@ describe("removing a Network", () => {
     };
 
     await doing(() => {
-      button("Cancel").click();
+      button("cancel").click();
     });
     await settled(() => question() === null);
 
@@ -236,7 +236,7 @@ describe("removing a Network", () => {
     daemon.lives.set("libera", 99);
 
     await doing(() => {
-      button("Remove").click();
+      button("remove").click();
     });
     await settled(() => question()?.textContent?.includes("since you were asked") === true);
 
@@ -254,7 +254,7 @@ describe("removing a Network", () => {
     await submit(container, "/network remove");
     await settled(() => question() !== null);
     await doing(() => {
-      button("Remove").click();
+      button("remove").click();
     });
     await settled(() => question() === null && document.querySelector('[role="note"]') !== null);
 
@@ -279,7 +279,7 @@ describe("removing a Network", () => {
     const choosing = question()?.querySelectorAll("input[type='radio']").length;
 
     await doing(() => {
-      button("Drop them").click();
+      button("drop them").click();
     });
     await settled(() => question() === null && registry.get(timelinesState).networks.size === 0);
 
@@ -293,16 +293,16 @@ describe("removing a Network", () => {
       says: daemon.says,
     }).toStrictEqual({
       choosing: 0,
-      drop: "Drop libera's Timelines?",
+      drop: "Drop libera's conversations?",
       kept: {
-        composer: "libera was removed: nothing can be said here",
-        note: "libera was removed. Its Timelines are kept to read and search, and nothing can be said here.",
+        composer: "libera was removed, so you can't send messages here.",
+        note: "libera was removed. Its conversations are kept to read and search, and you can't send messages here.",
         removals: [{ keep: true, network: "libera" }],
-        sidebar: ["Removed", "libera, removed", "#iirc"],
+        sidebar: ["removed", "libera, removed", "#iirc"],
       },
       left: [],
       refused:
-        "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.",
+        "libera was removed, so its conversations are read-only. /network remove libera drops them.",
       removals: [
         { keep: true, network: "libera" },
         { keep: false, network: "libera" },
@@ -320,7 +320,7 @@ describe("removing a Network", () => {
       question()?.querySelector<HTMLInputElement>("input[value='drop']")?.click();
     });
     await doing(() => {
-      button("Remove").click();
+      button("remove").click();
     });
     await settled(() => question() === null && registry.get(timelinesState).networks.size === 0);
 
@@ -344,7 +344,7 @@ describe("removing a Network", () => {
     await submit(container, "/network remove libera keep");
     await settled(() => question() !== null);
     await doing(() => {
-      button("Remove").click();
+      button("remove").click();
     });
     await settled(() => question() === null && daemon.kept.has("libera"));
 
@@ -352,7 +352,7 @@ describe("removing a Network", () => {
     await settled(() => container.querySelector('[role="alert"] p') !== null);
 
     expect(container.querySelector('[role="alert"] p')?.textContent).toBe(
-      "libera was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove libera drops them."
+      "libera was removed but its conversations were kept, so no network can take its name until you drop them. /network remove libera drops them."
     );
   });
 
@@ -372,7 +372,7 @@ describe("removing a Network", () => {
       await settled(() => container.querySelector('[role="alert"] p') !== null);
 
       expect(container.querySelector('[role="alert"] p')?.textContent).toBe(
-        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. ${ending}`
+        `${network} was removed but its conversations were kept, so no network can take its name until you drop them. ${ending}`
       );
     }
   );

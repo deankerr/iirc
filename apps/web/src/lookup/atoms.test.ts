@@ -187,7 +187,7 @@ describe("a Lookup", () => {
     }).toStrictEqual({
       looked: ["web-1", "web-1", "web-2"],
       looks: ["web-1", "web-2"],
-      stopped: "The Network stopped before it was looked up. Try again.",
+      stopped: "The network stopped before the request finished. Try again.",
     });
   });
 
@@ -285,7 +285,7 @@ describe("a Lookup", () => {
       heldAsked: held.daemon.looked,
       timedOut: [timedOut.daemon.looks.length, timedOut.daemon.looked],
     }).toStrictEqual({
-      gaveUp: "No result came from the Daemon in time. Try again.",
+      gaveUp: "The daemon did not answer in time. Try again.",
       heldAsked: [],
       timedOut: [1, ["web-1"]],
     });
@@ -310,7 +310,7 @@ describe("a Lookup", () => {
       gaveUp: gaveUp?.body._tag === "Said" ? gaveUp.body.words : undefined,
       heldAsked: held.daemon.looked,
     }).toStrictEqual({
-      gaveUp: "No result came from the Daemon in time. Try again.",
+      gaveUp: "The daemon did not answer in time. Try again.",
       heldAsked: ["web-1"],
     });
   });

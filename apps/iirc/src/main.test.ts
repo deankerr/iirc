@@ -136,7 +136,7 @@ const startDaemonOn = async (host: string, directory: string, ...args: readonly 
     const chunk = await reader.read();
 
     if (chunk.done) {
-      throw new Error(`the Daemon ended before listening: ${logged}`);
+      throw new Error(`the daemon ended before listening: ${logged}`);
     }
 
     logged += decoder.decode(chunk.value);
@@ -249,7 +249,7 @@ describe("iirc", () => {
       expect({
         exited: await child.exited,
         keyWhileRunning: keyWhileRunning.code,
-        second: [second.code, second.stderr.includes("held by another process")],
+        second: [second.code, second.stderr.includes("in use by another process")],
         statuses: [withKey.status, await withKey.text(), withoutKey.status],
       }).toStrictEqual({
         exited: 0,
@@ -451,14 +451,8 @@ describe("iirc", () => {
         noDirectory: [noDirectory.code, noDirectory.stderr],
         noIndex: [noIndex.code, noIndex.stderr],
       }).toStrictEqual({
-        noDirectory: [
-          1,
-          `The web frontend in ${missing} could not be served: it holds no index.html. Build it with bun run build:web.\n`,
-        ],
-        noIndex: [
-          1,
-          `The web frontend in ${empty} could not be served: it holds no index.html. Build it with bun run build:web.\n`,
-        ],
+        noDirectory: [1, `The web app in ${missing} could not be served: it has no index.html.\n`],
+        noIndex: [1, `The web app in ${empty} could not be served: it has no index.html.\n`],
       });
     });
 
@@ -478,7 +472,7 @@ describe("iirc", () => {
         code: 1,
         made: false,
         stderr:
-          "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist.\n",
+          "This build of iirc has no built-in web app, so --web needs a directory, such as --web=apps/web/dist.\n",
         stdout: "",
       });
     });
@@ -516,7 +510,7 @@ describe("iirc", () => {
 
       expect(result).toStrictEqual({
         code: 1,
-        stderr: `The Daemon at 127.0.0.1:${unwell.port} is unwell: its projector has stopped until it restarts.\n`,
+        stderr: `The daemon at 127.0.0.1:${unwell.port} is unhealthy: its projector has stopped until it restarts.\n`,
         stdout: "",
       });
     });
@@ -559,7 +553,7 @@ describe("iirc", () => {
         proxied: { code: 0, stderr: "", stdout: "" },
         redirected: {
           code: 1,
-          stderr: `Something at 127.0.0.1:${redirecting.port} answered, but not as an iirc Daemon.\n`,
+          stderr: `Something at 127.0.0.1:${redirecting.port} responded, but it is not an iirc daemon.\n`,
           stdout: "",
         },
       });
@@ -580,12 +574,12 @@ describe("iirc", () => {
       expect({ refused, unanswered }).toStrictEqual({
         refused: {
           code: 1,
-          stderr: `Nothing answered at 127.0.0.1:${closed.port}.\n`,
+          stderr: `No response from 127.0.0.1:${closed.port}.\n`,
           stdout: "",
         },
         unanswered: {
           code: 1,
-          stderr: `Nothing answered at 127.0.0.1:${silent.port} within 5s.\n`,
+          stderr: `No response from 127.0.0.1:${silent.port} within 5s.\n`,
           stdout: "",
         },
       });

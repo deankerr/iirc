@@ -58,7 +58,7 @@ export const resultRows = Atom.make((get): readonly ResultRow[] => {
       : [
           {
             found,
-            place: `${item.network} ${name === undefined ? "(a Timeline gone)" : contained(name)}`,
+            place: `${item.network} ${name === undefined ? "(conversation gone)" : contained(name)}`,
           },
         ];
   });

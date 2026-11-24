@@ -609,7 +609,7 @@ const failedFor = Duration.toMillis(Duration.hours(1));
  * @returns What logs a failure.
  */
 const warn = (what: string) => (error: { readonly reason: string }) =>
-  Effect.logWarning(`The Preview cache could not be ${what}: ${error.reason}`);
+  Effect.logWarning(`Could not ${what} preview cache: ${error.reason}`);
 
 /** A link being fetched now: what to answer meanwhile, and when it was last shown. */
 interface Flight {
@@ -742,7 +742,7 @@ export const layerPreviews = Layer.effect(Previews)(
                 shown: flight?.shown ?? fetched,
                 state,
               })
-              .pipe(Effect.catch(warn("written")));
+              .pipe(Effect.catch(warn("write to")));
             yield* Ref.update(flying, (now) => {
               const rest = new Map(now);
 
@@ -829,7 +829,7 @@ export const layerPreviews = Layer.effect(Previews)(
 
       const warned = (reason: string) =>
         Effect.as(
-          Effect.logWarning(`A Preview's image was not kept: ${reason}`).pipe(
+          Effect.logWarning(`Could not save preview image: ${reason}`).pipe(
             Effect.annotateLogs({ image: address })
           ),
           state
@@ -840,7 +840,7 @@ export const layerPreviews = Layer.effect(Previews)(
         Effect.catch((error) =>
           warned("reason" in error ? `${error._tag}, ${error.reason}` : error._tag)
         ),
-        Effect.catchDefect(() => warned("it failed unforeseen"))
+        Effect.catchDefect(() => warned("unexpected error"))
       );
     };
 
@@ -898,7 +898,9 @@ export const layerPreviews = Layer.effect(Previews)(
 
           const kept = yield* cache
             .shown(key, now)
-            .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
+            .pipe(
+              Effect.catch((error) => Effect.as(warn("read from")(error), Option.none<Kept>()))
+            );
 
           if (Option.isSome(kept) && !stale(kept.value, now, how)) {
             return {
@@ -1055,7 +1057,9 @@ export const layerPreviews = Layer.effect(Previews)(
           flight === undefined
             ? yield* cache
                 .get(key)
-                .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())))
+                .pipe(
+                  Effect.catch((error) => Effect.as(warn("read from")(error), Option.none<Kept>()))
+                )
             : Option.none<Kept>();
 
         const absent: HeldItem["state"] = how.waits ? waiting : { _tag: "NotHeld" };
@@ -1183,7 +1187,9 @@ export const layerPreviews = Layer.effect(Previews)(
               : yield* cache
                   .get(key)
                   .pipe(
-                    Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>()))
+                    Effect.catch((error) =>
+                      Effect.as(warn("read from")(error), Option.none<Kept>())
+                    )
                   );
 
           const preview =

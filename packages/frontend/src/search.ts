@@ -200,7 +200,7 @@ const searchTextOf = (text: string): Parsed<SearchText> => {
 
   if (folded === 0) {
     return invalid(
-      `Say what to search for: at least ${searchTextMinimum} characters, with from:, in:, network:, since:, or until: to narrow it.`
+      `Enter at least ${searchTextMinimum} characters to search for. Narrow it with from:, in:, network:, since:, or until:.`
     );
   }
 
@@ -215,7 +215,7 @@ const searchTextOf = (text: string): Parsed<SearchText> => {
   const decoded = Option.getOrUndefined(decodeSearchText(text));
 
   return decoded === undefined
-    ? invalid("A search holds no line break, NUL, or broken character.")
+    ? invalid("A search can't contain a line break, NUL, or invalid character.")
     : parsed(decoded);
 };
 
@@ -344,7 +344,7 @@ export const parseMoment = (value: string, usage: string): Parsed<Moment> => {
     const day = dayOf(date);
 
     return day === undefined
-      ? invalid(`${value} is no day of the calendar. ${usage}`)
+      ? invalid(`${value} is not a valid date. ${usage}`)
       : parsed({ _tag: "Day", day });
   }
 
@@ -361,17 +361,17 @@ export const parseMoment = (value: string, usage: string): Parsed<Moment> => {
   const millis = Number((time.fraction ?? "").padEnd(3, "0"));
 
   if (day === undefined || hours > 23 || minutes > 59 || seconds > 59) {
-    return invalid(`${value} is no time of the calendar. ${usage}`);
+    return invalid(`${value} is not a valid time. ${usage}`);
   }
 
   if (time.zone === undefined) {
-    return invalid(`${value} needs its zone, such as Z or +01:00, or a date alone. ${usage}`);
+    return invalid(`${value} needs a time zone, such as Z or +01:00, or a date alone. ${usage}`);
   }
 
   const offset = offsetOf(time.zone);
 
   if (offset === undefined) {
-    return invalid(`${time.zone} is no zone's offset. ${usage}`);
+    return invalid(`${time.zone} is not a valid time zone offset. ${usage}`);
   }
 
   const at = instantOf(
@@ -384,7 +384,7 @@ export const parseMoment = (value: string, usage: string): Parsed<Moment> => {
   );
 
   return at === undefined
-    ? invalid(`${value} lies past any time kept. ${usage}`)
+    ? invalid(`${value} is too far in the future or past. ${usage}`)
     : parsed({ _tag: "At", at });
 };
 
@@ -445,7 +445,7 @@ const boundOf = (
   value: string,
   dayStart: QueryContext["dayStart"]
 ): Parsed<Instant> => {
-  const usage = `${name}: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.`;
+  const usage = `${name}: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.`;
   const moment = parseMoment(value, usage);
 
   if (moment._tag === "Invalid") {
@@ -454,14 +454,16 @@ const boundOf = (
 
   const at = instantAt(boundMoment(name, moment.value), dayStart);
 
-  return at === undefined ? invalid(`${value} cannot be searched from. ${usage}`) : parsed(at);
+  return at === undefined
+    ? invalid(`${value} can't be used as a search limit. ${usage}`)
+    : parsed(at);
 };
 
 // Timelines.
 
 /**
  * The Timelines among some that a name finds: those with exactly that name, or with none,
- * those the Daemon keyed by it, as written or with its ASCII letters lower-cased, which
+ * those the Daemon keyed by it, as written or with its ASCII letters lowercased, which
  * every casemapping folds alike, so nothing another casemapping would fold together is
  * guessed. A detached Direct Message Timeline is found only when nothing else is.
  * @param timelines - The Timelines.
@@ -506,8 +508,8 @@ const timelineNamed = (
   if (found.length === 0) {
     return invalid(
       network === undefined
-        ? `No Timeline is called ${name}.`
-        : `${network} has no Timeline called ${name}.`
+        ? `No conversation is called ${name}.`
+        : `${network} has no conversation called ${name}.`
     );
   }
 
@@ -515,8 +517,8 @@ const timelineNamed = (
 
   return invalid(
     where.length > 1
-      ? `${name} names Timelines on ${where.join(" and ")}. Say which with network:<id>.`
-      : `${name} names more than one Timeline on ${where.join("")}.`
+      ? `${name} matches conversations on ${where.join(" and ")}. Pick one with network:<id>.`
+      : `${name} matches more than one conversation on ${where.join("")}.`
   );
 };
 
@@ -537,12 +539,12 @@ const filtersGiven = (
       text.push(word.text);
     } else if (!isFilterName(word.name)) {
       return invalid(
-        `There is no filter ${word.name}:. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "${word.name}:${word.value}".`
+        `${word.name}: is not a filter. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "${word.name}:${word.value}".`
       );
     } else if (filters.has(word.name)) {
-      return invalid(`${word.name}: is given twice.`);
+      return invalid(`${word.name}: is used twice.`);
     } else if (word.value === "") {
-      return invalid(`${word.name}: needs a value after it.`);
+      return invalid(`${word.name}: needs a value.`);
     } else {
       filters.set(word.name, word.value);
     }
@@ -565,7 +567,7 @@ const placeOf = (
   const network = context.networks.find((one) => one.network === networkName)?.network;
 
   if (networkName !== undefined && network === undefined) {
-    return invalid(`No Network is called ${networkName}.`);
+    return invalid(`No network is called ${networkName}.`);
   }
 
   const inName = filters.get("in");

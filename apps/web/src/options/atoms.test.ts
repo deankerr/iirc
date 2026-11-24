@@ -118,7 +118,7 @@ describe("the options", () => {
     }).toStrictEqual({
       enabled: true,
       notice:
-        "libera's Configuration changed while this was being made, twice, so nothing was changed. Try again.",
+        "libera's settings changed while this was being saved, so nothing was changed. Try again.",
       puts: 2,
     });
   });
@@ -180,7 +180,7 @@ describe("the options", () => {
       history: ["/set network.libera.login.credential"],
       inAtoms: false,
       notice:
-        "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set network.libera.password alone, which asks for it in a password prompt.",
+        "Don't type a password into the message input. It was cleared and nothing was sent. Use /set network.libera.password alone to enter it in a password prompt.",
       prompting: {
         name: "network.libera.login.credential",
         network: libera,

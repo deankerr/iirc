@@ -725,7 +725,7 @@ describe("the API over a real server", () => {
       400,
       {
         _tag: "InvalidRequest",
-        issues: [{ message: "must not hold a line break or NUL", path: ["payload", "text"] }],
+        issues: [{ message: "must not contain a line break or NUL", path: ["payload", "text"] }],
       },
     ]);
     expect([result.badName[0], result.credential[0], result.notJson[0]]).toStrictEqual([
@@ -1435,8 +1435,8 @@ describe("the API over a real server", () => {
     );
 
     expect(result.statuses).toStrictEqual([204, 401, 403, 400, 204]);
-    expect(result.logged).toContain("Signed a browser in");
-    expect(result.logged).toContain("Signed a browser out");
+    expect(result.logged).toContain("Browser signed in");
+    expect(result.logged).toContain("Browser signed out");
 
     // A response carries a token only in the sign-in's cookie, and never a key.
     const keys = [result.key, wrong];

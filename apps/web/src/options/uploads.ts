@@ -372,7 +372,7 @@ export const moreUploads = runtime
                 ? { _tag: "SignedOut" }
                 : {
                     _tag: "NotDone",
-                    message: "The Daemon did not give the next page of Uploads. Try again.",
+                    message: "The daemon did not load more uploads. Try again.",
                   }
             );
           })
@@ -406,7 +406,7 @@ export const copyLink = runtime
           onFailure: () => {
             told(get.registry, {
               _tag: "NotDone",
-              message: "This browser would not copy the link, so it was not copied.",
+              message: "This browser blocked copying the link, so it wasn't copied.",
             });
           },
           onSuccess: () => {

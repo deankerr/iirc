@@ -223,7 +223,9 @@ export const layerAwayWhenClosed = Layer.effect(Following)(
         yield* Effect.all(acts, { discard: true });
 
         yield* Effect.logInfo(
-          move._tag === "Away" ? "Away, as no Frontend is open" : "Back, as a Frontend is open"
+          move._tag === "Away"
+            ? "Marked away (no clients connected)"
+            : "Marked back (a client connected)"
         );
       });
 
@@ -272,7 +274,7 @@ export const layerAwayWhenClosed = Layer.effect(Following)(
         Effect.flatMap(({ last }) =>
           Effect.all([followFrom(last), decide], { concurrency: 2, discard: true })
         ),
-        Effect.catchCause((cause) => Effect.logError("Away when closed stopped", cause))
+        Effect.catchCause((cause) => Effect.logError("Automatic away stopped", cause))
       )
     );
 

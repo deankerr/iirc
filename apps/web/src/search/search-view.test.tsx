@@ -475,7 +475,7 @@ describe("the search view", () => {
     const target = container.querySelector("[data-target]");
 
     const jump = [...container.querySelectorAll("button")].some(
-      (button) => button.textContent === "Jump to latest"
+      (button) => button.textContent === "jump to latest"
     );
 
     if (log === null) {
@@ -509,7 +509,7 @@ describe("the search view", () => {
           text: "<img src=x onerror=alert(1)> WoRd ten",
         },
       },
-      status: "60 found, newest first.",
+      status: "60 results, newest first.",
       // The start, the day, then items 1 to 10: the tenth's middle, 230, in the middle of 400.
       target: [true, 30],
     });

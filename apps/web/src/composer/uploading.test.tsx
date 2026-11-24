@@ -274,7 +274,7 @@ const renameKept = async (container: HTMLElement, name: string, to: string) => {
   await press(button(container, `Rename ${name}`));
 
   const field = container.querySelector<HTMLInputElement>(
-    `input[aria-label="New name for ${name}"]`
+    `input[aria-label="new name for ${name}"]`
   );
 
   if (field === null) {
@@ -396,7 +396,7 @@ describe("uploading from the Composer", () => {
     });
 
     const bar = container.querySelector<HTMLProgressElement>(
-      'progress[aria-label="Sending cat.png"]'
+      'progress[aria-label="Uploading cat.png"]'
     );
 
     expect({ max: bar?.max, value: bar?.value }).toStrictEqual({ max: 100, value: 40 });
@@ -443,7 +443,7 @@ describe("uploading from the Composer", () => {
 
     await press(
       [...container.querySelectorAll("button")].find(
-        (one) => one.textContent === "Open the options"
+        (one) => one.textContent === "open settings"
       ) ?? null
     );
 
@@ -476,7 +476,7 @@ describe("uploading from the Composer", () => {
 
     expect({ after: alerts(container), said, value: composerOf(container).value }).toStrictEqual({
       after: [],
-      said: ["The store that keeps Uploads could not be reached, so cat.png was not kept."],
+      said: ["The storage that keeps uploads could not be reached, so cat.png was not kept."],
       value: "",
     });
   });
@@ -511,7 +511,7 @@ describe("uploading from the Composer", () => {
 
     expect({
       accept: camera?.accept,
-      button: button(container, "Take a photo") === null,
+      button: button(container, "take a photo") === null,
       capture: camera?.getAttribute("capture"),
     }).toStrictEqual({ accept: "image/*", button: false, capture: "environment" });
   });
@@ -739,7 +739,7 @@ describe("uploading from the Composer", () => {
     await settled(() => alerts(container).length === 1);
 
     expect({ alerts: alerts(container), value: composerOf(container).value }).toStrictEqual({
-      alerts: ["The Daemon could not write its Journal, so cat.png was not renamed."],
+      alerts: ["The daemon could not write its history, so cat.png was not renamed."],
       value: linkOf(10, "cat.png"),
     });
   });
@@ -749,7 +749,7 @@ describe("uploading from the Composer", () => {
 
     await paste(container, image("cat.png"));
     await settled(() => composerOf(container).value.includes(publicUrl));
-    await press(button(container, "Dismiss cat.png, leaving its link"));
+    await press(button(container, "Dismiss cat.png but keep its link"));
 
     expect({ listed: listedFiles(container), value: composerOf(container).value }).toStrictEqual({
       listed: [],

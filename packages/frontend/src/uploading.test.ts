@@ -255,7 +255,7 @@ describe("putting a link into the draft", () => {
     );
   });
 
-  it("puts nothing in when no public URL gives a link, and notes that Uploads are off", () => {
+  it("puts nothing in when no public URL gives a link, and notes that uploads are off", () => {
     const after = keep(
       { composers: typed(initialComposers, "hi"), uploading: addedAt(2, file("a")) },
       "a",
@@ -462,7 +462,7 @@ describe("adding files", () => {
     expect(textOf(keep(keep(start, "b"), "a"))).toBe("https://f.test/a https://f.test/b");
   });
 
-  it("follows the draft while Uploads are asked about, edits and all", () => {
+  it("follows the draft while uploads are asked about, edits and all", () => {
     const composers = typed(initialComposers, "abcdef");
 
     const uploading = fold(initialUploading, {
@@ -485,7 +485,7 @@ describe("adding files", () => {
     expect(textOf(after)).toBe("Xabc https://f.test/a defY");
   });
 
-  it("follows a draft carried to its Timeline while Uploads are asked about", () => {
+  it("follows a draft carried to its conversation while uploads are asked about", () => {
     const draft: Place = "draft libera peer";
     const composers = typed(initialComposers, "hi", draft);
 
@@ -509,7 +509,7 @@ describe("adding files", () => {
     ).toBe("hi L");
   });
 
-  it("sends nothing of a file cancelled while Uploads are asked about", () => {
+  it("sends nothing of a file cancelled while uploads are asked about", () => {
     const state = fold(
       initialUploading,
       { _tag: "Added", anchor: 0, files: [file("a")], place },
@@ -523,7 +523,7 @@ describe("adding files", () => {
     });
   });
 
-  it("checks a file until the Daemon says whether Uploads are on", () => {
+  it("checks a file until the daemon says whether uploads are on", () => {
     const state = fold(initialUploading, {
       _tag: "Added",
       anchor: 0,
@@ -553,11 +553,11 @@ describe("adding files", () => {
       words: pendingIn(state, place).map((one) => failureText({ ...one, failure: failureOf(one) })),
     }).toStrictEqual({
       sending: ["small"],
-      words: ["cat.mp4 is 120 MiB, over the 100 MiB limit.", undefined],
+      words: ["cat.mp4 is 126 MB, over the 105 MB limit.", undefined],
     });
   });
 
-  it("adds nothing while Uploads are off, and notes the options to set", () => {
+  it("adds nothing while uploads are off, and notes the options to set", () => {
     const state = fold(
       initialUploading,
       ...arrived(
@@ -574,7 +574,7 @@ describe("adding files", () => {
     });
   });
 
-  it("lets the note go once files are added while Uploads are on", () => {
+  it("lets the note go once files are added while uploads are on", () => {
     const state = fold(
       initialUploading,
       ...arrived(
@@ -589,7 +589,7 @@ describe("adding files", () => {
     expect(noteIn(state, place)).toBeUndefined();
   });
 
-  it("notes that Uploads are off when the Daemon says so as a file is sent, and lets the file go", () => {
+  it("notes that uploads are off when the daemon says so as a file is sent, and lets the file go", () => {
     const state = fold(addedAt(0, file("a")), {
       _tag: "Off",
       key: "a",
@@ -602,7 +602,7 @@ describe("adding files", () => {
     });
   });
 
-  it("fails each file, sending none, when the Daemon did not say whether Uploads are on", () => {
+  it("fails each file, sending none, when the daemon did not say whether uploads are on", () => {
     const state = fold(initialUploading, ...arrived(0, [file("a")], { _tag: "NoAnswer" }, place));
 
     expect({
@@ -610,7 +610,7 @@ describe("adding files", () => {
       words: state.pending.map((one) => failureText({ ...one, failure: failureOf(one) })),
     }).toStrictEqual({
       sending: [],
-      words: ["The Daemon did not answer, so a.png was not sent."],
+      words: ["The daemon did not answer, so a.png was not sent."],
     });
   });
 
@@ -669,7 +669,7 @@ describe("sending a draft while its files upload", () => {
     ]).toStrictEqual([undefined, undefined]);
   });
 
-  it("holds nothing back for a draft typing a Credential's value, so it is let go of", () => {
+  it("holds nothing back for a draft typing a password's value, so it is let go of", () => {
     const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
 
     expect(heldBack(addedAt(0, file("a")), credential, place, [])).toBeUndefined();
@@ -722,7 +722,7 @@ describe("what a composer says of a send held back", () => {
     expect(heldNoteIn(later, composers, place, [])).toBeUndefined();
   });
 
-  it("stays with a draft carried to its Timeline while its file uploads", () => {
+  it("stays with a draft carried to its conversation while its file uploads", () => {
     const draft: Place = "draft libera peer";
     const before = typed(initialComposers, "hi", draft);
 
@@ -751,7 +751,7 @@ describe("what a composer says of a send held back", () => {
   });
 });
 
-describe("the note while Uploads are off", () => {
+describe("the note while uploads are off", () => {
   it("names one option", () => {
     expect(offNote(["uploads.publicUrl"])).toBe("Uploads are off until uploads.publicUrl is set.");
   });
@@ -770,39 +770,39 @@ describe("the note while Uploads are off", () => {
 describe("why a file was not kept, in words", () => {
   const named = { name: "cat.png", size: 10 };
 
-  it("says the limit the Daemon read past", () => {
+  it("says the limit the daemon read past", () => {
     expect(
       failureText({ ...named, failure: { _tag: "OverLimit", before: false, maxSize: mib } })
-    ).toBe("cat.png is over the 1.0 MiB limit, so it was not kept.");
+    ).toBe("cat.png is over the 1.0 MB limit, so it was not kept.");
   });
 
   it("says the store could not be reached", () => {
     expect(failureText({ ...named, failure: { _tag: "StoreUnavailable" } })).toBe(
-      "The store that keeps Uploads could not be reached, so cat.png was not kept."
+      "The storage that keeps uploads could not be reached, so cat.png was not kept."
     );
   });
 
-  it("says the store is full, and how much Uploads may hold in all", () => {
+  it("says the store is full, and how much uploads may hold in all", () => {
     expect(failureText({ ...named, failure: { _tag: "StoreFull", maxTotal: 2 * mib } })).toBe(
-      "The store is full: Uploads may hold 2.0 MiB in all, so cat.png was not kept."
+      "Storage is full: uploads can total 2.1 MB, so cat.png was not kept."
     );
   });
 
-  it("says the Journal could not be written", () => {
+  it("says the history could not be written", () => {
     expect(failureText({ ...named, failure: { _tag: "JournalFailed" } })).toBe(
-      "The Daemon could not write its Journal, so cat.png was not kept."
+      "The daemon could not write its history, so cat.png was not kept."
     );
   });
 
   it("says whether a file sent with no answer was kept is unknown", () => {
     expect(failureText({ ...named, failure: { _tag: "NoAnswer", sent: true } })).toBe(
-      "The Daemon did not answer, so whether cat.png was kept is unknown."
+      "The daemon did not answer, so it's unknown whether cat.png was kept."
     );
   });
 
   it("says an answer that could not be read", () => {
     expect(failureText({ ...named, failure: { _tag: "Unexpected" } })).toBe(
-      "The Daemon answered in a way the Frontend could not read, so whether cat.png was kept is unknown."
+      "The daemon sent a reply this device could not read, so it's unknown whether cat.png was kept."
     );
   });
 

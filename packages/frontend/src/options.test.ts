@@ -129,7 +129,7 @@ const nowhere: CommandContext = {
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);
 
 describe("the options, derived from the Schema", () => {
-  it("has a field for every field of the Configuration, each described", () => {
+  it("has a field for every field of the settings, each described", () => {
     const keys = Object.keys(NetworkConfiguration.fields).toSorted();
 
     expect({
@@ -185,7 +185,7 @@ describe("the options, derived from the Schema", () => {
     });
   });
 
-  it("shows each value in its syntax, and what a new Network starts with", () => {
+  it("shows each value in its syntax, and what a new network starts with", () => {
     const shown = Object.fromEntries(
       optionsOf(libera, full, new Set(["libera.sasl"])).map((option) => [
         option.name.slice("network.libera.".length),
@@ -239,7 +239,7 @@ describe("the options, derived from the Schema", () => {
     });
   });
 
-  it("shows a service login's fields, sharing the account and Credential with SASL's", () => {
+  it("shows a service login's fields, sharing the account and password with SASL's", () => {
     const service = decode({
       ...plain,
       login: {
@@ -277,7 +277,7 @@ const at = (name: string) => {
 };
 
 describe("names", () => {
-  it("resolve a Network's id with dots, a Channel's name with dots, and nothing else", () => {
+  it("resolve a network's id with dots, a channel's name with dots, and nothing else", () => {
     expect({
       channel: at("network.libera.channels.#a.b.key"),
       dotted: at("network.my.net.nicks"),
@@ -296,7 +296,7 @@ describe("names", () => {
     });
   });
 
-  it("derive a Credential's name from the option's, escaping what a name cannot hold", () => {
+  it("derive a password's name from the option's, escaping what a name cannot hold", () => {
     expect({
       channel: derivedCredential(libera, ["channels", "#a_b", "key"]),
       kept: credentialFor(libera, full, ["login", "credential"]),
@@ -509,7 +509,7 @@ describe("the text syntax", () => {
     ]);
   });
 
-  it("shows what it reads, once read, for an Ircd list typed any way", () => {
+  it("shows what it reads, once read, for a server list typed any way", () => {
     const kind = kindOf("ircds");
 
     const typed = fc
@@ -542,7 +542,7 @@ describe("the text syntax", () => {
     );
   });
 
-  it("takes on, off, true, and false, an Ircd with or without a port and TLS, and refuses the rest", () => {
+  it("takes on, off, true, and false, a server with or without a port and TLS, and refuses the rest", () => {
     const toggle = kindOf("enabled");
     const ircds = kindOf("ircds");
 
@@ -565,7 +565,7 @@ describe("the text syntax", () => {
         { _tag: "Parsed", value: [{ host: "irc.test", port: 7000, tls: true }] },
         { _tag: "Parsed", value: [{ host: "irc.test", port: 6667, tls: false }] },
         { _tag: "Parsed", value: [{ host: "::1", port: 6697, tls: false }] },
-        { _tag: "Invalid", message: 'An Ircd\'s port is 1 to 65535, not "0".' },
+        { _tag: "Invalid", message: 'A server\'s port is 1 to 65535, not "0".' },
         { _tag: "Parsed", value: [{ host: "a -tlsx", port: 6697, tls: true }] },
         {
           _tag: "Invalid",
@@ -577,7 +577,7 @@ describe("the text syntax", () => {
           message:
             'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "irc.test +tls".',
         },
-        { _tag: "Invalid", message: "Give at least one Ircd, as host/port." },
+        { _tag: "Invalid", message: "Give at least one server, as host/port." },
       ],
       toggles: ["Parsed", "Parsed", "Parsed", "Parsed", "Invalid"],
     });
@@ -654,7 +654,7 @@ const ignore = (text: string): Edit => ({ _tag: "Ignore", mask: IgnoreMask.make(
 const unignore = (text: string): Edit => ({ _tag: "Unignore", mask: IgnoreMask.make(text) });
 
 describe("editing", () => {
-  it("sets each option to what it shows and gets the same Configuration back", () => {
+  it("sets each option to what it shows and gets the same settings back", () => {
     const again = optionsOf(libera, full, undefined).flatMap((option) =>
       option.value._tag === "Shown"
         ? [valueOf(set(libera, full, option.path, option.value.text))]
@@ -670,7 +670,7 @@ describe("editing", () => {
     });
   });
 
-  it("sets a value, and refuses one that would not be a Configuration", () => {
+  it("sets a value, and refuses one that would not be a settings", () => {
     expect({
       empty: set(libera, plain, ["nicks"], ""),
       nicks: valueOf(set(libera, plain, ["nicks"], "a, b ,c")).nicks,
@@ -715,7 +715,7 @@ describe("editing", () => {
     });
   });
 
-  it("sets up an operator login by its name, starting with the first nick and a named Credential", () => {
+  it("sets up an operator login by its name, starting with the first nick and a named password", () => {
     const named = valueOf(set(libera, plain, ["oper", "name"], "admin"));
 
     expect({
@@ -809,14 +809,14 @@ describe("editing", () => {
     });
   });
 
-  it("keeps a Channel's key when the Channels are set again, and drops a Channel no longer named", () => {
+  it("keeps a channel's key when the channels are set again, and drops a channel no longer named", () => {
     expect(valueOf(set(libera, full, ["channels"], "#new,#secret")).channels).toStrictEqual([
       { name: "#new" },
       { key: "libera.channels._23secret.key", name: "#secret" },
     ]);
   });
 
-  it("unsets each option to what a new Network starts with, or refuses one that must be given", () => {
+  it("unsets each option to what a new network starts with, or refuses one that must be given", () => {
     expect({
       channelKey: valueOf(unset(libera, full, ["channels", "#secret", "key"])).channels,
       enabled: valueOf(unset(libera, valueOf(set(libera, plain, ["enabled"], "off")), ["enabled"]))
@@ -844,13 +844,13 @@ describe("editing", () => {
       saslCredential: {
         _tag: "Invalid",
         message:
-          "network.libera.login.credential is the Credential login uses, so it cannot be unset. /set network.libera.login none turns login off.",
+          "network.libera.login.credential is the password login uses, so it can't be unset. /set network.libera.login none turns login off.",
       },
       saslOff: plain,
     });
   });
 
-  it("points a Credential option at a Credential, and a Channel's key only at a Channel named", () => {
+  it("points a password option at a password, and a channel's key only at a channel named", () => {
     expect({
       key: valueOf(
         apply(libera, plain, { _tag: "Point", credential: "k", path: ["channels", "#iirc", "key"] })
@@ -873,7 +873,7 @@ describe("editing", () => {
     });
   });
 
-  it("joins Channels not already wanted, as the Network folds them, and parts those that are", () => {
+  it("joins channels not already wanted, as the network folds them, and parts those that are", () => {
     const rfc = { casemapping: "rfc1459", chantypes: "#&" } as const;
 
     expect({
@@ -885,14 +885,14 @@ describe("editing", () => {
       unknownCase: valueOf(apply(libera, plain, { _tag: "Join", channels: ["#IIRC"] })).channels,
     }).toStrictEqual({
       joined: [{ name: "#iirc" }, { name: "#new" }],
-      missing: { _tag: "Invalid", message: "#nope is not among the Channels of libera." },
+      missing: { _tag: "Invalid", message: "#nope is not among the channels of libera." },
       parted: [{ key: "libera.channels._23secret.key", name: "#secret" }],
       // With no casemapping known, names are compared exactly.
       unknownCase: [{ name: "#iirc" }, { name: "#IIRC" }],
     });
   });
 
-  it("ignores a mask once, and unignores it compared as the Network folds it", () => {
+  it("ignores a mask once, and unignores it compared as the network folds it", () => {
     const ascii = { casemapping: "ascii", chantypes: "#" } as const;
     const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
     const held = valueOf(set(libera, plain, ["ignores"], "p[a]!*@*,*!*@spam.example"));
@@ -923,7 +923,7 @@ describe("editing", () => {
     });
   });
 
-  it("never merges or parts two Channels an ascii Network tells apart", () => {
+  it("never merges or parts two channels an ascii network tells apart", () => {
     const ascii = { casemapping: "ascii", chantypes: "#" } as const;
     const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
     const square = valueOf(set(libera, plain, ["channels"], "#[a]"));
@@ -944,7 +944,7 @@ describe("editing", () => {
     }).toStrictEqual({
       folded: {
         _tag: "Invalid",
-        message: "#[A] could be any of #[a], #{a} on libera. Part one by its exact name.",
+        message: "#[A] could be any of #[a], #{a} on libera. Leave one by its exact name.",
       },
       joined: [{ name: "#[a]" }, { name: "#{a}" }],
       parted: [{ name: "#{a}" }],
@@ -952,7 +952,7 @@ describe("editing", () => {
       timeline: [{ name: "#[a]" }],
       timelineFolded: {
         _tag: "Invalid",
-        message: "#[A] could be any of #[a], #{a} on libera. Part one by its exact name.",
+        message: "#[A] could be any of #[a], #{a} on libera. Leave one by its exact name.",
       },
       // Keys are folded by rfc1459 until a Network declares a mapping, as the Daemon folds them.
       timelineUnknown: [],
@@ -970,12 +970,12 @@ describe("editing", () => {
       percent: ["%help"],
       rfc: ["#a", "&b", "+c", "!d"],
       unknown:
-        "libera has not said what its Channels start with, so give %help with its prefix, such as #%help.",
+        "libera has not said what its channel names start with, so include the prefix, such as #%help.",
     });
   });
 
   // Any option of a valid Configuration, set to any text, gives a valid Configuration or says why.
-  it("always gives a Configuration, or why not", () => {
+  it("always gives a settings, or why not", () => {
     const options = optionsOf(libera, full, undefined);
     const valid = Schema.is(NetworkConfiguration);
 
@@ -1005,7 +1005,7 @@ const configureMask = (_tag: "Ignore" | "Unignore", text: string) => ({
 
 const neither = (text: string) => ({
   _tag: "Invalid",
-  message: `${text} is neither a nick nor a mask of nick!user@host, with each part given, at most 255 characters, and no space or comma.`,
+  message: `${text} is not a nick or a nick!user@host mask. Give every part, in at most 255 characters, with no space or comma.`,
 });
 
 describe("the commands", () => {
@@ -1037,7 +1037,7 @@ describe("the commands", () => {
           { _tag: "Configure", edit: { _tag: "Unset", path: ["realname"] }, network: libera },
         ],
       },
-      wrong: { _tag: "Invalid", message: 'network.libera.enabled: Say on or off, not "maybe".' },
+      wrong: { _tag: "Invalid", message: 'network.libera.enabled: Use on or off, not "maybe".' },
     });
   });
 
@@ -1049,7 +1049,7 @@ describe("the commands", () => {
     ]).toStrictEqual([' "two"  spaces ', "", ""]);
   });
 
-  it("ask for a Credential option's value in a prompt, and refuse one typed after it", () => {
+  it("ask for a password option's value in a prompt, and refuse one typed after it", () => {
     expect({
       prompt: read("/set network.libera.login.credential"),
       typed: read("/set network.libera.login.credential hunter2 two"),
@@ -1061,12 +1061,12 @@ describe("the commands", () => {
       typed: {
         _tag: "Invalid",
         message:
-          "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set network.libera.login.credential alone, which asks for it in a password prompt.",
+          "Don't type a password into the message input. It was cleared and nothing was sent. Use /set network.libera.login.credential alone to enter it in a password prompt.",
       },
     });
   });
 
-  it("add a Network with one Ircd and one nick, everything else as a new Network starts", () => {
+  it("add a network with one server and one nick, everything else as a new network starts", () => {
     const added = read("/network add test 127.0.0.1/6670 plain bot");
 
     expect({
@@ -1101,11 +1101,11 @@ describe("the commands", () => {
       badId: {
         _tag: "Invalid",
         message:
-          'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
+          'A network\'s id is 1 to 64 lowercase letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
       },
       noNick: {
         _tag: "Invalid",
-        message: "Give an Ircd and a nick. /network add <id> <host>[/port] [plain] <nick>",
+        message: "Give a server and a nick. /network add <id> <host>[/port] [plain] <nick>",
       },
       oldFlag: {
         _tag: "Invalid",
@@ -1120,7 +1120,7 @@ describe("the commands", () => {
     });
   });
 
-  it("start a new Network as its Schema says, with what must be given, given", () => {
+  it("start a new network as its Schema says, with what must be given, given", () => {
     expect({
       missing: starting(libera, { nicks: ["x"] }),
       started: starting(libera, { ircds: [{ host: "h", port: 1, tls: true }], nicks: ["x"] }),
@@ -1148,7 +1148,7 @@ describe("the commands", () => {
     });
   });
 
-  it("join and part on the focused Network, the open Channel when /part names none", () => {
+  it("join and part on the focused network, the open channel when /part names none", () => {
     expect({
       join: read("/join #a,b", inChannel),
       keyed: read("/join #a key", inChannel)._tag,
@@ -1159,7 +1159,7 @@ describe("the commands", () => {
       // A bare name is prefixed only once the Daemon says what CHANTYPES is.
       join: { _tag: "Parsed", value: configure({ _tag: "Join", channels: ["#a", "b"] }) },
       keyed: "Invalid",
-      nowhere: { _tag: "Invalid", message: "Open a Timeline first." },
+      nowhere: { _tag: "Invalid", message: "Open a conversation first." },
       part: {
         _tag: "Parsed",
         value: configure({ _tag: "PartTimeline", key: "#iirc", name: "#iirc" }),
@@ -1186,7 +1186,7 @@ describe("the commands", () => {
       list: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "network.libera.ignores" }] },
       mask: configureMask("Ignore", "*!*@spam.example"),
       nick: configureMask("Ignore", "Peer!*@*"),
-      nowhere: { _tag: "Invalid", message: "Open a Timeline first." },
+      nowhere: { _tag: "Invalid", message: "Open a conversation first." },
       two: { _tag: "Invalid", message: "Give one nick or mask. /ignore [<nick|mask>]" },
       unignore: configureMask("Unignore", "Peer!*@*"),
       unignoreBad: neither("@host"),
@@ -1194,7 +1194,7 @@ describe("the commands", () => {
     });
   });
 
-  it("clear a Credential's value typed into the composer at once, keeping it nowhere", () => {
+  it("clear a password's value typed into the composer at once, keeping it nowhere", () => {
     const typed = reduceComposers(
       reduceComposers(initialComposers, {
         _tag: "Edited",
@@ -1214,7 +1214,7 @@ describe("the commands", () => {
     expect({
       held: JSON.stringify([...refused.state.drafts]).includes("hunter2"),
       intents: refused.intents,
-      notice: draft.notice?.message.startsWith("A Credential's value is never typed"),
+      notice: draft.notice?.message.startsWith("Don't type a password"),
       text: [draft.text, draft.kept, draft.history],
     }).toStrictEqual({
       held: false,
@@ -1316,7 +1316,7 @@ describe("an option's menu", () => {
 });
 
 describe("the options view", () => {
-  it("lists the options of each Network read, filtered, and keeps the newest read", () => {
+  it("lists the options of each network read, filtered, and keeps the newest read", () => {
     const opened: readonly OptionsEvent[] = [
       { _tag: "Listed", networks: [libera, dotted] },
       { _tag: "Read", configuration: plain, network: libera, sequence: 5 },
@@ -1339,7 +1339,7 @@ describe("the options view", () => {
     });
   });
 
-  it("says which Networks are still read: all before they are listed, then each not read yet", () => {
+  it("says which networks are still read: all before they are listed, then each not read yet", () => {
     const listedTwo = reduceOptions(initialOptions, {
       _tag: "Listed",
       networks: [libera, dotted],
@@ -1371,7 +1371,7 @@ describe("the options view", () => {
     });
   });
 
-  it("shows whether a Credential is held as not known once the names held could not be read, even when some were read before", () => {
+  it("shows whether a password is held as not known once the names held could not be read, even when some were read before", () => {
     const failed = reduceOptions(initialOptions, { _tag: "HeldFailed" });
 
     const kept = reduceOptions(reduceOptions(initialOptions, { _tag: "Held", names: ["a"] }), {
@@ -1384,7 +1384,7 @@ describe("the options view", () => {
     });
   });
 
-  it("lets go of a Network's read that lands before the Networks are listed, as listing reads each again", () => {
+  it("lets go of a network's read that lands before the networks are listed, as listing reads each again", () => {
     const early = reduceOptions(initialOptions, {
       _tag: "Read",
       configuration: plain,
@@ -1661,7 +1661,7 @@ describe("the options under ui", () => {
       device: {
         _tag: "Invalid",
         message:
-          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+          "ui.previews is shared by all your devices, so one device can't override it. Use /set ui.previews without -device.",
       },
       kind: { _tag: "Choice", choices: ["off", "text", "on"] },
       linksOnly: {
@@ -1685,7 +1685,7 @@ describe("the options under ui", () => {
       unsetDevice: {
         _tag: "Invalid",
         message:
-          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+          "ui.previews is shared by all your devices, so one device can't override it. Use /set ui.previews without -device.",
       },
     });
   });
@@ -1704,7 +1704,7 @@ describe("the options under ui", () => {
       device: {
         _tag: "Invalid",
         message:
-          "ui.previews.players is shared by every device, so no device overrides it. Use /set ui.previews.players without -device.",
+          "ui.previews.players is shared by all your devices, so one device can't override it. Use /set ui.previews.players without -device.",
       },
       kind: { _tag: "Texts", nonEmpty: false },
       notAHost: "Invalid",
@@ -1727,7 +1727,7 @@ describe("the options under ui", () => {
     });
   });
 
-  it("offer ui.sidebar.pinned as a list of Timeline ids, shared by every device, refused when one is named twice, and unset to none", () => {
+  it("offer ui.sidebar.pinned as a list of conversation ids, shared by every device, refused when one is named twice, and unset to none", () => {
     const one = "00000000000002-00000000-00000000";
     const two = "00000000000003-00000000-00000000";
     const option = uiOptionsOf(shared, {}).find((found) => found.option === "sidebar.pinned");
@@ -1755,7 +1755,7 @@ describe("the options under ui", () => {
     });
   });
 
-  it("offer ui.previews.timelines as each Timeline's choice, typed id=mode and read back the same", () => {
+  it("offer ui.previews.timelines as each conversation's choice, typed id=mode and read back the same", () => {
     const one = "00000000000002-00000000-00000000";
     const two = "00000000000003-00000000-00000000";
     const kind: Kind = { _tag: "ChoiceByKey", choices: ["off", "text", "on"] };
@@ -1846,12 +1846,12 @@ describe("the options under ui", () => {
       deviceAlone: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       deviceNetwork: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       empty: {
         _tag: "Invalid",
@@ -1948,7 +1948,7 @@ describe("the options under store, uploads, and previews", () => {
     });
   });
 
-  it("list each value in force, its default or unset, and a Credential's name and whether it is held", () => {
+  it("list each value in force, its default or unset, and a password's name and whether it is held", () => {
     expect({
       held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(3, 5),
       notHeld: ownerRows(owner, new Set()).slice(3, 4),
@@ -2058,12 +2058,12 @@ describe("the options under store, uploads, and previews", () => {
       bucketBad: {
         _tag: "Invalid",
         message:
-          "store.s3.bucket must be 3 to 63 lower-case letters, digits, . and -, starting and ending with a letter or digit.",
+          "store.s3.bucket must be 3 to 63 lowercase letters, digits, . and -, starting and ending with a letter or digit.",
       },
       credential: {
         _tag: "Invalid",
         message:
-          "store.s3.secretAccessKey: A Credential is set by giving its value, which the Vault holds.",
+          "store.s3.secretAccessKey: Enter a password in a password prompt. iirc stores it securely and never shows it.",
       },
       days: { _tag: "Parsed", value: 30 },
       daysTooMany: {
@@ -2094,7 +2094,7 @@ describe("the options under store, uploads, and previews", () => {
     });
   });
 
-  it("are set and unset with /set and /unset, never for one device, and a Credential's value only in a prompt", () => {
+  it("are set and unset with /set and /unset, never for one device, and a password's value only in a prompt", () => {
     const secret = "/set store.s3.secretAccessKey hunter2";
 
     expect({
@@ -2121,12 +2121,12 @@ describe("the options under store, uploads, and previews", () => {
       credentialTyped: {
         _tag: "Invalid",
         message:
-          "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set store.s3.secretAccessKey alone, which asks for it in a password prompt.",
+          "Don't type a password into the message input. It was cleared and nothing was sent. Use /set store.s3.secretAccessKey alone to enter it in a password prompt.",
       },
       device: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       empty: {
         _tag: "Invalid",
@@ -2139,12 +2139,12 @@ describe("the options under store, uploads, and previews", () => {
       unsetDevice: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
     });
   });
 
-  it("name a Credential the option names, or one no Network's could ever be named", () => {
+  it("name a password the option names, or one no network's could ever be named", () => {
     expect({
       derived: derivedOwnerCredential("store.s3.secretAccessKey"),
       named: ownerCredentialFor(
@@ -2244,7 +2244,7 @@ describe("the options view's headings", () => {
         ["ui", Object.keys(uiDefaults).length, true],
         ["uploads", 5, true],
       ],
-      why: "every heading in the order of its name, whatever order the Networks were listed in",
+      why: "every heading in the order of its name, whatever order the networks were listed in",
     },
     {
       filter: "*maxTotal",
@@ -2257,7 +2257,7 @@ describe("the options view's headings", () => {
     {
       filter: "network.libera.nicks",
       shown: [["network.libera", 1, true]],
-      why: "one Network's option heads only its own",
+      why: "one network's option heads only its own",
     },
     { filter: "nothing matches", shown: [], why: "nothing matched is no heading at all" },
   ])("$why", ({ filter, shown }) => {
@@ -2310,7 +2310,7 @@ describe("a change on its way", () => {
     });
   });
 
-  it("shows an edit at once, under a Network", () => {
+  it("shows an edit at once, under a network", () => {
     const set = folded([...read, { _tag: "Asked", change: realname("Dean K") }]);
 
     const unset = folded([
@@ -2451,7 +2451,7 @@ describe("a change on its way", () => {
     });
   });
 
-  it("leaves out an edit that cannot be made, and one for another Network", () => {
+  it("leaves out an edit that cannot be made, and one for another network", () => {
     const state = folded([
       ...read,
       {

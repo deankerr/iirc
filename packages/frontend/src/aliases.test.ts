@@ -57,8 +57,7 @@ describe("expanding an alias", () => {
       { _tag: "Invalid", message: "/x $1 $2 takes 2 words, and only 1 was given." },
       {
         _tag: "Invalid",
-        message:
-          "/x $1 takes one word, and 2 were given. Nothing is dropped, so $* takes the rest.",
+        message: "/x $1 takes one word, and you gave 2. Nothing is dropped, so $* takes the rest.",
       },
     ]);
   });
@@ -91,10 +90,10 @@ describe("editing the aliases", () => {
       added: { _tag: "Parsed", value: [join, part] },
       cap: {
         _tag: "Invalid",
-        message: "64 aliases are made already. /alias remove one first.",
+        message: "You already have 64 aliases. /alias remove one first.",
       },
       capReplace: "Parsed",
-      missing: { _tag: "Invalid", message: "No alias p was made. /alias lists them." },
+      missing: { _tag: "Invalid", message: "You have no alias p. /alias lists them." },
       removed: { _tag: "Parsed", value: [part] },
       replaced: { _tag: "Parsed", value: [{ line: "/part $1", name: "j" }, part] },
     });

@@ -48,7 +48,7 @@ export const PaneSwitcher = ({ placement }: { readonly placement: "Bar" | "Row" 
 
   return (
     <ToggleButtonGroup
-      aria-label="Panes"
+      aria-label="panes"
       className={`${styles.switcher} ${placement === "Row" ? styles.row : styles.inBar}`}
       disallowEmptySelection
       onSelectionChange={(keys: Set<Key>) => {

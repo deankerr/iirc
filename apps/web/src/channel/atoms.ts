@@ -467,7 +467,7 @@ export const query = (
             ? { _tag: "SignedOut" }
             : {
                 _tag: "NotDone",
-                message: `The Daemon did not say how ${network} compares nicks, so /query ${name} opened nothing, rather than risk another's Direct Message. Try again.`,
+                message: `Couldn't compare nicks on ${network}, so /query ${name} opened nothing. Try again.`,
               }
         )
       )

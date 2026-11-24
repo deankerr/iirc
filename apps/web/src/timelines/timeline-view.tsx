@@ -219,7 +219,7 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
   switch (row._tag) {
     case "Start": {
       // Nothing is before it, so nothing is drawn: a screen reader alone is told.
-      return <p className={styles.unseen}>The start of this Timeline</p>;
+      return <p className={styles.unseen}>The start of this conversation</p>;
     }
 
     case "Held": {
@@ -227,14 +227,14 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
         <p className={styles.held}>
           {row.hidden
             ? "Older history here is hidden activity."
-            : "Older history lies beyond what this view holds."}{" "}
+            : "Older history is not loaded yet."}{" "}
           <Button
             onPress={() => {
               askOlder({ mode: "Asked", timeline });
             }}
             size="small"
           >
-            Load older
+            load older
           </Button>
         </p>
       );
@@ -269,7 +269,7 @@ const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
         }}
         size="small"
       >
-        Jump to latest
+        jump to latest
       </Button>
     </div>
   );
@@ -1017,17 +1017,17 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
     }
 
     case "Vanished": {
-      return <p className={styles.placeholder}>The Daemon has no such Timeline.</p>;
+      return <p className={styles.placeholder}>Conversation not found.</p>;
     }
 
     // The layout this device kept is not taken yet, so the Pane is not known to be empty.
     case "Restoring":
     case "Reading": {
-      return <p className={styles.placeholder}>Reading…</p>;
+      return <p className={styles.placeholder}>loading…</p>;
     }
 
     case "Shown": {
-      const label = shown.description?.name ?? "Timeline";
+      const label = shown.description?.name ?? "Conversation";
 
       return (
         <section aria-label={label} className={styles.view}>

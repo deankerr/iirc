@@ -174,10 +174,10 @@ describe("the web frontend on iirc daemon --web", () => {
         page.on("pageerror", (error) => problems.push(error.message));
 
         await page.goto(base);
-        const field = page.getByLabel("Key");
+        const field = page.getByLabel("api key");
 
         await field.fill(wrongKey);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("button", { name: "sign in" }).click();
         const wrong = await page.getByRole("alert").textContent();
 
         const afterWrong = {
@@ -190,7 +190,7 @@ describe("the web frontend on iirc daemon --web", () => {
         };
 
         await field.fill(key);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("button", { name: "sign in" }).click();
         const listed = await networkRow(page);
 
         await page.reload();
@@ -215,9 +215,9 @@ describe("the web frontend on iirc daemon --web", () => {
         // Signing out asks first.
         await page.getByRole("button", { name: "Sign out" }).click();
         await page.getByRole("alertdialog").getByRole("button", { name: "Sign out" }).click();
-        await page.getByLabel("Key").waitFor();
+        await page.getByLabel("api key").waitFor();
         await page.reload();
-        await page.getByLabel("Key").waitFor();
+        await page.getByLabel("api key").waitFor();
         const cookiesAfter = await context.cookies();
 
         expect({
@@ -246,7 +246,7 @@ describe("the web frontend on iirc daemon --web", () => {
           listed: "example\u25CB",
           problems: [],
           wrong:
-            "That key matches none the Daemon holds. Check it, or make one with iirc key create.",
+            "That API key does not match any the daemon has. Check it, or make one with iirc key create.",
         });
       } finally {
         child.kill("SIGTERM");
@@ -278,8 +278,8 @@ describe("the web frontend on iirc daemon --web", () => {
         const { page, problems } = await watchedPage(browser);
 
         await page.goto(base);
-        await page.getByLabel("Key").fill(key);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByLabel("api key").fill(key);
+        await page.getByRole("button", { name: "sign in" }).click();
 
         const status = await networkRow(page);
         const connected = await page.getByRole("row", { name: /, connected$/u }).count();
@@ -435,8 +435,8 @@ describe("the web frontend on iirc daemon --web", () => {
         const { page, problems } = await watchedPage(browser);
 
         await page.goto(base);
-        await page.getByLabel("Key").fill(key);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByLabel("api key").fill(key);
+        await page.getByRole("button", { name: "sign in" }).click();
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
@@ -495,7 +495,7 @@ describe("the web frontend on iirc daemon --web", () => {
 
         // With ui.composer.enter newline on this device, Enter begins a line, a send button shows, and
         // Mod+Enter sends both lines.
-        const sendButton = page.getByRole("button", { exact: true, name: "Send" });
+        const sendButton = page.getByRole("button", { exact: true, name: "send" });
         const buttonBefore = await sendButton.count();
 
         await composer.fill("/set -device ui.composer.enter newline");
@@ -578,8 +578,8 @@ describe("the web frontend on iirc daemon --web", () => {
         const { page, problems } = await watchedPage(browser);
 
         await page.goto(base);
-        await page.getByLabel("Key").fill(key);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByLabel("api key").fill(key);
+        await page.getByRole("button", { name: "sign in" }).click();
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
@@ -672,9 +672,9 @@ describe("the web frontend on iirc daemon --web", () => {
         const { page, problems } = await watchedPage(browser);
 
         await page.goto(base);
-        await page.getByLabel("Key").fill(key);
-        await page.getByRole("button", { name: "Sign in" }).click();
-        await page.getByText("No Networks are configured yet.").waitFor();
+        await page.getByLabel("api key").fill(key);
+        await page.getByRole("button", { name: "sign in" }).click();
+        await page.getByText("No networks yet. Add one with /network add.").waitFor();
 
         // With no Timeline open, the composer takes commands that need none.
         const nowhere = page.getByRole("textbox", { name: "iirc" });

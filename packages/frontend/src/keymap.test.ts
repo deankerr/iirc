@@ -262,7 +262,7 @@ describe("the keymap", () => {
     });
   });
 
-  it("resolves Mod+Shift+P to starting / and Mod+K to starting /go in the Composer, from anywhere, typing, with its list open or not, and with no Timeline", () => {
+  it("resolves Mod+Shift+P to starting / and Mod+K to starting /go in the Composer, from anywhere, typing, with its list open or not, and with no conversation", () => {
     const k = press("k", "KeyK", { ctrl: true });
     const p = press("P", "KeyP", { ctrl: true, shift: true });
 
@@ -330,7 +330,7 @@ describe("the keymap", () => {
     });
   });
 
-  it("jumps to the Timeline calling most with Alt+A, Option+A on a Mac, while typing too", () => {
+  it("jumps to the conversation calling most with Alt+A, Option+A on a Mac, while typing too", () => {
     const calling: CommandContext = {
       ...inChannel,
       unread: [
@@ -359,7 +359,7 @@ describe("the keymap", () => {
     });
   });
 
-  it("moves the open Timeline up or down in the Sidebar with Mod+Alt and the arrows, while typing too, and only where one is open", () => {
+  it("moves the open conversation up or down in the Sidebar with Mod+Alt and the arrows, while typing too, and only where one is open", () => {
     const up = press("ArrowUp", "ArrowUp", { alt: true, ctrl: true });
     const down = press("ArrowDown", "ArrowDown", { alt: true, ctrl: true });
 
@@ -398,7 +398,7 @@ describe("the keymap", () => {
     }).toStrictEqual({ mac: turned, open: turned, other: turned });
   });
 
-  it("moves to the next and previous Timeline in the sidebar's order, wrapping, while typing too", () => {
+  it("moves to the next and previous conversation in the sidebar's order, wrapping, while typing too", () => {
     const down = press("ArrowDown", "ArrowDown", { alt: true });
     const up = press("ArrowUp", "ArrowUp", { alt: true });
     const atEnd: CommandContext = { ...inChannel, open: direct };
@@ -680,7 +680,7 @@ describe("keys from layouts other than QWERTY", () => {
     });
   });
 
-  it("still moves between Timelines with Alt+arrows, in a field too", () => {
+  it("still moves between conversations with Alt+arrows, in a field too", () => {
     const up = press("ArrowUp", "ArrowUp", { alt: true });
 
     expect([
@@ -690,7 +690,7 @@ describe("keys from layouts other than QWERTY", () => {
   });
 });
 
-describe("the Panes' keys", () => {
+describe("the panes' keys", () => {
   const twoPanes = { ...inChannel, panes: 2 };
 
   const change = (event: KeyEvent, context: KeyContext = at({ editing: true }, twoPanes)) =>
@@ -728,7 +728,7 @@ describe("the Panes' keys", () => {
     });
   });
 
-  it("lets a Pane's key through with one Pane, but splits", () => {
+  it("lets a pane's key through with one pane, but splits", () => {
     const one = at({ editing: true });
 
     expect({

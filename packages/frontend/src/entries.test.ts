@@ -66,8 +66,8 @@ describe("an entry's key and the words it is matched by", () => {
         "command:timeline.previous",
       ],
       network: [
-        "network: remove it, asking first whether its Timelines stay readable",
-        "network: drop the Timelines kept since it was removed, which frees its name",
+        "network: remove it, asking first whether to keep its conversations to read",
+        "network: delete its kept conversations and free its name",
       ],
       timeline: ["#iirc", "libera #iirc"],
     });
@@ -124,7 +124,7 @@ describe("the fonts listed", () => {
       current: ["font:commit-mono"],
       family: { _tag: "Font", current: true, key: "font:Fira Code", name: "Fira Code" },
       familyNames: ["font Fira Code", "Fira Code"],
-      said: ["font: sans", "font: a family on this device"],
+      said: ["font: sans", "font: a font family on this device"],
     });
   });
 

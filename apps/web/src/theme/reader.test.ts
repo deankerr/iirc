@@ -6,7 +6,7 @@ import type { ReaderWorker } from "./reader.ts";
 
 const unreadable = {
   _tag: "Invalid",
-  message: "Theme files cannot be read in this browser, so nothing was imported.",
+  message: "This browser can't read theme files, so nothing was imported.",
 };
 
 /**

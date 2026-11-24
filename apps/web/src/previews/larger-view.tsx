@@ -57,7 +57,7 @@ export const OpensLarger = ({
         <Dialog aria-label={alt} className={styles.dialog}>
           {large._tag === "Image" ? (
             // The image is the view's close control: a press on it closes, as its slot asks.
-            <Button aria-label="Close" className={styles.closes} slot="close">
+            <Button aria-label="close" className={styles.closes} slot="close">
               <img
                 alt={alt}
                 className={styles.large}
@@ -76,7 +76,7 @@ export const OpensLarger = ({
                 src={large.src}
               />
               <Button
-                aria-label="Close"
+                aria-label="close"
                 className={`${styles.control} ${styles.close}`}
                 slot="close"
               >

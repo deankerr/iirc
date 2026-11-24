@@ -33,7 +33,7 @@ export const SignOutButton = ({
   return (
     <DialogTrigger>
       <Button isPending={attempt._tag === "Waiting"} size={size} variant="quiet">
-        Sign out
+        sign out
       </Button>
       <ModalOverlay className={styles.overlay} isDismissable>
         <Modal className={styles.modal}>
@@ -41,11 +41,11 @@ export const SignOutButton = ({
             {({ close }) => (
               <div className={styles.content}>
                 <Heading className={styles.heading} slot="title">
-                  Sign out of this browser?
+                  Sign out?
                 </Heading>
                 <Text className={styles.body} elementType="p" slot="description">
-                  This browser forgets its Sign-in, and needs a key to sign in again. The Daemon
-                  stays on its Networks.
+                  This browser forgets its session and needs an API key to sign in again. The daemon
+                  stays on your networks.
                 </Text>
                 <div className={styles.actions}>
                   <Button
@@ -55,7 +55,7 @@ export const SignOutButton = ({
                     }}
                     variant="primary"
                   >
-                    Sign out
+                    sign out
                   </Button>
                   <Button
                     // A slip is what this asks against, so the answer that changes nothing
@@ -64,7 +64,7 @@ export const SignOutButton = ({
                     autoFocus
                     onPress={close}
                   >
-                    Cancel
+                    cancel
                   </Button>
                 </div>
               </div>

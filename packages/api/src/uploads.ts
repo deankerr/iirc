@@ -16,7 +16,7 @@ import { After, Limit, TimelineItem } from "./schemas.ts";
  */
 export const UploadId = Schema.String.check(
   Schema.isPattern(/^[0-9a-hjkmnp-tv-z]{16}$/u, {
-    message: "must be 16 lower-case Crockford base32 characters",
+    message: "must be 16 lowercase letters and digits, without i, l, o, or u",
   })
 ).pipe(Schema.brand("UploadId"));
 
@@ -35,7 +35,7 @@ export const UploadName = Schema.String.check(
   Schema.isMaxLength(uploadNameMaxLength)
 ).annotate({
   description:
-    "The file's name, such as cat.png. Its type is read from its bytes, never from this.",
+    "The file name, such as cat.png. The file type comes from its contents, never from this.",
   identifier: "UploadName",
 });
 
@@ -101,7 +101,7 @@ export type UploadsStatus = typeof UploadsStatus.Type;
  * holds is refused.
  */
 export const UploadsAfter = UploadId.annotate({
-  description: "Where the next page of Uploads begins, as a page gave it in `next`.",
+  description: "Where the next page of uploads begins, as a page gave it in `next`.",
   identifier: "UploadsAfter",
 });
 
@@ -112,7 +112,7 @@ export const UploadsAfter = UploadId.annotate({
 export const UploadsQuery = Schema.Struct({
   after: Schema.optionalKey(UploadsAfter),
   deleted: Schema.optionalKey(
-    Schema.Literal("true").annotate({ description: "Give true to list deleted Uploads too." })
+    Schema.Literal("true").annotate({ description: "Give true to list deleted uploads too." })
   ),
   limit: Schema.optionalKey(Limit),
 });

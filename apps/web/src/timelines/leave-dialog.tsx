@@ -52,7 +52,7 @@ const Offered = ({
           }}
           variant="primary"
         >
-          Leave
+          leave
         </Button>
         <Button
           isDisabled={leaving.sending}
@@ -60,7 +60,7 @@ const Offered = ({
             dismiss(undefined);
           }}
         >
-          Cancel
+          cancel
         </Button>
       </div>
     </div>

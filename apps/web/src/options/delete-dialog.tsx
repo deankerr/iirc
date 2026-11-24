@@ -50,8 +50,8 @@ export const DeleteDialog = () => {
                 Delete <bdi>{shownName(upload)}</bdi>?
               </Heading>
               <p className={styles.body}>
-                Its link stops working at once, wherever it was said. A copy someone already opened
-                or saved cannot be called back.
+                Its link stops working right away, wherever you shared it. A copy someone already
+                opened or saved stays with them.
               </p>
               <div className={styles.actions}>
                 <Button
@@ -63,14 +63,14 @@ export const DeleteDialog = () => {
                   }}
                   variant="primary"
                 >
-                  Delete
+                  delete
                 </Button>
                 <Button
                   onPress={() => {
                     close(undefined);
                   }}
                 >
-                  Cancel
+                  cancel
                 </Button>
               </div>
             </div>

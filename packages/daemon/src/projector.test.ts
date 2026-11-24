@@ -600,7 +600,7 @@ describe("the projector", () => {
       pong: "PONG still-here",
       status: { _tag: "Stopped", reason: "TimelineStoreFailed: the disk is full" },
     });
-    expect(result.logged).toContain("The Timelines stopped being folded");
+    expect(result.logged).toContain("Conversation history stopped updating");
   });
 
   it("keeps the Timelines in views.sqlite beside the SQLite Journal, and rebuilds the file when it is deleted", async () => {

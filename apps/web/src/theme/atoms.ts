@@ -76,7 +76,7 @@ const readLimit = "1 second";
 
 /** Why text that took longer than `readLimit` to read was not imported, in words. */
 const tooLong =
-  "This took too long to read, so it was not imported. A terminal theme reads at once.";
+  "This took too long to read, so it wasn't imported. A terminal theme reads right away.";
 
 /** The last text the reader was given, and what it read it as, none while it reads. */
 const lastRead = Atom.make<
@@ -300,7 +300,7 @@ export const chooseFile = runtime
       if (file.size > importLimit) {
         applyImport(registry, {
           fileName: file.name,
-          notice: `${file.name} is longer than 256 KB, which no terminal theme is.`,
+          notice: `${file.name} is larger than 256 KB, which is too large for a terminal theme.`,
           text: "",
         });
 
@@ -314,7 +314,7 @@ export const chooseFile = runtime
           registry,
           Option.isSome(text)
             ? { fileName: file.name, text: text.value }
-            : { fileName: file.name, notice: `${file.name} could not be read.`, text: "" }
+            : { fileName: file.name, notice: `Couldn't read ${file.name}.`, text: "" }
         );
       }
     })
@@ -362,7 +362,7 @@ export const saveImport = runtime
       };
 
       if (read?._tag !== "Parsed") {
-        say(read?.message ?? "Paste a theme, or choose its file, and wait for it to be read.");
+        say(read?.message ?? "Paste a theme or choose a file, then wait for it to load.");
 
         return;
       }

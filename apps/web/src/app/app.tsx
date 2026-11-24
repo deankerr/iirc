@@ -39,11 +39,11 @@ const Checking = ({ check: attempt }: { readonly check: Attempt }) => {
             }}
             variant="primary"
           >
-            Try again
+            try again
           </Button>
         </>
       ) : (
-        <p className={styles.muted}>Asking the Daemon…</p>
+        <p className={styles.muted}>connecting…</p>
       )}
     </main>
   );
@@ -57,7 +57,7 @@ const Checking = ({ check: attempt }: { readonly check: Attempt }) => {
  */
 const Reading = ({ signOut: attempt }: { readonly signOut: Attempt }) => (
   <main className={styles.checking}>
-    <p className={styles.muted}>Reading…</p>
+    <p className={styles.muted}>loading…</p>
     {attempt._tag === "Failed" ? (
       <p className={styles.failure} role="alert">
         {explain(attempt.failure)}

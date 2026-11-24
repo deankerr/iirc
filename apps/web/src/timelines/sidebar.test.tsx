@@ -242,7 +242,7 @@ const pressButton = async (name: string) => {
  * The sidebar's edge.
  * @returns It, or none.
  */
-const edge = () => document.querySelector<HTMLElement>('[aria-label="Resize the sidebar"]');
+const edge = () => document.querySelector<HTMLElement>('[aria-label="resize sidebar"]');
 
 /**
  * The composer's textarea.
@@ -330,9 +330,9 @@ describe("the sidebar", () => {
     await settled(() => rows().length === 2);
 
     expect({
-      read: rowTexts().map((one) => one.includes("Reading…")),
-      unlisted: [unlisted.includes("Reading…"), unlisted.includes("No Networks are configured")],
-      unread: unread.map((one) => one.includes("Reading…")),
+      read: rowTexts().map((one) => one.includes("loading…")),
+      unlisted: [unlisted.includes("loading…"), unlisted.includes("No networks yet")],
+      unread: unread.map((one) => one.includes("loading…")),
     }).toStrictEqual({
       read: [false, false],
       unlisted: [true, false],
@@ -423,7 +423,7 @@ describe("the sidebar", () => {
       ])
     ).toStrictEqual([
       ["libera, connected", "false", null],
-      ["#iirc, in Pane 1", "false", "1"],
+      ["#iirc, in pane 1", "false", "1"],
       ["#other", "true", null],
     ]);
   });
@@ -478,7 +478,7 @@ describe("closing a Timeline from the sidebar", () => {
     const menus = rows().map((one) => one.querySelector('button[aria-label^="More for"]') !== null);
 
     await pressButton("More for peer");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => !names().includes("peer"));
 
     const closed = names();
@@ -542,7 +542,7 @@ describe("closing a Timeline from the sidebar", () => {
     );
 
     await pressButton("More for peer");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => !names().includes("peer"));
 
     expect({ closes: fake.daemon.closes, names: names() }).toStrictEqual({
@@ -558,9 +558,9 @@ describe("closing a Timeline from the sidebar", () => {
     await signedIn(undefined, fake);
 
     await pressButton("More for libera");
-    await chooseFromMenu("Remove Network…");
+    await chooseFromMenu("remove network…");
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
-    await pressButton("Remove");
+    await pressButton("remove");
     await settled(
       () =>
         document.querySelector('[role="alertdialog"]') === null &&
@@ -568,7 +568,7 @@ describe("closing a Timeline from the sidebar", () => {
     );
 
     await pressButton("More for #iirc");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => !names().includes("#iirc"));
 
     expect({ closes: fake.daemon.closes, names: names() }).toStrictEqual({
@@ -588,12 +588,12 @@ describe("closing a Timeline from the sidebar", () => {
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
       );
     });
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
 
     const offered = document.querySelector('[role="alertdialog"] h2')?.textContent;
 
-    await pressButton("Leave");
+    await pressButton("leave");
     await settled(() => document.querySelector('[role="alertdialog"]') === null);
 
     expect({
@@ -624,14 +624,14 @@ describe("closing a Timeline from the sidebar", () => {
     await doing(() => {
       registry.set(pageState, { compact: true, focused: true, visible: true });
     });
-    await pressButton("Networks");
-    await settled(() => document.querySelector('[role="dialog"][aria-label="Networks"]') !== null);
+    await pressButton("networks");
+    await settled(() => document.querySelector('[role="dialog"][aria-label="networks"]') !== null);
     await doing(() => {
       row("#iirc").dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
       );
     });
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
     await back();
     await settled(() => document.querySelector('[role="alertdialog"]') === null);
@@ -659,9 +659,9 @@ describe("closing a Timeline from the sidebar", () => {
     await signedIn(undefined, fake);
 
     await pressButton("More for #iirc");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
-    await pressButton("Leave");
+    await pressButton("leave");
     await settled(() => document.querySelector('[role="alertdialog"]') === null);
 
     expect({
@@ -689,7 +689,7 @@ describe("closing a Timeline from the sidebar", () => {
 
     const offered = document.querySelector('[role="alertdialog"] h2')?.textContent;
 
-    await pressButton("Leave");
+    await pressButton("leave");
     await settled(() => document.querySelector('[role="alertdialog"]') === null);
 
     expect({
@@ -711,7 +711,7 @@ describe("closing a Timeline from the sidebar", () => {
     const registry = await signedIn(undefined, fake);
 
     await pressButton("More for #iirc");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => document.querySelector('[role="alertdialog"]') !== null);
 
     await act(async () => {
@@ -740,7 +740,7 @@ describe("closing a Timeline from the sidebar", () => {
     const registry = await signedIn(undefined, fake);
 
     await pressButton("More for #iirc");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => fake.daemon.held.closes.length === 1);
 
     await act(async () => {
@@ -759,7 +759,7 @@ describe("closing a Timeline from the sidebar", () => {
       }
     });
     await pressButton("More for #other");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => !names().includes("#other"));
 
     expect({
@@ -829,7 +829,7 @@ describe("a close, while it is on its way", () => {
     });
     await settled(() => document.querySelector("textarea") !== null);
     await pressButton("More for #other");
-    await chooseFromMenu("Close");
+    await chooseFromMenu("close");
     await settled(() => closes.length === 1);
 
     const whileHeld = names();
@@ -848,7 +848,7 @@ describe("a close, while it is on its way", () => {
     }).toStrictEqual({
       after: ["libera", "#iirc", "#other"],
       notice:
-        "libera has stopped, so whether #other was closed is unknown. Closing it again is safe.",
+        "libera has stopped, so it's unknown whether #other was closed. Closing it again is safe.",
       whileHeld: ["libera", "#iirc"],
     });
   });
@@ -1018,7 +1018,7 @@ describe("the Sidebar in the Owner's order", () => {
   // Catches a pin drawn under its Network, or without saying which Network it is of.
   it("draws a pinned Timeline in a part of its own above the Networks, saying its Network", async () => {
     await arrangedWith({ "sidebar.pinned": [peer] }, withPeer);
-    await settled(() => headings().includes("Pinned"));
+    await settled(() => headings().includes("pinned"));
 
     expect({
       headings: headings(),
@@ -1026,7 +1026,7 @@ describe("the Sidebar in the Owner's order", () => {
       names: names(),
       text: row("peer").textContent,
     }).toStrictEqual({
-      headings: ["Pinned"],
+      headings: ["pinned"],
       label: "peer of libera",
       names: ["peer", "libera", "#iirc", "#other"],
       text: "peer· libera…↕",
@@ -1048,7 +1048,7 @@ describe("the Sidebar in the Owner's order", () => {
     await press(document.activeElement ?? document.body, { key: "Escape" });
     await settled(() => document.querySelector('[role="menu"]') === null);
     await pressButton("More for #iirc");
-    await chooseFromMenu("Pin");
+    await chooseFromMenu("pin");
     await settled(() => fake.daemon.uiChanges.length === 1);
     await settled(() => names()[1] === "#iirc");
 
@@ -1220,23 +1220,23 @@ describe("removing a Network from the sidebar", () => {
 
     const bare = [...document.querySelectorAll('[role^="menuitem"]')].map((one) => one.textContent);
 
-    await chooseFromMenu("Remove Network…");
+    await chooseFromMenu("remove network…");
     await settled(() => question() !== null);
     const asked = question()?.querySelector("h2")?.textContent;
 
-    await pressButton("Cancel");
+    await pressButton("cancel");
     await settled(() => question() === null);
 
     await pressButton("More for libera");
-    await chooseFromMenu("Remove Network…");
+    await chooseFromMenu("remove network…");
     await settled(() => question() !== null);
-    await pressButton("Remove");
+    await pressButton("remove");
     await settled(
       () => question() === null && row("libera").getAttribute("aria-label") === "libera, removed"
     );
 
     await pressButton("More for libera");
-    await chooseFromMenu("Drop Timelines…");
+    await chooseFromMenu("drop history…");
     await settled(() => question() !== null);
 
     expect({
@@ -1246,8 +1246,8 @@ describe("removing a Network from the sidebar", () => {
       removals: fake.daemon.removals,
     }).toStrictEqual({
       asked: "Remove oftc?",
-      bare: ["Remove Network…"],
-      drop: "Drop libera's Timelines?",
+      bare: ["remove network…"],
+      drop: "Drop libera's conversations?",
       removals: [{ keep: true, network: "libera" }],
     });
   });
@@ -1273,7 +1273,7 @@ describe("muting a Timeline from the Sidebar", () => {
     };
 
     await pressButton("More for peer");
-    await chooseFromMenu("Mute");
+    await chooseFromMenu("mute");
     await settled(() => fake.daemon.uiChanges.length === 1);
     await settled(() => row("peer").getAttribute("aria-label")?.endsWith("muted") === true);
 
@@ -1287,7 +1287,7 @@ describe("muting a Timeline from the Sidebar", () => {
     const sequence = String(fake.daemon.ui.sequence);
 
     await pressButton("More for peer");
-    await chooseFromMenu("Unmute");
+    await chooseFromMenu("unmute");
     await settled(() => fake.daemon.uiChanges.length === 2);
     await settled(() => row("peer").getAttribute("aria-label") === before.label);
 
@@ -1371,7 +1371,7 @@ const viewMarks = () =>
  * @returns It, while the options show.
  */
 const filter = () =>
-  document.querySelector<HTMLInputElement>('main section[aria-label="Options"] input');
+  document.querySelector<HTMLInputElement>('main section[aria-label="Settings"] input');
 
 describe("the views of iirc's own, from the sidebar", () => {
   afterEach(() => {
@@ -1411,15 +1411,15 @@ describe("the views of iirc's own, from the sidebar", () => {
 
     expect({ elsewhere: viewMarks(), focused }).toStrictEqual({
       elsewhere: [
-        ["Search", "true", null],
-        ["Uploads, in Pane 2", "false", "2"],
-        ["Options", "false", null],
+        ["search", "true", null],
+        ["uploads, in pane 2", "false", "2"],
+        ["settings", "false", null],
       ],
       focused: {
         marks: [
-          ["Search", "false", null],
-          ["Uploads", "true", null],
-          ["Options", "false", null],
+          ["search", "false", null],
+          ["uploads", "true", null],
+          ["settings", "false", null],
         ],
         pane: "p1",
       },
@@ -1440,7 +1440,9 @@ describe("the views of iirc's own, from the sidebar", () => {
       });
       await settled(() => shownNow(registry) === name);
 
-      const view = document.querySelector<HTMLElement>(`main section[aria-label="${name}"]`);
+      const view = document.querySelector<HTMLElement>(
+        `main section[aria-label="${name === "Options" ? "Settings" : name}"]`
+      );
 
       const closing = [...(view?.querySelectorAll("button") ?? [])].some((one) =>
         (one.getAttribute("aria-label") ?? "").startsWith("Close")
@@ -1537,7 +1539,7 @@ describe("the views of iirc's own, from the sidebar", () => {
     await press(composer(), { code: "KeyF", ctrlKey: true, key: "F", shiftKey: true });
     await settled(() => shownNow(registry) === "Search");
 
-    expect(viewMarks()[0]).toStrictEqual(["Search", "true", null]);
+    expect(viewMarks()[0]).toStrictEqual(["search", "true", null]);
   });
 
   it("on a phone, lists the rows in the drawer, which choosing one closes", async () => {
@@ -1578,28 +1580,28 @@ describe("the shell", () => {
       footer: footerControls("nav footer"),
     }).toStrictEqual({
       bar: null,
-      footer: ["Search", "Uploads", "Options", "Sign out", "Hide the sidebar"],
+      footer: ["Search", "Uploads", "Options", "sign out", "hide sidebar"],
     });
   });
 
   it("hides the sidebar by its button and shows it from beside the composer, keeping that on this device", async () => {
     await signedIn();
-    await pressButton("Hide the sidebar");
+    await pressButton("hide sidebar");
 
     const hidden = {
       kept: readChoice("iirc.sidebar"),
       nav: document.querySelector("nav") === null,
-      show: buttonNamed("Show the sidebar") !== undefined,
+      show: buttonNamed("show sidebar") !== undefined,
     };
 
-    await pressButton("Show the sidebar");
+    await pressButton("show sidebar");
 
     expect({
       hidden,
       shown: {
         kept: readChoice("iirc.sidebar"),
         nav: document.querySelector("nav") === null,
-        show: buttonNamed("Show the sidebar") !== undefined,
+        show: buttonNamed("show sidebar") !== undefined,
       },
     }).toStrictEqual({
       hidden: { kept: "hidden", nav: true, show: true },
@@ -1753,7 +1755,7 @@ describe("the shell", () => {
       bars: 1,
       compact: { edge: true, nav: true },
       drawer: "Sidebar",
-      footer: ["Search", "Uploads", "Options", "Sign out"],
+      footer: ["Search", "Uploads", "Options", "sign out"],
       kept: undefined,
     });
   });
@@ -1765,7 +1767,7 @@ describe("the shell", () => {
  */
 const footerSignOut = () =>
   [...document.querySelectorAll<HTMLElement>("nav footer button")].find(
-    (one) => one.textContent === "Sign out"
+    (one) => one.textContent === "sign out"
   );
 
 /**
@@ -1815,13 +1817,13 @@ describe("signing out from the sidebar", () => {
     const asked = {
       described: document
         .querySelector(`[id="${describedBy}"]`)
-        ?.textContent?.includes("needs a key"),
+        ?.textContent?.includes("needs an API key"),
       focused: question()?.contains(document.activeElement) ?? false,
       signedIn: fake.daemon.signedIn,
       text: question()?.querySelector("h2")?.textContent,
     };
 
-    await answer("Sign out");
+    await answer("sign out");
     await settled(() => !fake.daemon.signedIn);
 
     expect({ asked, question: question() }).toStrictEqual({
@@ -1829,7 +1831,7 @@ describe("signing out from the sidebar", () => {
         described: true,
         focused: true,
         signedIn: true,
-        text: "Sign out of this browser?",
+        text: "Sign out?",
       },
       question: null,
     });
@@ -1840,7 +1842,7 @@ describe("signing out from the sidebar", () => {
 
     await signedIn(undefined, fake);
     await ask();
-    await answer("Cancel");
+    await answer("cancel");
     // React Aria gives the focus back a frame after the question goes.
     await settled(() => question() === null && document.activeElement === footerSignOut());
 
@@ -1857,14 +1859,14 @@ describe("signing out from the sidebar", () => {
     await signedIn(undefined, fake);
     fake.daemon.signInsFail = true;
     await ask();
-    await answer("Sign out");
+    await answer("sign out");
     await settled(() => document.querySelector('nav footer [role="alert"]') !== null);
 
     expect({
       failure: document.querySelector('nav footer [role="alert"]')?.textContent,
       signedIn: fake.daemon.signedIn,
     }).toStrictEqual({
-      failure: "The Daemon could not save its sign-ins, so nothing changed. Try again.",
+      failure: "The daemon could not save your session, so nothing changed. Try again.",
       signedIn: true,
     });
   });
@@ -1899,16 +1901,16 @@ describe("exporting a Timeline from the sidebar", () => {
     await pressButton("More for #other");
     const channel = await menuTexts();
 
-    await chooseFromMenu("Export as text");
+    await chooseFromMenu("export as text");
 
     await pressButton("More for libera");
     const network = await menuTexts();
 
-    await chooseFromMenu("Export as text");
+    await chooseFromMenu("export as text");
 
     expect({
       downloads,
-      menus: [channel.includes("Export as text"), network.includes("Export as text")],
+      menus: [channel.includes("export as text"), network.includes("export as text")],
     }).toStrictEqual({
       downloads: [
         { href: `/api/timelines/${other}/export`, saves: true },

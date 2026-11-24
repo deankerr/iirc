@@ -82,19 +82,19 @@ const scanTop = (
       count += 1;
 
       if (count > maxPatches) {
-        return bad("a file of too many boxes");
+        return bad("file has too many boxes");
       }
 
       const want = Math.min(16, size - at);
       const head = yield* read(at, want);
 
       if (head.length !== want) {
-        return bad("the file could not be read");
+        return bad("could not read the file");
       }
 
       if (want < 8) {
         // What is left is too little to be a box, which is only allowed to be zeros.
-        return allZero(head, 0, want) ? { mdats, walked } : bad("a box header is cut short");
+        return allZero(head, 0, want) ? { mdats, walked } : bad("truncated box header");
       }
 
       const found = readBox(head, 0, size - at);
@@ -133,12 +133,12 @@ const readWhole = (box: Box, read: Reader): Effect.Effect<Uint8Array | Unreadabl
     const length = box.end - box.start;
 
     if (length > maxWalked) {
-      return bad("a box too large to walk");
+      return bad("box is too large to read");
     }
 
     const bytes = yield* read(box.start, length);
 
-    return bytes.length === length ? bytes : bad("the file could not be read");
+    return bytes.length === length ? bytes : bad("could not read the file");
   });
 
 // Walks a box read whole.
@@ -158,7 +158,7 @@ const walkBox = (
   const inside = movieParts.get(box.type);
 
   return inside === undefined
-    ? bad("a box that is not walked")
+    ? bad("box was not read")
     : walkMovie(bytes, box.start, box.header, inside, file);
 };
 
@@ -179,7 +179,7 @@ export const plan = (layout: Layout, read: Reader, size: number): Effect.Effect<
     }
 
     if (scan.walked.filter((box) => box.type === meta).length > 1) {
-      return bad("more than one meta at the top of an image");
+      return bad("more than one meta box at the top level of an image");
     }
 
     // Without a `moov`, which tracks the media holds is unknown, so none of it can be kept.
@@ -188,7 +188,7 @@ export const plan = (layout: Layout, read: Reader, size: number): Effect.Effect<
       scan.mdats.length > 0 &&
       !scan.walked.some((box) => box.type === moov)
     ) {
-      return bad("a movie with media and no moov");
+      return bad("movie has media but no moov box");
     }
 
     // Every `moov` is read before anything is walked, since which tracks it drops decides
@@ -230,7 +230,7 @@ export const plan = (layout: Layout, read: Reader, size: number): Effect.Effect<
       }
 
       if (patches.length > maxPatches) {
-        return bad("a file of too many parts");
+        return bad("file has too many parts");
       }
     }
 

@@ -541,7 +541,7 @@ describe("Uploads over the API", () => {
   it("refuses an empty body, whether it says its length or is chunked, and keeps nothing", async () => {
     const empty = {
       _tag: "InvalidRequest",
-      issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
+      issues: [{ message: "An upload must have at least one byte", path: ["payload"] }],
     };
 
     const result = await run((served) =>
@@ -808,7 +808,7 @@ describe("Uploads over the API", () => {
       journaled: [],
       keyless: [
         503,
-        { _tag: "StoreUnavailable", reason: "the Credential bucket-secret is not held" },
+        { _tag: "StoreUnavailable", reason: "the credential bucket-secret is not held" },
       ],
       staged: [],
       unreachable: [503, { _tag: "StoreUnavailable", reason: "unreachable" }],
@@ -1067,7 +1067,7 @@ describe("the link listener", () => {
         ...safety,
         "cache-control": "no-store",
         "content-disposition": "inline",
-        "content-length": "25",
+        "content-length": "23",
         "content-type": "text/plain; charset=utf-8",
       },
     ];
@@ -1260,7 +1260,7 @@ describe("the list of Uploads", () => {
       400,
       {
         _tag: "InvalidRequest",
-        issues: [{ message: "Names no Upload", path: ["query", "after"] }],
+        issues: [{ message: "Does not match an upload", path: ["query", "after"] }],
       },
     ]);
   });

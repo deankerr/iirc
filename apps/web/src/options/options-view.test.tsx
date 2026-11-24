@@ -148,7 +148,7 @@ const signedIn = () => {
  * @returns The rows.
  */
 const rows = (container: HTMLElement) =>
-  [...container.querySelectorAll<HTMLElement>('section[aria-label="Options"] [data-key]')].map(
+  [...container.querySelectorAll<HTMLElement>('section[aria-label="Settings"] [data-key]')].map(
     (row) => {
       // A row's one grid cell holds two lines: its name and value, then its description
       // and what it starts as.
@@ -177,7 +177,7 @@ const linesOf = (container: HTMLElement, name: string) =>
  * @returns The headings.
  */
 const headingsOf = (container: HTMLElement) =>
-  [...container.querySelectorAll('section[aria-label="Options"] [role="rowheader"]')].map(
+  [...container.querySelectorAll('section[aria-label="Settings"] [role="rowheader"]')].map(
     (heading) => heading.textContent
   );
 
@@ -216,33 +216,33 @@ describe("the options view, under store, uploads, and previews", () => {
     expect(rows(container)).toStrictEqual([
       [
         "uploads.expireAfter",
-        "unset",
+        "not set",
         "default: unset",
-        "How many days an Upload is kept before it is deleted, from 1 to 36500. Unset, an Upload is kept until the Owner deletes it.",
+        "How many days an upload is kept before it is deleted, from 1 to 36500. When not set, an upload is kept until you delete it.",
       ],
       [
         "uploads.listen",
-        "unset",
+        "not set",
         "default: unset",
-        "The address the Link listener listens on, as host:port, such as 127.0.0.1:7668.",
+        "The address the upload server listens on, as host:port, such as 127.0.0.1:7668.",
       ],
       [
         "uploads.maxSize",
         "104857600",
         "default: 104857600",
-        "The largest an Upload may be, in bytes. The default is 100 MiB.",
+        "The maximum size of an upload, in bytes. The default is 104.9 MB.",
       ],
       [
         "uploads.maxTotal",
-        "unset",
+        "not set",
         "default: unset",
-        "The most bytes of Uploads the store may hold, each distinct file counted once. An upload that would pass it is refused, and nothing is deleted to make room. Unset, there is no limit.",
+        "The maximum total size of uploads that storage may hold, in bytes, counting each distinct file once. An upload that would exceed it is refused, and nothing is deleted to make room. When not set, there is no limit.",
       ],
       [
         "uploads.publicUrl",
-        "unset",
+        "not set",
         "default: unset",
-        "The address every Upload's link starts with, an http or https URL, such as https://files.example.com.",
+        "The address every upload link starts with, an http or https URL, such as https://files.example.com.",
       ],
     ]);
   });
@@ -302,7 +302,7 @@ describe("the options view, under store, uploads, and previews", () => {
     const question = container.querySelector('[role="alertdialog"]')?.textContent;
 
     const button = [...container.querySelectorAll('[role="alertdialog"] button')].find(
-      (one) => one.textContent === "Unset"
+      (one) => one.textContent === "unset"
     );
 
     if (button === undefined) {
@@ -314,7 +314,7 @@ describe("the options view, under store, uploads, and previews", () => {
     await doing(() => {
       button.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
     });
-    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "unset");
+    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "not set");
 
     expect({
       changes: fake.daemon.ownerChanges.map((one) => one.route),
@@ -322,8 +322,8 @@ describe("the options view, under store, uploads, and previews", () => {
       row: rowOf(container, "store.s3.bucket")?.[1],
     }).toStrictEqual({
       changes: ["PUT store.s3.bucket", "DELETE store.s3.bucket"],
-      question: "Unset store.s3.bucket?UnsetKeep",
-      row: "unset",
+      question: "Unset store.s3.bucket?unsetkeep",
+      row: "not set",
     });
   });
 
@@ -357,7 +357,7 @@ describe("the options view, under store, uploads, and previews", () => {
     await edit("0");
 
     const notice = container.querySelector(
-      'section[aria-label="Options"] [role="alert"]'
+      'section[aria-label="Settings"] [role="alert"]'
     )?.textContent;
 
     await edit("1048576");
@@ -419,7 +419,7 @@ describe("the options view, under store, uploads, and previews", () => {
     ]);
   });
 
-  it("shows a Credential another device held again under the name an option already gave it as held", async () => {
+  it("shows a Credential another device held again under the name an option already gave it as set", async () => {
     const fake = signedIn();
 
     fake.daemon.owner = {
@@ -441,8 +441,7 @@ describe("the options view, under store, uploads, and previews", () => {
     await readAt(second.registry, 1);
     await settled(
       () =>
-        rowOf(first.container, "store.s3.accessKeyId")?.[1] ===
-        "Owner.store.s3.accessKeyId not held"
+        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId not set"
     );
     await second.type("/set store.s3.accessKeyId");
 
@@ -457,8 +456,7 @@ describe("the options view, under store, uploads, and previews", () => {
       field.form?.requestSubmit();
     });
     await settled(
-      () =>
-        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
+      () => rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId set"
     );
 
     expect({
@@ -466,11 +464,11 @@ describe("the options view, under store, uploads, and previews", () => {
       row: rowOf(first.container, "store.s3.accessKeyId")?.[1],
     }).toStrictEqual({
       changes: [{ ifSequence: "1", route: "PUT store.s3.accessKeyId" }],
-      row: "Owner.store.s3.accessKeyId held",
+      row: "Owner.store.s3.accessKeyId set",
     });
   });
 
-  it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is held", async () => {
+  it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is set", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
     const secret = "the-bucket's-secret-access-key";
@@ -492,7 +490,7 @@ describe("the options view, under store, uploads, and previews", () => {
     });
     await settled(
       () =>
-        rowOf(container, "store.s3.secretAccessKey")?.[1] === "Owner.store.s3.secretAccessKey held"
+        rowOf(container, "store.s3.secretAccessKey")?.[1] === "Owner.store.s3.secretAccessKey set"
     );
 
     expect({
@@ -508,9 +506,9 @@ describe("the options view, under store, uploads, and previews", () => {
       atoms: false,
       before: [
         "store.s3.secretAccessKey",
-        "unset",
+        "not set",
         "default: unset",
-        "The Credential that holds the bucket's secret access key.",
+        "The secret that holds the bucket's secret access key.",
       ],
       changes: [{ ifSequence: "0", route: "PUT store.s3.secretAccessKey" }],
       held: { "Owner.store.s3.secretAccessKey": secret },
@@ -519,9 +517,9 @@ describe("the options view, under store, uploads, and previews", () => {
       prompt: null,
       row: [
         "store.s3.secretAccessKey",
-        "Owner.store.s3.secretAccessKey held",
+        "Owner.store.s3.secretAccessKey set",
         "default: unset",
-        "The Credential that holds the bucket's secret access key.",
+        "The secret that holds the bucket's secret access key.",
       ],
     });
   });
@@ -591,7 +589,7 @@ describe("an option's change, while it is on its way", () => {
     }
   });
 
-  it("shows a Network's option as asked, while the write is held", async () => {
+  it("shows a Network's option as asked, while the write is set", async () => {
     const { container, type, writes } = await held();
 
     await type("/set network.libera.realname Dean");
@@ -607,7 +605,7 @@ describe("an option's change, while it is on its way", () => {
     expect(whileHeld).toStrictEqual([1, "Dean"]);
   });
 
-  it("unsets a Network's option on the Daemon, showing at once, when unset while its set is held", async () => {
+  it("unsets a Network's option on the Daemon, showing at once, when unset while its set is set", async () => {
     const { container, fake, registry, state, writes } = await held();
     const realname = ["realname"];
 
@@ -639,7 +637,7 @@ describe("an option's change, while it is on its way", () => {
     }).toStrictEqual({ configuration: liberaConfiguration, puts: 2, whileHeld: 1 });
   });
 
-  it("shows an option under store as asked, while the write is held", async () => {
+  it("shows an option under store as asked, while the write is set", async () => {
     const { container, type, writes } = await held();
 
     await type("/set store.s3.bucket my-bucket");
@@ -674,7 +672,7 @@ describe("an option's change, while it is on its way", () => {
       notice: container.querySelector('[role="alert"]')?.firstChild?.textContent,
       whileHeld,
     }).toStrictEqual({
-      notice: "The Daemon could not record this, so nothing was changed.",
+      notice: "The daemon could not record this, so nothing was changed.",
       whileHeld: "HH:mm:ss",
     });
   });
@@ -744,12 +742,12 @@ const configured = () => {
 
 /**
  * Whatever in the view would read as an answer while it is not known: a default, "not
- * held", an empty filter, or a Network with no rows and no wait.
+ * set", an empty filter, or a Network with no rows and no wait.
  * @param container - The page.
  * @returns What the view says of each.
  */
 const answers = (container: HTMLElement) => {
-  const text = container.querySelector('section[aria-label="Options"]')?.textContent ?? "";
+  const text = container.querySelector('section[aria-label="Settings"]')?.textContent ?? "";
 
   return {
     accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
@@ -758,7 +756,7 @@ const answers = (container: HTMLElement) => {
     nothingMatches: text.includes("No option matches."),
     password: rowOf(container, "network.libera.password")?.[1],
     publicUrl: rowOf(container, "uploads.publicUrl")?.[1],
-    waits: [...container.querySelectorAll('[aria-label="Being read"] li')].map(
+    waits: [...container.querySelectorAll('[aria-label="Loading"] li')].map(
       (wait) => wait.textContent
     ),
   };
@@ -766,11 +764,11 @@ const answers = (container: HTMLElement) => {
 
 /** What the view says once everything is read. */
 const allRead = {
-  accessKeyId: "Owner.store.s3.accessKeyId held",
+  accessKeyId: "Owner.store.s3.accessKeyId set",
   libera: true,
   maxTotal: "4096",
   nothingMatches: false,
-  password: "libera.password held",
+  password: "libera.password set",
   publicUrl: "https://files.example.com",
   waits: [],
 };
@@ -801,7 +799,7 @@ const opened = async (held: readonly string[], holding: ReturnType<typeof answer
   await settled(() => {
     const now = answers(shown.container);
 
-    return now.waits.length === 0 && !JSON.stringify(now).includes("reading…");
+    return now.waits.length === 0 && !JSON.stringify(now).includes("loading…");
   });
 
   return answers(shown.container);
@@ -817,9 +815,9 @@ describe("the options view, opened while what it shows is read", () => {
   it("draws each option under store, uploads, and previews as being read, never its default, until they are", async () => {
     const reading = {
       ...allRead,
-      accessKeyId: "reading…",
-      maxTotal: "reading…",
-      publicUrl: "reading…",
+      accessKeyId: "loading…",
+      maxTotal: "loading…",
+      publicUrl: "loading…",
     };
 
     await expect(opened(["/api/options/changes"], reading)).resolves.toStrictEqual(allRead);
@@ -828,8 +826,8 @@ describe("the options view, opened while what it shows is read", () => {
   it("draws whether a Credential is held as being read, never as not held, until the names held are", async () => {
     const reading = {
       ...allRead,
-      accessKeyId: "Owner.store.s3.accessKeyId reading…",
-      password: "libera.password reading…",
+      accessKeyId: "Owner.store.s3.accessKeyId loading…",
+      password: "libera.password loading…",
     };
 
     await expect(opened(["/api/credentials"], reading)).resolves.toStrictEqual(allRead);
@@ -840,7 +838,7 @@ describe("the options view, opened while what it shows is read", () => {
       ...allRead,
       libera: false,
       password: undefined,
-      waits: ["Reading network.libera.*…"],
+      waits: ["Loading network.libera.*…"],
     };
 
     await expect(opened(["/api/networks/libera/configuration"], reading)).resolves.toStrictEqual(
@@ -904,14 +902,14 @@ describe("the options view, opened when a read fails", () => {
       notice: container.querySelector('[role="alert"]')?.textContent,
       waits: answers(container).waits,
     }).toStrictEqual({
-      accessKeyId: "Owner.store.s3.accessKeyId held",
+      accessKeyId: "Owner.store.s3.accessKeyId set",
       notice:
-        "The Daemon did not list its Networks, so their options are not shown. Open the options again to read them.",
+        "The daemon did not list its networks, so their settings are not shown. Open settings again to load them.",
       waits: [],
     });
   });
 
-  it("says whether each Credential is held is not known, and never that one is not held", async () => {
+  it("says whether each Credential is held is not known, and never that one is not set", async () => {
     const { container } = await failed(["/api/credentials"]);
 
     expect({
@@ -921,7 +919,7 @@ describe("the options view, opened when a read fails", () => {
     }).toStrictEqual({
       accessKeyId: "Owner.store.s3.accessKeyId not known",
       notice:
-        "The Daemon did not say which Credentials it holds, so whether each is held is not known. Open the options again to read them.",
+        "The daemon did not say which passwords are saved, so it's unknown whether each is set. Open settings again to load them.",
       password: "libera.password not known",
     });
   });
@@ -930,14 +928,14 @@ describe("the options view, opened when a read fails", () => {
     const { container } = await failed(["/api/networks", "/api/credentials"]);
 
     await settled(() =>
-      (container.querySelector('[role="alert"]')?.textContent ?? "").includes("Credentials")
+      (container.querySelector('[role="alert"]')?.textContent ?? "").includes("passwords")
     );
 
     const notice = container.querySelector('[role="alert"]')?.textContent ?? "";
 
     expect({
-      credentials: notice.includes("did not say which Credentials it holds"),
-      networks: notice.includes("did not list its Networks"),
+      credentials: notice.includes("did not say which passwords are saved"),
+      networks: notice.includes("did not list its networks"),
     }).toStrictEqual({ credentials: true, networks: true });
   });
 
@@ -950,7 +948,7 @@ describe("the options view, opened when a read fails", () => {
     await settled(() => shown.registry.get(optionsState).ui !== undefined);
     reads.paths.add("/api/options/changes");
     await shown.type("/set");
-    await settled(() => rowOf(shown.container, "uploads.publicUrl")?.[1] === "reading…");
+    await settled(() => rowOf(shown.container, "uploads.publicUrl")?.[1] === "loading…");
 
     const row = shown.container.querySelector<HTMLElement>('[data-key="uploads.publicUrl"]');
 
@@ -1258,7 +1256,7 @@ describe("an option chosen from a menu", () => {
         "ui.tail",
         "info",
         "default: info",
-        "The least level of what the Daemon logged that the iirc view shows, along with every level above it. It changes what is shown, never what the Daemon keeps. Every device shares it.",
+        "The minimum level of daemon logs to show, along with every level above it. It changes what is shown, never what the daemon keeps. Every device shares it.",
       ],
       set: "debug",
     });
@@ -1274,12 +1272,12 @@ describe("an option chosen from a menu", () => {
     await settled(() => document.activeElement === rowElement(container, "ui.timeline.timeFormat"));
 
     // Escape once more, on the row, is the view's own: it closes.
-    const before = container.querySelector('section[aria-label="Options"]') !== null;
+    const before = container.querySelector('section[aria-label="Settings"]') !== null;
 
     await press(rowElement(container, "ui.timeline.timeFormat"), "Escape");
 
     expect({
-      after: container.querySelector('section[aria-label="Options"]') !== null,
+      after: container.querySelector('section[aria-label="Settings"]') !== null,
       before,
       changes: fake.daemon.uiChanges,
     }).toStrictEqual({ after: false, before: true, changes: [] });
@@ -1337,7 +1335,7 @@ describe("an option chosen from a menu", () => {
         "atkinson-hyperlegible-next",
         "source-sans-3",
         "inter",
-        "Custom…",
+        "custom…",
       ],
       menu: false,
       starting: "system",
@@ -1396,7 +1394,7 @@ describe("an option chosen from a menu", () => {
 
     expect(entriesOf(await menuFor(container, "ui.timeline.maxWidth"))).toStrictEqual([
       "none",
-      "* Custom…",
+      "* custom…",
     ]);
   });
 });

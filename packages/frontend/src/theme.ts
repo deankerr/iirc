@@ -579,7 +579,7 @@ const invalid = <A>(message: string): Parsed<A> => ({ _tag: "Invalid", message }
 const decodeName = Schema.decodeUnknownOption(ThemeName);
 
 /**
- * A theme's name, from text: one word of lower-case letters and digits joined by `-`,
+ * A theme's name, from text: one word of lowercase letters and digits joined by `-`,
  * typed in any ASCII case.
  * @param text - The text.
  * @returns The name, or why it is not one.
@@ -590,7 +590,7 @@ export const parseThemeName = (text: string): Parsed<ThemeName> => {
   return Option.isSome(name)
     ? parsed(name.value)
     : invalid(
-        `${text.trim() === "" ? "A theme needs a name" : `${text.trim()} is not a theme's name`}: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.`
+        `${text.trim() === "" ? "A theme needs a name" : `${text.trim()} is not a valid theme name`}: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.`
       );
 };
 
@@ -633,13 +633,13 @@ export const editThemes = (
 
   if (builtInThemeNames.includes(name)) {
     return invalid(
-      `${name} is built in, so it is never ${edit._tag === "Add" ? "imported" : "removed"}.${edit._tag === "Add" ? " Give it another name." : ""}`
+      `${name} is built in, so it can't be ${edit._tag === "Add" ? "imported" : "removed"}.${edit._tag === "Add" ? " Give it another name." : ""}`
     );
   }
 
   if (edit._tag === "Add" && themeCommandWords.includes(name)) {
     return invalid(
-      `${name} is a word /theme takes, so no theme is named it. Give it another name.`
+      `${name} is a word /theme uses, so a theme can't have that name. Give it another name.`
     );
   }
 
@@ -647,12 +647,12 @@ export const editThemes = (
 
   if (edit._tag === "Remove") {
     return others.length === themes.length
-      ? invalid(`No theme ${name} was imported. /theme lists them.`)
+      ? invalid(`You haven't imported a theme named ${name}. /theme lists them.`)
       : parsed(others);
   }
 
   if (others.length === themes.length && themes.length >= themesCap) {
-    return invalid(`${themesCap} themes are imported already. /theme remove one first.`);
+    return invalid(`You already imported ${themesCap} themes. /theme remove one first.`);
   }
 
   const at = themes.findIndex((one) => one.name === name);

@@ -236,25 +236,28 @@ export const uiFailed = (tag: string): Outcome => {
       return {
         _tag: "NotDone",
         message:
-          "The ui options changed while this was being made, twice, so nothing was changed. Try again.",
+          "The ui settings changed while this was being saved, so nothing was changed. Try again.",
       };
     }
 
     case "InvalidRequest": {
-      return { _tag: "NotDone", message: "The Daemon could not take this as a ui option's value." };
+      return {
+        _tag: "NotDone",
+        message: "The daemon could not accept this as a ui setting's value.",
+      };
     }
 
     case "JournalFailed": {
       return {
         _tag: "NotDone",
-        message: "The Daemon could not record this, so nothing was changed.",
+        message: "The daemon could not record this, so nothing was changed.",
       };
     }
 
     default: {
       return {
         _tag: "NotDone",
-        message: "The Daemon did not answer, so whether this was changed is unknown.",
+        message: "The daemon did not answer, so it's unknown whether this was changed.",
       };
     }
   }

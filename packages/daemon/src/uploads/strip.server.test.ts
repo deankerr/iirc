@@ -271,7 +271,7 @@ describe("stripping an image as it is uploaded", () => {
     expect(result).toStrictEqual({
       body: {
         _tag: "UploadUnreadable",
-        reason: "a JPEG segment runs past the end",
+        reason: "JPEG segment runs past the end of file",
         type: "image/jpeg",
       },
       journaled: 0,
@@ -384,7 +384,7 @@ describe("stripping HEIC, AVIF, MP4 and MOV as they are uploaded", () => {
     expect(result).toStrictEqual({
       body: {
         _tag: "UploadUnreadable",
-        reason: "a box is smaller than its header",
+        reason: "box is smaller than its header",
         type: "video/mp4",
       },
       staged: [],

@@ -383,7 +383,7 @@ const signIn = HttpApiBuilder.group(
             ...cookieOptions(request),
             maxAge: signInLifetime,
           });
-          yield* Effect.logInfo("Signed a browser in", { key: key.name });
+          yield* Effect.logInfo("Browser signed in", { key: key.name });
         })
       )
       .handle("signOut", ({ request }) =>
@@ -398,7 +398,7 @@ const signIn = HttpApiBuilder.group(
               .pipe(Effect.mapError(signInsFailed));
 
             if (Option.isSome(ended)) {
-              yield* Effect.logInfo("Signed a browser out", { key: ended.value });
+              yield* Effect.logInfo("Browser signed out", { key: ended.value });
             }
           }
 
@@ -1342,13 +1342,13 @@ const credentials = HttpApiBuilder.group(
       )
       .handle("set", ({ params, payload }) =>
         vault.hold(params.name, payload.value).pipe(
-          Effect.tap(() => Effect.logInfo("Held a Credential", { credential: params.name })),
+          Effect.tap(() => Effect.logInfo("Saved credential", { credential: params.name })),
           Effect.mapError(vaultFailed)
         )
       )
       .handle("delete", ({ params }) =>
         vault.forget(params.name).pipe(
-          Effect.tap(() => Effect.logInfo("Forgot a Credential", { credential: params.name })),
+          Effect.tap(() => Effect.logInfo("Deleted credential", { credential: params.name })),
           Effect.mapError(vaultFailed)
         )
       );
@@ -1425,7 +1425,7 @@ const uploads = HttpApiBuilder.group(
 
           const stopped = Effect.andThen(
             stopping,
-            Effect.fail(new StoreUnavailable({ reason: "the Daemon is stopping" }))
+            Effect.fail(new StoreUnavailable({ reason: "the daemon is stopping" }))
           );
 
           // Its id was drawn just now, so no Message has said it yet.
@@ -1444,7 +1444,7 @@ const uploads = HttpApiBuilder.group(
             EmptyUpload: () =>
               Effect.fail(
                 new InvalidRequest({
-                  issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
+                  issues: [{ message: "An upload must have at least one byte", path: ["payload"] }],
                 })
               ),
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
@@ -1473,7 +1473,7 @@ const uploads = HttpApiBuilder.group(
             NoSuchUpload: () =>
               Effect.fail(
                 new InvalidRequest({
-                  issues: [{ message: "Names no Upload", path: ["query", "after"] }],
+                  issues: [{ message: "Does not match an upload", path: ["query", "after"] }],
                 })
               ),
           })

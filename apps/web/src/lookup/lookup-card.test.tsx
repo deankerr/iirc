@@ -269,7 +269,7 @@ const removedThen = async (event: Parameters<ReturnType<typeof fakeDaemon>["send
 
   await inComposer(container, "/bans", "Enter");
   await settled(() => card()?.textContent.includes("bad!*@*") === true);
-  await press("Remove bad!*@*");
+  await press("remove bad!*@*");
   await settled(() => daemon.acts.length === 1);
   await settled(() => card()?.textContent.includes("has no bans") === true);
 
@@ -343,7 +343,7 @@ describe("the Lookup card", () => {
     const words = card()?.textContent;
 
     await act(async () => {
-      card()?.querySelector<HTMLElement>('button[aria-label="Close the Lookup"]')?.click();
+      card()?.querySelector<HTMLElement>('button[aria-label="close"]')?.click();
       await Promise.resolve();
     });
 
@@ -385,14 +385,14 @@ describe("the Lookup card", () => {
     await settled(() => card()?.textContent.includes("evil") === true);
 
     const shown = card();
-    const members = [...(shown?.querySelectorAll('ul[aria-label="Members"] > li') ?? [])];
+    const members = [...(shown?.querySelectorAll('ul[aria-label="members"] > li') ?? [])];
 
     expect({
       bold: shown?.querySelectorAll("b").length,
       heading: shown?.querySelector("h3")?.textContent,
       looks: daemon.looks.map((one) => one.lookup),
       members: members.map((one) => one.textContent),
-      note: shown?.textContent.includes("ran longer than a Lookup keeps"),
+      note: shown?.textContent.includes("longer than iirc keeps"),
     }).toStrictEqual({
       bold: 0,
       heading: "names #iirc",
@@ -449,11 +449,11 @@ describe("the Lookup card", () => {
     // Self is in `#iirc`, so it opens; a Channel with no Timeline is joined.
     daemon.joined.set("libera", ["#iirc"]);
 
-    const rows = () => [...(card()?.querySelectorAll('ul[aria-label="Channels"] > li') ?? [])];
+    const rows = () => [...(card()?.querySelectorAll('ul[aria-label="channels"] > li') ?? [])];
 
     const moreButton = () =>
       [...(card()?.querySelectorAll("button") ?? [])].find(
-        (one) => one.textContent === "More Channels"
+        (one) => one.textContent === "load more"
       );
 
     await inComposer(container, "/list 2", "Enter");
@@ -525,7 +525,7 @@ describe("the Lookup card", () => {
     await settled(() => card()?.textContent.includes("A Peer") === true);
 
     const shown = card();
-    const rows = [...(shown?.querySelectorAll('ul[aria-label="Users"] > li') ?? [])];
+    const rows = [...(shown?.querySelectorAll('ul[aria-label="users"] > li') ?? [])];
 
     expect({
       heading: shown?.querySelector("h3")?.textContent,
@@ -599,7 +599,7 @@ describe("the Lookup card", () => {
     };
 
     await act(async () => {
-      card()?.querySelector<HTMLElement>('button[aria-label="Remove bad!*@*"]')?.click();
+      card()?.querySelector<HTMLElement>('button[aria-label="remove bad!*@*"]')?.click();
       await Promise.resolve();
     });
     await settled(() => daemon.acts.length === 1);
@@ -617,7 +617,7 @@ describe("the Lookup card", () => {
       heading: "bans #iirc",
       looks: [{ _tag: "Bans", channel: "#iirc" }],
       masks: ["bad!*@* set by op!u@h", `${override}worse!*@*‬`],
-      removable: ["Close the Lookup", "Remove bad!*@*", `Remove ${override}worse!*@*‬`],
+      removable: ["close", "remove bad!*@*", `remove ${override}worse!*@*‬`],
     });
   });
 
@@ -647,7 +647,7 @@ describe("the Lookup card", () => {
     const drawn = [...(card()?.querySelectorAll("li") ?? [])].map((one) => one.textContent);
 
     await act(async () => {
-      card()?.querySelector<HTMLElement>('button[aria-label="Remove ~account:bob"]')?.click();
+      card()?.querySelector<HTMLElement>('button[aria-label="remove ~account:bob"]')?.click();
       await Promise.resolve();
     });
     await settled(() => daemon.acts.length === 1);
@@ -670,11 +670,11 @@ describe("the Lookup card", () => {
     daemon.sayAnswers.push("Offline");
     await inComposer(container, "/bans", "Enter");
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
-    await press("Remove bad!*@*");
+    await press("remove bad!*@*");
     await settled(() => daemon.acts.length === 1);
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
 
-    expect(buttons()).toStrictEqual(["Close the Lookup", "Remove bad!*@*"]);
+    expect(buttons()).toStrictEqual(["close", "remove bad!*@*"]);
   });
 
   it("shows a mask again when the Ircd refuses its removal later, by the act's intent", async () => {
@@ -682,7 +682,7 @@ describe("the Lookup card", () => {
 
     await inComposer(container, "/bans", "Enter");
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
-    await press("Remove bad!*@*");
+    await press("remove bad!*@*");
     await settled(() => daemon.acts.length === 1);
     await settled(() => card()?.textContent.includes("has no bans") === true);
 
@@ -723,7 +723,7 @@ describe("the Lookup card", () => {
     });
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
 
-    expect(buttons()).toStrictEqual(["Close the Lookup", "Remove bad!*@*"]);
+    expect(buttons()).toStrictEqual(["close", "remove bad!*@*"]);
   });
 
   it("shows a mask again when the removal's request is never answered, and sends it once", async () => {
@@ -732,13 +732,13 @@ describe("the Lookup card", () => {
     daemon.holdActs = true;
     await inComposer(container, "/bans", "Enter");
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
-    await press("Remove bad!*@*");
+    await press("remove bad!*@*");
     await settled(() => card()?.textContent.includes("has no bans") === true);
     await settled(() => card()?.textContent.includes("bad!*@*") === true);
 
     expect({ acts: daemon.acts.length, buttons: buttons() }).toStrictEqual({
       acts: 1,
-      buttons: ["Close the Lookup", "Remove bad!*@*"],
+      buttons: ["close", "remove bad!*@*"],
     });
   });
 
@@ -754,7 +754,7 @@ describe("the Lookup card", () => {
     expect({ ...removed, buttons: buttons() }).toStrictEqual({
       after: [],
       before: ["bad!*@*"],
-      buttons: ["Close the Lookup", "Remove bad!*@*"],
+      buttons: ["close", "remove bad!*@*"],
     });
   });
 
@@ -812,17 +812,17 @@ describe("the Lookup card", () => {
     const before = buttons();
 
     await changeTo(60, ["o"]);
-    await settled(() => buttons().includes("Remove bad!*@*"));
+    await settled(() => buttons().includes("remove bad!*@*"));
 
     const promoted = buttons();
 
     await changeTo(61, ["v"]);
-    await settled(() => !buttons().includes("Remove bad!*@*"));
+    await settled(() => !buttons().includes("remove bad!*@*"));
 
     expect({ before, demoted: buttons(), promoted }).toStrictEqual({
-      before: ["Close the Lookup"],
-      demoted: ["Close the Lookup"],
-      promoted: ["Close the Lookup", "Remove bad!*@*"],
+      before: ["close"],
+      demoted: ["close"],
+      promoted: ["close", "remove bad!*@*"],
     });
   });
 
@@ -849,7 +849,7 @@ describe("the Lookup card", () => {
     );
 
     await act(async () => {
-      document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Whois peer"]')?.click();
+      document.querySelector<HTMLElement>('[role="menuitem"][aria-label="whois peer"]')?.click();
       await Promise.resolve();
     });
     await settled(() => card()?.textContent.includes("example.test") === true);
@@ -861,7 +861,7 @@ describe("the Lookup card", () => {
       looks: daemon.looks.map((one) => one.lookup),
     }).toStrictEqual({
       closed: true,
-      items: ["Query peer", "Whois peer", "Mention peer", "Ignore peer"],
+      items: ["query peer", "whois peer", "mention peer", "ignore peer"],
       label: "What to do with peer",
       looks: [{ _tag: "Whois", nick: "peer" }],
     });

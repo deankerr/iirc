@@ -770,16 +770,16 @@ const paneFaults = (state: Timelines): readonly string[] => {
   const faults: string[] = [];
 
   if (new Set(open).size !== open.length) {
-    faults.push(`a Timeline open twice: ${open.join(", ")}`);
+    faults.push(`a conversation open twice: ${open.join(", ")}`);
   }
 
   if (!panesOf(state.layout.root).some((pane) => pane.id === state.layout.focused)) {
-    faults.push("the focus on no Pane");
+    faults.push("the focus on no pane");
   }
 
   for (const id of state.windows.keys()) {
     if (!open.includes(id)) {
-      faults.push(`a window of ${id}, open in no Pane`);
+      faults.push(`a window of ${id}, open in no pane`);
     }
   }
 
@@ -1300,7 +1300,7 @@ describe("following the changes", () => {
     );
   });
 
-  it("keeps a Network configured after the Network list was asked, which it does not name", () => {
+  it("keeps a network configured after the network list was asked, which it does not name", () => {
     // Shrunk from the property above: the stream stops, the Network list is answered before
     // beta is configured, and beta's first steps come after it.
     const played: Scenario = {
@@ -1716,7 +1716,7 @@ const from = (
     : result;
 };
 
-describe("the Timelines' state", () => {
+describe("the conversations' state", () => {
   it("follows the stream after the smallest `through` it read", () => {
     let state = initialTimelines;
 
@@ -1782,7 +1782,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("orders the sidebar: the Network's own first, then Channels by name", () => {
+  it("orders the sidebar: the network's own first, then channels by name", () => {
     expect(
       sidebar(following()).map((network) => [
         network.network,
@@ -1791,7 +1791,7 @@ describe("the Timelines' state", () => {
     ).toStrictEqual([["alpha", ["alpha", "#a", "#b"]]]);
   });
 
-  it("leaves a closed Timeline out of the sidebar until something arrives in it, and lists it while a Pane has it open", () => {
+  it("leaves a closed conversation out of the sidebar until something arrives in it, and lists it while a pane has it open", () => {
     // #b is closed, and #a, open in the Pane, is closed too.
     const closed = reduceTimelines(
       reduceTimelines(following(), closedAt(6, idOf(2), "#b", true)),
@@ -1815,7 +1815,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("marks a closed Timeline read with /read all, though navigation and the sidebar leave it out", () => {
+  it("marks a closed conversation read with /read all, though navigation and the sidebar leave it out", () => {
     // #b is closed with a Message unread, and no Pane shows it, so it is not listed.
     const closed = reduceTimelines(
       following(),
@@ -1857,7 +1857,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("steps /next and /previous through the Timelines in the order shown: the Owner's, with the pinned first", () => {
+  it("steps /next and /previous through the conversations in the order shown: the Owner's, with the pinned first", () => {
     const state = following();
 
     const stepped = (arrangement: Arrangement) => {
@@ -1890,7 +1890,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("breaks a tie in /next-unread by the order shown, so a pinned Timeline comes first", () => {
+  it("breaks a tie in /next-unread by the order shown, so a pinned conversation comes first", () => {
     const unread = {
       activity: 0,
       botDirect: 0,
@@ -1923,7 +1923,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("passes a muted Timeline over in /next-unread, a Highlight unread there too, and /read all still marks it", () => {
+  it("passes a muted conversation over in /next-unread, a highlight unread there too, and /read all still marks it", () => {
     const messages = withUnread({ messages: 1 }, { messages: 3 });
     const highlight = withUnread({ messages: 1 }, { highlights: 1, messages: 3 });
 
@@ -1947,7 +1947,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("gives each Network the muted Timelines, whole, whether or not it lists them", () => {
+  it("gives each network the muted conversations, whole, whether or not it lists them", () => {
     const gone = timelineId(idOf(99));
     const muted = new Set([two, gone]);
 
@@ -1957,7 +1957,7 @@ describe("the Timelines' state", () => {
     }).toStrictEqual({ given: [muted], none: [[]] });
   });
 
-  it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
+  it("draws a network as its own conversation's row, with its channels and direct messages under it", () => {
     const [network] = sidebar(following());
     const tree = network === undefined ? undefined : treeOf(network);
 
@@ -1999,7 +1999,7 @@ describe("the Timelines' state", () => {
     }).toStrictEqual({ changedOfSix: 8, items: [3, 7, 4, 6] });
   });
 
-  it("opens the Direct Message Timeline the Daemon placed a Message in, by id, never by name", () => {
+  it("opens the direct message conversation the daemon placed a message in, by id, never by name", () => {
     // Under CASEMAPPING=ascii these are two Users, though rfc1459 folds them together.
     const square = timelineId(idOf(6));
     const curly = timelineId(idOf(7));
@@ -2056,7 +2056,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("ignores a placement from before the Owner opened another Timeline", () => {
+  it("ignores a placement from before the Owner opened another conversation", () => {
     const listed = reduceTimelines(
       following(),
       changed(6, { timelines: [direct(idOf(6), "bob")] })
@@ -2079,7 +2079,7 @@ describe("the Timelines' state", () => {
     }).toStrictEqual({ navigation: [1, 2], open: idOf(2), pending: undefined });
   });
 
-  it("shows the Timeline a placement opens, though the options were showing when it was said", () => {
+  it("shows the conversation a placement opens, though the options were showing when it was said", () => {
     const listed = reduceTimelines(
       following(),
       changed(6, { timelines: [direct(idOf(6), "bob")] })
@@ -2139,7 +2139,7 @@ describe("the Timelines' state", () => {
     expect(shownItems(state)).toStrictEqual([3, 4]);
   });
 
-  it("follows a merged Timeline to the one it went to, and reads that", () => {
+  it("follows a merged conversation to the one it went to, and reads that", () => {
     let state = reduceTimelines(following(), { _tag: "Opened", timeline: two });
 
     state = reduceTimelines(
@@ -2234,7 +2234,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("says the Network list was read once, through its reads again, and a Network's Timelines not known until read", () => {
+  it("says the network list was read once, through its reads again, and a network's conversations not known until read", () => {
     const unread = initialTimelines;
 
     let state = reduceTimelines(unread, {
@@ -2261,7 +2261,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("reads the Network list again on a reset, so a Network only the reset reaches is found", () => {
+  it("reads the network list again on a reset, so a network only the reset reaches is found", () => {
     // An empty list, read in full, and followed: nothing more to read.
     let state = initialTimelines;
 
@@ -2375,7 +2375,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("keeps the Network list stale when an overflow touching everything came while it was read", () => {
+  it("keeps the network list stale when an overflow touching everything came while it was read", () => {
     // The Network list is read, an overflow that touched everything comes, which may have
     // configured a Network, and then the list from before it lands.
     let state = reduceTimelines(following(), {
@@ -2416,7 +2416,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("takes the Network list as current from where the stream was when it was asked", () => {
+  it("takes the network list as current from where the stream was when it was asked", () => {
     // Taken on, then an overflow that touched everything while the runtime waits, then asked.
     let state = reduceTimelines(following(), {
       _tag: "ReadStarted",
@@ -2539,7 +2539,7 @@ describe("the Timelines' state", () => {
     });
   });
 
-  it("takes a Network's connection from known, then from later Session items", () => {
+  it("takes a network's connection from known, then from later connection items", () => {
     let state = following();
 
     state = reduceTimelines(state, {
@@ -2621,7 +2621,7 @@ describe("the Timelines' state", () => {
   describe("a Gap before anything", () => {
     const closed = { count: 2, from: cursor(10, 1), to: cursor(20, 2) };
 
-    it("is not a row once it ended, in a Timeline read to its start, and the window keeps it", () => {
+    it("is not a row once it ended, in a conversation read to its start, and the window keeps it", () => {
       expect(rowsWith([closed], false)).toStrictEqual({ held: 1, rows: [3, 4] });
     });
 
@@ -2651,7 +2651,7 @@ describe("the Timelines' state", () => {
       expect(rowsWith([closed], false, (item) => item.sequence !== 3)?.rows).toStrictEqual([4]);
     });
 
-    it("is not a row in a Timeline with no item at all, once it ended", () => {
+    it("is not a row in a conversation with no item at all, once it ended", () => {
       const state = reduceTimelines(following(), {
         _tag: "WindowRead",
         read: latestOf(three, 0),
@@ -2765,8 +2765,8 @@ const began = (sequence: number) =>
  */
 const statusWanted = (state: Timelines) => wanted(state).some((read) => read._tag === "Status");
 
-describe("whether a Session carries tags", () => {
-  it("says a Network's Timelines are complete only once their last page is read", () => {
+describe("whether a connection carries tags", () => {
+  it("says a network's conversations are complete only once their last page is read", () => {
     const page = (more: boolean, ...timelines: readonly ReturnType<typeof timelineOf>[]) => ({
       ...listOf(5, ...timelines),
       more,
@@ -2802,7 +2802,7 @@ describe("whether a Session carries tags", () => {
     }).toStrictEqual({ first: [[true, false]], last: [[true, true]] });
   });
 
-  it("is what known says, and unknown once a Session begins, until known is read again", () => {
+  it("is what known says, and unknown once a connection begins, until known is read again", () => {
     const read = folded(following(), [
       { _tag: "ReadStarted", read: statusOfAlpha },
       knownTags(true),
@@ -2822,7 +2822,7 @@ describe("whether a Session carries tags", () => {
     });
   });
 
-  it("is read again when a Session began after a read of known that was in flight", () => {
+  it("is read again when a connection began after a read of known that was in flight", () => {
     const inFlight = reduceTimelines(following(), { _tag: "ReadStarted", read: statusOfAlpha });
 
     const landed = folded(inFlight, [began(7), knownTags(true)]);
@@ -2834,7 +2834,7 @@ describe("whether a Session carries tags", () => {
     }).toStrictEqual({ again: [true, false], landed: [false, true] });
   });
 
-  it("is never carried on a Network that is not connected", () => {
+  it("is never carried on a network that is not connected", () => {
     const read = folded(following(), [
       { _tag: "ReadStarted", read: statusOfAlpha },
       knownTags(true),
@@ -2877,8 +2877,8 @@ const keptPane = (id: string, open: string) =>
 const keptOf = (left: string, right: string) =>
   `{"focused":"p0","next":2,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s1","children":[${left},${right}]}}`;
 
-describe("the Panes", () => {
-  it("opens a Timeline in a new Pane, focused, and reads the window of each Pane", () => {
+describe("the panes", () => {
+  it("opens a conversation in a new pane, focused, and reads the window of each pane", () => {
     const state = split(following(), two);
 
     expect({
@@ -2895,7 +2895,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("splits into an empty Pane when the Timeline named is open in another already", () => {
+  it("splits into an empty pane when the conversation named is open in another already", () => {
     const state = split(following(), three);
 
     expect({ opened: opened(state)._tag, opens: opens(state) }).toStrictEqual({
@@ -2907,7 +2907,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("focuses the Pane a Timeline is open in rather than open it twice, keeping its window", () => {
+  it("focuses the pane a conversation is open in rather than open it twice, keeping its window", () => {
     const state = split(following(), undefined);
     const window = state.windows.get(three);
     const again = reduceTimelines(state, { _tag: "Opened", timeline: three });
@@ -2928,7 +2928,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("opens in the focused Pane, and keeps the window of the one it replaced among the closed", () => {
+  it("opens in the focused pane, and keeps the window of the one it replaced among the closed", () => {
     let state = split(following(), two);
 
     // The new Pane opens the Network's own Timeline in place of `#b`.
@@ -2943,7 +2943,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("closes the focused Pane, its window joining the closed, and the last never", () => {
+  it("closes the focused pane, its window joining the closed, and the last never", () => {
     const state = split(following(), two);
     const closed = reduceTimelines(state, { _tag: "Pane", change: { _tag: "Close" } });
     const last = reduceTimelines(closed, { _tag: "Pane", change: { _tag: "Close" } });
@@ -2957,7 +2957,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("lets a placement go when the Owner moves to another Pane, but not when a view moves with them", () => {
+  it("lets a placement go when the Owner moves to another pane, but not when a view moves with them", () => {
     const listed = reduceTimelines(
       split(following(), two),
       changed(6, { timelines: [direct(idOf(6), "bob")] })
@@ -3002,7 +3002,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("shows the options in one Pane, with its Timeline open behind them", () => {
+  it("shows the options in one pane, with its conversation open behind them", () => {
     let state = split(following(), two);
 
     state = reduceTimelines(state, { _tag: "OptionsShown", filter: "a" });
@@ -3021,7 +3021,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("keeps the layout as JSON and restores it once the Timelines are read, without a Timeline gone", () => {
+  it("keeps the layout as JSON and restores it once the conversations are read, without a conversation gone", () => {
     let state = split(following(), two, true);
 
     state = split(state, one);
@@ -3138,7 +3138,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("draws an empty Pane as a wait while a kept layout waits, and as empty once it is let go", () => {
+  it("draws an empty pane as a wait while a kept layout waits, and as empty once it is let go", () => {
     const layout = single({ ...emptyView, open: one });
 
     // The Timelines are not read yet, so the layout kept waits.
@@ -3162,7 +3162,7 @@ describe("the Panes", () => {
 
   // Regression: the iirc row is marked over a Pane still waiting, and pressing it leaves
   // the wait, so the Tail cannot be reached while the Timelines are not read.
-  it("marks the Tail chosen only once a waiting Pane shows it, which showing it lets go of the wait", () => {
+  it("marks the Tail chosen only once a waiting pane shows it, which showing it lets go of the wait", () => {
     const layout = single({ ...emptyView, open: one });
     const waiting = reduceTimelines(timelinesWith(windowCap), { _tag: "Restore", layout });
     const shown = reduceTimelines(waiting, { _tag: "TailShown" });
@@ -3176,7 +3176,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("refuses a kept layout that is not one, and opens a Timeline kept twice once", () => {
+  it("refuses a kept layout that is not one, and opens a conversation kept twice once", () => {
     const twice = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(3))));
 
     const twiceIds = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p0", idOf(2))));
@@ -3206,7 +3206,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("empties the Pane not focused when a merge leaves two Panes on one Timeline", () => {
+  it("empties the pane not focused when a merge leaves two panes on one conversation", () => {
     // `#a` in the first Pane, `#b` in the second, focused; `#b` goes into `#a`.
     const both = split(following(), two);
 
@@ -3243,7 +3243,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("never has a Timeline open in two Panes, whatever the Owner does and whatever merges", () => {
+  it("never has a conversation open in two panes, whatever the Owner does and whatever merges", () => {
     const ids = [one, two, three];
 
     const action = fc.oneof(
@@ -3311,7 +3311,7 @@ describe("the Panes", () => {
     );
   });
 
-  it("refuses a kept layout's text of too many Panes, nested past the deepest a layout splits, or no JSON", () => {
+  it("refuses a kept layout's text of too many panes, nested past the deepest a layout splits, or no JSON", () => {
     const many = `{"focused":"p0","next":99,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s0","children":[${Array.from(
       { length: 65 },
       (_, index) =>
@@ -3540,7 +3540,7 @@ const resultsPage = (more: boolean, ...items: readonly ReturnType<typeof message
 const windowOf = (state: Timelines, timeline: TimelineId) => state.windows.get(timeline);
 
 describe("searching", () => {
-  it("shows in the focused Pane in front of its Timeline, reads a page at a time while shown, and closes back", () => {
+  it("shows in the focused pane in front of its conversation, reads a page at a time while shown, and closes back", () => {
     let state = searching(following(), "word in:#b");
     const first = searchStarted(state);
 
@@ -3637,7 +3637,7 @@ describe("searching", () => {
 });
 
 describe("jumping to a result", () => {
-  it("opens its Timeline in the search's Pane, read around its position as a new window, never following", () => {
+  it("opens its conversation in the search's pane, read around its position as a new window, never following", () => {
     let state = searching(following(), "m2 word");
 
     state = reduceTimelines(state, {
@@ -3940,7 +3940,7 @@ describe("jumping to a result", () => {
     ]);
   });
 
-  it("jumps in the Pane that has the Timeline open, which takes the focus, leaving the search where it is", () => {
+  it("jumps in the pane that has the conversation open, which takes the focus, leaving the search where it is", () => {
     // Two Panes: p0 has three open, p1 has two, and the search shows in p1.
     let state = split(following(), two);
 
@@ -3966,8 +3966,8 @@ describe("jumping to a result", () => {
   });
 });
 
-describe("what stands in front of a Timeline", () => {
-  it("closes the options back to what the Pane showed before them, the Timeline or the search's", () => {
+describe("what stands in front of a conversation", () => {
+  it("closes the options back to what the pane showed before them, the conversation or the search's", () => {
     const shown = reduceTimelines(following(), { _tag: "OptionsShown", filter: "nick" });
     const closed = reduceTimelines(shown, { _tag: "OptionsClosed" });
 
@@ -3990,7 +3990,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("closes the options in the Pane they show in, whichever has the focus", () => {
+  it("closes the options in the pane they show in, whichever has the focus", () => {
     let state = reduceTimelines(following(), { _tag: "OptionsShown", filter: "" });
 
     state = split(state, two);
@@ -4005,7 +4005,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("marks in the sidebar only what the focused Pane shows, never a Timeline behind something", () => {
+  it("marks in the sidebar only what the focused pane shows, never a conversation behind something", () => {
     const start = following();
     const options = reduceTimelines(start, { _tag: "OptionsShown", filter: "" });
     const search = searching(start, "m3 word");
@@ -4040,7 +4040,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("marks in the sidebar what the other Panes show, by their number, a view of its own too, never what is behind something", () => {
+  it("marks in the sidebar what the other panes show, by their number, a view of its own too, never what is behind something", () => {
     const start = following();
     const two_ = split(start, two);
     const three_ = split(two_, one, true);
@@ -4097,7 +4097,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("shows the Tail by letting go of what the focused Pane showed, chosen there and by the first other Pane's number elsewhere", () => {
+  it("shows the Tail by letting go of what the focused pane showed, chosen there and by the first other pane's number elsewhere", () => {
     // Three Panes, the third focused, then the first two shown the Tail, the options in
     // front of the first's Timeline let go too.
     const three_ = split(split(following(), two), one, true);
@@ -4132,7 +4132,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("shows a Direct Message not yet begun, closes it back, and lets the Timeline its first Message made take its place", () => {
+  it("shows a direct message not yet begun, closes it back, and lets the conversation its first message made take its place", () => {
     const start = reduceTimelines(following(), { _tag: "OptionsShown", filter: "x" });
 
     const draft = reduceTimelines(start, {
@@ -4190,7 +4190,7 @@ describe("what stands in front of a Timeline", () => {
     });
   });
 
-  it("closes the options shown over a Direct Message not yet begun back to it", () => {
+  it("closes the options shown over a direct message not yet begun back to it", () => {
     const draft = reduceTimelines(following(), {
       _tag: "DraftShown",
       declared: null,
@@ -4227,8 +4227,8 @@ const keptUploadsPane = (id: string, uploads: boolean) => ({
   view: { open: null, options: null, uploads },
 });
 
-describe("the Uploads in a Pane", () => {
-  it("shows in the focused Pane in front of its Timeline, which closing shows again", () => {
+describe("the uploads in a pane", () => {
+  it("shows in the focused pane in front of its conversation, which closing shows again", () => {
     const shown = reduceTimelines(following(), { _tag: "UploadsShown" });
     const closed = reduceTimelines(shown, { _tag: "UploadsClosed" });
 
@@ -4249,7 +4249,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("shows in one Pane at most, a second showing focusing the Pane that has them", () => {
+  it("shows in one pane at most, a second showing focusing the pane that has them", () => {
     let state = split(following(), two);
 
     state = reduceTimelines(state, { _tag: "UploadsShown" });
@@ -4269,7 +4269,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("closes in the Pane they show in, whichever has the focus", () => {
+  it("closes in the pane they show in, whichever has the focus", () => {
     let state = reduceTimelines(following(), { _tag: "UploadsShown" });
 
     state = split(state, two);
@@ -4281,7 +4281,7 @@ describe("the Uploads in a Pane", () => {
     ]);
   });
 
-  it("goes back one step only, whichever of the options and the Uploads stands in front of the other", () => {
+  it("goes back one step only, whichever of the options and the uploads stands in front of the other", () => {
     const uploads = reduceTimelines(following(), { _tag: "UploadsShown" });
     const options = reduceTimelines(uploads, { _tag: "OptionsShown", filter: "a" });
     const optionsFirst = reduceTimelines(following(), { _tag: "OptionsShown", filter: "a" });
@@ -4300,7 +4300,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("closes the search shown over them back to them, and a Direct Message not yet begun too", () => {
+  it("closes the search shown over them back to them, and a direct message not yet begun too", () => {
     const uploads = reduceTimelines(following(), { _tag: "UploadsShown" });
     const searched = searching(uploads, "m3 word");
 
@@ -4322,7 +4322,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("closes the options to the Timeline, not to them, once another Pane shows them", () => {
+  it("closes the options to the conversation, not to them, once another pane shows them", () => {
     let state = split(following(), two);
 
     // The second Pane has the Uploads behind the options, so shows only the options.
@@ -4343,7 +4343,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("is kept in the layout, comes back as the Uploads in front of the Timeline, and is kept under a search", () => {
+  it("is kept in the layout, comes back as the uploads in front of the conversation, and is kept under a search", () => {
     let state = split(following(), two, true);
 
     state = reduceTimelines(state, { _tag: "UploadsShown" });
@@ -4365,7 +4365,7 @@ describe("the Uploads in a Pane", () => {
     });
   });
 
-  it("restores a second Pane keeping them as its Timeline, since they show in one at most", () => {
+  it("restores a second pane keeping them as its conversation, since they show in one at most", () => {
     const decoded = decodeKept(
       JSON.stringify({
         focused: "p0",
@@ -4546,7 +4546,7 @@ describe("a placement lands where it was said", () => {
     });
   });
 
-  it("lets go of one said from Bob's draft once Bob's Pane closed onto Alice's", () => {
+  it("lets go of one said from Bob's draft once Bob's pane closed onto Alice's", () => {
     const said = twoDrafts();
     const closed = reduceTimelines(said, { _tag: "Pane", change: { _tag: "Close" } });
     const after = folded(closed, placedFrom(said));
@@ -4554,7 +4554,7 @@ describe("a placement lands where it was said", () => {
     expect(showing(after)).toStrictEqual([["p0", "alice", undefined]]);
   });
 
-  it("opens in its own Pane, not the focused one, when the focus moved to a Pane showing the same", () => {
+  it("opens in its own pane, not the focused one, when the focus moved to a pane showing the same", () => {
     // Two empty Panes: `/msg bob hi` said from p1, then the focus moves to p0, also empty.
     const said = reduceTimelines(nothingOpen(), {
       _tag: "Pane",
@@ -4579,8 +4579,8 @@ describe("a placement lands where it was said", () => {
   });
 });
 
-describe("a draft meets its Timeline", () => {
-  it("shows the Timeline listed for its nick, by the mapping it was made with, in place, moving nothing else", () => {
+describe("a draft meets its conversation", () => {
+  it("shows the conversation listed for its nick, by the mapping it was made with, in place, moving nothing else", () => {
     const start = reduceTimelines(following(), {
       _tag: "DraftShown",
       declared: "ascii",
@@ -4645,7 +4645,7 @@ describe("a draft meets its Timeline", () => {
     });
   });
 
-  it("reports a draft behind the options or the search as met when closing them shows its Timeline", () => {
+  it("reports a draft behind the options or the search as met when closing them shows its conversation", () => {
     const draft = reduceTimelines(following(), {
       _tag: "DraftShown",
       declared: null,
@@ -4682,8 +4682,8 @@ describe("a draft meets its Timeline", () => {
   });
 });
 
-describe("what a Pane is called, and what the composer counts as open", () => {
-  it("names a Pane by what it shows, never by the Timeline behind it", () => {
+describe("what a pane is called, and what the composer counts as open", () => {
+  it("names a pane by what it shows, never by the conversation behind it", () => {
     const start = following();
     const options = reduceTimelines(start, { _tag: "OptionsShown", filter: "" });
 
@@ -4703,7 +4703,7 @@ describe("what a Pane is called, and what the composer counts as open", () => {
     ]).toStrictEqual(["#a", "options", "search", "bob", "iirc"]);
   });
 
-  it("counts a Timeline behind something in front as not shown, so /next-unread goes to it", () => {
+  it("counts a conversation behind something in front as not shown, so /next-unread goes to it", () => {
     // `#a`, open behind the options or a draft, has a Highlight unread.
     const unread = reduceTimelines(
       following(),
@@ -4846,8 +4846,8 @@ const delta = (keep: boolean) =>
     changed(6, { removals: [{ changed: 6, keep, life: 4, network: "delta" }] })
   );
 
-describe("removing a Network", () => {
-  it("never forgets a kept Network the one list names, however the list and a removal cross", () => {
+describe("removing a network", () => {
+  it("never forgets a kept network the one list names, however the list and a removal cross", () => {
     // The list is asked for while alpha is live, the stream then removes it keeping its
     // Timelines, and the list answers as the Daemon held it then, live or kept.
     const asked = reading(following());
@@ -4887,7 +4887,7 @@ describe("removing a Network", () => {
       })
     );
 
-  it("keeps a Network removed with its Timelines kept, apart from the rest, read and never said to", () => {
+  it("keeps a network removed with its conversations kept, apart from the rest, read and never said to", () => {
     const state = reduceTimelines(withBeta(), keptAt(6));
     const context = contextOf(state);
 
@@ -4904,7 +4904,7 @@ describe("removing a Network", () => {
       say: {
         _tag: "Invalid",
         message:
-          "alpha was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove alpha drops them.",
+          "alpha was removed, so its conversations are read-only. /network remove alpha drops them.",
       },
       shown: "Shown",
       sidebar: [
@@ -4914,7 +4914,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("holds a Network removed with its Timelines kept that it never held, as kept, and none dropped", () => {
+  it("holds a network removed with its conversations kept that it never held, as kept, and none dropped", () => {
     const kept = delta(true);
 
     expect({
@@ -4932,7 +4932,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("learns from the stream alone of a Network removed that had no Timeline, kept or not", () => {
+  it("learns from the stream alone of a network removed that had no conversation, kept or not", () => {
     const quiet = withQuiet();
     const kept = reduceTimelines(quiet, removalOf(6, true));
     const dropped = reduceTimelines(quiet, removalOf(6, false));
@@ -4954,7 +4954,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("reads the Networks removed with their Timelines kept with the Network list, but for their Session", () => {
+  it("reads the networks removed with their conversations kept with the network list, but for their connection", () => {
     let state = reduceTimelines(initialTimelines, {
       _tag: "ReadStarted",
       read: { _tag: "Networks", attempt: 0 },
@@ -4991,7 +4991,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("lets go of dropped Timelines: their windows, the Panes that showed them, and the search", () => {
+  it("lets go of dropped conversations: their windows, the panes that showed them, and the search", () => {
     let state = reduceTimelines(withBeta(), {
       _tag: "Pane",
       change: { _tag: "Split", axis: "Horizontal", timeline: two },
@@ -5018,7 +5018,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("drops kept Timelines too, and frees the name for a new Network at once", () => {
+  it("drops kept conversations too, and frees the name for a new network at once", () => {
     let state = reduceTimelines(following(), keptAt(6));
 
     state = reduceTimelines(state, dropAt(7));
@@ -5037,7 +5037,7 @@ describe("removing a Network", () => {
     }).toStrictEqual({ again: [["alpha", false, 1]], gone: 0 });
   });
 
-  it("takes the Daemon's answer to a removal ahead of the stream's step", () => {
+  it("takes the daemon's answer to a removal ahead of the stream's step", () => {
     const kept = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: true,
@@ -5058,7 +5058,7 @@ describe("removing a Network", () => {
     }).toStrictEqual({ dropped: [0, "Closed"], kept: [true, true] });
   });
 
-  it("never brings back a Network dropped since the list naming it live was read", () => {
+  it("never brings back a network dropped since the list naming it live was read", () => {
     const restored = reduceTimelines(reduceTimelines(following(), dropAt(6)), {
       _tag: "NetworksRead",
       entries: decodeEntries([
@@ -5069,7 +5069,7 @@ describe("removing a Network", () => {
     expect(sidebar(restored)).toStrictEqual([]);
   });
 
-  it("keeps a Network the stream says was kept when its Session's read finds no Network", () => {
+  it("keeps a network the stream says was kept when its connection's read finds no network", () => {
     const status = { _tag: "Status", attempt: 0, network: alpha } as const;
     let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
 
@@ -5300,7 +5300,7 @@ describe("removing a Network", () => {
     // Each answer of alpha's first life, and the read it answers, if any.
     const answers: readonly (readonly [string, Read | undefined, TimelinesEvent])[] = [
       [
-        "a Network list naming it kept",
+        "a network list naming it kept",
         undefined,
         {
           _tag: "NetworksRead",
@@ -5308,7 +5308,7 @@ describe("removing a Network", () => {
         },
       ],
       [
-        "a Network list naming it live",
+        "a network list naming it live",
         undefined,
         {
           _tag: "NetworksRead",
@@ -5318,17 +5318,17 @@ describe("removing a Network", () => {
         },
       ],
       [
-        "a page of its Timelines",
+        "a page of its conversations",
         list,
         { _tag: "ListRead", after: undefined, network: alpha, page: oldPage },
       ],
       [
-        "its Timelines finding no Network",
+        "its conversations finding no network",
         list,
         { _tag: "NetworkVanished", network: alpha, of: "List" },
       ],
       [
-        "its Session",
+        "its connection",
         status,
         {
           _tag: "StatusRead",
@@ -5340,12 +5340,12 @@ describe("removing a Network", () => {
         },
       ],
       [
-        "its Session finding no Network",
+        "its connection finding no network",
         status,
         { _tag: "NetworkVanished", network: alpha, of: "Status" },
       ],
       [
-        "the Daemon's answer to removing it",
+        "the daemon's answer to removing it",
         undefined,
         { _tag: "NetworkRemoved", keep: false, life: 1, network: alpha },
       ],
@@ -5385,7 +5385,7 @@ describe("removing a Network", () => {
     expect(survived).toStrictEqual(answers.map(([kind]) => [kind, true]));
   });
 
-  it("begins a newer life a Session read reveals after the old one was dropped", () => {
+  it("begins a newer life a connection read reveals after the old one was dropped", () => {
     const status = { _tag: "Status", attempt: 0, network: alpha } as const;
     let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
 
@@ -5414,7 +5414,7 @@ describe("removing a Network", () => {
     }).toStrictEqual({ gone: 0, life: 9, reads: ["List", "Status"] });
   });
 
-  it("never takes an old life's Session item as the new life's connection", () => {
+  it("never takes an old life's connection item as the new life's connection", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
     const status = { _tag: "Status", attempt: 0, network: alpha } as const;
 
@@ -5612,7 +5612,7 @@ describe("where the day changes", () => {
     });
   });
 
-  it("stands in either direction, as a Network's time can go back", () => {
+  it("stands in either direction, as a network's time can go back", () => {
     const [a, b] = [midnightUtc + 36 * hour, midnightUtc + 12 * hour];
 
     expect(dayText(dayRows([a, b], { zone: fixed(0) }))).toStrictEqual([
@@ -5839,10 +5839,10 @@ const runRows = (
   );
 };
 
-describe("a run of Messages under one nick", () => {
+describe("a run of messages under one nick", () => {
   const at = midnightUtc + 12 * hour;
 
-  it("joins consecutive plain Messages from one User, the first heading the run", () => {
+  it("joins consecutive plain messages from one user, the first heading the run", () => {
     expect(runRows([said(1, at), said(2, at + minute), said(3, at + 2 * minute)])).toStrictEqual([
       1,
       "+2",
@@ -5850,7 +5850,7 @@ describe("a run of Messages under one nick", () => {
     ]);
   });
 
-  it("takes a nick in any case as the same User", () => {
+  it("takes a nick in any case as the same user", () => {
     expect(runRows([said(1, at, "Alice"), said(2, at + minute, "aLICE")])).toStrictEqual([1, "+2"]);
   });
 
@@ -5880,13 +5880,13 @@ describe("a run of Messages under one nick", () => {
     ).toStrictEqual([1, "+2", 3, 4]);
   });
 
-  it("ends when another User speaks", () => {
+  it("ends when another user speaks", () => {
     expect(
       runRows([said(1, at), said(2, at + minute, "bob"), said(3, at + 2 * minute)])
     ).toStrictEqual([1, 2, 3]);
   });
 
-  it("ends at any Activity, a numeric of the Ircd's among it", () => {
+  it("ends at any Activity, a numeric of the server's among it", () => {
     expect(
       runRows([
         said(1, at),
@@ -5919,7 +5919,7 @@ describe("a run of Messages under one nick", () => {
     ).toStrictEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it("ends when more than five minutes separate a Message from the one before it, either way", () => {
+  it("ends when more than five minutes separate a message from the one before it, either way", () => {
     expect(
       runRows([
         said(1, at),
@@ -6045,7 +6045,7 @@ describe("joins, parts, quits, and changes of nick in a row", () => {
     ).toStrictEqual([[cursor(10, 1), 4, [1, 2, 3, 4]]]);
   });
 
-  it("end at a Message, each run its own row, and a lone one is a plain row", () => {
+  it("end at a message, each run its own row, and a lone one is a plain row", () => {
     expect(
       foldRows([
         joins(1, "alice"),
@@ -6080,7 +6080,7 @@ describe("joins, parts, quits, and changes of nick in a row", () => {
     ]);
   });
 
-  it("are not folded where they are Self's, which split a run in two, as Self is known by an earlier nick too, and not at all while Self's nick is unknown", () => {
+  it("are not folded where they are your, which split a run in two, as you is known by an earlier nick too, and not at all while your nick is unknown", () => {
     const items = [
       joins(1, "alice"),
       joins(2, "amy"),
@@ -6180,8 +6180,8 @@ const renamed = (sequence: number, from: string, to: string, timeline = idOf(1))
     timeline
   );
 
-describe("Self's nick", () => {
-  it("is what known said, which a Session that began after it replaces, and a change of nick in the Network's own Timeline moves", () => {
+describe("Your nick", () => {
+  it("is what known said, which a connection that began after it replaces, and a change of nick in the network's own conversation moves", () => {
     let state = statusOf(following(), "me");
     const known = selfOf(state, alpha);
 
@@ -6203,7 +6203,7 @@ describe("Self's nick", () => {
     }).toStrictEqual({ began: "me2", known: "me", renamed: "me3", unrelated: "me3" });
   });
 
-  it("is kept after the Session ends, and is not unknown again by a read that says none", () => {
+  it("is kept after the connection ends, and is not unknown again by a read that says none", () => {
     let state = statusOf(following(), "me");
 
     state = reduceTimelines(state, ended(6));
@@ -6219,7 +6219,7 @@ describe("Self's nick", () => {
     });
   });
 
-  it("is not unknown for a Network not held, or before it is told", () => {
+  it("is not unknown for a network not held, or before it is told", () => {
     expect({
       held: selfOf(following(), alpha),
       none: selfOf(following(), networkId("beta")),

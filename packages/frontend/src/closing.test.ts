@@ -71,8 +71,8 @@ const offered: LeavingEvent = { _tag: "Offered", channel: "#iirc", network: libe
 
 const closedById = (timeline: Timeline) => closeOf(timeline)?.timeline;
 
-describe("closing a Timeline", () => {
-  it("closes a Channel or a Direct Message from its row, by its id, whatever names it, and never a Network's own", () => {
+describe("closing a conversation", () => {
+  it("closes a channel or a direct message from its row, by its id, whatever names it, and never a network's own", () => {
     const idOf = timelineOf("Channel", "#iirc").id;
 
     expect({
@@ -94,7 +94,7 @@ describe("closing a Timeline", () => {
   });
 });
 
-describe("the offer to leave a Channel instead", () => {
+describe("the offer to leave a channel instead", () => {
   it("offers to leave it, and leaves it as `/part` with its name does, once", () => {
     const asked = folded([offered]);
     const sent = folded([{ _tag: "Sent" }], asked);
@@ -114,7 +114,7 @@ describe("the offer to leave a Channel instead", () => {
     });
   });
 
-  it("leaves a Channel the Configuration wants by the edit, saved with other case or not, and one it does not by parting it", () => {
+  it("leaves a channel the settings wants by the edit, saved with other case or not, and one it does not by parting it", () => {
     const asked = folded([{ _tag: "Offered", channel: "#[Iirc]", network: libera }]);
 
     const edit = {
@@ -206,7 +206,7 @@ const closes = (events: readonly ClosingEvent[]) => {
 };
 
 describe("a close on its way", () => {
-  it("shows its Timeline closed from when it is asked until the stream says it is, once answered closed", () => {
+  it("shows its conversation closed from when it is asked until the stream says it is, once answered closed", () => {
     const asked = closes([{ _tag: "Asked", network: libera, timeline: channel.id }]);
     const answered = reduceClosing(asked, { _tag: "Answered", ask: 0, closedAt: 5 });
 
@@ -222,7 +222,7 @@ describe("a close on its way", () => {
     }).toStrictEqual({ answered: [channel.id], asked: [channel.id], said: [] });
   });
 
-  it("shows its Timeline again once it is refused or failed", () => {
+  it("shows its conversation again once it is refused or failed", () => {
     const refused = closes([
       { _tag: "Asked", network: libera, timeline: channel.id },
       { _tag: "Answered", ask: 0, closedAt: undefined },

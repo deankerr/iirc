@@ -26,7 +26,7 @@ import { layerWeb } from "./web.ts";
 import type { WebSource } from "./web.ts";
 
 const dataDir = Flag.String("data-dir").pipe(
-  Flag.withDescription("Directory holding the Journal, the Credentials, and the API keys")
+  Flag.withDescription("Directory that holds the journal, credentials, and API keys")
 );
 
 /**
@@ -51,7 +51,7 @@ const daemon = Command.make(
   "daemon",
   {
     dataDir,
-    listen: listenFlag("Where the API listens, loopback unless a proxy fronts it"),
+    listen: listenFlag("Address the API listens on. Use loopback unless a proxy sits in front"),
     web: Flag.String("web").pipe(
       // A bare `--web` reads as `--web=`, an empty path, which names no directory: the
       // build compiled into this executable.
@@ -61,7 +61,7 @@ const daemon = Command.make(
       ),
       Flag.withMetavar("dir"),
       Flag.withDescription(
-        "Also serve the web frontend on the API's origin: the one built in, or the one built into =<dir>"
+        "Also serve the web app on the API's address: the built-in one, or the one in =<dir>"
       ),
       Flag.optional
     ),
@@ -77,70 +77,68 @@ const daemon = Command.make(
         switch (error._tag) {
           case "WebFrontendUnusable": {
             return failed(
-              `The web frontend in ${error.directory} could not be served: ${error.reason}. Build it with bun run build:web.`
+              `The web app in ${error.directory} could not be served: ${error.reason}.`
             );
           }
 
           case "WebFrontendNotEmbedded": {
             return failed(
-              "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist."
+              "This build of iirc has no built-in web app, so --web needs a directory, such as --web=apps/web/dist."
             );
           }
 
           case "DataDirectoryLocked": {
             return failed(
-              `The data directory ${directory} is held by another process, most likely another Daemon. Only one may run on it.`
+              `The data directory ${directory} is in use by another process, most likely another daemon. Only one daemon can use it.`
             );
           }
 
           case "DataDirectoryFailed": {
-            return failed(`The data directory ${directory} could not be used: ${error.reason}`);
+            return failed(`Could not use the data directory ${directory}: ${error.reason}`);
           }
 
           case "KeysUnreadable": {
-            return failed(`The API keys in ${error.path} could not be read: ${error.reason}`);
+            return failed(`Could not read the API keys in ${error.path}: ${error.reason}`);
           }
 
           case "SignInsUnreadable": {
-            return failed(`The sign-ins in ${error.path} could not be read: ${error.reason}`);
+            return failed(`Could not read the sign-ins in ${error.path}: ${error.reason}`);
           }
 
           case "SignInsUnwritable": {
-            return failed(`The sign-ins in ${error.path} could not be written: ${error.reason}`);
+            return failed(`Could not write the sign-ins in ${error.path}: ${error.reason}`);
           }
 
           case "JournalFailed": {
-            return failed(
-              `The Journal in ${directory} could not be opened or read: ${error.reason}`
-            );
+            return failed(`Could not open or read the journal in ${directory}: ${error.reason}`);
           }
 
           case "JournalVersionMismatch": {
             return failed(
-              `The Journal in ${directory} is version ${error.found}, and this iirc reads version ${error.expected}. Nothing was changed.`
+              `The journal in ${directory} is version ${error.found}, but this iirc reads version ${error.expected}. Nothing was changed.`
             );
           }
 
           case "TimelineStoreFailed": {
             return failed(
-              `The Timelines in ${directory}/views.sqlite could not be opened: ${error.reason}. They are derived from the Journal, so removing the file rebuilds them.`
+              `Could not open the conversation history in ${directory}/views.sqlite: ${error.reason}. It is rebuilt from the journal, so you can remove the file.`
             );
           }
 
           case "PreviewCacheFailed": {
             return failed(
-              `The Previews in ${directory}/previews.sqlite could not be opened: ${error.reason}. Removing the file loses nothing but fetches.`
+              `Could not open the preview cache in ${directory}/previews.sqlite: ${error.reason}. You can remove the file; previews are fetched again.`
             );
           }
 
           case "DecodersMissing": {
             return failed(
-              `This runtime cannot decode ${error.missing.join(", ")}, so it would read the Journal wrongly. Run iirc on the Bun it was built for.`
+              `This runtime cannot decode ${error.missing.join(", ")}, so it would read the journal incorrectly.`
             );
           }
 
           case "ServeError": {
-            return failed(`The API could not listen on ${listen.host}:${listen.port}.`);
+            return failed(`Could not listen on ${listen.host}:${listen.port}.`);
           }
 
           default: {
@@ -150,11 +148,11 @@ const daemon = Command.make(
       }),
       // Bun's server throws when it cannot listen, such as on a port in use.
       Effect.catchDefect(() =>
-        Effect.fail(failed(`The API could not listen on ${listen.host}:${listen.port}.`))
+        Effect.fail(failed(`Could not listen on ${listen.host}:${listen.port}.`))
       ),
       reportedOnStderr
     )
-).pipe(Command.withDescription("Stay on every configured Network, and serve the API"));
+).pipe(Command.withDescription("Stay connected to every configured network and serve the API"));
 
 const keyCreate = Command.make(
   "create",
@@ -162,7 +160,7 @@ const keyCreate = Command.make(
     dataDir,
     name: Argument.String("name").pipe(
       Argument.withSchema(KeyName),
-      Argument.withDescription("Whose key it is, such as `phone` or `agent`")
+      Argument.withDescription("Name for the key, such as `phone` or `agent`")
     ),
   },
   ({ dataDir: directory, name }) =>
@@ -180,12 +178,12 @@ const keyCreate = Command.make(
         switch (error._tag) {
           case "DataDirectoryLocked": {
             return failed(
-              `The data directory ${directory} is held, most likely by a running Daemon. Stop it first: keys are created only while it is stopped.`
+              `The data directory ${directory} is in use, most likely by a running daemon. Stop the daemon first: you can only create keys while it is stopped.`
             );
           }
 
           case "DataDirectoryFailed": {
-            return failed(`The data directory ${directory} could not be used: ${error.reason}`);
+            return failed(`Could not use the data directory ${directory}: ${error.reason}`);
           }
 
           case "KeyExists": {
@@ -194,13 +192,13 @@ const keyCreate = Command.make(
 
           case "KeysUnreadable": {
             return failed(
-              `The API keys in ${error.path} could not be read, so no key was made: ${error.reason}`
+              `Could not read the API keys in ${error.path}, so no key was created: ${error.reason}`
             );
           }
 
           case "KeysUnwritable": {
             return failed(
-              `The API keys in ${error.path} could not be written, so no key was made: ${error.reason}`
+              `Could not write the API keys in ${error.path}, so no key was created: ${error.reason}`
             );
           }
 
@@ -213,7 +211,7 @@ const keyCreate = Command.make(
       Effect.flatMap((key) => Console.log(Redacted.value(key))),
       reportedOnStderr
     )
-).pipe(Command.withDescription("Create an API key and print it once. The Daemon must be stopped."));
+).pipe(Command.withDescription("Create an API key and print it once. The daemon must be stopped."));
 
 const key = Command.make("key").pipe(
   Command.withDescription("Manage API keys"),

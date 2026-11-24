@@ -86,12 +86,12 @@ const Importing = () => {
     }
   };
 
-  let status = "Paste a theme's text, or choose its file.";
+  let status = "Paste a theme or choose a file.";
 
   if (read === undefined && draft.text.trim() !== "") {
-    status = "Reading…";
+    status = "Loading…";
   } else if (read?._tag === "Parsed") {
-    status = `Read as ${read.value.format}.`;
+    status = `Recognized as ${read.value.format}.`;
   } else if (read?._tag === "Invalid") {
     ({ message: status } = read);
   }
@@ -103,8 +103,7 @@ const Importing = () => {
       </Heading>
       <div className={styles.field}>
         <label className={styles.label} htmlFor={textId}>
-          A theme file&apos;s text: base16 or base24, iTerm2, Alacritty, Kitty, Ghostty, or Windows
-          Terminal
+          Theme file text: base16, base24, iTerm2, Alacritty, Kitty, Ghostty, or Windows Terminal
         </label>
         <textarea
           aria-describedby={statusId}
@@ -126,7 +125,7 @@ const Importing = () => {
           acceptedFileTypes={[".yaml", ".yml", ".itermcolors", ".toml", ".conf", ".json", ""]}
           onSelect={onSelect}
         >
-          <Button>Choose a file…</Button>
+          <Button>choose a file…</Button>
         </FileTrigger>
         {draft.fileName === undefined ? null : (
           <span className={styles.muted}>{draft.fileName}</span>
@@ -142,7 +141,7 @@ const Importing = () => {
       {read?._tag === "Parsed" ? <Sample /> : null}
       <div className={styles.field}>
         <label className={styles.label} htmlFor={nameId}>
-          Name
+          name
         </label>
         <input
           autoCapitalize="off"
@@ -162,14 +161,14 @@ const Importing = () => {
       )}
       <div className={styles.row}>
         <Button isDisabled={read?._tag !== "Parsed"} type="submit" variant="primary">
-          Save
+          save
         </Button>
         <Button
           onPress={() => {
             cancel(undefined);
           }}
         >
-          Cancel
+          cancel
         </Button>
       </div>
     </Form>

@@ -146,7 +146,7 @@ describe("the sign-in screen", () => {
       field: "",
       inAtoms: false,
       inReact: false,
-      label: "Key",
+      label: "api key",
       state: { _tag: "SignedOut", signIn: { _tag: "Failed", failure: "WrongKey" } },
       tracker: [wrongKey, ""],
       typed: false,

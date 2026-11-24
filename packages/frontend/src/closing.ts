@@ -148,7 +148,7 @@ export const leaveOf = (
  * @returns The title and the body.
  */
 export const offerOf = (channel: string, network: NetworkId) => ({
-  body: `A Channel you are in stays in the sidebar. Leaving parts it, and takes it from ${network}'s Channels if it is among them. Once you have left, it can be closed.`,
+  body: `A channel you are in stays in the sidebar. Leaving removes it from ${network}'s channels, and you can close it afterward.`,
   title: `You are in ${channel}. Leave it?`,
 });
 

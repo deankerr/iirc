@@ -161,7 +161,7 @@ export const layerUiConfiguration = Layer.effect(UiConfiguration)(
             const sequence = yield* journal.append({ _tag: "Change", change: one });
 
             yield* SubscriptionRef.set(held, foldChange(before, one, sequence));
-            yield* Effect.logInfo("Changed a ui option", { option: one.option });
+            yield* Effect.logInfo("Changed ui option", { option: one.option });
 
             return sequence;
           })

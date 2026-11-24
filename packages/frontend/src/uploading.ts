@@ -913,25 +913,25 @@ export const failureText = (
     }
 
     case "StoreFull": {
-      return `The store is full: Uploads may hold ${sizeText(failure.maxTotal)} in all, so ${name} was not kept.`;
+      return `Storage is full: uploads can total ${sizeText(failure.maxTotal)}, so ${name} was not kept.`;
     }
 
     case "StoreUnavailable": {
-      return `The store that keeps Uploads could not be reached, so ${name} was not kept.`;
+      return `The storage that keeps uploads could not be reached, so ${name} was not kept.`;
     }
 
     case "JournalFailed": {
-      return `The Daemon could not write its Journal, so ${name} was not kept.`;
+      return `The daemon could not write its history, so ${name} was not kept.`;
     }
 
     case "NoAnswer": {
       return failure.sent
-        ? `The Daemon did not answer, so whether ${name} was kept is unknown.`
-        : `The Daemon did not answer, so ${name} was not sent.`;
+        ? `The daemon did not answer, so it's unknown whether ${name} was kept.`
+        : `The daemon did not answer, so ${name} was not sent.`;
     }
 
     case "Unexpected": {
-      return `The Daemon answered in a way the Frontend could not read, so whether ${name} was kept is unknown.`;
+      return `The daemon sent a reply this device could not read, so it's unknown whether ${name} was kept.`;
     }
 
     default: {

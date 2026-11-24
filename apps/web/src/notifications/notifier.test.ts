@@ -118,7 +118,7 @@ describe("the browser's Notifier, over storage that may refuse", () => {
         outcome: {
           _tag: "NotDone",
           message:
-            "Notifications are on for this page only: this browser would not keep the choice for the device.",
+            "Notifications are on for this page only: this browser can't keep the choice for this device.",
         },
       },
     });
@@ -134,7 +134,7 @@ describe("the browser's Notifier, over storage that may refuse", () => {
         outcome: {
           _tag: "NotDone",
           message:
-            "Notifications are off for this page only: this browser would not keep the choice for the device.",
+            "Notifications are off for this page only: this browser can't keep the choice for this device.",
         },
       },
     });

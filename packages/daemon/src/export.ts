@@ -39,13 +39,13 @@ const because = (reason: string | undefined): string =>
   reason === undefined || reason === "" ? "" : ` (${plain(reason)})`;
 
 const closeReasons: Readonly<Record<CloseReason, string>> = {
-  Ended: "the Ircd closed the connection",
+  Ended: "the server closed the connection",
   HungUp: "we hung up",
   Refused: "the connection was refused",
   Reset: "the connection was reset",
   TimedOut: "the connection timed out",
-  Tls: "TLS failed",
-  Unreachable: "the Ircd could not be reached",
+  Tls: "the TLS handshake failed",
+  Unreachable: "the server could not be reached",
 };
 
 const endReason = (reason: EndReason): string => {
@@ -55,23 +55,23 @@ const endReason = (reason: EndReason): string => {
     }
 
     case "Disabled": {
-      return "the Network was disabled";
+      return "the network was disabled";
     }
 
     case "Error": {
-      return "the Ircd sent ERROR";
+      return "the server sent an error";
     }
 
     case "LoginFailed": {
-      return "logging in failed";
+      return "login failed";
     }
 
     case "Restarted": {
-      return "the Daemon restarted";
+      return "the daemon restarted";
     }
 
     case "Silent": {
-      return "the Ircd stopped answering";
+      return "the server stopped responding";
     }
 
     case "Upgrading": {
@@ -359,47 +359,47 @@ const activityText = (activity: Activity): string => {
 const attemptedText = (attempted: Attempted): string => {
   switch (attempted._tag) {
     case "Topic": {
-      return `Your topic change for ${plain(attempted.channel)}`;
+      return `change the topic of ${plain(attempted.channel)}`;
     }
 
     case "Kick": {
-      return `Your kick of ${attempted.nicks.map(plain).join(", ")} from ${plain(attempted.channel)}`;
+      return `kick ${attempted.nicks.map(plain).join(", ")} from ${plain(attempted.channel)}`;
     }
 
     case "Part": {
-      return `Your leaving of ${plain(attempted.channel)}`;
+      return `leave ${plain(attempted.channel)}`;
     }
 
     case "Mode": {
-      return `Your mode change ${plain(attempted.modes)} on ${plain(attempted.target)}`;
+      return `set ${plain(attempted.modes)} on ${plain(attempted.target)}`;
     }
 
     case "Invite": {
-      return `Your invite of ${plain(attempted.nick)} to ${plain(attempted.channel)}`;
+      return `invite ${plain(attempted.nick)} to ${plain(attempted.channel)}`;
     }
 
     case "Nick": {
-      return `Your nick change to ${plain(attempted.nick)}`;
+      return `change your nick to ${plain(attempted.nick)}`;
     }
 
     case "Away": {
-      return attempted.away ? "Marking you away" : "Marking you back";
+      return attempted.away ? "mark you away" : "mark you back";
     }
 
     case "Setname": {
-      return "Your real name change";
+      return "change your real name";
     }
 
     case "Raw": {
-      return attempted.command === null ? "Your raw line" : `Your raw ${plain(attempted.command)}`;
+      return attempted.command === null ? "send a raw command" : `send ${plain(attempted.command)}`;
     }
 
     case "Ctcp": {
-      return `Your CTCP ${plain(attempted.command)} to ${plain(attempted.nick)}`;
+      return `send CTCP ${plain(attempted.command)} to ${plain(attempted.nick)}`;
     }
 
     case "Ping": {
-      return `Your PING of ${plain(attempted.nick)}`;
+      return `ping ${plain(attempted.nick)}`;
     }
 
     default: {
@@ -417,7 +417,7 @@ const contentText = (content: Content): string => {
   switch (content._tag) {
     case "Message": {
       const delivery = content.ours?.delivery;
-      // The Ircd's own text for one of ours it confirmed, which may differ from what we said.
+      // The server's own text for one of ours it confirmed, which may differ from what we said.
       const text = plain(delivery?._tag === "Confirmed" ? delivery.text : content.text);
       const nick = plain(content.sender);
 
@@ -461,10 +461,8 @@ const contentText = (content: Content): string => {
     case "ActionRefused": {
       const { reason } = content;
 
-      return `-- ${attemptedText(content.attempted)}${
-        reason._tag === "Rejected"
-          ? ` was refused (${plain(reason.reply)})`
-          : " was not sent: its connection ended first"
+      return `-- Could not ${attemptedText(content.attempted)}${
+        reason._tag === "Rejected" ? ` (${plain(reason.reply)})` : ": the connection ended first"
       }`;
     }
 

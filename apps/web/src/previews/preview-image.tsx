@@ -219,7 +219,7 @@ export const EnlargeControl = ({
   readonly onOpen?: (() => void) | undefined;
 }) => (
   <OpensLarger alt={name} large={large} link={link} onOpen={onOpen}>
-    <AriaButton aria-label={`Open ${name} large`} className={`${larger.control} ${styles.enlarge}`}>
+    <AriaButton aria-label={`enlarge ${name}`} className={`${larger.control} ${styles.enlarge}`}>
       <Icon name="enlarge" />
     </AriaButton>
   </OpensLarger>
@@ -252,7 +252,7 @@ const StillImage = ({
     <Holder drawn={image.drawn} loaded={loaded} reference={setElement} box={image.dimensions} still>
       {seen ? (
         <OpensLarger alt={image.alt} large={{ _tag: "Image", src: image.src }} link={link}>
-          <AriaButton aria-label={`Open ${image.alt} large`} className={styles.press}>
+          <AriaButton aria-label={`enlarge ${image.alt}`} className={styles.press}>
             <img
               alt={image.alt}
               className={styles.picture}

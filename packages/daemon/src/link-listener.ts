@@ -38,7 +38,7 @@ const plain = (status: number, text: string, cache: string) =>
 
 const notFound = plain(404, "Not found\n", "no-cache");
 
-const unavailable = plain(503, "The store is unavailable\n", "no-store");
+const unavailable = plain(503, "Storage is unavailable\n", "no-store");
 
 // `/<id>/<anything>`, with the id the first segment and something after it.
 const linkPath = /^\/(?<id>[^/]+)\/.+$/u;
@@ -96,7 +96,7 @@ const serveAt = (address: ListenAddress) =>
     const server = yield* BunHttpServer.make({ ...hostAndPort(address), gracefulShutdownTimeout });
 
     yield* server.serve(Effect.provideService(answer, Uploads, uploads));
-    yield* Effect.logInfo("Serving Uploads' links", { listen: address });
+    yield* Effect.logInfo("Serving upload links", { listen: address });
   });
 
 /**
@@ -148,7 +148,7 @@ export const layerLinkListener = Layer.effectDiscard(
             yield* Ref.set(bound, Option.some(scope));
           } else {
             yield* Scope.close(scope, exit);
-            yield* Effect.logError("Could not serve Uploads' links", { listen: address });
+            yield* Effect.logError("Could not serve upload links", { listen: address });
           }
         })
       );

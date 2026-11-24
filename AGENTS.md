@@ -38,6 +38,15 @@ The lint fence in `oxlint.config.ts` is deliberately small. A gap it misses is f
 - **A README bullet is one behaviour a caller can rely on,** in a sentence or two.
 - **"Not yet" names what a caller would otherwise assume the package does,** once, in the package that would do it. Work someone means to do is an issue.
 
+# Copy
+
+User-facing copy is written in plain, contemporary US English: direct, calm, and active. Address the user as "you" and "your". Lead with what happened or what to do in one or two short sentences, using standard UI verbs (`loading…`, `save`, `set` / `not set`, `shared in`, `leave`, `current`, `monospace`).
+
+- **Vocabulary:** Use `GLOSSARY.md` terms in lowercase, applying every `_UI_:` override in user-facing copy. Use `daemon` when distinguishing it from an IRC server or browser; omit it when obvious.
+- **Casing:** Use lowercase for UI labels (sidebar headings and nav items, pane titles, buttons, menus, field labels, status badges, lookup headings, formatting labels). Use sentence case for prose (dialog titles and descriptions, empty states, helper text, notices, command and option descriptions, activity lines, and logs), never capitalizing common nouns mid-sentence. Tooltips and `aria-label`s match their element: lowercase for short action labels, sentence case for full phrases.
+- **Units:** Format file sizes in decimal (base 1000) with uppercase units: `B`, `KB`, `MB`, `GB`, `TB`.
+- **Web UI vs. logs and CLI:** Web UI copy (notices, errors, dialogs, command help, option descriptions) uses plain end-user language, translating internal mechanics (`journaled`, `folded`) and IRC protocol tokens (`ISUPPORT`, `CHANMODES`, `PREFIX`, `ACCOUNTEXTBAN`) into what the user sees. Daemon/runtime logs (`/tail`, stdout) and CLI errors (`apps/iirc`) use the same plain US English, while allowing operational terms (`daemon`, `journal`, `vault`, `credential`, `TLS`, `SASL`, `SQLite`, `S3`) where they aid debugging; keep CLI errors valid for a release binary.
+
 # Agent skills
 
 ## Issue tracker

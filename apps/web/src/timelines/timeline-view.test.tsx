@@ -710,7 +710,7 @@ const at = (type: string, clientX: number) =>
  * The grip on the rule between nick and text, over the log.
  * @returns It, or none.
  */
-const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
+const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="resize nick column"]');
 
 describe("what the view says it shows", () => {
   beforeEach(() => {
@@ -871,11 +871,11 @@ describe("what the view says it shows", () => {
 
     // Read on purpose: the newest go past the cap, and the Message is reached without
     // scrolling, with a way back to the latest.
-    await press("Load older");
+    await press("load older");
     await settled(() => logOf().textContent?.includes("line 1"));
 
     const reached = {
-      jump: document.body.textContent?.includes("Jump to latest"),
+      jump: document.body.textContent?.includes("jump to latest"),
       reads: [...daemon.reads],
     };
 
@@ -901,7 +901,7 @@ describe("what the view says it shows", () => {
     };
 
     live(1102);
-    await press("Jump to latest");
+    await press("jump to latest");
     await settled(() => logOf().textContent?.includes("line 1102"));
     await settled(() => daemon.reads.length === 1);
 
@@ -911,7 +911,7 @@ describe("what the view says it shows", () => {
     await settled(() => daemon.reads.length === 2);
 
     expect({
-      jumpAfter: document.body.textContent?.includes("Jump to latest"),
+      jumpAfter: document.body.textContent?.includes("jump to latest"),
       reached,
       reads: daemon.reads,
       unasked,
@@ -1095,7 +1095,7 @@ describe("what the view says it shows", () => {
     expect({
       closed: withClosed?.includes("not connected"),
       open: logOf().textContent?.includes("not connected since"),
-      start: withClosed?.includes("The start of this Timeline"),
+      start: withClosed?.includes("The start of this conversation"),
     }).toStrictEqual({ closed: false, open: true, start: true });
   });
 
@@ -1107,7 +1107,7 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 2"));
 
     const said = [...logOf().querySelectorAll<HTMLElement>("p")].find(
-      (one) => one.textContent === "The start of this Timeline"
+      (one) => one.textContent === "The start of this conversation"
     );
 
     const style = said === undefined ? undefined : getComputedStyle(said);
@@ -1361,7 +1361,7 @@ describe("what the view says it shows", () => {
     );
 
     const button = row?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Go to the message this answers"]'
+      'button[aria-label="Go to the replied message"]'
     );
 
     const before = {
@@ -1687,7 +1687,7 @@ describe("what the view says it shows", () => {
     await settled(() => registry.get(openTimeline)._tag === "Shown");
     await settled(() => logOf().textContent?.includes("line 2"));
 
-    const grips = document.querySelectorAll('[aria-label="Resize the nick column"]').length;
+    const grips = document.querySelectorAll('[aria-label="resize nick column"]').length;
 
     // Right widens it, three `0`s.
     await act(async () => {
@@ -2688,7 +2688,7 @@ describe("replying to a Message", () => {
     await settled(() => document.querySelector('[role="menu"]') !== null);
 
     expect({ items: menuItems(), tagged, untagged }).toStrictEqual({
-      items: ["Reply"],
+      items: ["reply"],
       tagged: [true, null],
       untagged: [null, null],
     });
@@ -2705,7 +2705,7 @@ describe("replying to a Message", () => {
         ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    await chooseFromMenu("Reply");
+    await chooseFromMenu("reply");
     await settled(() => answeringShown() !== undefined);
 
     expect({
@@ -2722,13 +2722,13 @@ describe("replying to a Message", () => {
         menuButtonIn(rowSaying("said 1"))?.click();
         await Promise.resolve();
       });
-      await chooseFromMenu("Reply");
+      await chooseFromMenu("reply");
       await settled(() => answeringShown() !== undefined);
     };
 
     await choose();
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Stop replying"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="stop replying"]')?.click();
       await Promise.resolve();
     });
     const byButton = answeringShown();
@@ -2754,7 +2754,7 @@ describe("replying to a Message", () => {
       menuButtonIn(rowSaying("said 1"))?.click();
       await Promise.resolve();
     });
-    await chooseFromMenu("Reply");
+    await chooseFromMenu("reply");
     await settled(() => answeringShown() !== undefined);
 
     await act(async () => {
@@ -2984,7 +2984,7 @@ describe("going to a date", () => {
     await sentWithEnter();
     await landedOn("<peer> line 1");
 
-    const first = logOf().textContent?.includes("The start of this Timeline");
+    const first = logOf().textContent?.includes("The start of this conversation");
 
     await typed("/date 2100-01-01");
     await sentWithEnter();

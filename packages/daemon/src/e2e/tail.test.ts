@@ -43,7 +43,7 @@ describe("the Tail across a restart", () => {
     const optionLines = (lines: typeof result.before.lines) =>
       lines.filter(
         (line) =>
-          line.message.startsWith("Changed a ui option") &&
+          line.message.startsWith("Changed ui option") &&
           line.message.includes('"timeline.timeFormat"')
       );
 

@@ -103,7 +103,7 @@ export const droppedTracks = (bytes: Uint8Array, header: number): ReadonlySet<nu
 const dropTrack = (bytes: Uint8Array, sink: Sink, trak: Box, movie: Movie): Unreadable | null => {
   // A track that cannot be named cannot be told apart in a fragment or a reference.
   if (readTrack(bytes, trak).id === undefined) {
-    return bad("a dropped track's tkhd names no track");
+    return bad("removed track's tkhd box names no track");
   }
 
   const runs = droppedSamples(bytes, trak);
@@ -129,7 +129,7 @@ const dropTrack = (bytes: Uint8Array, sink: Sink, trak: Box, movie: Movie): Unre
 
   for (const run of joined) {
     if (!insideOne(movie.mdats, starts, run)) {
-      return bad("a dropped track's samples are not in an mdat");
+      return bad("removed track's samples are not in an mdat box");
     }
 
     sink.patches.push({ at: run.start, zeros: run.end - run.start });
@@ -146,7 +146,7 @@ const dropTrack = (bytes: Uint8Array, sink: Sink, trak: Box, movie: Movie): Unre
   return overfull(sink);
 };
 
-const cannotRemove = () => bad("a kept track's reference to a dropped track cannot be removed");
+const cannotRemove = () => bad("cannot remove a kept track's reference to a removed track");
 
 // Takes the dropped tracks out of a kept track's `tref`. A reference that names only dropped
 // tracks is retyped, and one that names others too is rewritten without them, followed by a
@@ -208,7 +208,7 @@ const dropReferences = (
 const namedTrack = (bytes: Uint8Array, box: Box, at: number): number | Unreadable =>
   box.start + box.header + at + 4 <= box.end
     ? readBe(bytes, box.start + box.header + at, 4)
-    : bad("a box that names a track is cut short");
+    : bad("truncated box that names a track");
 
 // What a fragment of a dropped track becomes: retyped when it holds no run of samples, and
 // refused when it does, since zeroing a fragment's samples is not done.
@@ -220,7 +220,7 @@ const dropFragment = (bytes: Uint8Array, sink: Sink, traf: Box): Unreadable | nu
   }
 
   if (children.some((child) => child.type === types.trun)) {
-    return bad("a fragment holds a run of a dropped track");
+    return bad("fragment holds a run of a removed track");
   }
 
   retype(sink, traf);
@@ -249,7 +249,7 @@ const special = (
   }
 
   if (box.type === types.leva) {
-    return bad("a level assignment of a movie that drops a track");
+    return bad("level assignment in a movie that removes a track");
   }
 
   if (namingOne.has(box.type)) {
@@ -276,7 +276,9 @@ const special = (
     }
 
     const header = tfhd.find((child) => child.type === types.tfhd);
-    const id = header === undefined ? bad("a fragment with no tfhd") : namedTrack(bytes, header, 4);
+
+    const id =
+      header === undefined ? bad("fragment has no tfhd box") : namedTrack(bytes, header, 4);
 
     if (id instanceof Unreadable) {
       return id;
