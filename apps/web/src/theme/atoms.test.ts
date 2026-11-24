@@ -247,9 +247,13 @@ describe("themes", () => {
     });
   });
 
-  it("draws the theme as custom properties on the root, its scheme, and its name, system as the device prefers", async () => {
+  it("draws the theme as custom properties on the root, its scheme, its name, and the browser's bar, system as the device prefers", async () => {
     const fake = signedIn();
     const { registry, type } = await page(fake);
+    const bar = document.createElement("meta");
+    bar.name = "theme-color";
+    bar.content = "#000000";
+    document.head.append(bar);
     const stop = watchTheme(registry);
     const root = document.documentElement;
 
@@ -258,6 +262,7 @@ describe("themes", () => {
       root.style.getPropertyValue("--irc-98"),
       root.style.colorScheme,
       root.dataset.theme,
+      bar.content,
     ];
 
     const before = read();
@@ -268,11 +273,12 @@ describe("themes", () => {
     const after = read();
 
     stop();
+    bar.remove();
 
     expect({ after, before }).toStrictEqual({
-      after: ["#fdf6e3", "#6a6969", "light", "solarized-light"],
+      after: ["#fdf6e3", "#6a6969", "light", "solarized-light", "#fdf6e3"],
       // happy-dom's device prefers light, which system follows.
-      before: ["#f6f5f1", "#696868", "light", "system"],
+      before: ["#f6f5f1", "#696868", "light", "system", "#f6f5f1"],
     });
   });
 

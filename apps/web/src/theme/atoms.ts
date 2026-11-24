@@ -397,7 +397,8 @@ export const saveImport = runtime
  * Draws the page in the theme in effect, or the one previewed: every colour the core
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
- * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
+ * `color-scheme` as the theme is light or dark, `data-theme` as the name in effect, and every
+ * `theme-color` the page declares as the theme's background, for the browser's bar. The
  * text's size, line height, font, widths, and room between rows are custom properties there
  * too. Whether the device prefers dark is followed, for `system`.
  * @param registry - The registry.
@@ -420,6 +421,12 @@ export const watchTheme = (registry: AtomRegistry.AtomRegistry): (() => void) =>
 
     root.style.colorScheme = theme.scheme;
     root.dataset.theme = registry.get(uiInEffect).theme;
+
+    // `index.html` declares one for light and one for dark until the theme is known. The
+    // theme drawn has already followed the device, so each takes its background.
+    for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+      meta.content = theme.tokens.background;
+    }
   };
 
   const drawType = () => {

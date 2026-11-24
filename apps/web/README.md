@@ -267,6 +267,8 @@ The core decides and this package draws and does the I/O.
 - **The browser's Back closes what Escape closes, the topmost first,** on any screen: the drawer, the sheet, the members over a narrow Pane, a Lookup card, a dialog, a Preview's larger view, or a menu. Each takes one entry in the history as it opens, with the same URL, and gives it back however it closes, so with nothing open Back leaves the page.
 - **Where the pointer is coarse, every control is at least 44px and every field's text at least 16px,** so iOS Safari does not zoom into it.
 - **Pinch zoom is never turned off.**
+- **Installs as an app,** from its manifest, and opens on its own without the browser's bars. Installing needs a secure context, so a Daemon reached other than on `localhost` needs TLS in front of it. An app installed on iOS holds a Sign-in of its own, apart from Safari's.
+- **The browser's bar, or an installed app's, is drawn in the theme's background,** light or dark as the device prefers until the theme is known.
 
 ## How it is built
 
@@ -428,5 +430,5 @@ The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser se
 - **Splitting the bundle.** The page's code is one script, but for the emoji names and the theme reader's Worker.
 - **Notifying per Network, or of words of the Owner's own.** Whether a device notifies is kept in its `localStorage`.
 - **A sound, or a badge on an installed app's icon.**
-- **An installable web app,** with a manifest.
+- **A service worker.** Nothing is kept for use without the Daemon, and Android and an app installed on iOS show no notification.
 - **Moving a Pane by dragging it.**
