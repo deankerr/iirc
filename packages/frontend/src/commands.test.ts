@@ -178,7 +178,7 @@ describe("reading a line", () => {
       namedOff: interpret("/disconnect oftc", inChannel),
       none: message("/connect", nowhere),
     }).toStrictEqual({
-      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, ., _, or -, not "Not-An-Id". /connect [id]',
+      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Not-An-Id". /connect [id]',
       connect: enabled("on"),
       disconnect: enabled("off"),
       drafting: enabled("off"),
@@ -220,7 +220,7 @@ describe("reading a line", () => {
       none: message("/network remove", nowhere),
       unknownChoice: message("/network remove oftc forget", nowhere),
     }).toStrictEqual({
-      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, ., _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
+      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
       drafting: asks(network, undefined),
       dropFocused: asks(network, false),
       dropNone:

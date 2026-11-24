@@ -305,13 +305,18 @@ const fromLinks = (
   });
 
 /**
- * Fetches from the link listener once it is bound.
+ * Fetches from the link listener once it is bound. Every answer the listener gives carries
+ * the safety headers, so an answer without them came from something else on the port, such
+ * as a server that held it before the listener bound, and is not the one waited for.
  * @param port - Its port.
  * @param path - The path.
- * @returns The response, or `refused` if it never was.
+ * @returns The response, or the last answer if the listener never answered.
  */
 const fromBound = (port: number, path: string) =>
-  settled(fromLinks(port, path), (answer) => answer !== "refused");
+  settled(
+    fromLinks(port, path),
+    (answer) => answer !== "refused" && answer.headers.has("x-content-type-options")
+  );
 
 const statusOf = (answer: Response | "refused") =>
   answer === "refused" ? "refused" : answer.status;

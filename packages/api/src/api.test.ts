@@ -191,12 +191,13 @@ describe("the contract", () => {
     const network = Schema.is(NetworkId);
     const intent = Schema.is(CallerIntent);
 
-    expect([network("libera"), network("Libera"), network("../x"), network("")]).toStrictEqual([
-      true,
-      false,
-      false,
-      false,
-    ]);
+    expect([
+      network("libera"),
+      network("Libera"),
+      network("../x"),
+      network("my.net"),
+      network(""),
+    ]).toStrictEqual([true, false, false, false, false]);
     expect([
       intent("a1.b_c~d-e"),
       intent("..."),

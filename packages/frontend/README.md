@@ -270,7 +270,7 @@ The one list a draft's formatting is chosen from, as data for a view to draw: `f
 
 Configuration as an option tree. Every option comes from the annotations on the Client's `NetworkConfiguration` Schema, so a new field is a new option.
 
-An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. Ids and Channel names may hold dots, so a name is an option only when exactly one way of splitting it is valid.
+An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. A Network's id holds no dot, so the id is what sits before the first dot, though a Channel's name may hold dots.
 
 | Kind               | Text                                                          |
 | ------------------ | ------------------------------------------------------------- |

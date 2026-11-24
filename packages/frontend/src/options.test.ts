@@ -53,7 +53,7 @@ import type {
 } from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
-const dotted = Schema.decodeSync(NetworkId)("my.net");
+const hyphenated = Schema.decodeSync(NetworkId)("my-net");
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
 const decode = Schema.decodeSync(NetworkConfiguration);
 
@@ -277,18 +277,18 @@ const at = (name: string) => {
 };
 
 describe("names", () => {
-  it("resolve a network's id with dots, a channel's name with dots, and nothing else", () => {
+  it("resolve a network's id with a hyphen, a channel's name with dots, and nothing else", () => {
     expect({
       channel: at("network.libera.channels.#a.b.key"),
-      dotted: at("network.my.net.nicks"),
-      member: at("network.my.net.login.account"),
+      hyphenated: at("network.my-net.nicks"),
+      member: at("network.my-net.login.account"),
       noNetwork: at("libera.nicks"),
       none: at("network.libera.nope"),
       uppercase: at("network.Libera.nicks"),
     }).toStrictEqual({
       channel: ["libera", "channels", "#a.b", "key"],
-      dotted: [dotted, "nicks"],
-      member: [dotted, "login", "account"],
+      hyphenated: [hyphenated, "nicks"],
+      member: [hyphenated, "login", "account"],
       noNetwork:
         "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.",
       none: "There is no option network.libera.nope.",
@@ -1101,7 +1101,7 @@ describe("the commands", () => {
       badId: {
         _tag: "Invalid",
         message:
-          'A network\'s id is 1 to 64 lowercase letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
+          'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
       },
       noNick: {
         _tag: "Invalid",
@@ -1318,9 +1318,9 @@ describe("an option's menu", () => {
 describe("the options view", () => {
   it("lists the options of each network read, filtered, and keeps the newest read", () => {
     const opened: readonly OptionsEvent[] = [
-      { _tag: "Listed", networks: [libera, dotted] },
+      { _tag: "Listed", networks: [libera, hyphenated] },
       { _tag: "Read", configuration: plain, network: libera, sequence: 5 },
-      { _tag: "Read", configuration: full, network: dotted, sequence: 2 },
+      { _tag: "Read", configuration: full, network: hyphenated, sequence: 2 },
       { _tag: "Read", configuration: full, network: libera, sequence: 3 },
     ];
 
@@ -1335,14 +1335,14 @@ describe("the options view", () => {
       names: listed(state, "*nicks").map((option) => option.name),
     }).toStrictEqual({
       kept: { _tag: "Read", configuration: plain, sequence: 5 },
-      names: ["network.libera.nicks", "network.my.net.nicks"],
+      names: ["network.libera.nicks", "network.my-net.nicks"],
     });
   });
 
   it("says which networks are still read: all before they are listed, then each not read yet", () => {
     const listedTwo = reduceOptions(initialOptions, {
       _tag: "Listed",
-      networks: [libera, dotted],
+      networks: [libera, hyphenated],
     });
 
     const oneRead = reduceOptions(listedTwo, {
@@ -1355,7 +1355,7 @@ describe("the options view", () => {
     const bothDone = reduceOptions(oneRead, {
       _tag: "ReadFailed",
       message: "Not read.",
-      network: dotted,
+      network: hyphenated,
     });
 
     expect({
@@ -1365,8 +1365,8 @@ describe("the options view", () => {
       unlisted: networksReading(initialOptions),
     }).toStrictEqual({
       bothDone: [],
-      listed: ["network.libera.*", "network.my.net.*"],
-      oneRead: ["network.my.net.*"],
+      listed: ["network.libera.*", "network.my-net.*"],
+      oneRead: ["network.my-net.*"],
       unlisted: ["network.*"],
     });
   });
@@ -2213,9 +2213,9 @@ describe("the options view's headings", () => {
 
   // Three Networks listed, two read, and everything else read.
   const everything = [
-    { _tag: "Listed", networks: [dotted, libera, unread] },
+    { _tag: "Listed", networks: [hyphenated, libera, unread] },
     { _tag: "Read", configuration: plain, network: libera, sequence: 1 },
-    { _tag: "Read", configuration: plain, network: dotted, sequence: 1 },
+    { _tag: "Read", configuration: plain, network: hyphenated, sequence: 1 },
     { _tag: "UiRead", ui: { options: uiDefaults, sequence: 1 } },
     { _tag: "OwnerRead", owner },
   ] satisfies readonly OptionsEvent[];
@@ -2245,7 +2245,7 @@ describe("the options view's headings", () => {
       shown: [
         ["away", 2, true],
         ["network.libera", optionsOf(libera, plain, undefined).length, true],
-        ["network.my.net", optionsOf(dotted, plain, undefined).length, true],
+        ["network.my-net", optionsOf(hyphenated, plain, undefined).length, true],
         ["previews", 1, true],
         ["storage", 5, true],
         ["ui", Object.keys(uiDefaults).length, true],
@@ -2474,7 +2474,7 @@ describe("a change on its way", () => {
         change: {
           _tag: "Network",
           edit: { _tag: "Set", path: ["realname"], text: "Dean K" },
-          network: dotted,
+          network: hyphenated,
         },
       },
       {

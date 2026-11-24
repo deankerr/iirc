@@ -1212,11 +1212,11 @@ export const menuOf = (kind: Kind, value: Value): Menu | undefined => {
 const optionsAreNamed =
   "Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.";
 
-const networkIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+const networkIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 /**
  * Whether text is a Network's id, as the API takes it: 1 to 64 lowercase letters,
- * digits, `.`, `_`, or `-`, starting with a letter or digit. The pattern is the API's own.
+ * digits, `_`, or `-`, starting with a letter or digit. The pattern is the API's own.
  * @param text - The text.
  * @returns Whether it is one.
  */
@@ -1293,9 +1293,8 @@ const resolvePath = (rest: string): { readonly path: Path; readonly field: Field
 
 /**
  * The option a dotted name names, read from the Schema alone: `network.<id>.<path>`. A
- * Network's id may hold dots, so each split is tried, and the shortest id that leaves a path
- * the Schema has is the Network's. `network.libera.login.password` is `libera`'s
- * `login.password`, never the `password` of a Network named `libera.login`.
+ * Network's id holds no dot, so the id is whatever sits before the first dot after
+ * `network.`.
  * @param name - The name.
  * @returns The option's Network, path, and field, or why it names none.
  */
@@ -1307,17 +1306,13 @@ export const resolve = (name: string): Parsed<Resolved> => {
   }
 
   const rest = name.slice(prefix.length);
+  const dot = rest.indexOf(".");
+  const network = dot === -1 ? undefined : networkIdOf(rest.slice(0, dot));
+  const at = network === undefined ? undefined : resolvePath(rest.slice(dot + 1));
 
-  for (let dot = rest.indexOf("."); dot !== -1; dot = rest.indexOf(".", dot + 1)) {
-    const network = networkIdOf(rest.slice(0, dot));
-    const at = network === undefined ? undefined : resolvePath(rest.slice(dot + 1));
-
-    if (network !== undefined && at !== undefined) {
-      return parsed({ ...at, network });
-    }
-  }
-
-  return invalid(`There is no option ${name}.`);
+  return network === undefined || at === undefined
+    ? invalid(`There is no option ${name}.`)
+    : parsed({ ...at, network });
 };
 
 // The options under `ui`.

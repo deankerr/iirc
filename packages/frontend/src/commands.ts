@@ -868,7 +868,7 @@ const enabledArguments =
 
     return network === undefined
       ? invalid(
-          `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${id}". ${usage}`
+          `A network's id is 1 to 64 lowercase letters, digits, _, or -, not "${id}". ${usage}`
         )
       : parsed(network);
   };
@@ -917,7 +917,7 @@ const removeArguments = (words: readonly string[], context: CommandContext): Par
 
   return network === undefined
     ? invalid(
-        `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${first}". ${removeUsage}`
+        `A network's id is 1 to 64 lowercase letters, digits, _, or -, not "${first}". ${removeUsage}`
       )
     : parsed({ _tag: "AskRemoval", keep: removalChoices.get(second), network });
 };
@@ -947,7 +947,7 @@ const networkArguments = (args: string, context: CommandContext): Parsed<Intent>
 
   if (network === undefined) {
     return invalid(
-      `A network's id is 1 to 64 lowercase letters, digits, ., _, or -, not "${id}". ${networkUsage}`
+      `A network's id is 1 to 64 lowercase letters, digits, _, or -, not "${id}". ${networkUsage}`
     );
   }
 
@@ -3023,7 +3023,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "Save the open conversation as a text file, all of it or between two dates or times. A date alone covers the whole day.",
+      "Save the current conversation as a text file, all of it or between two dates or times. One date exports from that day onward. An end date includes the whole ending day.",
     id: "conversation.export",
     intents: (range: ExportRange, focus) => [
       { _tag: "Export", since: range.since, timeline: focus.timeline, until: range.until },

@@ -2143,7 +2143,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           // Gaps on Networks ordered by code point, applied against that order: U+E000 comes
           // before U+10000 by code point, and after it as UTF-16 code units, which is how
           // JavaScript compares strings. The store takes any text as a Network's id, so
-          // these are the store's to order, though the API admits only `[a-z0-9._-]`.
+          // these are the store's to order, though the API admits only `[a-z0-9_-]`.
           gap(2, position(5, 2), undefined, supplementary),
           gap(2, position(40, 2), undefined, privateUse),
           gap(2, position(50, 2), undefined, ""),
