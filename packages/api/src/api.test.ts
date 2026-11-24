@@ -191,12 +191,13 @@ describe("the contract", () => {
     const network = Schema.is(NetworkId);
     const intent = Schema.is(CallerIntent);
 
-    expect([network("libera"), network("Libera"), network("../x"), network("")]).toStrictEqual([
-      true,
-      false,
-      false,
-      false,
-    ]);
+    expect([
+      network("libera"),
+      network("Libera"),
+      network("../x"),
+      network("my.net"),
+      network(""),
+    ]).toStrictEqual([true, false, false, false, false]);
     expect([
       intent("a1.b_c~d-e"),
       intent("..."),
@@ -447,21 +448,26 @@ describe("the contract", () => {
     expect({
       defaults: uiDefaults,
       names: uiOptionNames,
-      option: ["timeline.timeFormat", "theme", "timeline.activity", "nope", "TIME", "time"].map(
-        (each) => Option.getOrNull(option(each))
-      ),
+      option: [
+        "conversation.timeFormat",
+        "theme",
+        "conversation.activity",
+        "nope",
+        "TIME",
+        "time",
+      ].map((each) => Option.getOrNull(option(each))),
       options: [
         {
           ...uiDefaults,
+          "conversation.activity": "quiet",
+          "conversation.timeFormat": "HH:mm:ss",
           theme: "dark",
-          "timeline.activity": "quiet",
-          "timeline.timeFormat": "HH:mm:ss",
         },
-        { ...uiDefaults, theme: "dark", "timeline.activity": "loud" },
-        { theme: "dark", "timeline.timeFormat": "HH:mm" },
+        { ...uiDefaults, "conversation.activity": "loud", theme: "dark" },
+        { "conversation.timeFormat": "HH:mm", theme: "dark" },
         { ...uiDefaults, theme: "tokyo-night" },
         { ...uiDefaults, theme: "Tokyo Night" },
-        { ...uiDefaults, "theme.imported": [mine], "timeline.colours": "raw" },
+        { ...uiDefaults, "conversation.colors": "raw", "theme.imported": [mine] },
         { ...uiDefaults, "theme.imported": [mine, mine] },
         {
           ...uiDefaults,
@@ -499,15 +505,27 @@ describe("the contract", () => {
     }).toStrictEqual({
       defaults: {
         aliases: [],
-        "composer.enter": "send",
-        "composer.nickSuffix": ": ",
-        "composer.spellcheck": true,
+        "conversation.activity": "all",
+        "conversation.colors": "theme",
+        "conversation.dateFormat": "full",
+        "conversation.layout": "columns",
+        "conversation.maxWidth": "none",
+        "conversation.nickBrackets": true,
+        "conversation.nickPrefix": true,
+        "conversation.nickWidth": 16,
+        "conversation.spacing": 0.3,
+        "conversation.timeFormat": "HH:mm",
         font: "system",
         "font.lineHeight": 1.45,
         "font.size": 14,
+        "input.enter": "send",
+        "input.nickSuffix": ": ",
+        "input.spellcheck": true,
+        logs: "info",
         "members.width": 18,
         previews: "off",
         "previews.animate": true,
+        "previews.conversations": {},
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -518,67 +536,55 @@ describe("the contract", () => {
           "player.twitch.tv",
         ],
         "previews.start": "open",
-        "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
         "theme.light": "light",
-        "timeline.activity": "all",
-        "timeline.colours": "theme",
-        "timeline.dateFormat": "full",
-        "timeline.layout": "columns",
-        "timeline.maxWidth": "none",
-        "timeline.nickBrackets": true,
-        "timeline.nickPrefix": true,
-        "timeline.nickWidth": 16,
-        "timeline.spacing": 0.3,
-        "timeline.timeFormat": "HH:mm",
         "unread.markRead": "latest",
         "unread.muted": [],
         "unread.quietBots": false,
       },
       names: [
         "aliases",
-        "composer.enter",
-        "composer.nickSuffix",
-        "composer.spellcheck",
+        "conversation.activity",
+        "conversation.colors",
+        "conversation.dateFormat",
+        "conversation.layout",
+        "conversation.maxWidth",
+        "conversation.nickBrackets",
+        "conversation.nickPrefix",
+        "conversation.nickWidth",
+        "conversation.spacing",
+        "conversation.timeFormat",
         "font",
         "font.lineHeight",
         "font.size",
+        "input.enter",
+        "input.nickSuffix",
+        "input.spellcheck",
+        "logs",
         "members.width",
         "previews",
         "previews.animate",
+        "previews.conversations",
         "previews.mediaHeight",
         "previews.players",
         "previews.start",
-        "previews.timelines",
         "sidebar.networks",
         "sidebar.order",
         "sidebar.pinned",
-        "tail",
         "theme",
         "theme.dark",
         "theme.imported",
         "theme.light",
-        "timeline.activity",
-        "timeline.colours",
-        "timeline.dateFormat",
-        "timeline.layout",
-        "timeline.maxWidth",
-        "timeline.nickBrackets",
-        "timeline.nickPrefix",
-        "timeline.nickWidth",
-        "timeline.spacing",
-        "timeline.timeFormat",
         "unread.markRead",
         "unread.muted",
         "unread.quietBots",
       ],
-      option: ["timeline.timeFormat", "theme", "timeline.activity", null, null, null],
+      option: ["conversation.timeFormat", "theme", "conversation.activity", null, null, null],
       options: [
         true,
         false,
@@ -615,12 +621,14 @@ describe("the contract", () => {
     });
   });
 
-  it("reads a ui option's name kept under the name it had before as the name it has now, and no other", () => {
-    expect(["font.size", "size", "time", "themes", "nope", ""].map(uiNameKept)).toStrictEqual([
+  it("reads a ui option's name kept as the option it names, and no other", () => {
+    expect(
+      ["font.size", "size", "time", "conversation.timeFormat", "nope", ""].map(uiNameKept)
+    ).toStrictEqual([
       "font.size",
-      "font.size",
-      "timeline.timeFormat",
-      "theme.imported",
+      undefined,
+      undefined,
+      "conversation.timeFormat",
       undefined,
       undefined,
     ]);
@@ -754,20 +762,12 @@ describe("the contract", () => {
     });
   });
 
-  it("reads ui.previews.folded kept before as ui.previews.start, open as open and summary or chip as closed", () => {
-    const option = uiNameKept("previews.folded");
-
+  it("reads ui.previews.start kept as summary or chip as closed, and open as open", () => {
     expect(
       ["open", "summary", "chip", "closed", "folded"].map((value) =>
-        option === undefined ? undefined : [option, uiValueKept(option, value)]
+        uiValueKept("previews.start", value)
       )
-    ).toStrictEqual([
-      ["previews.start", "open"],
-      ["previews.start", "closed"],
-      ["previews.start", "closed"],
-      ["previews.start", "closed"],
-      ["previews.start", undefined],
-    ]);
+    ).toStrictEqual(["open", "closed", "closed", "closed", undefined]);
   });
 
   it("reads Previews journaled as links only as text, in ui.previews and in each Timeline's own", () => {
@@ -775,8 +775,8 @@ describe("the contract", () => {
     const two = "00000000000003-00000000-00000000";
 
     expect({
-      byTimeline: uiValueKept("previews.timelines", { [one]: "links only", [two]: "on" }),
-      byTimelineRefused: uiValueKept("previews.timelines", { [one]: "links" }),
+      byTimeline: uiValueKept("previews.conversations", { [one]: "links only", [two]: "on" }),
+      byTimelineRefused: uiValueKept("previews.conversations", { [one]: "links" }),
       shown: ["links only", "text", "on", "links", "Links Only"].map((each) =>
         uiValueKept("previews", each)
       ),
@@ -886,7 +886,7 @@ describe("the contract", () => {
       layout: ["columns", "inline", "stacked", "Stacked", "", null].map((each) =>
         Option.getOrNull(layout(each))
       ),
-      start: uiDefaults["timeline.layout"],
+      start: uiDefaults["conversation.layout"],
     }).toStrictEqual({
       layout: ["columns", "inline", "stacked", null, null, null],
       start: "columns",
@@ -948,12 +948,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"aliases":[],"composer.enter":"send","composer.nickSuffix":": ","composer.spellcheck":true,"font":"system","font.lineHeight":1.45,"font.size":14,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"all","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
+        data: '{"options":{"aliases":[],"conversation.activity":"all","conversation.colors":"theme","conversation.dateFormat":"full","conversation.layout":"columns","conversation.maxWidth":"none","conversation.nickBrackets":true,"conversation.nickPrefix":true,"conversation.nickWidth":16,"conversation.spacing":0.3,"conversation.timeFormat":"HH:mm","font":"system","font.lineHeight":1.45,"font.size":14,"input.enter":"send","input.nickSuffix":": ","input.spellcheck":true,"logs":"info","members.width":18,"previews":"off","previews.animate":true,"previews.conversations":{},"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"system","theme.dark":"dark","theme.imported":[],"theme.light":"light","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"aliases":[],"composer.enter":"newline","composer.nickSuffix":", ","composer.spellcheck":false,"font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"members.width":18,"previews":"off","previews.animate":true,"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","previews.timelines":{},"sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"tail":"info","theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","timeline.activity":"quiet","timeline.colours":"theme","timeline.dateFormat":"full","timeline.layout":"columns","timeline.maxWidth":"none","timeline.nickBrackets":true,"timeline.nickPrefix":true,"timeline.nickWidth":16,"timeline.spacing":0.3,"timeline.timeFormat":"HH:mm:ss","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
+        data: '{"options":{"aliases":[],"conversation.activity":"quiet","conversation.colors":"theme","conversation.dateFormat":"full","conversation.layout":"columns","conversation.maxWidth":"none","conversation.nickBrackets":true,"conversation.nickPrefix":true,"conversation.nickWidth":16,"conversation.spacing":0.3,"conversation.timeFormat":"HH:mm:ss","font":"ibm-plex-mono","font.lineHeight":1.45,"font.size":16,"input.enter":"newline","input.nickSuffix":", ","input.spellcheck":false,"logs":"info","members.width":18,"previews":"off","previews.animate":true,"previews.conversations":{},"previews.mediaHeight":"medium","previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.start":"open","sidebar.networks":[],"sidebar.order":[],"sidebar.pinned":[],"theme":"dark","theme.dark":"dark","theme.imported":[],"theme.light":"light","unread.markRead":"latest","unread.muted":[],"unread.quietBots":false},"sequence":9}',
         event: "changed",
         id: "9",
       },

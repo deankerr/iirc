@@ -195,15 +195,15 @@ export const parseLookupNick = (kind: UserKind, args: string, rules: NickRules):
   }
 
   if (unsendable.test(nick)) {
-    return invalid("A nick holds no line break or NUL.");
+    return invalid("A nick can't contain a line break or NUL.");
   }
 
   if (notInNicks.test(nick) || notFirstInNicks.test(nick)) {
-    return invalid("A Lookup takes one nick, never a mask or a source.");
+    return invalid("A request takes one nick, not a mask or a source.");
   }
 
   if (rules.chantypes.includes(first)) {
-    return invalid("That is a Channel's name. A Lookup takes a nick.");
+    return invalid("That is a channel name. This request takes a nick.");
   }
 
   if (rules.symbols.includes(first)) {
@@ -250,18 +250,18 @@ export const parseListChannel = (
   if (name === "") {
     return focus.kind === "Channel"
       ? { _tag: "Parsed", value: focus.name }
-      : invalid("Of which Channel? Open it, or name it:");
+      : invalid("Name a channel or open one:");
   }
 
   if (/[\s,]/u.test(name) || unsendable.test(name)) {
-    return invalid("Give one Channel.");
+    return invalid("Give one channel.");
   }
 
   // While no head says the Network's `CHANTYPES`, any prefix may start a Channel's name
   // there, so the Client, which knows it, decides.
   return chantypes === undefined || chantypes.includes(firstOf(name))
     ? { _tag: "Parsed", value: name }
-    : invalid(`${name} is no Channel's name.`);
+    : invalid(`${name} is no channel's name.`);
 };
 
 /**
@@ -354,13 +354,13 @@ export const parseWhoMask = (args: string): Parsed<string> => {
   return { _tag: "Parsed", value: mask };
 };
 
-/** What `/list` asks of the Network's Channels: a mask of their names, and a least number of members. */
+/** What `/list` asks of the Network's Channels: a mask of their names, and a minimum number of members. */
 export type Conditions = Omit<Extract<LookupRequest, { readonly _tag: "Channels" }>, "_tag">;
 
 /**
  * The conditions of `/list`, with a key only for each given.
  * @param mask - The mask, if given.
- * @param least - The least number of members, if given.
+ * @param least - The minimum number of members, if given.
  * @returns The conditions.
  */
 const conditionsOf = (mask: string | undefined, least: number | undefined): Conditions => {
@@ -393,14 +393,14 @@ export const parseConditions = (args: string): Parsed<Conditions> => {
   });
 
   if (words.length > 2) {
-    return invalid("Give a mask, a least number of members, or both.");
+    return invalid("Give a mask, a minimum number of members, or both.");
   }
 
   const leasts = words.filter((word) => /^\d+$/u.test(word));
   const masks = words.filter((word) => !/^\d+$/u.test(word));
 
   if (leasts.length > 1) {
-    return invalid("Give one least number of members.");
+    return invalid("Give one minimum number of members.");
   }
 
   if (masks.length > 1) {
@@ -412,16 +412,18 @@ export const parseConditions = (args: string): Parsed<Conditions> => {
 
   if (mask !== undefined && (mask.includes(",") || unsendable.test(mask))) {
     return invalid(
-      mask.includes(",") ? "A mask holds no comma." : "A mask holds no line break or NUL."
+      mask.includes(",")
+        ? "A mask can't contain a comma."
+        : "A mask can't contain a line break or NUL."
     );
   }
 
   if (least !== undefined && !Number.isSafeInteger(least)) {
-    return invalid("No Channel has that many members.");
+    return invalid("No channel has that many members.");
   }
 
   if (least !== undefined && least < 1) {
-    return invalid("A Channel listed has at least 1 member.");
+    return invalid("A channel listed has at least 1 member.");
   }
 
   return { _tag: "Parsed", value: conditionsOf(mask, least) };
@@ -429,7 +431,7 @@ export const parseConditions = (args: string): Parsed<Conditions> => {
 
 /**
  * The intent `/list` comes to, once its conditions are read.
- * @param conditions - The mask and least number of members, each where given.
+ * @param conditions - The mask and minimum number of members, each where given.
  * @param network - The Network in focus.
  * @param timeline - The Timeline in focus.
  * @returns The intent.
@@ -1383,28 +1385,28 @@ export const profileShown = (
 
 /** Why a reply was cut short, in words. */
 const partialWords: Readonly<Record<"TimedOut" | "Ended" | "Bounded", string>> = {
-  Bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",
-  Ended: "The connection ended before the reply did, so this is what had come.",
-  TimedOut: "The Network had not finished replying after 30 seconds, so this is what had come.",
+  Bounded: "The reply was longer than iirc keeps, so this is only the start.",
+  Ended: "The connection ended before the reply finished, so this is only part of it.",
+  TimedOut: "The network took more than 30 seconds to finish replying, so this is only part of it.",
 };
 
 /** Why a Lookup was not sent, in words, but for a name it cannot be asked of. */
 const refusedWords: Readonly<Record<"Offline" | "Busy" | "NotOffered", string>> = {
-  Busy: "Not looked up: too many Lookups are waiting on this Network. Try again in a moment.",
-  NotOffered: "Not looked up: the Network keeps no such list, by its ISUPPORT.",
-  Offline: "Not looked up: the Network is not connected.",
+  Busy: "Not looked up: too many requests are waiting on this network. Try again in a moment.",
+  NotOffered: "Not looked up: the network does not support that list.",
+  Offline: "Not looked up: the network is not connected.",
 };
 
 /** Why `/list` was not sent while an earlier one is still being answered, in words. */
 const busyListing =
-  "Not looked up: the Network is still listing its Channels for an earlier /list. Try again once it has.";
+  "Not looked up: the network is still answering an earlier /list. Try again when it finishes.";
 
 /** Why a Lookup came to nothing on the Frontend's side, in words. */
 const lostWords: Readonly<Record<LookFailure, string>> = {
-  NoAnswer: "No result came from the Daemon in time. Try again.",
-  Stopped: "The Network stopped before it was looked up. Try again.",
-  Unexpected: "The Daemon could not look it up.",
-  UnknownNetwork: "The Daemon has no such Network.",
+  NoAnswer: "The daemon did not answer in time. Try again.",
+  Stopped: "The network stopped before the request finished. Try again.",
+  Unexpected: "The daemon could not complete the request.",
+  UnknownNetwork: "The daemon has no such network.",
 };
 
 /**
@@ -1431,20 +1433,20 @@ const nothingFound = (
       }
 
       if (kind === "Whowas") {
-        return `The Network remembers no one who used the nick ${name} (${reply}).`;
+        return `The network has no record of anyone who used the nick ${name} (${reply}).`;
       }
 
       if (kind === "Channels") {
-        return `The Network listed no Channels (${reply}).`;
+        return `The network listed no channels (${reply}).`;
       }
 
       return kind === "Who"
-        ? `The Network has no one matching ${name} (${reply}).`
-        : `The Network has no Channel ${name} (${reply}).`;
+        ? `The network has no one matching ${name} (${reply}).`
+        : `The network has no channel ${name} (${reply}).`;
     }
 
     case "Failed": {
-      return `The Network refused the Lookup (${contained(result.reply)}).`;
+      return `The network refused the request (${contained(result.reply)}).`;
     }
 
     case "Refused": {
@@ -1457,12 +1459,12 @@ const nothingFound = (
       }
 
       if (kind === "Whois" || kind === "Whowas") {
-        return "Not looked up: the Network cannot be asked about that nick.";
+        return "Not looked up: the network cannot be asked about that nick.";
       }
 
       return kind === "Who" || kind === "Channels"
-        ? "Not looked up: the Network cannot be asked about that mask."
-        : "Not looked up: the Network cannot be asked about that Channel.";
+        ? "Not looked up: the network cannot be asked about that mask."
+        : "Not looked up: the network cannot be asked about that channel.";
     }
 
     case "Unsent": {
@@ -1670,7 +1672,7 @@ const directoryNote = (
   result: Extract<LookResult, { readonly _tag: "Channels" }>
 ): string | undefined => {
   if (result.cut === "Bounded") {
-    return `These are the ${counted(result.total)} largest of the ${counted(result.seen)} Channels the Network listed, as many as a Lookup keeps.`;
+    return `These are the ${counted(result.total)} largest of the ${counted(result.seen)} channels the network listed, the maximum iirc keeps.`;
   }
 
   return result.cut === null ? undefined : partialWords[result.cut];
@@ -1699,8 +1701,8 @@ const directoryBody = (
       words:
         note ??
         (name === ""
-          ? "The Network listed no Channels."
-          : `The Network listed no Channels ${name}.`),
+          ? "The network listed no channels."
+          : `The network listed no channels ${name}.`),
     };
   }
 
@@ -1850,7 +1852,7 @@ export const cardShown = (
     case "Pending": {
       return {
         ...shown,
-        body: { _tag: "Waiting", words: "Still waiting for the Network's reply…" },
+        body: { _tag: "Waiting", words: "Still waiting for the network's reply…" },
       };
     }
 
@@ -1885,7 +1887,7 @@ export const cardShown = (
       if (result.profiles.length === 0) {
         return {
           ...shown,
-          body: { _tag: "Said", words: note ?? `Nothing came back about ${name}.` },
+          body: { _tag: "Said", words: note ?? `Nothing came back for ${name}.` },
         };
       }
 

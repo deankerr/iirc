@@ -160,11 +160,11 @@ export type Switch =
 
 /** The options Uploads need, in the order an `Off` names them. */
 const needed = [
-  "store.s3.endpoint",
-  "store.s3.bucket",
-  "store.s3.region",
-  "store.s3.accessKeyId",
-  "store.s3.secretAccessKey",
+  "storage.s3.endpoint",
+  "storage.s3.bucket",
+  "storage.s3.region",
+  "storage.s3.accessKeyId",
+  "storage.s3.secretAccessKey",
   "uploads.publicUrl",
 ] as const satisfies readonly OwnerOptionName[];
 
@@ -176,11 +176,11 @@ const needed = [
  */
 export const switchOf = (options: OwnerOptions): Switch => {
   const {
-    "store.s3.accessKeyId": accessKeyId,
-    "store.s3.bucket": bucket,
-    "store.s3.endpoint": endpoint,
-    "store.s3.region": region,
-    "store.s3.secretAccessKey": secretAccessKey,
+    "storage.s3.accessKeyId": accessKeyId,
+    "storage.s3.bucket": bucket,
+    "storage.s3.endpoint": endpoint,
+    "storage.s3.region": region,
+    "storage.s3.secretAccessKey": secretAccessKey,
     "uploads.listen": listen,
     "uploads.maxSize": maxSize,
     "uploads.publicUrl": publicUrl,
@@ -707,8 +707,8 @@ export const layerUploads = (dataDir: string) =>
                 new ByteStoreUnavailable({
                   reason:
                     error._tag === "CredentialMissing"
-                      ? `the Credential ${error.credential} is not held`
-                      : "the Credentials could not be read",
+                      ? `the credential ${error.credential} is not held`
+                      : "the credentials could not be read",
                 })
             )
           );
@@ -776,7 +776,7 @@ export const layerUploads = (dataDir: string) =>
               });
 
               yield* SubscriptionRef.update(held, (all) => holding(all, kept, sequence));
-              yield* Effect.logInfo("Kept an Upload", {
+              yield* Effect.logInfo("Saved upload", {
                 size: kept.size,
                 type: kept.type,
                 upload: kept.id,
@@ -968,7 +968,7 @@ export const layerUploads = (dataDir: string) =>
 
               return Option.some(change);
             }),
-          "Renamed an Upload"
+          "Renamed upload"
         ).pipe(Effect.flatMap(shown));
 
       // One already deleted is answered as it is, and its bytes released again, which does
@@ -991,7 +991,7 @@ export const layerUploads = (dataDir: string) =>
 
               return Option.some(change);
             }),
-          "Deleted an Upload"
+          "Deleted upload"
         ).pipe(
           Effect.tap((record) => release(record.hash)),
           Effect.flatMap(shown)
@@ -1028,7 +1028,7 @@ export const layerUploads = (dataDir: string) =>
           const { record } = HashMap.getUnsafe(all.byId, id);
 
           if (Option.isSome(yield* expiryOf(record))) {
-            const expired = yield* amend(id, expiryOf, "Expired an Upload");
+            const expired = yield* amend(id, expiryOf, "Expired upload");
 
             if (expired.deleted?.why === "expired") {
               yield* release(expired.hash);
@@ -1037,7 +1037,7 @@ export const layerUploads = (dataDir: string) =>
         }
       }).pipe(
         Effect.catch((error) =>
-          Effect.logWarning("Could not expire Uploads, and will try again", { error: error._tag })
+          Effect.logWarning("Could not expire uploads; will try again", { error: error._tag })
         )
       );
 

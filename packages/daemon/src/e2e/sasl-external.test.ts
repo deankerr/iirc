@@ -166,9 +166,9 @@ describe("Ergo, over TLS with SASL EXTERNAL", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: "ergo.test", port: tlsPort, tls: true }],
             login: { _tag: "External", required: true },
             nicks: ["iirc"],
+            servers: [{ host: "ergo.test", port: tlsPort, tls: true }],
             tls: { _tag: "Certificate", certificate: credential },
           }),
           query: {},

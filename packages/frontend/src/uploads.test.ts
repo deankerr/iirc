@@ -44,7 +44,7 @@ const upload = (letter: string, name?: string, at = 1_700_000_000_000) => {
 const [a, b, c, d, e] = ["a", "b", "c", "d", "e"].map((letter) => upload(letter));
 
 if (a === undefined || b === undefined || c === undefined || d === undefined || e === undefined) {
-  throw new Error("no Uploads");
+  throw new Error("no uploads");
 }
 
 /**
@@ -85,7 +85,7 @@ const shown: UploadsEvent = { _tag: "DeletedShown", shown: true };
 
 const ids = (state: Uploads) => state.uploads.map((one) => one.id[0]);
 
-describe("the Uploads held", () => {
+describe("the uploads held", () => {
   it("holds the first page newest first, with where the next begins and how far it was read", () => {
     const state = after({
       _tag: "Paged",
@@ -135,7 +135,7 @@ describe("the Uploads held", () => {
     });
   });
 
-  it("puts a new Upload from the stream first, one held in its place, and follows from the latest", () => {
+  it("puts a new upload from the stream first, one held in its place, and follows from the latest", () => {
     const renamed = upload("d", "renamed.png");
 
     const state = after(
@@ -170,7 +170,7 @@ describe("the Uploads held", () => {
     expect(after({ _tag: "Changed", sequence: 4, upload: e })).toStrictEqual(initialUploads);
   });
 
-  it("drops an Upload a Change says was deleted, and never holds a deleted one it did not", () => {
+  it("drops an upload a Change says was deleted, and never holds a deleted one it did not", () => {
     const state = after(
       { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c] } },
       { _tag: "Changed", sequence: 4, upload: deleted(d) },
@@ -180,7 +180,7 @@ describe("the Uploads held", () => {
     expect({ ids: ids(state), through: state.through }).toStrictEqual({ ids: ["c"], through: 5 });
   });
 
-  it("passes over a Change of an Upload older than those held while a page not yet read holds it", () => {
+  it("passes over a Change of an upload older than those held while a page not yet read holds it", () => {
     const old = upload("a", "renamed.png", 1_600_000_000_000);
     const newer = upload("f", undefined, 1_800_000_000_000);
 
@@ -202,7 +202,7 @@ describe("the Uploads held", () => {
     );
 
     if (olderA === undefined || olderB === undefined || olderC === undefined) {
-      throw new Error("no Uploads");
+      throw new Error("no uploads");
     }
 
     const renamedC = upload("c", "renamed.png", 1_600_000_000_000);
@@ -229,7 +229,7 @@ describe("the Uploads held", () => {
     });
   });
 
-  it("takes the Daemon's answer to a rename in place, and to a delete by dropping it, ahead of its Change", () => {
+  it("takes the daemon's answer to a rename in place, and to a delete by dropping it, ahead of its Change", () => {
     const renamed = upload("d", "renamed.png");
     const gone = deleted(c);
 
@@ -258,7 +258,7 @@ describe("the Uploads held", () => {
   });
 });
 
-describe("the Uploads whose bytes are missing", () => {
+describe("the uploads whose bytes are missing", () => {
   it("holds none to start, and the ids the stream gave, whole, replacing those held", () => {
     const first = after({ _tag: "Missing", ids: [a.id, b.id] });
     const second = reduceUploads(first, { _tag: "Missing", ids: [b.id, c.id] });
@@ -288,7 +288,7 @@ describe("the Uploads whose bytes are missing", () => {
   });
 });
 
-describe("the Uploads held while the deleted show", () => {
+describe("the uploads held while the deleted show", () => {
   it("hides the deleted until asked, and starts the list over when that changes", () => {
     const held = after({
       _tag: "Paged",
@@ -304,7 +304,7 @@ describe("the Uploads held while the deleted show", () => {
     ).toStrictEqual(initialUploads);
   });
 
-  it("keeps a deleted Upload a page gives, in its place", () => {
+  it("keeps a deleted upload a page gives, in its place", () => {
     const state = after(shown, {
       _tag: "Paged",
       after: undefined,
@@ -314,7 +314,7 @@ describe("the Uploads held while the deleted show", () => {
     expect(ids(state)).toStrictEqual(["d", "c", "b"]);
   });
 
-  it("replaces an Upload in place when a Change or an answer deletes it, rather than dropping it", () => {
+  it("replaces an upload in place when a Change or an answer deletes it, rather than dropping it", () => {
     const state = after(
       shown,
       { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c, b] } },
@@ -330,7 +330,7 @@ describe("the Uploads held while the deleted show", () => {
     expect(state.through).toBe(4);
   });
 
-  it("treats a deleted Upload not held as a live one would be", () => {
+  it("treats a deleted upload not held as a live one would be", () => {
     const state = after(
       shown,
       { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [c, b] } },
@@ -340,7 +340,7 @@ describe("the Uploads held while the deleted show", () => {
     expect(ids(state)).toStrictEqual(["d", "c", "b"]);
   });
 
-  it("drops a deleted Upload as before while they are hidden", () => {
+  it("drops a deleted upload as before while they are hidden", () => {
     const state = after(
       { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [c, b] } },
       { _tag: "Changed", sequence: 4, upload: expired(c) }
@@ -351,12 +351,12 @@ describe("the Uploads held while the deleted show", () => {
 });
 
 describe("a deletion in words", () => {
-  it("says expired for the Daemon's and deleted for the Owner's", () => {
+  it("says expired for the daemon's and deleted for the Owner's", () => {
     expect([deletedText("expired"), deletedText("owner")]).toStrictEqual(["expired", "deleted"]);
   });
 });
 
-describe("an Upload's link", () => {
+describe("an upload's link", () => {
   it("joins the public URL in force, the id, and the safe name", () => {
     expect(linkOf("https://files.example.com/u", a)).toBe(
       "https://files.example.com/u/aaaaaaaaaaaaaaaa/a.png"
@@ -368,7 +368,7 @@ describe("an Upload's link", () => {
   });
 });
 
-describe("an Upload's name", () => {
+describe("an upload's name", () => {
   it("is the one given, else the safe name", () => {
     expect([shownName(upload("a", "Cat picture.PNG")), shownName(a)]).toStrictEqual([
       "Cat picture.PNG",
@@ -397,22 +397,20 @@ describe("a thumbnail", () => {
 });
 
 describe("a size", () => {
-  it("is in binary units, one decimal under 10 and whole past that", () => {
+  it("is in decimal units, one decimal under 10 and whole past that", () => {
     expect(
-      [0, 1023, 1024, 1536, 10_240, 1_258_291, 104_857_600, 1_048_575, 5 * 1024 ** 4, 2 ** 60].map(
-        sizeText
-      )
+      [0, 999, 1000, 1500, 10_000, 1_260_000, 100_000_000, 999_999, 5e12, 2e15].map(sizeText)
     ).toStrictEqual([
       "0 B",
-      "1023 B",
-      "1.0 KiB",
-      "1.5 KiB",
-      "10 KiB",
-      "1.2 MiB",
-      "100 MiB",
-      "1.0 MiB",
-      "5.0 TiB",
-      "1024 PiB",
+      "999 B",
+      "1.0 KB",
+      "1.5 KB",
+      "10 KB",
+      "1.3 MB",
+      "100 MB",
+      "1.0 MB",
+      "5.0 TB",
+      "2000 TB",
     ]);
   });
 });
@@ -435,7 +433,7 @@ describe("renaming and deleting from the list", () => {
     }).toStrictEqual({ asked: a.id, closed: undefined });
   });
 
-  it("closes the question as the delete is sent, and holds what each Upload is waiting on", () => {
+  it("closes the question as the delete is sent, and holds what each upload is waiting on", () => {
     const state = edits(
       { _tag: "AskedToDelete", id: a.id },
       { _tag: "Sent", id: a.id, of: "Delete" },
@@ -451,7 +449,7 @@ describe("renaming and deleting from the list", () => {
     });
   });
 
-  it("lets go of an Upload done, and keeps why one failed until it is tried again", () => {
+  it("lets go of an upload done, and keeps why one failed until it is tried again", () => {
     const failed = edits(
       { _tag: "Sent", id: a.id, of: "Rename" },
       { _tag: "Sent", id: b.id, of: "Delete" },
@@ -481,7 +479,7 @@ describe("renaming and deleting from the list", () => {
   });
 });
 
-describe("a name typed for an Upload", () => {
+describe("a name typed for an upload", () => {
   it("is the text as typed, of 1 to 1024 code units", () => {
     expect([nameOf("cat.png"), nameOf(" spaced "), nameOf("x".repeat(1024))]).toStrictEqual([
       "cat.png",
@@ -496,15 +494,15 @@ describe("a name typed for an Upload", () => {
 });
 
 describe("why a rename or a delete did not go as asked, in words", () => {
-  it("says the Daemon no longer has it", () => {
+  it("says the daemon no longer has it", () => {
     expect(editFailureText({ _tag: "UnknownUpload" }, "cat.png", "Delete")).toBe(
-      "The Daemon no longer has cat.png, so it was not deleted."
+      "The daemon no longer has cat.png, so it was not deleted."
     );
   });
 
-  it("says the Journal could not be written", () => {
+  it("says the history could not be written", () => {
     expect(editFailureText({ _tag: "JournalFailed" }, "cat.png", "Rename")).toBe(
-      "The Daemon could not write its Journal, so cat.png was not renamed."
+      "The daemon could not write its history, so cat.png was not renamed."
     );
   });
 
@@ -513,8 +511,8 @@ describe("why a rename or a delete did not go as asked, in words", () => {
       editFailureText({ _tag: "NoAnswer" }, "cat.png", "Rename"),
       editFailureText({ _tag: "Unexpected" }, "cat.png", "Delete"),
     ]).toStrictEqual([
-      "The Daemon did not answer, so whether cat.png was renamed is unknown.",
-      "The Daemon answered in a way the Frontend could not read, so whether cat.png was deleted is unknown.",
+      "The daemon did not answer, so it's unknown whether cat.png was renamed.",
+      "The daemon sent a reply this device could not read, so it's unknown whether cat.png was deleted.",
     ]);
   });
 });
@@ -577,15 +575,15 @@ const message = (
   });
 };
 
-describe("where an Upload was said", () => {
-  it("is the Network and the Target, its direction marks closed", () => {
+describe("where an upload was said", () => {
+  it("is the network and the channel or user, its direction marks closed", () => {
     expect([
       saidPlace(message("look", { network: "libera", target: "#iirc" })),
       saidPlace(message("look", { network: "oftc", target: "fri\u2067end" })),
     ]).toStrictEqual(["libera #iirc", "oftc fri\u2067end\u2069"]);
   });
 
-  it("is learnt anew for each Upload held whose link a Message of ours holds", () => {
+  it("is learnt anew for each upload held whose link a message of ours holds", () => {
     const state = reduceUploads(initialUploads, {
       _tag: "Paged",
       after: undefined,
@@ -623,7 +621,7 @@ describe("where an Upload was said", () => {
     expect(state.through).toBe(2);
   });
 
-  it("is not learnt anew from a Message that only names an id without its slashes", () => {
+  it("is not learnt anew from a message that only names an id without its slashes", () => {
     const state = reduceUploads(initialUploads, {
       _tag: "Paged",
       after: undefined,

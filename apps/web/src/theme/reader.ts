@@ -41,7 +41,7 @@ const decodeAnswer = Schema.decodeUnknownOption(Answer);
 /** Why a theme could not be read: no Worker could start, or the one that did failed. */
 const unreadable: Parsed<Imported> = {
   _tag: "Invalid",
-  message: "Theme files cannot be read in this browser, so nothing was imported.",
+  message: "This browser can't read theme files, so nothing was imported.",
 };
 
 /** What the reader needs of a Worker: to send it text, hear its answer, and end it. */

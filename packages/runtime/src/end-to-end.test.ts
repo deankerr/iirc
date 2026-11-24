@@ -89,7 +89,7 @@ describe("the real Client on the in-memory ports", () => {
       Effect.gen(function* () {
         const plain = configured({
           channels: [{ name: "#iirc" }],
-          ircds: [{ host: "irc.test", port: 6667, tls: false }],
+          servers: [{ host: "irc.test", port: 6667, tls: false }],
         });
 
         const { runtime } = yield* startRuntime(world, client);

@@ -374,19 +374,19 @@ export const editFailureText = (failure: EditFailure, name: string, of: Asked): 
 
   switch (failure._tag) {
     case "UnknownUpload": {
-      return `The Daemon no longer has ${name}, so it was not ${done}.`;
+      return `The daemon no longer has ${name}, so it was not ${done}.`;
     }
 
     case "JournalFailed": {
-      return `The Daemon could not write its Journal, so ${name} was not ${done}.`;
+      return `The daemon could not write its history, so ${name} was not ${done}.`;
     }
 
     case "NoAnswer": {
-      return `The Daemon did not answer, so whether ${name} was ${done} is unknown.`;
+      return `The daemon did not answer, so it's unknown whether ${name} was ${done}.`;
     }
 
     case "Unexpected": {
-      return `The Daemon answered in a way the Frontend could not read, so whether ${name} was ${done} is unknown.`;
+      return `The daemon sent a reply this device could not read, so it's unknown whether ${name} was ${done}.`;
     }
 
     default: {
@@ -427,27 +427,27 @@ const drawable = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", 
  */
 export const thumbnailed = (type: string): boolean => drawable.has(type.toLowerCase());
 
-/** The units of a size past bytes, each 1024 of the one before. */
-const units = ["KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+/** The units of a size past bytes, each 1000 of the one before. */
+const units = ["KB", "MB", "GB", "TB"] as const;
 
 /**
- * A size in bytes as text, in binary units: whole bytes under 1 KiB, then one decimal
- * under 10 of a unit and whole numbers past that, such as `512 B`, `1.2 MiB`, or `340 KiB`.
+ * A size in bytes as text, in decimal units: whole bytes under 1 KB, then one decimal
+ * under 10 of a unit and whole numbers past that, such as `512 B`, `1.2 MB`, or `340 KB`.
  * It reads no locale.
  * @param size - The size, in bytes.
  * @returns The text.
  */
 export const sizeText = (size: number): string => {
-  if (size < 1024) {
+  if (size < 1000) {
     return `${size} B`;
   }
 
-  let value = size / 1024;
+  let value = size / 1000;
   let unit = 0;
 
-  // A value that rounds to 1024 of a unit is 1 of the next.
-  while (unit < units.length - 1 && Math.round(value) >= 1024) {
-    value /= 1024;
+  // A value that rounds to 1000 of a unit is 1 of the next.
+  while (unit < units.length - 1 && Math.round(value) >= 1000) {
+    value /= 1000;
     unit += 1;
   }
 

@@ -160,11 +160,11 @@ const faults = (layout: Layout<View>): readonly string[] => {
   visit(layout.root, undefined);
 
   if (!panesOf(layout.root).some((pane) => pane.id === layout.focused)) {
-    wrong.push(`the focus is on ${layout.focused}, no Pane`);
+    wrong.push(`the focus is on ${layout.focused}, no pane`);
   }
 
   if (layout.zoomed && layout.root._tag === "Pane") {
-    wrong.push("zoomed with one Pane");
+    wrong.push("zoomed with one pane");
   }
 
   return wrong;
@@ -332,7 +332,7 @@ const viewsOf = (layout: Layout<View>) =>
     .toSorted((left, right) => left - right);
 
 describe("the pane layout", () => {
-  it("stays well formed, and keeps the focus on a Pane, whatever is done", () => {
+  it("stays well formed, and keeps the focus on a pane, whatever is done", () => {
     fc.assert(
       fc.property(fc.array(step, { maxLength: 60 }), (steps) => {
         play(steps, (_, change, after) => {
@@ -343,7 +343,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("never closes the last Pane, and closes one otherwise, keeping every other view", () => {
+  it("never closes the last pane, and closes one otherwise, keeping every other view", () => {
     fc.assert(
       fc.property(fc.array(step, { maxLength: 40 }), (steps) => {
         play(steps, (before, change, after) => {
@@ -366,7 +366,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("gives the focus to the Pane a split makes", () => {
+  it("gives the focus to the pane a split makes", () => {
     fc.assert(
       fc.property(fc.array(step, { maxLength: 40 }), (steps) => {
         play(steps, (_, change, after) => {
@@ -378,7 +378,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("moves the focus to the Pane beside it on the screen, or nowhere at an edge", () => {
+  it("moves the focus to the pane beside it on the screen, or nowhere at an edge", () => {
     fc.assert(
       fc.property(fc.array(step, { maxLength: 40 }), direction, (steps, towards) => {
         play(steps, (_, __, after) => {
@@ -414,7 +414,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("finds the Pane beside it in a known layout", () => {
+  it("finds the pane beside it in a known layout", () => {
     // p0 | (p1 / (p2 | p3)): p0 on the left, p1 at the top right, p2 and p3 below it.
     let layout = single(0);
 
@@ -464,7 +464,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("grows and shrinks the focused Pane by a step, within the least share", () => {
+  it("grows and shrinks the focused pane by a step, within the least share", () => {
     let layout = reduceLayout(single(0), { _tag: "Split", axis: "Horizontal", view: 1 });
 
     layout = reduceLayout(layout, { _tag: "Grow" });
@@ -523,7 +523,7 @@ describe("the pane layout", () => {
     ]);
   });
 
-  it("closes into the Pane nearest where the closed one was", () => {
+  it("closes into the pane nearest where the closed one was", () => {
     let layout = reduceLayout(single(0), { _tag: "Split", axis: "Horizontal", view: 1 });
 
     layout = reduceLayout(layout, { _tag: "Split", axis: "Vertical", view: 2 });
@@ -572,7 +572,7 @@ describe("the pane layout", () => {
     });
   });
 
-  it("drops Panes, their siblings taking their places, and keeps none of none", () => {
+  it("drops panes, their siblings taking their places, and keeps none of none", () => {
     let layout = reduceLayout(single(0), { _tag: "Split", axis: "Horizontal", view: 1 });
 
     layout = reduceLayout(layout, { _tag: "Split", axis: "Vertical", view: 2 });
@@ -586,7 +586,7 @@ describe("the pane layout", () => {
     }).toStrictEqual({ dropped: [[], "p0", [0, 1]], none: undefined });
   });
 
-  it("splits no further than the most Panes, nor deeper than the deepest Splits", () => {
+  it("splits no further than the most panes, nor deeper than the deepest Splits", () => {
     let wide = single(0);
 
     for (let view = 1; view < 100; view += 1) {
@@ -619,7 +619,7 @@ describe("the pane layout", () => {
     }).toStrictEqual({ deep: true, panes: true, takenBack: true, tooMany: undefined });
   });
 
-  it("never shrinks the focused Pane by growing it, nor grows it by shrinking it", () => {
+  it("never shrinks the focused pane by growing it, nor grows it by shrinking it", () => {
     fc.assert(
       fc.property(fc.array(step, { maxLength: 60 }), (steps) => {
         play(steps, (before, change, after) => {
@@ -636,7 +636,7 @@ describe("the pane layout", () => {
     );
   });
 
-  it("splits no Pane below the least share, so it still shrinks no larger and grows", () => {
+  it("splits no pane below the least share, so it still shrinks no larger and grows", () => {
     const five = splitTimes(5);
     const eleven = splitTimes(11);
 

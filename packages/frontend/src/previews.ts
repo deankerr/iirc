@@ -4,7 +4,7 @@
  * stream of their changes. A Message is asked for only once it was shown, and only once
  * while the stream is followed, since the Daemon fetches on the ask. Whether a Message is
  * asked for, and what it shows, follows its Timeline's own mode: its choice in
- * `ui.previews.timelines`, or else `ui.previews`. Each Preview is open or closed, as the
+ * `ui.previews.conversations`, or else `ui.previews`. Each Preview is open or closed, as the
  * toggle after its link leaves it, or else as `ui.previews.start` says, and a Message is
  * asked for only while one of its Previews is open, since a closed one fetches nothing. A
  * link the Daemon holds for a press is fetched only once the Owner opens it. A window's
@@ -233,7 +233,7 @@ export const previewsModesOf = (shared: UiInForce | undefined): PreviewsModes | 
     : {
         players: shared.options["previews.players"],
         shown: shared.options.previews,
-        timelines: shared.options["previews.timelines"],
+        timelines: shared.options["previews.conversations"],
       };
 
 /**
@@ -860,11 +860,11 @@ export const pressesWanted = (state: Previews, toggles: Toggles): readonly Previ
 export const reasonWords = (reason: PreviewFailure): string => {
   switch (reason) {
     case "Refused": {
-      return "No preview: the Daemon never fetches this address.";
+      return "No preview: the daemon never fetches this address.";
     }
 
     case "Unreachable": {
-      return "No preview: the Daemon could not reach this link.";
+      return "No preview: the daemon could not reach this link.";
     }
 
     case "TimedOut": {
@@ -1015,19 +1015,19 @@ const wordsOf = (text: string | null): string | undefined =>
 
 /**
  * How many bytes a file is, in words a reader weighs at a glance: a count under a thousand
- * as `0 bytes`, `1 byte`, or `999 bytes`, and above it kB, MB, GB, or TB in powers of a
+ * as `0 B` or `999 B`, and above it KB, MB, GB, or TB in powers of a
  * thousand, to one decimal below ten and whole from ten up. It rounds before it picks the
- * unit, so 999,999 bytes is `1.0 MB` and never `1000 kB`. Plain arithmetic, the same in
+ * unit, so 999,999 B is `1.0 MB` and never `1000 KB`. Plain arithmetic, the same in
  * every locale.
  * @param bytes - A length in bytes, a whole number from zero.
  * @returns The words.
  */
 const sizeWords = (bytes: number): string => {
   if (bytes < 1000) {
-    return bytes === 1 ? "1 byte" : `${bytes} bytes`;
+    return `${bytes} B`;
   }
 
-  const units = ["kB", "MB", "GB", "TB"];
+  const units = ["KB", "MB", "GB", "TB"];
   let index = 0;
   let amount = bytes / 1000;
 

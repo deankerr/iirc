@@ -2,7 +2,7 @@
 import { uiDefaults } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import { reduceOptions } from "@iirc/frontend/options";
-import { deviceUiKey, deviceUiOf } from "@iirc/frontend/ui";
+import { deviceUiKey } from "@iirc/frontend/ui";
 import { describe, expect, it } from "vitest";
 
 import { edit, send } from "../composer/atoms.ts";
@@ -54,13 +54,13 @@ describe("the options under ui", () => {
     const second = await page(fake);
 
     await eventually(() => fake.daemon.uiFollowers.length === 2);
-    await until(first.registry, uiInEffect, (ui) => ui["timeline.timeFormat"] === "HH:mm");
-    await first.type("/set ui.timeline.timeFormat HH:mm:ss");
+    await until(first.registry, uiInEffect, (ui) => ui["conversation.timeFormat"] === "HH:mm");
+    await first.type("/set ui.conversation.timeFormat HH:mm:ss");
 
     const seen = await until(
       second.registry,
       uiInEffect,
-      (ui) => ui["timeline.timeFormat"] === "HH:mm:ss"
+      (ui) => ui["conversation.timeFormat"] === "HH:mm:ss"
     );
 
     expect({
@@ -69,10 +69,10 @@ describe("the options under ui", () => {
       seen,
       shared: fake.daemon.ui,
     }).toStrictEqual({
-      changes: [{ ifSequence: "0", route: "PUT timeline.timeFormat" }],
+      changes: [{ ifSequence: "0", route: "PUT conversation.timeFormat" }],
       notice: undefined,
-      seen: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" },
-      shared: { options: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" }, sequence: 10 },
+      seen: { ...uiDefaults, "conversation.timeFormat": "HH:mm:ss" },
+      shared: { options: { ...uiDefaults, "conversation.timeFormat": "HH:mm:ss" }, sequence: 10 },
     });
   });
 
@@ -84,7 +84,7 @@ describe("the options under ui", () => {
 
     // Another device's Change, which this page has not heard of yet.
     fake.daemon.ui = {
-      options: { ...fake.daemon.ui.options, "timeline.activity": "quiet" },
+      options: { ...fake.daemon.ui.options, "conversation.activity": "quiet" },
       sequence: 7,
     };
     await type("/set ui.theme dark");
@@ -99,7 +99,7 @@ describe("the options under ui", () => {
         { ifSequence: "7", route: "PUT theme" },
       ],
       notice: undefined,
-      ui: { ...uiDefaults, theme: "dark", "timeline.activity": "quiet" },
+      ui: { ...uiDefaults, "conversation.activity": "quiet", theme: "dark" },
     });
   });
 
@@ -186,34 +186,6 @@ describe("an override of ui.previews.style a device kept, which is gone", () => 
       read: uiDefaults,
       // The rest of the words, how options are named, are the core's.
       refused: true,
-    });
-  });
-});
-
-describe("an override of ui.previews.folded a device kept, which is ui.previews.start now", () => {
-  it("is read as start, a chip or a summary as closed, and is kept under the new name once /set -device changes it", async () => {
-    const fake = signedIn();
-    const kept = '{"previews.folded":"chip","previews.mediaHeight":"large"}';
-
-    const { registry, type } = await page(fake);
-
-    // The page reads what a device kept once, as it starts.
-    registry.set(deviceUi, deviceUiOf(kept));
-    const read = registry.get(uiInEffect);
-
-    await type("/set -device ui.previews.start open");
-    const set = await until(registry, uiInEffect, (ui) => ui["previews.start"] === "open");
-
-    expect({
-      changes: fake.daemon.uiChanges,
-      kept: readChoice(deviceUiKey),
-      read: { height: read["previews.mediaHeight"], start: read["previews.start"] },
-      set: set["previews.start"],
-    }).toStrictEqual({
-      changes: [],
-      kept: '{"previews.mediaHeight":"large","previews.start":"open"}',
-      read: { height: "large", start: "closed" },
-      set: "open",
     });
   });
 });

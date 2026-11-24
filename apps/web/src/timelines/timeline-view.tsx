@@ -219,7 +219,7 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
   switch (row._tag) {
     case "Start": {
       // Nothing is before it, so nothing is drawn: a screen reader alone is told.
-      return <p className={styles.unseen}>The start of this Timeline</p>;
+      return <p className={styles.unseen}>The start of this conversation</p>;
     }
 
     case "Held": {
@@ -227,14 +227,14 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
         <p className={styles.held}>
           {row.hidden
             ? "Older history here is hidden activity."
-            : "Older history lies beyond what this view holds."}{" "}
+            : "Older history is not loaded yet."}{" "}
           <Button
             onPress={() => {
               askOlder({ mode: "Asked", timeline });
             }}
             size="small"
           >
-            Load older
+            load older
           </Button>
         </p>
       );
@@ -269,7 +269,7 @@ const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
         }}
         size="small"
       >
-        Jump to latest
+        jump to latest
       </Button>
     </div>
   );
@@ -310,7 +310,7 @@ const Lines = ({
 
   // With nothing earlier, the first row says so to a screen reader alone, inside the list,
   // so it is anchored and measured as every row is, and takes no room. The items
-  // `ui.timeline.activity` leaves out are not drawn, and are counted all the same.
+  // `ui.conversation.activity` leaves out are not drawn, and are counted all the same.
   const { rows, target } = useMemo(() => {
     const shows = showsIn(activity, kind, window.items, self);
     const drawn = rowsOf(window, divider, shows, zone, self);
@@ -359,7 +359,7 @@ const Lines = ({
   const anchor = useRef<Anchor | undefined>(undefined);
   const firstKey = useRef<string | undefined>(undefined);
   // The rows as they were last laid out, and which Activity they showed, so a row hidden by
-  // `ui.timeline.activity` is found among the rows around it.
+  // `ui.conversation.activity` is found among the rows around it.
   const laidOut = useRef<readonly LaidOut[]>([]);
   const shownActivity = useRef(activity);
   // What a row not yet measured was estimated at, so a change of the text's size, the line
@@ -553,7 +553,7 @@ const Lines = ({
   /**
    * Where a row the view was anchored to stands now, and how far below the top of the view
    * it should: its own place at its offset, or, when it is no longer drawn, as when
-   * `ui.timeline.activity` hides it, the nearest row before it that still is, at the same offset,
+   * `ui.conversation.activity` hides it, the nearest row before it that still is, at the same offset,
    * or with none before, the nearest after it, where that one stood.
    * @param anchored - The row, and its offset.
    * @returns The index and offset, or none when no row it was laid out with is drawn.
@@ -734,7 +734,7 @@ const Lines = ({
 
   /**
    * Reads on without asking while what is drawn cannot be scrolled to reach more: no item
-   * drawn, or less than fills the view, as when `ui.timeline.activity` hides a whole page. It reads
+   * drawn, or less than fills the view, as when `ui.conversation.activity` hides a whole page. It reads
    * the page before, except while a jump's window draws no item at all, as after a jump
    * before a Timeline's first item onto Activity hidden: what it jumped to lies at or after
    * its first item, so it reads the page after instead, until an item is drawn, and only
@@ -884,7 +884,7 @@ const Lines = ({
   }, []);
 
   // After rows change: at the bottom, stay there; with rows added above, hidden or shown
-  // again by `ui.timeline.activity`, or estimated anew, put the row that was in view back where
+  // again by `ui.conversation.activity`, or estimated anew, put the row that was in view back where
   // it was. A row above the view that changes height once measured is kept still by the
   // virtualizer itself.
   useLayoutEffect(() => {
@@ -1017,17 +1017,17 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
     }
 
     case "Vanished": {
-      return <p className={styles.placeholder}>The Daemon has no such Timeline.</p>;
+      return <p className={styles.placeholder}>Conversation not found.</p>;
     }
 
     // The layout this device kept is not taken yet, so the Pane is not known to be empty.
     case "Restoring":
     case "Reading": {
-      return <p className={styles.placeholder}>Reading…</p>;
+      return <p className={styles.placeholder}>loading…</p>;
     }
 
     case "Shown": {
-      const label = shown.description?.name ?? "Timeline";
+      const label = shown.description?.name ?? "Conversation";
 
       return (
         <section aria-label={label} className={styles.view}>

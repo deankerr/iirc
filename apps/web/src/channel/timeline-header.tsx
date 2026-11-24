@@ -57,7 +57,7 @@ const TopicPanel = ({ topic }: { readonly topic: TopicShown | undefined }) => (
         <bdi>
           <Inlines inlines={topic.inlines} />
         </bdi>
-        {topic.stale ? <span className={styles.dim}> (as last known)</span> : null}
+        {topic.stale ? <span className={styles.dim}> (last known)</span> : null}
       </p>
     ) : null}
   </DisclosurePanel>
@@ -120,9 +120,9 @@ const MembersToggle = ({
   const toggle = useAtomSet(toggleMembers);
 
   return (
-    <Tip command="members.toggle" label="Members">
+    <Tip command="members.toggle" label="members">
       <ToggleButton
-        aria-label={count === undefined ? "Members" : `Members, ${count}`}
+        aria-label={count === undefined ? "members" : `members, ${count}`}
         // Which Pane's toggle this is, so a press on it is not a press outside its members.
         data-members-toggle={pane}
         isSelected={shown}
@@ -206,7 +206,7 @@ const Details = ({ header, open }: { readonly header: Header; readonly open: boo
         <>
           <PartnerPresence presence={header.presence} />
           {header.note === undefined ? (
-            <BarText>Direct Message</BarText>
+            <BarText>direct message</BarText>
           ) : (
             <BarText tone="Note">{header.note}</BarText>
           )}
@@ -240,7 +240,7 @@ export const TimelineHeader = ({ pane }: { readonly pane: string }) => {
     return <PaneBar name={paneName} pane={pane} />;
   }
 
-  const name = header?.name ?? shown.description?.name ?? "Timeline";
+  const name = header?.name ?? shown.description?.name ?? "Conversation";
   const topic = header?._tag === "Channel" && header.note === undefined ? header.topic : undefined;
   const open = disclosed?.timeline === shown.timeline;
 

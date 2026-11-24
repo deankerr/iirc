@@ -25,7 +25,7 @@ const libera = NetworkId.make("libera");
 
 const floor = configured({
   channels: [{ name: "#iirc" }],
-  ircds: [{ host: "irc.test", port: 6667, tls: false }],
+  servers: [{ host: "irc.test", port: 6667, tls: false }],
 });
 
 /** 2026-01-01T00:00:00Z, where every test's clock starts. */
@@ -600,7 +600,7 @@ describe("the projector", () => {
       pong: "PONG still-here",
       status: { _tag: "Stopped", reason: "TimelineStoreFailed: the disk is full" },
     });
-    expect(result.logged).toContain("The Timelines stopped being folded");
+    expect(result.logged).toContain("Conversation history stopped updating");
   });
 
   it("keeps the Timelines in views.sqlite beside the SQLite Journal, and rebuilds the file when it is deleted", async () => {

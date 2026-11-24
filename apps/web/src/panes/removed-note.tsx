@@ -32,8 +32,8 @@ export const RemovedNote = ({ pane }: { readonly pane: string }) => {
   return network === undefined ? null : (
     <p className={styles.note} role="note">
       <span>
-        <bdi>{network}</bdi> was removed. Its Timelines are kept to read and search, and nothing can
-        be said here.
+        <bdi>{network}</bdi> was removed. Its conversations are kept to read and search, and you
+        can&apos;t send messages here.
       </span>
       <Button
         onPress={() => {
@@ -41,7 +41,7 @@ export const RemovedNote = ({ pane }: { readonly pane: string }) => {
         }}
         size="small"
       >
-        Drop them…
+        drop them…
       </Button>
     </p>
   );

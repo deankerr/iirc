@@ -46,7 +46,7 @@ export const makeRoom = Effect.gen(function* () {
       for (const one of held.filter((kept) => kept.hash !== hash)) {
         if (total + adds > maxTotal) {
           yield* cache.evict(one.hash);
-          yield* Effect.logInfo("Dropped a Preview's image to make room", {
+          yield* Effect.logInfo("Deleted preview image to make room", {
             hash: one.hash,
             shown: one.shown,
             size: one.size,

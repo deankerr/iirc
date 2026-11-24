@@ -23,8 +23,8 @@ export const listedFlags: readonly ListedFlag[] = [
   { flag: "bold", letter: "B", name: "bold" },
   { flag: "italic", letter: "I", name: "italic" },
   { flag: "underline", letter: "U", name: "underline" },
-  { flag: "monospace", letter: "M", name: "fixed pitch" },
-  { flag: "reverse", letter: "R", name: "reverse" },
+  { flag: "monospace", letter: "M", name: "monospace" },
+  { flag: "reverse", letter: "R", name: "reverse colors" },
   { flag: "strikethrough", letter: "S", name: "strikethrough" },
 ];
 

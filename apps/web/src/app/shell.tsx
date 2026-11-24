@@ -53,9 +53,9 @@ const unread = Atom.make((get) => saidLevel(get(sidebarNetworks)));
 /** What the sidebar's button says is unread, for a screen reader, by the highest level. */
 const unreadWords: Readonly<Record<Level, string>> = {
   Activity: "",
-  Direct: ", a Direct Message unread",
-  Highlight: ", a Highlight unread",
-  Message: ", Messages unread",
+  Direct: ", a direct message unread",
+  Highlight: ", a highlight unread",
+  Message: ", unread messages",
 };
 
 /** The class that colours the sidebar button's mark by the highest level unread. */
@@ -83,7 +83,7 @@ const SidebarButton = () => {
       className={drawer ? undefined : styles.show}
       command={drawer ? undefined : "sidebar.toggle"}
       icon={drawer ? "menu" : "showSidebar"}
-      label={`${drawer ? "Networks" : "Show the sidebar"}${level === undefined ? "" : unreadWords[level]}`}
+      label={`${drawer ? "networks" : "show sidebar"}${level === undefined ? "" : unreadWords[level]}`}
       onPress={() => {
         showSidebar(registry, true);
       }}
@@ -214,7 +214,7 @@ const SidebarEdge = () => {
   /* oxlint-disable jsx-a11y/no-noninteractive-tabindex, jsx-a11y/no-noninteractive-element-interactions */
   return (
     <hr
-      aria-label="Resize the sidebar"
+      aria-label="resize sidebar"
       aria-orientation="vertical"
       aria-valuemax={most}
       aria-valuemin={narrowest}
@@ -290,7 +290,7 @@ const SidebarDrawer = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
       }}
     >
       <Modal className={styles.drawer}>
-        <Dialog aria-label="Networks" className={styles.drawerDialog}>
+        <Dialog aria-label="networks" className={styles.drawerDialog}>
           <Sidebar signOut={attempt} />
         </Dialog>
       </Modal>
@@ -309,8 +309,8 @@ const StoppedNotice = () => {
   return reason === undefined ? null : (
     <div className={styles.stopped} role="alert">
       <p>
-        <strong>The Daemon hit a fatal error.</strong> The Timelines stopped updating, and stay
-        behind until the Daemon restarts.
+        <strong>The daemon hit a fatal error.</strong> Conversations stopped updating and stay as
+        they are until the daemon restarts.
       </p>
       <p className={styles.reason}>{reason}</p>
     </div>

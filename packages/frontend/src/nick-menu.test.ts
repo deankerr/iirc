@@ -114,20 +114,20 @@ describe("the menu on a nick", () => {
     };
 
     expect(entries.map((entry) => [entry.id, entry.label, entry.intents])).toStrictEqual([
-      ["query", "Query peer", composed("/query peer")],
-      ["whois", "Whois peer", composed("/whois peer")],
-      ["mention", "Mention peer", [{ _tag: "FocusComposer", text: "peer: " }]],
-      ["ignore", "Ignore peer", composed("/ignore peer")],
-      ["ban", "Ban peer", composed("/ban peer")],
-      ["op", "Op peer", composed("/op peer")],
-      ["deop", "Deop peer", composed("/deop peer")],
-      ["voice", "Voice peer", composed("/voice peer")],
-      ["devoice", "Devoice peer", composed("/devoice peer")],
-      ["kick", "Kick peer", composed("/kick peer")],
+      ["query", "query peer", composed("/query peer")],
+      ["whois", "whois peer", composed("/whois peer")],
+      ["mention", "mention peer", [{ _tag: "FocusComposer", text: "peer: " }]],
+      ["ignore", "ignore peer", composed("/ignore peer")],
+      ["ban", "ban peer", composed("/ban peer")],
+      ["op", "op peer", composed("/op peer")],
+      ["deop", "deop peer", composed("/deop peer")],
+      ["voice", "voice peer", composed("/voice peer")],
+      ["devoice", "devoice peer", composed("/devoice peer")],
+      ["kick", "kick peer", composed("/kick peer")],
     ]);
   });
 
-  it("offers to operate only where Self holds operator or a rank above it", () => {
+  it("offers to operate only where you holds operator or a rank above it", () => {
     expect({
       halfop: ids(inChannel(known(["h"]))),
       none: ids(inChannel(known([]))),
@@ -151,7 +151,7 @@ describe("the menu on a nick", () => {
     });
   });
 
-  it("leaves out what needs the User there for one gone or not known to be there", () => {
+  it("leaves out what needs the user there for one gone or not known to be there", () => {
     const context = inChannel(known(["o"]));
 
     expect({
@@ -163,7 +163,7 @@ describe("the menu on a nick", () => {
     });
   });
 
-  it("offers no kick, deop, or devoice of a member who outranks Self, though op, voice, and ban", () => {
+  it("offers no kick, deop, or devoice of a member who outranks you, though op, voice, and ban", () => {
     const op = inChannel(known(["o"]));
 
     expect({
@@ -200,7 +200,7 @@ describe("the menu on a nick", () => {
     ]);
   });
 
-  it("offers ban account right after ban where the Network's bans name an account, running /ban -a", () => {
+  it("offers ban account right after ban where the network's bans name an account, running /ban -a", () => {
     const context = inAccountChannel(known(["o"]));
     const { entries } = nickEntries("peer", timeline, here([]), context);
 
@@ -224,13 +224,13 @@ describe("the menu on a nick", () => {
       ran: {
         id: "ban-account",
         intents: composed("/ban -a peer"),
-        label: "Ban peer's account",
+        label: "ban peer's account",
         text: "ban account",
       },
     });
   });
 
-  it("offers nothing to operate outside a Channel", () => {
+  it("offers nothing to operate outside a channel", () => {
     const direct: CommandContext = { ...around, focus: focus("Direct", "peer"), head: undefined };
     const own: CommandContext = { ...around, focus: focus("Network", "libera"), head: undefined };
 
@@ -240,7 +240,7 @@ describe("the menu on a nick", () => {
     });
   });
 
-  it("acts only on its own Pane's Timeline, never the focused Pane's when that is another", () => {
+  it("acts only on its own pane's conversation, never the focused pane's when that is another", () => {
     const elsewhere: CommandContext = {
       ...inChannel(known(["o"])),
       focus: { ...focus("Channel", "#other"), timeline: other },
@@ -258,7 +258,7 @@ describe("the menu on a nick", () => {
     }).toStrictEqual({ elsewhere: [], otherHead: everyone });
   });
 
-  it("says how many entries may come while the head, the Session, or an operator's User is read, and none once known", () => {
+  it("says how many entries may come while the head, the connection, or an operator's user is read, and none once known", () => {
     const op = inChannel(known(["o"]));
     const unread: CommandContext = { ...op, head: undefined };
 
@@ -291,7 +291,7 @@ describe("the menu on a nick", () => {
     });
   });
 
-  it("offers only what runs without a Session, where nothing can be sent", () => {
+  it("offers only what runs without a connection, where nothing can be sent", () => {
     expect(ids({ ...inChannel(known(["o"])), session: false })).toStrictEqual([
       "query",
       "mention",
@@ -312,8 +312,8 @@ const fold = (events: readonly NickMenusEvent[], from: NickMenus = initialNickMe
 
 const opened: NickMenusEvent = { _tag: "Opened", channel: true, nick: "Peer", timeline };
 
-describe("whether the User of a nick menu is in its Channel", () => {
-  it("reads the Channel's members whose nick starts with theirs, under the menu's request", () => {
+describe("whether the user of a nick menu is in its channel", () => {
+  it("reads the channel's members whose nick starts with theirs, under the menu's request", () => {
     const state = fold([opened]);
 
     expect({

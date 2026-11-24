@@ -85,7 +85,7 @@ export const startDaemonIn = async (
     const chunk = await reader.read();
 
     if (chunk.done) {
-      throw new Error(`the Daemon ended before listening: ${logged}`);
+      throw new Error(`the daemon ended before listening: ${logged}`);
     }
 
     logged += decoder.decode(chunk.value);

@@ -34,7 +34,7 @@ export const sourcesAt = Atom.family((place: Place) =>
       keymap: get(keymapState),
       options: listed(get(optionsState), ""),
       ran: get(ranState),
-      suffix: get(uiInEffect)["composer.nickSuffix"],
+      suffix: get(uiInEffect)["input.nickSuffix"],
       ...get(themesListed),
       font: get(uiInEffect).font,
     })

@@ -25,7 +25,7 @@ const opened = lines(
 
 const own = {
   channels: [{ name: "#iirc" }],
-  lines: ["PRIVMSG HostServ :ON", "away :back soon"],
+  commands: ["PRIVMSG HostServ :ON", "away :back soon"],
   userModes: "+ix-w",
 };
 
@@ -56,7 +56,7 @@ describe("the Owner's start to a Session", () => {
         login: {
           _tag: "Service",
           account: "acct",
-          credential: CredentialName.make("pw"),
+          password: CredentialName.make("pw"),
           service: "NickServ",
           wait: 5,
         },
@@ -87,7 +87,7 @@ describe("the Owner's start to a Session", () => {
         login: {
           _tag: "Service",
           account: "acct",
-          credential: CredentialName.make("pw"),
+          password: CredentialName.make("pw"),
           service: "NickServ",
           wait: 5,
         },
@@ -140,7 +140,7 @@ describe("the Owner's start to a Session", () => {
 
   it("never sends a Line that /quote would refuse now, such as a PART of a Channel it wants", () => {
     play(client, {
-      configuration: configured({ ...own, lines: ["PART #iirc", "PRIVMSG HostServ :ON"] }),
+      configuration: configured({ ...own, commands: ["PART #iirc", "PRIVMSG HostServ :ON"] }),
       transcript: [
         opened,
         lines(
@@ -183,18 +183,18 @@ describe("the Owner's Lines in Configuration", () => {
     ["two Lines in one", "PING a\r\nQUIT"],
     ["nothing", ""],
   ])("refuses %s, as /quote does", (_, line) => {
-    expect(takes({ lines: [line] })).toBeFalsy();
+    expect(takes({ commands: [line] })).toBeFalsy();
   });
 
   it("takes a Line /quote takes", () => {
     expect(
-      takes({ lines: ["@+typing=active TAGMSG #iirc", "privmsg #iirc :hi there"] })
+      takes({ commands: ["@+typing=active TAGMSG #iirc", "privmsg #iirc :hi there"] })
     ).toBeTruthy();
   });
 
   it("takes at most 16", () => {
-    expect(takes({ lines: Array.from({ length: 16 }, () => "PING a") })).toBeTruthy();
-    expect(takes({ lines: Array.from({ length: 17 }, () => "PING a") })).toBeFalsy();
+    expect(takes({ commands: Array.from({ length: 16 }, () => "PING a") })).toBeTruthy();
+    expect(takes({ commands: Array.from({ length: 17 }, () => "PING a") })).toBeFalsy();
   });
 
   it.each(["+i", "-w", "+ix-w+R"])("takes the user modes %s", (userModes) => {

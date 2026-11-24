@@ -65,13 +65,6 @@ const operating = [
 ] as const;
 
 /**
- * An entry's word as its accessible name begins, capitalized.
- * @param text - The word.
- * @returns It, capitalized.
- */
-const labelOf = (text: string) => `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
-
-/**
  * An entry that runs a command as the Composer would, or none when the command would not
  * run here.
  * @param entry - The entry's id, word, and accessible name.
@@ -100,7 +93,7 @@ const commandEntry = (
  */
 const nickEntry = (name: string, nick: string, context: CommandContext): readonly NickEntry[] =>
   commandEntry(
-    { id: name, label: `${labelOf(name)} ${nick}`, text: name },
+    { id: name, label: `${name} ${nick}`, text: name },
     { args: nick, command: name },
     context
   );
@@ -160,8 +153,7 @@ export const nickEntries = (
           commandEntry(
             {
               id: one.id,
-              label:
-                one.id === "ban-account" ? `Ban ${nick}'s account` : `${labelOf(one.text)} ${nick}`,
+              label: one.id === "ban-account" ? `ban ${nick}'s account` : `${one.text} ${nick}`,
               text: one.text,
             },
             { args: `${one.args}${nick}`, command: one.command },
@@ -175,7 +167,7 @@ export const nickEntries = (
     {
       id: "mention",
       intents: [{ _tag: "FocusComposer", text: `${nick}: ` }],
-      label: `Mention ${nick}`,
+      label: `mention ${nick}`,
       text: "mention",
     },
     ...nickEntry("ignore", nick, context),

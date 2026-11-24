@@ -342,21 +342,21 @@ describe("reading the nick of a Lookup", () => {
       server: message("$*.test"),
       space: message("peer pal"),
     }).toStrictEqual({
-      channel: "That is a Channel's name. A Lookup takes a nick. /whois <nick>",
-      channelOnTheNetwork: "That is a Channel's name. A Lookup takes a nick. /whois <nick>",
+      channel: "That is a channel name. This request takes a nick. /whois <nick>",
+      channelOnTheNetwork: "That is a channel name. This request takes a nick. /whois <nick>",
       empty: "Whom? /whois <nick>",
       list: "Give one nick. /whois <nick>",
-      mask: "A Lookup takes one nick, never a mask or a source. /whois <nick>",
-      nul: "A nick holds no line break or NUL. /whois <nick>",
+      mask: "A request takes one nick, not a mask or a source. /whois <nick>",
+      nul: "A nick can't contain a line break or NUL. /whois <nick>",
       prefix: "Leave off the prefix ~: a nick does not start with it. /whois <nick>",
-      server: "A Lookup takes one nick, never a mask or a source. /whois <nick>",
+      server: "A request takes one nick, not a mask or a source. /whois <nick>",
       space: "Give one nick. /whois <nick>",
     });
   });
 });
 
 describe("/whois and /whowas", () => {
-  it("give a Look on the open Timeline's Network, with the head's ranks", () => {
+  it("give a Look on the open conversation's network, with the head's ranks", () => {
     const context = { ...contextOf(world(iirc)), head };
 
     expect(interpret("/whois peer", context)).toStrictEqual({
@@ -386,7 +386,7 @@ describe("/whois and /whowas", () => {
     });
   });
 
-  it("need a Timeline open and its Network's Session", () => {
+  it("need a conversation open and its network's connection", () => {
     const when = commandNamed("whois")?.when ?? [];
     const offline = { ...contextOf(world(iirc)), session: false };
 
@@ -397,7 +397,7 @@ describe("/whois and /whowas", () => {
 });
 
 describe("the Lookups", () => {
-  it("hold one card a Pane, which an answer for a card replaced never changes", () => {
+  it("hold one card a pane, which an answer for a card replaced never changes", () => {
     const state = fold([
       { _tag: "Asked", look: whois(), pane: "p0" },
       { _tag: "Asked", look: whois(), pane: "p0" },
@@ -428,7 +428,7 @@ describe("the Lookups", () => {
     });
   });
 
-  it("put a card away, and name Channels as `known` said", () => {
+  it("put a card away, and name channels as `known` said", () => {
     const state = fold([
       { _tag: "Asked", look: whois(), pane: "p0" },
       { _tag: "Named", chantypes: null, declared: null, id: 1, joined: [] },
@@ -443,7 +443,7 @@ describe("the Lookups", () => {
     expect(reduceLookups(state, { _tag: "Dismissed", pane: "p1" })).toBe(state);
   });
 
-  it("keep the cards of the Panes there are, shown or not, and none once signed out", () => {
+  it("keep the cards of the panes there are, shown or not, and none once signed out", () => {
     const state = fold([
       { _tag: "Asked", look: whois(), pane: "p0" },
       { _tag: "Asked", look: whois(), pane: "p1" },
@@ -459,7 +459,7 @@ describe("the Lookups", () => {
     }).toStrictEqual({ again: true, cleared: [0, 3], kept: ["p0"] });
   });
 
-  it("show a card only while its Pane has open the Timeline it was asked from", () => {
+  it("show a card only while its pane has open the conversation it was asked from", () => {
     const state = fold([{ _tag: "Asked", look: whois(), pane: "p0" }]);
 
     expect(shownCard(state, world(iirc), "p0")?.id).toBe(1);
@@ -469,7 +469,7 @@ describe("the Lookups", () => {
   });
 });
 
-describe("how long a User was idle", () => {
+describe("how long a user was idle", () => {
   it("is said in its two largest units", () => {
     expect(
       [0, 42, 180, 3600, 7500, 86_400, 273_600, -1, 1.5].map((seconds) => idleText(seconds))
@@ -496,7 +496,7 @@ describe("a card as a view draws it", () => {
     joined: [],
   };
 
-  it("shows a User whole, with the signon in the time format given", () => {
+  it("shows a user whole, with the signon in the time format given", () => {
     const card = cardAfter(
       [
         named,
@@ -600,7 +600,7 @@ describe("a card as a view draws it", () => {
     ]);
   });
 
-  it("offers no Channel to choose until the Network's naming is read, nor one no Channel", () => {
+  it("offers no channel to choose until the network's naming is read, nor one no channel", () => {
     // A bell, or an override the composer would show unseen, is no Channel's to join.
     const result = found(
       profile({
@@ -693,7 +693,7 @@ describe("a card as a view draws it", () => {
     ]);
   });
 
-  it("says in words what it waits on, and what found no User", () => {
+  it("says in words what it waits on, and what found no user", () => {
     const words = (more: readonly LookupsEvent[], look = whois()) => {
       const { body } = cardShown(world(iirc), cardAfter(more, look), time);
 
@@ -724,20 +724,21 @@ describe("a card as a view draws it", () => {
       wasNotFound: words([result({ _tag: "NotFound", notes: [], reply: "406" })], whowas),
     }).toStrictEqual({
       asking: "Looking up…",
-      bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",
-      busy: "Not looked up: too many Lookups are waiting on this Network. Try again in a moment.",
-      ended: "The connection ended before the reply did, so this is what had come.",
-      failed: "The Network refused the Lookup (402).",
-      lost: "No result came from the Daemon in time. Try again.",
+      bounded: "The reply was longer than iirc keeps, so this is only the start.",
+      busy: "Not looked up: too many requests are waiting on this network. Try again in a moment.",
+      ended: "The connection ended before the reply finished, so this is only part of it.",
+      failed: "The network refused the request (402).",
+      lost: "The daemon did not answer in time. Try again.",
       notFound: "No one uses the nick peer now (401).",
-      offline: "Not looked up: the Network is not connected.",
-      pending: "Still waiting for the Network's reply…",
-      stopped: "The Network stopped before it was looked up. Try again.",
-      timedOut: "The Network had not finished replying after 30 seconds, so this is what had come.",
-      unknown: "The Daemon has no such Network.",
-      unsendable: "Not looked up: the Network cannot be asked about that nick.",
+      offline: "Not looked up: the network is not connected.",
+      pending: "Still waiting for the network's reply…",
+      stopped: "The network stopped before the request finished. Try again.",
+      timedOut:
+        "The network took more than 30 seconds to finish replying, so this is only part of it.",
+      unknown: "The daemon has no such network.",
+      unsendable: "Not looked up: the network cannot be asked about that nick.",
       unsent: "Not looked up: the connection ended before it was sent.",
-      wasNotFound: "The Network remembers no one who used the nick old (406).",
+      wasNotFound: "The network has no record of anyone who used the nick old (406).",
     });
   });
 });
@@ -842,7 +843,7 @@ const looked = (kind: "Bans" | "Exceptions" | "Invitations", channel: string) =>
 describe("/bans, /exceptions, and /invexes", () => {
   const context = inIirc();
 
-  it("give a Look of the Channel in focus, or of the one named, on its Network", () => {
+  it("give a Look of the channel in focus, or of the one named, on its network", () => {
     expect([
       interpret("/bans", context),
       interpret("/exceptions #Other", context),
@@ -858,7 +859,7 @@ describe("/bans, /exceptions, and /invexes", () => {
     ]);
   });
 
-  it("leave a Channel's prefix to the Client while no head says the Network's CHANTYPES", () => {
+  it("leave a channel's prefix to the Client while no head says the network's CHANTYPES", () => {
     const unread = { ...contextOf(world(own)), head: undefined };
 
     expect(interpret("/bans $local", unread)).toMatchObject({
@@ -867,19 +868,19 @@ describe("/bans, /exceptions, and /invexes", () => {
     });
   });
 
-  it("say in words why there is no Channel to look up", () => {
+  it("say in words why there is no channel to look up", () => {
     expect({
       network: refusalOf("/bans", { ...contextOf(world(own)), head: undefined }),
       nick: refusalOf("/bans peer"),
       two: refusalOf("/invexes #a #b"),
     }).toStrictEqual({
-      network: "Of which Channel? Open it, or name it: /bans [channel]",
-      nick: "peer is no Channel's name. /bans [channel]",
-      two: "Give one Channel. /invexes [channel]",
+      network: "Name a channel or open one: /bans [channel]",
+      nick: "peer is no channel's name. /bans [channel]",
+      two: "Give one channel. /invexes [channel]",
     });
   });
 
-  it("are not offered where the head says the Network keeps no such list", () => {
+  it("are not offered where the head says the network keeps no such list", () => {
     const keeps = { ...head, lists: { bans: "b", exceptions: null, invitations: "I" } };
     const unread = { ...contextOf(world(iirc)), head: undefined };
 
@@ -889,13 +890,13 @@ describe("/bans, /exceptions, and /invexes", () => {
       unread: unmet(whenOf("exceptions"), unread),
     }).toStrictEqual({
       bans: undefined,
-      exceptions: "libera keeps no ban exceptions, by its ISUPPORT.",
+      exceptions: "libera does not support ban exceptions.",
       unread: undefined,
     });
   });
 });
 
-describe("a card of a Channel's list", () => {
+describe("a card of a channel's list", () => {
   const named: LookupsEvent = {
     _tag: "Named",
     chantypes: "#&",
@@ -925,7 +926,7 @@ describe("a card of a Channel's list", () => {
     mask,
   });
 
-  it("shows each mask, who set it and when where said, and removes one while Self may", () => {
+  it("shows each mask, who set it and when where said, and removes one while you may", () => {
     const card = cardAfter([named, listed], bans);
 
     expect(cardShown(world(iirc), card, time, held(["o"]))).toStrictEqual({
@@ -955,7 +956,7 @@ describe("a card of a Channel's list", () => {
     });
   });
 
-  it("shows a mask that names an account as the account, where the list's own Channel's head says how, and still unsets the mask", () => {
+  it("shows a mask that names an account as the account, where the list's own channel's head says how, and still unsets the mask", () => {
     const entries = result({
       _tag: "Listed",
       cut: null,
@@ -1032,7 +1033,7 @@ describe("a card of a Channel's list", () => {
     });
   });
 
-  it("offers removal only to an operator or higher, by the head of the list's own Channel", () => {
+  it("offers removal only to an operator or higher, by the head of the list's own channel", () => {
     const card = cardAfter([named, listed], bans);
 
     const elsewhereLook = listLookOf("Bans", "#Other", network, timelineId(iirc));
@@ -1070,7 +1071,7 @@ describe("a card of a Channel's list", () => {
     ]).toStrictEqual([true, false, true, false, false]);
   });
 
-  it("follows the Channel of each list's card, once its Timeline is found by its naming", () => {
+  it("follows the channel of each list's card, once its conversation is found by its naming", () => {
     const state = fold([
       { _tag: "Asked", look: listLookOf("Bans", "#OTHER", network, timelineId(iirc)), pane: "p0" },
       {
@@ -1128,7 +1129,7 @@ describe("a card of a Channel's list", () => {
     });
   });
 
-  it("shows a mask again when the act removing it is refused, at once or by the Ircd", () => {
+  it("shows a mask again when the act removing it is refused, at once or by the server", () => {
     const removingBoth: readonly LookupsEvent[] = [
       named,
       listed,
@@ -1161,7 +1162,7 @@ describe("a card of a Channel's list", () => {
     });
   });
 
-  it("says in words a list cut short, refused, or of no Channel", () => {
+  it("says in words a list cut short, refused, or of no channel", () => {
     const words = (more: LookupsEvent, look: Look = bans) => {
       const { body } = cardShown(world(iirc), cardAfter([more], look), time);
 
@@ -1187,13 +1188,13 @@ describe("a card of a Channel's list", () => {
       notOffered: words(result({ _tag: "Refused", reason: "NotOffered" })),
       unsendable: words(result({ _tag: "Refused", reason: "Unsendable" })),
     }).toStrictEqual({
-      bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",
+      bounded: "The reply was longer than iirc keeps, so this is only the start.",
       empty: "#IIRC has no bans.",
-      failed: "The Network refused the Lookup (482).",
+      failed: "The network refused the request (482).",
       invitations: "#iirc has no invitation masks.",
-      noChannel: "The Network has no Channel #IIRC (403).",
-      notOffered: "Not looked up: the Network keeps no such list, by its ISUPPORT.",
-      unsendable: "Not looked up: the Network cannot be asked about that Channel.",
+      noChannel: "The network has no channel #IIRC (403).",
+      notOffered: "Not looked up: the network does not support that list.",
+      unsendable: "Not looked up: the network cannot be asked about that channel.",
     });
   });
 });
@@ -1219,14 +1220,14 @@ const namesOf = (channel: string) => ({
 describe("/names", () => {
   const context = inIirc();
 
-  it("is of the Channel in focus, or the one named, shown by the head's ranks", () => {
+  it("is of the channel in focus, or the one named, shown by the head's ranks", () => {
     expect([interpret("/names", context), interpret("/NAMES #Other", context)]).toStrictEqual([
       namesOf("#iirc"),
       namesOf("#Other"),
     ]);
   });
 
-  it("is never a bare NAMES: outside a Channel it needs one named, and says why in words", () => {
+  it("is never a bare NAMES: outside a channel it needs one named, and says why in words", () => {
     const unread = { ...contextOf(world(own)), head: undefined };
 
     expect({
@@ -1236,7 +1237,7 @@ describe("/names", () => {
       nick: refusalOf("/names peer"),
       two: refusalOf("/names #a #b"),
     }).toStrictEqual({
-      direct: "Of which Channel? Open it, or name it: /names [channel]",
+      direct: "Name a channel or open one: /names [channel]",
       named: {
         _tag: "Parsed",
         value: [
@@ -1249,13 +1250,13 @@ describe("/names", () => {
           },
         ],
       },
-      network: "Of which Channel? Open it, or name it: /names [channel]",
-      nick: "peer is no Channel's name. /names [channel]",
-      two: "Give one Channel. /names [channel]",
+      network: "Name a channel or open one: /names [channel]",
+      nick: "peer is no channel's name. /names [channel]",
+      two: "Give one channel. /names [channel]",
     });
   });
 
-  it("needs a Timeline open and its Network's Session", () => {
+  it("needs a conversation open and its network's connection", () => {
     const when = commandNamed("names")?.when ?? [];
     const offline = { ...contextOf(world(iirc)), session: false };
 
@@ -1268,7 +1269,7 @@ describe("/names", () => {
 describe("/who", () => {
   const context = inIirc();
 
-  it("is of one mask, on the open Timeline's Network", () => {
+  it("is of one mask, on the open conversation's network", () => {
     expect(interpret("/who *!*@host.example", context)).toStrictEqual({
       _tag: "Parsed",
       value: [
@@ -1293,7 +1294,7 @@ describe("/who", () => {
     });
   });
 
-  it("needs a Timeline open and its Network's Session", () => {
+  it("needs a conversation open and its network's connection", () => {
     const when = commandNamed("who")?.when ?? [];
     const offline = { ...contextOf(world(iirc)), session: false };
 
@@ -1320,7 +1321,7 @@ const peopleWords = (look: Look, encoded: typeof LookResult.Encoded) => {
   return "note" in body ? body.note : body;
 };
 
-describe("a card of a Channel's members", () => {
+describe("a card of a channel's members", () => {
   const names = namesLookOf("#iirc", network, timelineId(iirc), head);
 
   it("shows each member in their colour with the symbols of their prefixes by the head's ranks", () => {
@@ -1370,18 +1371,18 @@ describe("a card of a Channel's members", () => {
       empty: peopleWords(names, { _tag: "Members", cut: null, members: [], notes: [] }),
       noChannel: peopleWords(names, { _tag: "NotFound", notes: [], reply: "403" }),
     }).toStrictEqual({
-      bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",
-      boundedEmpty: "The reply ran longer than a Lookup keeps, so this is how it began.",
+      bounded: "The reply was longer than iirc keeps, so this is only the start.",
+      boundedEmpty: "The reply was longer than iirc keeps, so this is only the start.",
       empty: "#iirc has no members.",
-      noChannel: "The Network has no Channel #iirc (403).",
+      noChannel: "The network has no channel #iirc (403).",
     });
   });
 });
 
-describe("a card of the Users a mask matched", () => {
+describe("a card of the users a mask matched", () => {
   const who = whoLookOf("*!*@Host", network, timelineId(iirc));
 
-  it("shows each User's nick, user@host, whether away, and realname where said", () => {
+  it("shows each user's nick, user@host, whether away, and realname where said", () => {
     const card = cardAfter(
       [
         result({
@@ -1400,7 +1401,7 @@ describe("a card of the Users a mask matched", () => {
     expect(cardShown(world(iirc), card, time)).toStrictEqual({
       body: {
         _tag: "Users",
-        note: "The Network had not finished replying after 30 seconds, so this is what had come.",
+        note: "The network took more than 30 seconds to finish replying, so this is only part of it.",
         users: [
           {
             away: true,
@@ -1431,15 +1432,15 @@ describe("a card of the Users a mask matched", () => {
       unsendable: peopleWords(who, { _tag: "Refused", reason: "Unsendable" }),
     }).toStrictEqual({
       empty: "No one matches *!*@Host.",
-      notFound: "The Network has no one matching *!*@Host (401).",
-      unsendable: "Not looked up: the Network cannot be asked about that mask.",
+      notFound: "The network has no one matching *!*@Host (401).",
+      unsendable: "Not looked up: the network cannot be asked about that mask.",
     });
   });
 });
 
 /**
  * A command read as a Look of the Network's Channels, from `#iirc`.
- * @param conditions - The mask and least number of members asked for.
+ * @param conditions - The mask and minimum number of members asked for.
  * @returns What it reads as.
  */
 const channelsOf = (conditions: { readonly mask?: string; readonly least?: number }) => ({
@@ -1456,7 +1457,7 @@ const channelsOf = (conditions: { readonly mask?: string; readonly least?: numbe
 });
 
 describe("/list", () => {
-  it("takes a mask, a least number of members, both in either order, or neither", () => {
+  it("takes a mask, a minimum number of members, both in either order, or neither", () => {
     expect({
       both: interpret("/list #linux* 10", inIirc()),
       least: interpret("/list 10", inIirc()),
@@ -1472,7 +1473,7 @@ describe("/list", () => {
     });
   });
 
-  it("says in words why it cannot read a mask or a least number of members", () => {
+  it("says in words why it cannot read a mask or a minimum number of members", () => {
     expect({
       comma: refusalOf("/list #a,#b"),
       huge: refusalOf("/list 99999999999999999999"),
@@ -1481,16 +1482,16 @@ describe("/list", () => {
       three: refusalOf("/list #a 3 #b"),
       zero: refusalOf("/list 0"),
     }).toStrictEqual({
-      comma: "A mask holds no comma. /list [mask] [least]",
-      huge: "No Channel has that many members. /list [mask] [least]",
-      leasts: "Give one least number of members. /list [mask] [least]",
+      comma: "A mask can't contain a comma. /list [mask] [least]",
+      huge: "No channel has that many members. /list [mask] [least]",
+      leasts: "Give one minimum number of members. /list [mask] [least]",
       masks: "Give one mask. /list [mask] [least]",
-      three: "Give a mask, a least number of members, or both. /list [mask] [least]",
-      zero: "A Channel listed has at least 1 member. /list [mask] [least]",
+      three: "Give a mask, a minimum number of members, or both. /list [mask] [least]",
+      zero: "A channel listed has at least 1 member. /list [mask] [least]",
     });
   });
 
-  it("needs a Timeline open and its Network's Session", () => {
+  it("needs a conversation open and its network's connection", () => {
     const when = commandNamed("list")?.when ?? [];
     const offline = { ...contextOf(world(iirc)), session: false };
 
@@ -1549,8 +1550,8 @@ const moreOf = (card: Card) => {
   return shown._tag === "Directory" ? shown.more : undefined;
 };
 
-describe("a card of the Network's Channels", () => {
-  it("shows each Channel's name, members and topic, contained, and opens or joins each", () => {
+describe("a card of the network's channels", () => {
+  it("shows each channel's name, members and topic, contained, and opens or joins each", () => {
     const card = cardAfter(
       [
         listNamed,
@@ -1609,7 +1610,7 @@ describe("a card of the Network's Channels", () => {
     });
   });
 
-  it("opens a Channel's Timeline only while Self is in it, and offers to join it otherwise", () => {
+  it("opens a channel's conversation only while you is in it, and offers to join it otherwise", () => {
     const look = directoryLookOf({}, network, timelineId(iirc));
     const listed = answeredWith(page(0, [{ channel: "#iirc", members: 3 }], { seen: 1, total: 1 }));
 
@@ -1693,7 +1694,7 @@ describe("a card of the Network's Channels", () => {
     });
   });
 
-  it("says in words when the reply was cut short, held no Channel, or was refused", () => {
+  it("says in words when the reply was cut short, held no channel, or was refused", () => {
     const look = directory();
     const masked = directoryLookOf({ mask: "#x*" }, network, timelineId(iirc));
     const one = [{ channel: "#a", members: 2 }];
@@ -1718,13 +1719,14 @@ describe("a card of the Network's Channels", () => {
       unsendable: noteOf(decodeResult({ _tag: "Refused", reason: "Unsendable" }), masked),
     }).toStrictEqual({
       bounded:
-        "These are the 1 000 largest of the 23 412 Channels the Network listed, as many as a Lookup keeps.",
-      busy: "Not looked up: the Network is still listing its Channels for an earlier /list. Try again once it has.",
-      empty: "The Network listed no Channels.",
-      emptyMasked: "The Network listed no Channels matching #x*.",
-      ended: "The connection ended before the reply did, so this is what had come.",
-      timedOut: "The Network had not finished replying after 30 seconds, so this is what had come.",
-      unsendable: "Not looked up: the Network cannot be asked about that mask.",
+        "These are the 1 000 largest of the 23 412 channels the network listed, the maximum iirc keeps.",
+      busy: "Not looked up: the network is still answering an earlier /list. Try again when it finishes.",
+      empty: "The network listed no channels.",
+      emptyMasked: "The network listed no channels matching #x*.",
+      ended: "The connection ended before the reply finished, so this is only part of it.",
+      timedOut:
+        "The network took more than 30 seconds to finish replying, so this is only part of it.",
+      unsendable: "Not looked up: the network cannot be asked about that mask.",
     });
   });
 });

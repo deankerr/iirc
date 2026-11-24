@@ -59,13 +59,13 @@ const isKeptApplication = (bytes: Uint8Array, at: number) =>
  */
 export const stripGif = (bytes: Uint8Array): Stripped => {
   if (!(asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a")) || bytes.length < 13) {
-    return unreadable("a GIF begins with its header and screen");
+    return unreadable("invalid GIF: missing header or screen descriptor");
   }
 
   const screenEnd = 13 + tableSize(bytes[10] ?? 0);
 
   if (screenEnd > bytes.length) {
-    return unreadable("a GIF's colour table runs past the end");
+    return unreadable("GIF color table runs past the end of file");
   }
 
   // Everything kept is copied, in order, from disjoint parts of the GIF, so no more than the
@@ -87,7 +87,7 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
     if (introducer === 0x3b) {
       copy(out, bytes, at, at + 1);
 
-      return imaged ? stripped(written(out)) : unreadable("a GIF ends before its image data");
+      return imaged ? stripped(written(out)) : unreadable("truncated GIF: ends before image data");
     }
 
     if (introducer === 0x2c) {
@@ -96,7 +96,7 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
       const end = dataAt > bytes.length ? undefined : subBlocksEnd(bytes, dataAt);
 
       if (end === undefined) {
-        return broken("a GIF image runs past the end");
+        return broken("GIF image runs past the end of file");
       }
 
       copy(out, bytes, pendingFrom, pendingTo);
@@ -110,7 +110,7 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
       const end = label === undefined ? undefined : subBlocksEnd(bytes, at + 2);
 
       if (end === undefined) {
-        return broken("a GIF extension runs past the end");
+        return broken("GIF extension runs past the end of file");
       }
 
       if (label === 0xf9) {
@@ -126,7 +126,7 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
       at = end;
     } else {
       return broken(
-        introducer === undefined ? "a GIF ends before its trailer" : "a GIF holds an unknown block"
+        introducer === undefined ? "truncated GIF: ends before trailer" : "GIF has an unknown block"
       );
     }
   }

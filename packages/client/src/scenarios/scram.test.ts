@@ -16,8 +16,8 @@ const login = (required: boolean, mechanism: SaslMechanism = "auto") =>
     login: {
       _tag: "Sasl",
       account: "iirc",
-      credential: CredentialName.make("pw"),
       mechanism,
+      password: CredentialName.make("pw"),
       required,
     },
   });

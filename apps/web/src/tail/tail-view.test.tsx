@@ -139,7 +139,7 @@ const page = async (fake: ReturnType<typeof fakeDaemon>) => {
  * @returns It, or none.
  */
 const view = (container: ParentNode) =>
-  container.querySelector<HTMLElement>('main section[aria-label="iirc"]');
+  container.querySelector<HTMLElement>('main section[aria-label="logs"]');
 
 /**
  * The Tail's lines the view shows, each its time, words, annotations, and cause, line by
@@ -174,11 +174,11 @@ const lines = (container: ParentNode) =>
 const words = (container: ParentNode) => lines(container).map((line) => line.message);
 
 /**
- * A time as the view draws it under the default `ui.timeline.timeFormat`.
+ * A time as the view draws it under the default `ui.conversation.timeFormat`.
  * @param at - The instant.
  * @returns The time.
  */
-const timeOf = (at: number) => clockFor(uiDefaults["timeline.timeFormat"]).format(new Date(at));
+const timeOf = (at: number) => clockFor(uiDefaults["conversation.timeFormat"]).format(new Date(at));
 
 /**
  * The view's banner: the art, as a screen reader names it, and the version under it.
@@ -196,7 +196,7 @@ const banner = (container: ParentNode) => {
 };
 
 /**
- * The sidebar's `iirc` row.
+ * The sidebar's `logs` row.
  * @returns It.
  */
 const tailRow = () => {
@@ -249,7 +249,7 @@ const composerDoes = async (container: HTMLElement, text?: string, key?: string)
  */
 const hintOf = (container: HTMLElement) => {
   const parts = [...(view(container)?.querySelectorAll("h2, p") ?? [])];
-  const hint = parts.findIndex((one) => one.textContent.startsWith("Choose a Timeline"));
+  const hint = parts.findIndex((one) => one.textContent.startsWith("Choose a conversation"));
 
   return hint === -1
     ? undefined
@@ -265,14 +265,14 @@ const tailShownNow = (registry: AtomRegistry.AtomRegistry) =>
   chosenOf(registry.get(timelinesState))._tag === "Tail";
 
 /**
- * The words of the lines the view shows under a value of `ui.tail`, with one line at each level held.
+ * The words of the lines the view shows under a value of `ui.logs`, with one line at each level held.
  * @param tail - The value.
  * @returns The words.
  */
 const shownAt = async (tail: "debug" | "info" | "warning" | "error") => {
   const fake = daemonWith();
 
-  fake.daemon.ui = { options: { ...uiDefaults, tail }, sequence: 1 };
+  fake.daemon.ui = { options: { ...uiDefaults, logs: tail }, sequence: 1 };
   fake.log("Debug", "debug");
   fake.log("Info", "info");
   fake.log("Warn", "warn");
@@ -456,14 +456,14 @@ describe("the iirc view", () => {
     expect({ none: hintOf(none.container), some: hintOf(some.container) }).toStrictEqual({
       none: {
         after: true,
-        text: "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.",
+        text: "Choose a conversation, or add a network with /network add <id> <host>[/port] [plain] <nick>. /set opens settings.",
       },
       some: undefined,
     });
   });
 
-  // Regression: `ui.tail` is not read, or a level it names is mapped to the wrong one.
-  it("shows the lines at the level ui.tail names and above, and no others", async () => {
+  // Regression: `ui.logs` is not read, or a level it names is mapped to the wrong one.
+  it("shows the lines at the level ui.logs names and above, and no others", async () => {
     expect({
       debug: await shownAt("debug"),
       error: await shownAt("error"),
@@ -478,7 +478,7 @@ describe("the iirc view", () => {
   });
 
   // Regression: a change on another device waits for a reload, or the Debug lines held are lost or out of order.
-  it("shows the Debug lines held, each in time order, once another device turns ui.tail down to debug, and hides them again once it is unset", async () => {
+  it("shows the Debug lines held, each in time order, once another device turns ui.logs down to debug, and hides them again once it is unset", async () => {
     const fake = daemonWith();
 
     fake.log("Debug", "Read a line");
@@ -493,11 +493,11 @@ describe("the iirc view", () => {
     );
     const before = words(shown.container);
 
-    await composerDoes(other.container, "/set ui.tail debug", "Enter");
+    await composerDoes(other.container, "/set ui.logs debug", "Enter");
     await settled(() => words(shown.container).length === 4);
     const debug = lines(shown.container).map((line) => [line.message, line.time]);
 
-    await composerDoes(other.container, "/unset ui.tail", "Enter");
+    await composerDoes(other.container, "/unset ui.logs", "Enter");
     await settled(() => words(shown.container).length === 2);
 
     expect({ after: words(shown.container), before, debug }).toStrictEqual({
@@ -512,8 +512,8 @@ describe("the iirc view", () => {
     });
   });
 
-  // Regression: `/tail` is no command, or the palette does not offer it.
-  it("opens from the palette, as /tail, in the focused Pane", async () => {
+  // Regression: `/logs` is no command, or the palette does not offer it.
+  it("opens from the palette, as /logs, in the focused Pane", async () => {
     const { container, registry } = await page(daemonWith());
 
     await doing(() => {
@@ -521,7 +521,7 @@ describe("the iirc view", () => {
     });
     await settled(() => !tailShownNow(registry) && view(container) === null);
 
-    await composerDoes(container, "/tai", "ArrowDown");
+    await composerDoes(container, "/log", "ArrowDown");
     await composerDoes(container, undefined, "Enter");
     await settled(() => tailShownNow(registry) && view(container) !== null);
 
@@ -572,12 +572,12 @@ describe("the iirc row", () => {
     await settled(() => marks()[1] === "false");
 
     expect({ chosen, elsewhere: marks(), empty, first, headings, neither }).toStrictEqual({
-      chosen: ["iirc", "true"],
-      elsewhere: ["iirc, in Pane 2", "false"],
-      empty: ["iirc", "true"],
+      chosen: ["logs", "true"],
+      elsewhere: ["logs, in pane 2", "false"],
+      empty: ["logs", "true"],
       first: true,
       headings: [],
-      neither: ["iirc", "false"],
+      neither: ["logs", "false"],
     });
   });
 

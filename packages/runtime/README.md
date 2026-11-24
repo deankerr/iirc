@@ -183,7 +183,7 @@ Each Connection has its own Outbox, from `@iirc/outbox`, and one pump fiber, bot
 
 - **The Runtime logs through `Effect.log*` and builds no Logger.** The composition root builds it.
 - **A Network's driver annotates its logs with the Network,** as does the log that it stopped on restart.
-- **A Connection's life is logged at INFO:** `Dialling` with its Connection id and Ircd, `Connected as <nick>` when a Session starts, and `Connection closed` once for each Connection, as its `Closed` is stepped.
+- **A Connection's life is logged at INFO:** `Connecting` with its connection id and server, `Connected as <nick>` when a Session starts, and `Connection closed` once for each Connection, as its `Closed` is stepped.
 - **`Connection closed` says why.** It carries the `connection` id, the Ircd's `host`, `port`, and `tls`, the Transport's `reason`, and from that step's News, `ended`, the Client's own reason, and `session`, whether a Session had begun.
 
 ## Ports

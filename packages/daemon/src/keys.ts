@@ -145,7 +145,7 @@ export class ApiKeys extends Context.Service<
 
         if (stored.length === 0) {
           yield* Effect.logWarning(
-            "No API keys, so every request is refused. Create one with `iirc key create` while the Daemon is stopped.",
+            "No API keys exist, so every request is refused. Stop the daemon and run `iirc key create` to create one.",
             { dataDir }
           );
         }

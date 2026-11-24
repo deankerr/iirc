@@ -71,8 +71,8 @@ describe("ngircd, away while no Frontend is open", () => {
           params: { network },
           payload: configured({
             channels: [],
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
           }),
           query: {},
         });

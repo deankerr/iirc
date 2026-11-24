@@ -131,7 +131,7 @@ export class SignIns extends Context.Service<
         // can bring it back.
         if (held.length !== read.length) {
           yield* write(held);
-          yield* Effect.logInfo("Dropped sign-ins whose key is no longer held", {
+          yield* Effect.logInfo("Dropped sign-ins whose API key no longer exists", {
             dropped: read.length - held.length,
           });
         }

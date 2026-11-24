@@ -102,7 +102,7 @@ export const changedSince = (
 export const runtimeClosed = "The Runtime closed";
 
 /** Why a Network stops once the Owner removed it. */
-const networkRemoved = "The Network was removed";
+const networkRemoved = "The network was removed";
 
 /** What carrying out an output left: Lines the Outbox refused, or an input to step next. */
 type Carried =
@@ -316,7 +316,7 @@ const sendLine = (connection: ConnectionId, link: Link, line: OutboundLine) => {
   const bytes = encode(line);
 
   return isRejected(bytes)
-    ? Effect.logError("Not sent: encode rejected a Line, a bug upstream", {
+    ? Effect.logError("Not sent: line could not be encoded (bug)", {
         command: line.command,
         connection,
         reason: bytes.reason,
@@ -354,14 +354,14 @@ const stoppedReason = (cause: Cause.Cause<JournalFailed | ClientThrew>): string 
   const failure = Cause.squash(cause);
 
   if (failure instanceof JournalFailed) {
-    return `The Journal failed: ${failure.reason}`;
+    return `Journal failed: ${failure.reason}`;
   }
 
   if (failure instanceof ClientThrew) {
-    return `The Client threw: ${failure.reason}`;
+    return `Client error: ${failure.reason}`;
   }
 
-  return `A defect: ${Cause.pretty(cause)}`;
+  return `Unexpected error: ${Cause.pretty(cause)}`;
 };
 
 // Takes the next Line. A secret taken is unfinished from the moment it leaves the Outbox.
@@ -569,7 +569,7 @@ const drive = <S>(
         const refuse = (reason: UnfilledReason) =>
           Effect.as(
             Effect.andThen(
-              Effect.logWarning("A Credential could not be filled", {
+              Effect.logWarning("Missing credential", {
                 connection,
                 credential: line.credential,
                 reason,
@@ -585,7 +585,7 @@ const drive = <S>(
             CredentialMissing: () =>
               Effect.succeed({ _tag: "Refused", reason: "Missing" } as const),
             VaultFailed: (error) =>
-              Effect.as(Effect.logWarning("The Vault failed", { reason: error.reason }), {
+              Effect.as(Effect.logWarning("Failed to read credentials", { reason: error.reason }), {
                 _tag: "Refused",
                 reason: "Unavailable",
               } as const),
@@ -637,7 +637,7 @@ const drive = <S>(
         );
 
         if (cut.dropped > 0) {
-          yield* Effect.logWarning("Lines dropped at hang-up", {
+          yield* Effect.logWarning("Dropped lines at disconnect", {
             connection,
             dropped: cut.dropped,
           });
@@ -753,7 +753,7 @@ const drive = <S>(
       Effect.gen(function* () {
         const refuse = (reason: string) =>
           Effect.as(
-            Effect.logWarning("The client certificate could not be had", {
+            Effect.logWarning("Failed to load client certificate", {
               connection,
               credential,
               reason,
@@ -767,7 +767,7 @@ const drive = <S>(
             CredentialMissing: () =>
               Effect.succeed({ _tag: "Refused", reason: "Missing" } as const),
             VaultFailed: (error) =>
-              Effect.as(Effect.logWarning("The Vault failed", { reason: error.reason }), {
+              Effect.as(Effect.logWarning("Failed to read credentials", { reason: error.reason }), {
                 _tag: "Refused",
                 reason: "Unavailable",
               } as const),
@@ -821,7 +821,7 @@ const drive = <S>(
         yield* Ref.update(links, (all) =>
           new Map(all).set(connection, { ...held, pump: pumping, scope: own })
         );
-        yield* Effect.logInfo("Dialling", { connection, ircd: output.ircd });
+        yield* Effect.logInfo("Connecting", { connection, ircd: output.ircd });
       });
 
     // Ends the Runtime's hold on a Connection once its `Closed` has been stepped.
@@ -839,7 +839,7 @@ const drive = <S>(
         const held = yield* live(line.connection);
 
         if (held === undefined) {
-          yield* Effect.logDebug("Not sent: no such Connection", { connection: line.connection });
+          yield* Effect.logDebug("Not sent: no such connection", { connection: line.connection });
 
           return [];
         }
@@ -851,7 +851,7 @@ const drive = <S>(
         });
 
         if (queued === "Full") {
-          yield* Effect.logWarning("Not sent: the Connection's queue is full", {
+          yield* Effect.logWarning("Not sent: connection queue is full", {
             connection: line.connection,
           });
 
@@ -898,7 +898,7 @@ const drive = <S>(
         const verified = verify(exchange, output.serverFinal);
 
         if (!verified) {
-          yield* Effect.logWarning("The Ircd's SASL server signature was not verified", {
+          yield* Effect.logWarning("Server's SASL signature was not verified", {
             connection: output.connection,
           });
         }
@@ -1216,10 +1216,10 @@ export const startNetwork = <S>(
     const network = yield* makeNetwork(id, folded);
 
     if (folded._tag === "Broken") {
-      yield* Effect.logError("The Network stopped on restart", { reason: folded.reason }).pipe(
+      yield* Effect.logError("Network stopped on restart", { reason: folded.reason }).pipe(
         Effect.annotateLogs({ network: id })
       );
-      yield* stop(network, `The Client threw: ${folded.reason}`);
+      yield* stop(network, `Client error: ${folded.reason}`);
 
       return network;
     }
@@ -1229,7 +1229,7 @@ export const startNetwork = <S>(
         (cause) => !Cause.hasInterruptsOnly(cause),
         (cause) =>
           Effect.andThen(
-            Effect.logError("The Network stopped", cause),
+            Effect.logError("Network stopped", cause),
             stop(network, stoppedReason(cause))
           )
       ),
@@ -1389,7 +1389,7 @@ export const stopGracefully = <S>(network: Network<S>, stopTimeout: number): Eff
     ).pipe(Effect.timeoutOption(stopTimeout));
 
     if (finished._tag === "None") {
-      yield* Effect.logWarning("A Connection did not close in time, so it is cut off", {
+      yield* Effect.logWarning("Connection did not close in time; force-closing", {
         network: network.id,
         stopTimeout,
       });
@@ -1423,7 +1423,7 @@ export const retire = <S>(network: Network<S>, stopTimeout: number): Effect.Effe
     ).pipe(Effect.timeoutOption(stopTimeout));
 
     if (finished._tag === "None") {
-      yield* Effect.logWarning("A Connection did not close in time, so it is cut off", {
+      yield* Effect.logWarning("Connection did not close in time; force-closing", {
         network: network.id,
         stopTimeout,
       });

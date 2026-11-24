@@ -101,8 +101,7 @@ const Details = ({ missing, upload }: { readonly upload: Upload; readonly missin
   const shown = useAtomValue(timeShown);
   const { deleted } = upload;
 
-  const at = (instant: number) =>
-    formattedAt(datedClockFor(shown), instant) ?? "at a time unavailable";
+  const at = (instant: number) => formattedAt(datedClockFor(shown), instant) ?? "unknown time";
 
   let said = at(upload.at);
 
@@ -135,7 +134,7 @@ const Said = ({
 
   return said.length === 0 ? null : (
     <span className={styles.said}>
-      said in{" "}
+      shared in{" "}
       {said.map((item, index) => {
         const place = saidPlace(item);
 
@@ -143,7 +142,7 @@ const Said = ({
           <span key={`${item.timeline}.${item.sequence}`}>
             {index === 0 ? null : ", "}
             <Button
-              aria-label={`Go to where ${name} was said in ${place}`}
+              aria-label={`Go to where ${name} was shared in ${place}`}
               className={styles.place}
               onPress={() => {
                 jump(item);
@@ -187,7 +186,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
       <span className={styles.about}>
         {renaming && deleted === undefined ? (
           <RenameField
-            label={`New name for ${name}`}
+            label={`new name for ${name}`}
             name={name}
             onClose={() => {
               setRenaming(false);
@@ -224,7 +223,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
               size="small"
               variant="quiet"
             >
-              Copy link
+              copy link
             </Button>
           )}
           {link === undefined || missing ? null : (
@@ -243,7 +242,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
             size="small"
             variant="quiet"
           >
-            Rename
+            rename
           </Button>
           <Button
             aria-label={`Delete ${name}`}
@@ -255,7 +254,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
             size="small"
             variant="quiet"
           >
-            Delete
+            delete
           </Button>
         </span>
       ) : null}
@@ -305,16 +304,16 @@ export const UploadsView = ({ pane }: { readonly pane: string }) => {
           size="small"
           variant="quiet"
         >
-          Show deleted
+          show deleted
         </ToggleButton>
         {unset ? (
-          <p className={styles.muted}>No link to copy until uploads.publicUrl is set.</p>
+          <p className={styles.muted}>You can&apos;t copy links until uploads.publicUrl is set.</p>
         ) : null}
       </div>
       <div className={styles.body}>
-        {next === undefined ? <p className={styles.muted}>Reading…</p> : null}
+        {next === undefined ? <p className={styles.muted}>loading…</p> : null}
         {next !== undefined && uploads.length === 0 ? (
-          <p className={styles.muted}>Nothing uploaded yet.</p>
+          <p className={styles.muted}>No uploads yet.</p>
         ) : null}
         <ul aria-label="Uploads" className={styles.list}>
           {uploads.map((upload) => (
@@ -329,7 +328,7 @@ export const UploadsView = ({ pane }: { readonly pane: string }) => {
             }}
             size="small"
           >
-            More
+            load more
           </Button>
         )}
       </div>

@@ -209,7 +209,7 @@ const markerAfterFill = (bytes: Uint8Array, at: number) => {
  */
 export const stripJpeg = (bytes: Uint8Array): Stripped => {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
-    return unreadable("a JPEG begins with its start-of-image marker");
+    return unreadable("invalid JPEG: missing start-of-image marker");
   }
 
   // Everything written is copied from the JPEG, from the part it is rebuilt from, or from the
@@ -227,28 +227,28 @@ export const stripJpeg = (bytes: Uint8Array): Stripped => {
 
   for (;;) {
     if (at >= bytes.length) {
-      return broken("a JPEG ends before its image data");
+      return broken("truncated JPEG: ends before image data");
     }
 
     if (bytes[at] !== 0xff) {
-      return broken("a JPEG holds bytes where a marker belongs");
+      return broken("invalid JPEG: unexpected bytes where a marker belongs");
     }
 
     const markerAt = markerAfterFill(bytes, at);
     const marker = bytes[markerAt];
 
     if (marker === undefined) {
-      return broken("a JPEG ends inside a marker");
+      return broken("truncated JPEG marker");
     }
 
     if (marker === 0xd9) {
       return walked.scanned
         ? assemble(walked, true)
-        : unreadable("a JPEG ends before its image data");
+        : unreadable("truncated JPEG: ends before image data");
     }
 
     if (marker === 0x00 || marker === 0xd8) {
-      return broken("a JPEG holds a marker out of place");
+      return broken("invalid JPEG: marker out of place");
     }
 
     // Markers with no length, out of place outside a scan: dropped.
@@ -261,7 +261,7 @@ export const stripJpeg = (bytes: Uint8Array): Stripped => {
     const end = markerAt + 1 + length;
 
     if (markerAt + 3 > bytes.length || length < 2 || end > bytes.length) {
-      return broken("a JPEG segment runs past the end");
+      return broken("JPEG segment runs past the end of file");
     }
 
     if (marker === 0xda) {

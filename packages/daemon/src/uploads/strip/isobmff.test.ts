@@ -229,7 +229,7 @@ describe("walking a movie", () => {
       secret: holds(out, "SECRET"),
       terminator: out.subarray(-4),
     }).toStrictEqual({
-      odd: "a box header is cut short",
+      odd: "truncated box header",
       secret: false,
       terminator: u(0, 4),
     });
@@ -600,22 +600,22 @@ describe("dropping a track a movie does not need", () => {
     [
       "a dropped track with no sample table",
       [videoTrack, { ...locationTrack, table: false }],
-      "a dropped track's sample table is missing",
+      "removed track's sample table is missing",
     ],
     [
       "a dropped track whose samples lie outside every mdat",
       [videoTrack, { ...locationTrack, at: [0, 0] }],
-      "a dropped track's samples are not in an mdat",
+      "removed track's samples are not in an mdat box",
     ],
     [
       "a dropped track whose sample table disagrees with itself",
       [videoTrack, { ...locationTrack, at: [200, 220, 240] }],
-      "a dropped track's sample table disagrees with itself",
+      "removed track's sample table is inconsistent",
     ],
     [
       "a kept track's reference that cannot lose a dropped track at the same length",
       [{ ...videoTrack, references: [{ ids: [1, 3], type: "cdsc" }] }, locationTrack],
-      "a kept track's reference to a dropped track cannot be removed",
+      "cannot remove a kept track's reference to a removed track",
     ],
   ] as const)("refuses %s", (_, tracks, reason) => {
     expect(reasonOf("movie", movie({ tracks }).bytes)).toBe(reason);
@@ -643,9 +643,7 @@ describe("dropping a track a movie does not need", () => {
     const at = (placed.chunks.get(3) ?? []).map(({ start }) => start);
     const built = movie({ tracks: [videoTrack, { ...locationTrack, extra: extra(at) }] });
 
-    expect(reasonOf("movie", built.bytes)).toBe(
-      "a dropped track's sample table disagrees with itself"
-    );
+    expect(reasonOf("movie", built.bytes)).toBe("removed track's sample table is inconsistent");
   });
 
   it.each([
@@ -654,7 +652,7 @@ describe("dropping a track a movie does not need", () => {
     ["a tkhd naming track 0", { ...locationTrack, id: 0 }],
   ] as const)("refuses a dropped track with %s", (_, track) => {
     expect(reasonOf("movie", movie({ tracks: [videoTrack, track] }).bytes)).toBe(
-      "a dropped track's tkhd names no track"
+      "removed track's tkhd box names no track"
     );
   });
 
@@ -663,7 +661,7 @@ describe("dropping a track a movie does not need", () => {
     const mdat = boxAt(built.bytes, "mdat");
 
     expect(reasonOf("movie", built.bytes.subarray(0, mdat?.end))).toBe(
-      "a movie with media and no moov"
+      "movie has media but no moov box"
     );
   });
 
@@ -677,7 +675,7 @@ describe("dropping a track a movie does not need", () => {
     );
 
     expect(reasonOf("movie", cat(built.bytes, fragment, box("mdat", planted(9))))).toBe(
-      "a fragment holds a run of a dropped track"
+      "fragment holds a run of a removed track"
     );
   });
 });
@@ -803,7 +801,7 @@ describe("walking an image", () => {
       iloc.set(u(1, 2), 6);
     });
 
-    expect(reasonOf("image", lying)).toBe("an iloc has more than its count of entries");
+    expect(reasonOf("image", lying)).toBe("iloc has more entries than its count");
   });
 
   it("refuses an iloc that lists an item twice", () => {
@@ -811,7 +809,7 @@ describe("walking an image", () => {
       iloc.set(u(1, 2), 8 + 16);
     });
 
-    expect(reasonOf("image", lying)).toBe("an iloc lists an item twice");
+    expect(reasonOf("image", lying)).toBe("iloc lists an item twice");
   });
 
   it("refuses a dropped item that iloc does not locate", () => {
@@ -819,7 +817,7 @@ describe("walking an image", () => {
       iloc.set(u(9, 2), 8 + 16);
     });
 
-    expect(reasonOf("image", lying)).toBe("an item is listed in iinf and not located in iloc");
+    expect(reasonOf("image", lying)).toBe("an item is listed in iinf but not located in iloc");
   });
 
   it("drops a JPEG item, which holds metadata of its own, with its data", () => {
@@ -853,7 +851,7 @@ describe("walking an image", () => {
         properties: [props[1] ?? text(""), box("zzzz", secret), props[2] ?? text("")],
       });
 
-      expect(reasonOf("image", built.bytes)).toBe("a kept item needs a property that is dropped");
+      expect(reasonOf("image", built.bytes)).toBe("a kept item needs a removed property");
     }
   );
 
@@ -905,33 +903,33 @@ describe("walking an image", () => {
     [
       "a dropped item's data that overlaps a kept item's",
       () => ({ at: [{ length: 8, offset: 3 }] }),
-      "a dropped item's data overlaps a kept item's",
+      "removed item's data overlaps a kept item's",
     ],
     [
       "a dropped item's data of no length",
       () => ({ at: [{ length: 0, offset: 20 }] }),
-      "a dropped item has an extent of no length",
+      "removed item has an empty extent",
     ],
     [
       "a dropped item's data past the end of the file",
       () => ({ at: [{ length: 8, offset: 100_000 }] }),
-      "a dropped item's data runs past the end of the file",
+      "removed item's data runs past the end of the file",
     ],
     [
       "a dropped item's data in meta",
       () => ({ at: [{ length: 8, offset: -100 }] }),
-      "a dropped item's data is in meta",
+      "removed item's data is in meta",
     ],
     [
       "a dropped item's data in ftyp",
       // Offsets are from the start of the mdat, so the start of the file is before it.
       (mdatStart: number) => ({ at: [{ length: 4, offset: -mdatStart }] }),
-      "a dropped item's data is not in an mdat",
+      "removed item's data is not in an mdat box",
     ],
     [
       "a dropped item's data in another file",
       () => ({ dataReference: 1 }),
-      "a dropped item's data is in another file",
+      "removed item's data is in another file",
     ],
   ] as const)("refuses %s", (_, overrides, reason) => {
     const items = [keptItem(1, "IMAGE-ONE"), keptItem(2, "THUMB")];
@@ -948,7 +946,7 @@ describe("walking an image", () => {
   it("refuses a kept item that refers to a dropped item", () => {
     const built = heif({ ...photo, references: [{ from: 1, to: [3], type: "dimg" }] });
 
-    expect(reasonOf("image", built.bytes)).toBe("a kept item refers to a dropped item");
+    expect(reasonOf("image", built.bytes)).toBe("a kept item refers to a removed item");
   });
 
   it.each([
@@ -960,7 +958,7 @@ describe("walking an image", () => {
 
   it("refuses a meta that does not hold a picture", () => {
     expect(reasonOf("image", heif({ ...photo, handler: "mdir" }).bytes)).toBe(
-      "a meta that does not hold a picture"
+      "meta box has no picture"
     );
   });
 
@@ -983,9 +981,7 @@ describe("walking an image", () => {
       references: [],
     });
 
-    expect(reasonOf("image", built.bytes)).toBe(
-      "a meta that shrinks too little to hold a free box"
-    );
+    expect(reasonOf("image", built.bytes)).toBe("meta box is too small to hold a free box");
   });
 
   it("leaves an image with only images as it is", () => {

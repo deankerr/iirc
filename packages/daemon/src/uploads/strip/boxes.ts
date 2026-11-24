@@ -86,14 +86,14 @@ export const typesOf = (names: string): ReadonlySet<number> =>
  */
 export const readBox = (bytes: Uint8Array, at: number, limit: number): Box | Unreadable => {
   if (at + 8 > limit || at + 8 > bytes.length) {
-    return bad("a box header is cut short");
+    return bad("truncated box header");
   }
 
   const small = readBe(bytes, at, 4);
   const header = small === 1 ? 16 : 8;
 
   if (at + header > limit || at + header > bytes.length) {
-    return bad("a box header is cut short");
+    return bad("truncated box header");
   }
 
   let size = small;
@@ -105,11 +105,11 @@ export const readBox = (bytes: Uint8Array, at: number, limit: number): Box | Unr
   }
 
   if (size < header) {
-    return bad("a box is smaller than its header");
+    return bad("box is smaller than its header");
   }
 
   if (at + size > limit) {
-    return bad("a box runs past what holds it");
+    return bad("box runs past its container");
   }
 
   return { end: at + size, header, start: at, type: readBe(bytes, at + 4, 4) };
@@ -158,13 +158,13 @@ export const readBoxes = (
     boxes.push(box);
 
     if (boxes.length > maxPatches) {
-      return bad("a box of too many boxes");
+      return bad("box holds too many boxes");
     }
 
     at = box.end;
   }
 
-  return allZero(bytes, at, to) ? boxes : bad("a box header is cut short");
+  return allZero(bytes, at, to) ? boxes : bad("truncated box header");
 };
 
 const free = ascii("free");
@@ -197,4 +197,4 @@ export const retype = (sink: Sink, box: Box) => {
  * @returns A failure if it does.
  */
 export const overfull = (sink: Sink): Unreadable | null =>
-  sink.patches.length > maxPatches ? bad("a file of too many parts") : null;
+  sink.patches.length > maxPatches ? bad("file has too many parts") : null;

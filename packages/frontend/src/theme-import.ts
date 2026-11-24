@@ -35,7 +35,7 @@ export interface Imported {
 }
 
 /** The longest text read, 256 KB: no terminal theme comes near it. */
-export const importLimit = 256 * 1024;
+export const importLimit = 256 * 1000;
 
 /** How deep a plist's arrays and dicts may nest. An `.itermcolors` file needs three. */
 const plistDepth = 16;
@@ -53,7 +53,7 @@ export const entryLimit = 4096;
  */
 const linesOf = (text: string) => text.split(/\r\n?|\n/u);
 
-const tooMany = `This holds more than ${entryLimit} settings or values, which no theme needs.`;
+const tooMany = `This has more than ${entryLimit} entries, which is more than a theme needs.`;
 
 const parsed = <A>(value: A): Parsed<A> => ({ _tag: "Parsed", value });
 
@@ -63,7 +63,7 @@ const decodeName = Schema.decodeUnknownOption(ThemeName);
 
 /**
  * A theme's name from the name a file gives itself, such as `Gruvbox dark, medium`, as
- * lower-case words joined by `-`, or none when nothing is left of it.
+ * lowercase words joined by `-`, or none when nothing is left of it.
  * @param text - The name given.
  * @returns The theme's name, or none.
  */
@@ -115,7 +115,7 @@ const OptionalText = Schema.optionalKey(Schema.String);
 
 /** Why the data of a theme is not what its format holds, in words: its first issue, by path. */
 const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1({
-  checkHook: () => "is not a colour as #rrggbb",
+  checkHook: () => "is not a color in #rrggbb form",
   leafHook: (issue) => {
     if (issue._tag === "MissingKey") {
       return "is missing";
@@ -123,8 +123,8 @@ const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1({
 
     if (issue._tag === "InvalidType") {
       return issue.ast._tag === "String"
-        ? "is not a colour as #rrggbb"
-        : "is not a group of colours";
+        ? "is not a color in #rrggbb form"
+        : "is not a group of colors";
     }
 
     return "cannot be read";
@@ -149,7 +149,7 @@ const parsedBy = <A>(schema: Schema.Decoder<A>, data: Schema.Json): Parsed<A> =>
 
   return invalid(
     path === ""
-      ? "This holds no colours where its format keeps them."
+      ? "This has no colors where its format stores them."
       : `${path} ${first?.message ?? "cannot be read"}.`
   );
 };
@@ -514,7 +514,7 @@ const colourOf = (text: string | undefined, name: string): Parsed<Colour> => {
 
   const colour = colourIn(text);
 
-  return colour === undefined ? invalid(`${name} is not a colour as #rrggbb.`) : parsed(colour);
+  return colour === undefined ? invalid(`${name} is not a color in #rrggbb form.`) : parsed(colour);
 };
 
 /**
@@ -743,7 +743,7 @@ const tokensOf = (text: string): Parsed<readonly Token[]> => {
     const inside = text.slice(open + 1, close);
 
     if (!comment && inside.startsWith("!") && inside.includes("[")) {
-      return invalid("This plist declares a DTD of its own, which is never read.");
+      return invalid("This plist declares its own DTD, which iirc does not read.");
     }
 
     if (instruction || (!comment && inside.startsWith("!"))) {
@@ -932,7 +932,7 @@ const plistValue = (reader: Reader, depth: number): Parsed<Plist> => {
   }
 
   if (token === undefined) {
-    return invalid("This plist ends before its last value does.");
+    return invalid("This plist ends before its last value is complete.");
   }
 
   if (token._tag === "Empty") {
@@ -940,7 +940,7 @@ const plistValue = (reader: Reader, depth: number): Parsed<Plist> => {
   }
 
   if (token._tag !== "Open") {
-    return invalid("This plist has something other than a value where a value goes.");
+    return invalid("This plist has something other than a value where one is expected.");
   }
 
   if (token.name === "dict") {
@@ -964,7 +964,7 @@ const itermColour = (value: Plist | undefined, name: string): Parsed<Colour> => 
   }
 
   if (value._tag !== "Dict") {
-    return invalid(`${name} is not a colour's dict.`);
+    return invalid(`${name} is not a color dict.`);
   }
 
   const component = (key: string) => {
@@ -1026,11 +1026,11 @@ const fromIterm = (text: string): Parsed<Imported> => {
   }
 
   if (nextToken(reader) !== undefined) {
-    return invalid("This plist goes on after </plist>, which only comments may.");
+    return invalid("This plist continues after </plist>, where only comments are allowed.");
   }
 
   if (root.value._tag !== "Dict") {
-    return invalid("This plist holds no dict of colours.");
+    return invalid("This plist has no dict of colors.");
   }
 
   const { entries } = root.value;
@@ -1167,7 +1167,7 @@ const yamlOf = (text: string): Parsed<Schema.Json> => {
   try {
     const data = Schema.decodeUnknownOption(Schema.Json)(Yaml.parse(text));
 
-    return Option.isSome(data) ? parsed(data.value) : invalid("This YAML holds no colours.");
+    return Option.isSome(data) ? parsed(data.value) : invalid("This YAML has no colors.");
   } catch (error) {
     return invalid(
       `This YAML cannot be read: ${error instanceof Error ? error.message : "it is not YAML"}.`
@@ -1203,7 +1203,7 @@ const tomlOf = (text: string): Parsed<Schema.Json> => {
   // A date has no place in a theme, so data that holds one is no theme.
   const data = Schema.decodeUnknownOption(Schema.Json)(read.success);
 
-  return Option.isSome(data) ? parsed(data.value) : invalid("This TOML holds no colours.");
+  return Option.isSome(data) ? parsed(data.value) : invalid("This TOML has no colors.");
 };
 
 /**
@@ -1225,7 +1225,7 @@ const readFrom = (
  */
 export const importTheme = (text: string): Parsed<Imported> => {
   if (text.length > importLimit) {
-    return invalid("This is longer than 256 KB, which no terminal theme is.");
+    return invalid("This is longer than 256 KB, which is too large for a terminal theme.");
   }
 
   const layout = layoutOf(text);
@@ -1261,7 +1261,7 @@ export const importTheme = (text: string): Parsed<Imported> => {
 
     case undefined: {
       return invalid(
-        "This is not a theme iirc reads: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's configuration, or a Windows Terminal scheme."
+        "This is not a theme iirc can read: base16 or base24 YAML, iTerm2's .itermcolors, Alacritty's TOML, Kitty's or Ghostty's config file, or a Windows Terminal scheme."
       );
     }
 

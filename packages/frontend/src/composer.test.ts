@@ -138,7 +138,7 @@ describe("what a draft ran", () => {
 
     expect([asked.ran, confirm(asked.state, channel, []).ran]).toStrictEqual([
       [],
-      ["command:timeline.next"],
+      ["command:conversation.next"],
     ]);
   });
 });
@@ -170,7 +170,7 @@ describe("aliases in a draft", () => {
     });
   });
 
-  it("are refused and cleared, keeping none of it, when they expand to a Credential's value", () => {
+  it("are refused and cleared, keeping none of it, when they expand to a password's value", () => {
     const before = sendAll(["hello"]);
 
     const { intents, state } = submit(
@@ -202,10 +202,10 @@ describe("submitting", () => {
     };
 
     const words =
-      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+      "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.";
 
     const oper =
-      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.";
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.";
 
     expect([
       refusedOne("/quote PASS one"),
@@ -253,10 +253,10 @@ describe("submitting", () => {
     }).toStrictEqual({
       bad: [
         [],
-        "Line 2: There is no command /frob. Start with // to say text that begins with /.",
+        "Raw command 2: There is no command /frob. Start with // to send text that begins with /.",
         "fine\n/frob",
       ],
-      nul: [[], "It holds a NUL character, which no IRC Line can carry. Nothing was sent."],
+      nul: [[], "It contains a NUL character, which IRC can't carry. Nothing was sent."],
     });
   });
 
@@ -354,7 +354,7 @@ describe("the draft and its history", () => {
     expect(draftOf(fold([down(), up(), down(), down()], typing), channel).text).toBe("half");
   });
 
-  it("properties: drafts are per Timeline, history is bounded, newest first, and recall returns to the draft", () => {
+  it("properties: drafts are per conversation, history is bounded, newest first, and recall returns to the draft", () => {
     const text = fc.string({ maxLength: 4, minLength: 1, unit: fc.constantFrom("a", "b", " ") });
 
     fc.assert(
@@ -440,17 +440,17 @@ describe("what became of a Say", () => {
     expect([draftOf(one, channel).notice, draftOf(more, channel).notice]).toStrictEqual([
       {
         _tag: "Outcome",
-        message: "Not said to #iirc: the Network had no Session when it arrived.",
+        message: "Not sent to #iirc: the network had no connection at the time.",
       },
       {
         _tag: "Outcome",
         message:
-          "Not said to \u202Epeer\u202C: no IRC Line can carry it there. Nothing after it was sent.",
+          "Not sent to \u202Epeer\u202C: IRC can't carry it there. Nothing after it was sent.",
       },
     ]);
   });
 
-  it("offers to send again only what the Network stopped before journaling, and never promises delivery", () => {
+  it("offers to send again only what the network stopped before journaling, and never promises delivery", () => {
     const intents = [say("one"), say("two")] as const;
 
     const notJournaled = fold([
@@ -471,7 +471,7 @@ describe("what became of a Say", () => {
       journaled: {
         _tag: "Offering",
         message:
-          "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery. What came after it was not sent.",
+          "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Its item in the conversation shows whether it was delivered. Nothing after it was sent.",
         offer: { _tag: "SendAgain", intent: undefined, intents: [say("two")] },
       },
       notJournaled: { _tag: "SendAgain", intent, intents },
@@ -495,13 +495,13 @@ describe("what became of a Say", () => {
     expect(draftOf(lost, channel).notice).toStrictEqual({
       _tag: "Offering",
       message:
-        "The Daemon did not answer, so whether this was said is unknown. Nothing after it was sent.",
+        "The daemon did not answer, so it's unknown whether this was sent. Nothing after it was sent.",
       offer: { _tag: "CheckAgain", intent, intents, network },
     });
   });
 });
 
-describe("a draft that came to show its Timeline", () => {
+describe("a draft that came to show its conversation", () => {
   const draft = placeOfDraft(network, "bob");
 
   const refused: ComposerEvent = {
@@ -512,7 +512,7 @@ describe("a draft that came to show its Timeline", () => {
     timeline: draft,
   };
 
-  it("carries its text and notice to the Timeline's composer, and says what answers later there", () => {
+  it("carries its text and notice to the conversation's composer, and says what answers later there", () => {
     const before = fold([
       { _tag: "Edited", text: "not sent yet", timeline: draft },
       { _tag: "Noticed", message: "said before", timeline: draft },
@@ -536,16 +536,16 @@ describe("a draft that came to show its Timeline", () => {
     });
   });
 
-  it("keeps what the Timeline's composer holds already", () => {
+  it("keeps what the conversation's composer holds already", () => {
     const state = reduceComposers(
       fold([
         { _tag: "Edited", text: "under the draft", timeline: draft },
-        { _tag: "Edited", text: "under the Timeline", timeline: other },
+        { _tag: "Edited", text: "under the conversation", timeline: other },
       ]),
       { _tag: "Carried", from: draft, to: other }
     );
 
-    expect(draftOf(state, other).text).toBe("under the Timeline");
+    expect(draftOf(state, other).text).toBe("under the conversation");
   });
 });
 
@@ -616,13 +616,13 @@ describe("how long a notice lasts", () => {
     }).toStrictEqual({ nothing: "AboutText", recalled: [undefined, "hello"] });
   });
 
-  it("lets go of a notice about the text when the composer turns to another Timeline, and the text stays", () => {
+  it("lets go of a notice about the text when the composer turns to another conversation, and the text stays", () => {
     const state = reduceComposers(complained(), { _tag: "Left", timeline: channel });
 
     expect([tagOf(state), draftOf(state, channel).text]).toStrictEqual([undefined, "/d"]);
   });
 
-  it("keeps a refused Credential's notice on the draft it cleared, until the text is edited", () => {
+  it("keeps a refused password's notice on the draft it cleared, until the text is edited", () => {
     const { state } = submit(
       fold([edited("/set network.libera.password secret")]),
       channel,
@@ -750,7 +750,7 @@ describe("how long a notice lasts", () => {
     }).toStrictEqual({ complaint: "AboutText", offering: "Offering", outcome: undefined });
   });
 
-  it("carries a draft's offer and outcome to its Timeline, and leaves a notice about its text behind", () => {
+  it("carries a draft's offer and outcome to its conversation, and leaves a notice about its text behind", () => {
     const draft = placeOfDraft(network, "bob");
 
     const carry = (event: ComposerEvent) => {
@@ -816,7 +816,7 @@ describe("a reply", () => {
   const offered = replyOf(item(), true);
 
   if (offered === undefined) {
-    throw new Error("a Message with an id, where tags are carried, is answerable");
+    throw new Error("a message with an id, where tags are carried, is answerable");
   }
 
   const answering: Answering = offered;
@@ -824,7 +824,7 @@ describe("a reply", () => {
   const replying = (events: readonly ComposerEvent[] = []) =>
     fold([{ _tag: "ReplyChosen", answering, timeline: channel }, ...events]);
 
-  it("is offered only where the Session carries tags and the Message has an id it can send", () => {
+  it("is offered only where the connection carries tags and the message has an id it can send", () => {
     const activity = Schema.decodeSync(TimelineItem)({
       ...Schema.encodeSync(TimelineItem)(item()),
       content: {
@@ -877,7 +877,7 @@ describe("a reply", () => {
     });
   });
 
-  it("is held by its Timeline's draft until dropped, through edits and turning away", () => {
+  it("is held by its conversation's draft until dropped, through edits and turning away", () => {
     const held = replying([edited("yes"), { _tag: "Left", timeline: channel }]);
     const dropped = fold([{ _tag: "ReplyDropped", timeline: channel }], held);
 
@@ -897,7 +897,7 @@ describe("a reply", () => {
     });
   });
 
-  it("answers on the first Say to its Timeline, not one to another Target", () => {
+  it("answers on the first Say to its conversation, not one to another channel or user", () => {
     const { intents } = submit(replying([edited("/msg bob hi\nyes")]), channel, context);
 
     expect(intents.map((one) => (one._tag === "Say" ? one.answers : "none"))).toStrictEqual([
@@ -1020,7 +1020,7 @@ describe("formatting a draft", () => {
     expect(draftOf(state, channel).text).toBe("a  c");
   });
 
-  it("writes a style across a line break on both lines, so each Message carries it", () => {
+  it("writes a style across a line break on both lines, so each message carries it", () => {
     const state = fold([edited("ab\ncd"), formatted(1, 4)]);
 
     expect(submit(state, channel, context).intents).toStrictEqual([
@@ -1044,7 +1044,7 @@ const answerable = (): Answering => {
   const offered = replyOf(item(), true);
 
   if (offered === undefined) {
-    throw new Error("a Message with an id, where tags are carried, is answerable");
+    throw new Error("a message with an id, where tags are carried, is answerable");
   }
 
   return offered;
@@ -1133,13 +1133,13 @@ describe("a command started over a draft", () => {
       answering: reply,
       aside: undefined,
       history: ["/next"],
-      ran: ["command:timeline.next"],
+      ran: ["command:conversation.next"],
       recalled: "/next",
       text: "hello",
     });
   });
 
-  it("brings the draft back once a Message is sent, and sends only what was typed", () => {
+  it("brings the draft back once a message is sent, and sends only what was typed", () => {
     const typed = reduceComposers(commandStarted(hello, channel, "/go "), edited("hi there"));
     const { intents, state } = submit(typed, channel, context);
 
@@ -1168,7 +1168,7 @@ describe("a command started over a draft", () => {
     ]).toStrictEqual(["hello", "hello", undefined]);
   });
 
-  it("keeps both when what was typed cannot be read, and when a Credential is refused", () => {
+  it("keeps both when what was typed cannot be read, and when a password is refused", () => {
     const refused = submit(commandStarted(hello, channel, "/frob"), channel, context);
 
     const credential = submit(
@@ -1212,7 +1212,7 @@ describe("a command started over a draft", () => {
     expect(reduceComposers(hello, { _tag: "Restored", timeline: channel })).toStrictEqual(hello);
   });
 
-  it("goes with the text when a draft comes to show its Timeline", () => {
+  it("goes with the text when a draft comes to show its conversation", () => {
     const place = placeOfDraft(network, "bob");
 
     const state = reduceComposers(commandStarted(fold([edited("hi bob", place)]), place, "/go "), {

@@ -55,7 +55,7 @@ const libera = NetworkId.make("libera");
 
 const floor = configured({
   channels: [{ name: "#iirc" }],
-  ircds: [{ host: "irc.test", port: 6667, tls: false }],
+  servers: [{ host: "irc.test", port: 6667, tls: false }],
 });
 
 /** 2026-01-01T00:00:00Z, where every test's clock starts. */
@@ -277,7 +277,9 @@ const uiChangedIn = <E>(events: Stream.Stream<UiEvent, E>, count: number) =>
     Stream.runCollect,
     Effect.map((all) =>
       all.map((event) =>
-        event.event === "changed" ? `${event.id} ${event.data.options["timeline.timeFormat"]}` : ""
+        event.event === "changed"
+          ? `${event.id} ${event.data.options["conversation.timeFormat"]}`
+          : ""
       )
     )
   );
@@ -373,7 +375,7 @@ describe("the handlers", () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         const ui = yield* api.ui.set({
-          params: { option: "timeline.timeFormat" },
+          params: { option: "conversation.timeFormat" },
           payload: { value: "none" },
           query: { ifSequence: 0 },
         });
@@ -411,14 +413,14 @@ describe("the handlers", () => {
     expect(result).toStrictEqual({
       inForce: {
         options: {
-          "previews.maxTotal": 1_073_741_824,
+          "previews.maxTotal": 1_000_000_000,
           "uploads.expireAfter": 30,
-          "uploads.maxSize": 104_857_600,
+          "uploads.maxSize": 100_000_000,
         },
         sequence: 3,
       },
       journaled: [
-        { _tag: "UiSet", option: "timeline.timeFormat", value: "none" },
+        { _tag: "UiSet", option: "conversation.timeFormat", value: "none" },
         { _tag: "OptionSet", option: "uploads.expireAfter", value: 30 },
         { _tag: "OptionUnset", option: "uploads.maxSize" },
       ],
@@ -438,7 +440,7 @@ describe("the handlers", () => {
         );
 
         yield* api.ui.set({
-          params: { option: "timeline.timeFormat" },
+          params: { option: "conversation.timeFormat" },
           payload: { value: "none" },
           query: {},
         });
@@ -453,7 +455,7 @@ describe("the handlers", () => {
 
         yield* Effect.yieldNow;
         yield* api.ui.set({
-          params: { option: "timeline.timeFormat" },
+          params: { option: "conversation.timeFormat" },
           payload: { value: "HH:mm:ss" },
           query: {},
         });
@@ -2206,7 +2208,7 @@ describe("the handlers", () => {
           params: { network: libera },
           payload: configured({
             channels: channels.map((name) => ({ name })),
-            ircds: [{ host: "irc.test", port: 6667, tls: false }],
+            servers: [{ host: "irc.test", port: 6667, tls: false }],
           }),
           query: {},
         });
@@ -3435,7 +3437,7 @@ describe("removing a Network", () => {
         }
 
         yield* api.options.set({
-          params: { option: "store.s3.accessKeyId" },
+          params: { option: "storage.s3.accessKeyId" },
           payload: { value: key },
           query: {},
         });
@@ -3511,7 +3513,7 @@ describe("removing a Network", () => {
 
           const setting = yield* Effect.forkChild(
             api.options.set({
-              params: { option: "store.s3.accessKeyId" },
+              params: { option: "storage.s3.accessKeyId" },
               payload: { value: key },
               query: {},
             })
@@ -3525,7 +3527,7 @@ describe("removing a Network", () => {
           yield* Fiber.join(setting);
 
           return {
-            option: (yield* api.options.read()).options["store.s3.accessKeyId"],
+            option: (yield* api.options.read()).options["storage.s3.accessKeyId"],
             vault: yield* world.vault.names,
             waiting,
           };

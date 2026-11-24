@@ -72,7 +72,7 @@ export type When = readonly Clause[];
 /** A key bound to a command, with its arguments, when it applies. */
 export interface Binding {
   readonly keys: Chord;
-  /** The command's id, such as `timeline.next`. */
+  /** The command's id, such as `conversation.next`. */
   readonly command: string;
   /** The text after the command's name. */
   readonly args: string;
@@ -219,7 +219,7 @@ export const parseChord = (text: string): Parsed<Chord> => {
     }
 
     if (held[modifier]) {
-      return invalid(`"${text}" holds ${modifier} twice.`);
+      return invalid(`"${text}" uses ${modifier} twice.`);
     }
 
     held[modifier] = true;
@@ -494,7 +494,7 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
 
 /**
  * The bindings the Frontend starts with. Mod+Shift+P starts `/` in the Composer and Mod+K
- * starts `/go `, which `timeline.go` requires arguments for, as a binding to such a command
+ * starts `/go `, which `conversation.go` requires arguments for, as a binding to such a command
  * with none does. Starting a command and moving between Timelines work while typing in the
  * composer, as an IRC client's do, and Alt+A jumps to what calls for the Owner most, as
  * WeeChat's does. Alt+M shows or hides the members and Alt+N the sidebar of Networks beside
@@ -512,13 +512,13 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * the Sidebar, and `/pin` has no key.
  */
 export const defaultBindings: readonly BindingText[] = [
-  { command: "timeline.go", keys: "mod+k" },
-  { args: "/", command: "composer.focus", keys: "mod+shift+p" },
-  { command: "timeline.next", keys: "alt+arrowdown" },
-  { command: "timeline.previous", keys: "alt+arrowup" },
-  { args: "up", command: "timeline.move", keys: "mod+alt+arrowup" },
-  { args: "down", command: "timeline.move", keys: "mod+alt+arrowdown" },
-  { command: "timeline.unread", keys: "alt+a" },
+  { command: "conversation.go", keys: "mod+k" },
+  { args: "/", command: "input.focus", keys: "mod+shift+p" },
+  { command: "conversation.next", keys: "alt+arrowdown" },
+  { command: "conversation.previous", keys: "alt+arrowup" },
+  { args: "up", command: "conversation.move", keys: "mod+alt+arrowup" },
+  { args: "down", command: "conversation.move", keys: "mod+alt+arrowdown" },
+  { command: "conversation.unread", keys: "alt+a" },
   { command: "members.toggle", keys: "alt+m" },
   { command: "sidebar.toggle", keys: "alt+n" },
   { args: "", command: "options.set", keys: "alt+o" },
@@ -716,7 +716,7 @@ const enterWith = ({ mod, shift }: { readonly mod: boolean; readonly shift: bool
 });
 
 /**
- * The chord that sends what the Composer holds, as `ui.composer.enter` says: Enter for `send`, and
+ * The chord that sends what the Composer holds, as `ui.input.enter` says: Enter for `send`, and
  * Mod+Enter for `newline`.
  * @param enter - What Enter does.
  * @returns The chord.
@@ -725,7 +725,7 @@ export const sendChord = (enter: EnterKey): Chord =>
   enterWith({ mod: enter === "newline", shift: false });
 
 /**
- * The chord that begins a new line in the Composer, as `ui.composer.enter` says: Shift+Enter for
+ * The chord that begins a new line in the Composer, as `ui.input.enter` says: Shift+Enter for
  * `send`, and Enter for `newline`.
  * @param enter - What Enter does.
  * @returns The chord.
@@ -737,7 +737,7 @@ export const newLineChord = (enter: EnterKey): Chord =>
 export type EnterPress = "Send" | "NewLine";
 
 /**
- * What an Enter pressed in the Composer does, as `ui.composer.enter` says. With `send`, Enter sends
+ * What an Enter pressed in the Composer does, as `ui.input.enter` says. With `send`, Enter sends
  * whatever else is held, as it always has, but Shift, which begins a new line. With
  * `newline`, Mod+Enter sends, and Enter or Shift+Enter begins a new line, which the field
  * does itself. Any other key, or Enter with another modifier under `newline`, is none of

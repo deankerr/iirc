@@ -45,7 +45,7 @@ describe("the formatting list", () => {
     });
   });
 
-  it("starts on the default colour", () => {
+  it("starts on the default color", () => {
     expect(firstHighlight).toStrictEqual(at(colours, 0));
   });
 });

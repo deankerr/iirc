@@ -52,7 +52,7 @@ export const DraftView = ({
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
     <section
-      aria-label={`Direct Message with ${nick}`}
+      aria-label={`Direct message with ${nick}`}
       className={styles.view}
       onKeyDown={onKeyDown}
     >
@@ -61,7 +61,7 @@ export const DraftView = ({
           <IconButton
             icon="close"
             keys="Esc"
-            label={`Close the Direct Message with ${nick}`}
+            label={`Close the direct message with ${nick}`}
             onPress={closeNow}
             size="small"
           />
@@ -70,11 +70,11 @@ export const DraftView = ({
         pane={pane}
       >
         <BarText>
-          Direct Message on <bdi>{network}</bdi>
+          Direct message on <bdi>{network}</bdi>
         </BarText>
       </PaneBar>
       <p className={styles.log}>
-        No Messages with <bdi>{nick}</bdi> yet. What you say below starts the conversation.
+        No messages with <bdi>{nick}</bdi> yet. Send one below to start the conversation.
       </p>
     </section>
   );

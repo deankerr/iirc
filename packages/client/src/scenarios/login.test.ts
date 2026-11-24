@@ -18,8 +18,8 @@ const required = configured({
   login: {
     _tag: "Sasl",
     account: "iirc",
-    credential: CredentialName.make("pw"),
     mechanism: "auto",
+    password: CredentialName.make("pw"),
     required: true,
   },
 });
@@ -86,8 +86,8 @@ describe("a Configured that requires a login", () => {
       login: {
         _tag: "Sasl",
         account: "iirc",
-        credential: CredentialName.make("pw"),
         mechanism: "auto",
+        password: CredentialName.make("pw"),
         required: false,
       },
     });

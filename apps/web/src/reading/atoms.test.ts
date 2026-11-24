@@ -389,7 +389,7 @@ describe("marking read", () => {
 
     const changing = run(registry, changeUiOption, {
       device: false,
-      option: "timeline.timeFormat",
+      option: "conversation.timeFormat",
       value: "HH:mm:ss",
     });
 
@@ -683,7 +683,7 @@ describe("notifications", () => {
     expect({ refused, tag: notifier.shown[0]?.tag }).toStrictEqual({
       refused: {
         notice:
-          "This browser blocks notifications from iirc. Allow them in its settings for this site, then /notify on again.",
+          "This browser blocks notifications from iirc. Allow them in its settings for this site, then run /notify on again.",
         on: false,
       },
       tag: `iirc:${iirc}`,

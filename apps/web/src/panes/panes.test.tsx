@@ -431,7 +431,7 @@ const drawnOf = (pane: string) => {
  * The bar's button that opens the sidebar's drawer on a compact screen.
  * @returns It, or none.
  */
-const button = () => document.querySelector<HTMLElement>('header button[aria-label^="Networks"]');
+const button = () => document.querySelector<HTMLElement>('header button[aria-label^="networks"]');
 
 /**
  * How many dialogs the page shows.
@@ -525,10 +525,10 @@ describe("the Panes", () => {
       registry.set(open, other);
       await Promise.resolve();
     });
-    await settled(() => composer().getAttribute("aria-label") === "Pane 2: #other");
+    await settled(() => composer().getAttribute("aria-label") === "pane 2: #other");
 
     await press(composer(), { altKey: true, code: "ArrowLeft", key: "ArrowLeft", shiftKey: true });
-    await settled(() => composer().getAttribute("aria-label") === "Pane 1: #iirc");
+    await settled(() => composer().getAttribute("aria-label") === "pane 1: #iirc");
 
     const marked = document.querySelector<HTMLElement>('[data-marked="true"]')?.dataset.pane;
 
@@ -617,12 +617,12 @@ describe("the Panes", () => {
     const compact = {
       separators: document.querySelectorAll("[data-separator]").length,
       shown: shown(),
-      switcher: [...document.querySelectorAll('[aria-label="Panes"] button')].map(
+      switcher: [...document.querySelectorAll('[aria-label="panes"] button')].map(
         (one) => one.textContent
       ),
     };
 
-    const first = document.querySelector<HTMLElement>('[aria-label="Panes"] button');
+    const first = document.querySelector<HTMLElement>('[aria-label="panes"] button');
 
     await act(async () => {
       first?.click();
@@ -772,7 +772,7 @@ describe("the Panes", () => {
     await settled(() => logNamed("#iirc") !== null);
 
     expect({
-      held: [held.includes("Reading…"), held.includes("Choose a Timeline")],
+      held: [held.includes("loading…"), held.includes("Choose a Timeline")],
       restored: openOf(registry.get(timelinesState)),
     }).toStrictEqual({ held: [true, false], restored: iirc });
   });
@@ -820,9 +820,11 @@ describe("what stands in front of a Timeline", () => {
     await act(async () => {
       await run(registry, openOptions, "");
     });
-    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+    await settled(() => document.querySelector('section[aria-label="Settings"]') !== null);
 
-    const grid = document.querySelector<HTMLElement>('section[aria-label="Options"] [role="grid"]');
+    const grid = document.querySelector<HTMLElement>(
+      'section[aria-label="Settings"] [role="grid"]'
+    );
 
     await press(grid ?? composer(), { key: "Escape" });
     await settled(() => logNamed("#iirc") !== null);
@@ -836,7 +838,7 @@ describe("what stands in front of a Timeline", () => {
     await act(async () => {
       await run(registry, openOptions, "");
     });
-    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+    await settled(() => document.querySelector('section[aria-label="Settings"]') !== null);
 
     const marked = {
       iirc: rowNamed("#iirc")?.getAttribute("aria-selected"),
@@ -897,11 +899,11 @@ describe("what stands in front of a Timeline", () => {
       await Promise.resolve();
     });
     await settled(
-      () => document.querySelector('section[aria-label="Direct Message with bob"]') !== null
+      () => document.querySelector('section[aria-label="Direct message with bob"]') !== null
     );
 
     const drawn = {
-      log: document.querySelector('section[aria-label="Direct Message with bob"] p')?.textContent,
+      log: document.querySelector('section[aria-label="Direct message with bob"] p')?.textContent,
       prompt: document.querySelector("label")?.textContent,
     };
 
@@ -910,7 +912,7 @@ describe("what stands in front of a Timeline", () => {
 
     expect({ drawn, main: mainTag(registry) }).toStrictEqual({
       drawn: {
-        log: "No Messages with bob yet. What you say below starts the conversation.",
+        log: "No messages with bob yet. Send one below to start the conversation.",
         prompt: "bob>",
       },
       main: "Timeline",
@@ -931,7 +933,7 @@ describe("what stands in front of a Timeline", () => {
       await Promise.resolve();
     });
     await press(input, { key: "Enter" });
-    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+    await settled(() => document.querySelector('section[aria-label="Settings"]') !== null);
     const shown = mainTag(registry);
 
     await press(composer(), { key: "Escape" });
@@ -959,19 +961,19 @@ describe("what stands in front of a Timeline", () => {
       registry.set(pageState, { compact: true, focused: true, visible: true });
       await Promise.resolve();
     });
-    await settled(() => document.querySelectorAll('[aria-label="Panes"] button').length === 2);
+    await settled(() => document.querySelectorAll('[aria-label="panes"] button').length === 2);
 
     expect({
       composer: composer().getAttribute("aria-label"),
       shown: document
-        .querySelector('section[aria-label^="Direct Message with"]')
+        .querySelector('section[aria-label^="Direct message with"]')
         ?.getAttribute("aria-label"),
-      switcher: [...document.querySelectorAll('[aria-label="Panes"] button')].map(
+      switcher: [...document.querySelectorAll('[aria-label="panes"] button')].map(
         (one) => one.textContent
       ),
     }).toStrictEqual({
-      composer: "Pane 2: bob",
-      shown: "Direct Message with bob",
+      composer: "pane 2: bob",
+      shown: "Direct message with bob",
       switcher: ["1 alice", "2 bob"],
     });
   });
@@ -996,7 +998,7 @@ describe("what stands in front of a Timeline", () => {
       button()?.click();
       await Promise.resolve();
     });
-    await settled(() => document.querySelector('[role="dialog"][aria-label="Networks"]') !== null);
+    await settled(() => document.querySelector('[role="dialog"][aria-label="networks"]') !== null);
 
     const row = [...document.querySelectorAll<HTMLElement>('[role="dialog"] [role="row"]')].find(
       (one) => one.getAttribute("aria-label")?.startsWith("#other") === true
@@ -1023,7 +1025,7 @@ describe("what stands in front of a Timeline", () => {
       opened,
     }).toStrictEqual({
       after: { dialog: 0, drawer: "None", shown: ["#other"] },
-      before: { expanded: "false", label: "Networks, Messages unread", sidebar: 0 },
+      before: { expanded: "false", label: "networks, unread messages", sidebar: 0 },
       opened: { expanded: "true", sidebar: 1 },
     });
   });
@@ -1068,7 +1070,7 @@ describe("what stands in front of a Timeline", () => {
       toggle()?.click();
       await Promise.resolve();
     });
-    await settled(() => document.querySelector('section[aria-label="Members"]') !== null);
+    await settled(() => document.querySelector('section[aria-label="members"]') !== null);
 
     const kept = readChoice("iirc.members");
 
@@ -1118,7 +1120,7 @@ describe("what stands in front of a Timeline", () => {
     await resize(false);
 
     const wide = {
-      column: document.querySelectorAll('section[aria-label="Members"]').length,
+      column: document.querySelectorAll('section[aria-label="members"]').length,
       kept: registry.get(membersShown),
     };
 

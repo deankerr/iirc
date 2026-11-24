@@ -115,7 +115,7 @@ const listing = (order: readonly TimelineId[]) =>
   numbers(arranged([libera], arrange({ order }))).networks[0];
 
 describe("the Sidebar in the Owner's order", () => {
-  it("is exactly the fixed order when nothing is set, and keeps the removed Networks last", () => {
+  it("is exactly the fixed order when nothing is set, and keeps the removed networks last", () => {
     const shown = arranged([libera, oftc, gone], unarranged);
 
     expect({
@@ -136,7 +136,7 @@ describe("the Sidebar in the Owner's order", () => {
     });
   });
 
-  it("puts the Networks and a Network's Timelines in the order given, its own Timeline first", () => {
+  it("puts the networks and a network's conversations in the order given, its own conversation first", () => {
     const shown = arranged(fixed, {
       ...unarranged,
       networks: [network("oftc"), network("libera")],
@@ -150,7 +150,7 @@ describe("the Sidebar in the Owner's order", () => {
     ]);
   });
 
-  it("keeps the removed Networks after the others, whatever the order says", () => {
+  it("keeps the removed networks after the others, whatever the order says", () => {
     const shown = arranged(
       fixed,
       arrange({ networks: [network("gone"), network("oftc"), network("libera")] })
@@ -159,7 +159,7 @@ describe("the Sidebar in the Owner's order", () => {
     expect(shown.networks.map((one) => one.network)).toStrictEqual(["oftc", "libera", "gone"]);
   });
 
-  it("gives a Timeline with no place the place the fixed order gives it, after the one before it", () => {
+  it("gives a conversation with no place the place the fixed order gives it, after the one before it", () => {
     expect({
       // The Direct Message goes where #c goes.
       direct: listing([id(13), id(12), id(11)]),
@@ -182,7 +182,7 @@ describe("the Sidebar in the Owner's order", () => {
     }).toStrictEqual({ gone: [10, 12, 13, 14, 11], twice: [10, 13, 14, 11, 12] });
   });
 
-  it("takes a pinned Timeline out of its Network into the pinned part, in the order pinned, saying its Network", () => {
+  it("takes a pinned conversation out of its network into the pinned part, in the order pinned, saying its network", () => {
     const shown = arranged(fixed, arrange({ pinned: [id(21), id(12)] }));
 
     expect({
@@ -211,7 +211,7 @@ describe("the Sidebar in the Owner's order", () => {
     });
   });
 
-  it("shows nothing for a pin that is closed, gone, unknown, or a Network's own, and names a Timeline once", () => {
+  it("shows nothing for a pin that is closed, gone, unknown, or a network's own, and names a conversation once", () => {
     const withClosed = net("libera", 10, ["#a"], { closed: ["#b"] });
 
     const shown = arranged(
@@ -270,7 +270,7 @@ const place = (timeline: number, target: number, side: "Before" | "After"): Arra
 });
 
 describe("arranging the Sidebar", () => {
-  it("moves a Timeline among its Network's, writing the whole order and keeping other Networks' places", () => {
+  it("moves a conversation among its network's, writing the whole order and keeping other networks' places", () => {
     const other = [id(21), id(22)];
 
     expect({
@@ -284,7 +284,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("keeps a closed Timeline, and a pinned one, in its own place while another moves", () => {
+  it("keeps a closed conversation, and a pinned one, in its own place while another moves", () => {
     // #b, closed, sits between #a, listed first, and #c.
     const held = [net("libera", 10, ["#a", "#c"], { closed: ["#b"] })];
 
@@ -298,7 +298,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("drops what has gone from what it writes once every Network is read, and keeps it while one is read", () => {
+  it("drops what has gone from what it writes once every network is read, and keeps it while one is read", () => {
     // oftc's first page is held, and later pages are still read.
     const reading: SidebarNetwork = { ...oftc, complete: false };
     const given = { order: [id(99), id(11), id(21)], pinned: [id(98), id(13)] };
@@ -319,7 +319,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("changes nothing at an edge, for an unknown Timeline, or when a Timeline is placed where it is", () => {
+  it("changes nothing at an edge, for an unknown conversation, or when a conversation is placed where it is", () => {
     expect({
       bottom: edit({}, move(14, "Down")),
       first: edit({}, move(11, "Up")),
@@ -335,7 +335,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("moves a Network among the Networks as removed as it is, by its own Timeline", () => {
+  it("moves a network among the networks as removed as it is, by its own conversation", () => {
     const four = [
       libera,
       oftc,
@@ -371,11 +371,11 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("will not move a Network past a removed one", () => {
+  it("will not move a network past a removed one", () => {
     expect(edit({}, place(20, 30, "After"))).toBeUndefined();
   });
 
-  it("moves a pinned Timeline within the pinned part, and writes the pinned part", () => {
+  it("moves a pinned conversation within the pinned part, and writes the pinned part", () => {
     const pinned = [id(21), id(12), id(11)];
 
     expect({
@@ -389,7 +389,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("refuses to place a Timeline across parts or Networks, which only reorders within one", () => {
+  it("refuses to place a conversation across parts or networks, which only reorders within one", () => {
     const pinned = [id(21)];
 
     expect({
@@ -407,7 +407,7 @@ describe("arranging the Sidebar", () => {
     });
   });
 
-  it("pins a Timeline by appending it, and unpins by removing it, changing nothing when it already is so", () => {
+  it("pins a conversation by appending it, and unpins by removing it, changing nothing when it already is so", () => {
     expect({
       already: edit({ pinned: [id(12)] }, pin(12, true)),
       append: edit({ pinned: [id(12), id(99)] }, pin(11, true)),

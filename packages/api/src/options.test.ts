@@ -27,16 +27,16 @@ const takesListen = Schema.is(ListenAddress);
 describe("the options under store, uploads, and previews", () => {
   it("are named in full, and only uploads.maxSize and previews.maxTotal start as anything, at 100 MiB and 1 GiB", () => {
     expect({ defaults: ownerDefaults, names: ownerOptionNames }).toStrictEqual({
-      defaults: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 104_857_600 },
+      defaults: { "previews.maxTotal": 1_000_000_000, "uploads.maxSize": 100_000_000 },
       names: [
         "away.after",
         "away.message",
         "previews.maxTotal",
-        "store.s3.accessKeyId",
-        "store.s3.bucket",
-        "store.s3.endpoint",
-        "store.s3.region",
-        "store.s3.secretAccessKey",
+        "storage.s3.accessKeyId",
+        "storage.s3.bucket",
+        "storage.s3.endpoint",
+        "storage.s3.region",
+        "storage.s3.secretAccessKey",
         "uploads.expireAfter",
         "uploads.listen",
         "uploads.maxSize",
@@ -51,15 +51,15 @@ describe("the options under store, uploads, and previews", () => {
       named: credentialsNamed(
         Schema.decodeSync(OwnerOptions)({
           "previews.maxTotal": 1,
-          "store.s3.bucket": "uploads",
-          "store.s3.secretAccessKey": "bucket-secret",
+          "storage.s3.bucket": "uploads",
+          "storage.s3.secretAccessKey": "bucket-secret",
           "uploads.maxSize": 1,
         })
       ),
       options: ownerCredentialOptions,
     }).toStrictEqual({
       named: new Set(["bucket-secret"]),
-      options: ["store.s3.accessKeyId", "store.s3.secretAccessKey"],
+      options: ["storage.s3.accessKeyId", "storage.s3.secretAccessKey"],
     });
   });
 

@@ -2,7 +2,7 @@
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
  * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
- * one's words starting where a Message's text does. Under `ui.timeline.layout` `inline`, and in a
+ * one's words starting where a Message's text does. Under `ui.conversation.layout` `inline`, and in a
  * Timeline too narrow for those columns, a row is one run of text that wraps under itself.
  * Under `stacked`, a run of plain speech from one User has its nick and time on a line above
  * the first Message's text, and each later Message is its text alone, its time shown while
@@ -84,16 +84,16 @@ export const NickEdge = ({ onHeld }: { readonly onHeld: (held: boolean) => void 
       <ColumnEdge
         className={styles.edge}
         grows="Right"
-        label="Resize the nick column"
+        label="resize nick column"
         onHeld={onHeld}
-        option="timeline.nickWidth"
+        option="conversation.nickWidth"
       />
     </div>
   );
 };
 
 /**
- * A time as the line shows it, as `ui.timeline.timeFormat` says, or nothing for `none`.
+ * A time as the line shows it, as `ui.conversation.timeFormat` says, or nothing for `none`.
  * @param props - The instant.
  * @returns The time, with the full date and time on hover.
  */
@@ -125,7 +125,7 @@ export const Time = ({
         data-sample={sample}
         // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a later Message of a run shows its time only while focused.
         tabIndex={focusable ? 0 : undefined}
-        title="Time unavailable"
+        title="Unknown time"
       >
         {hasSeconds(shown) ? "--:--:--" : "--:--"}
       </span>
@@ -199,7 +199,7 @@ const Answered = ({ item }: { readonly item: TimelineItem }) => {
     <>
       <div className={styles.answered}>
         <Button
-          aria-label="Go to the message this answers"
+          aria-label="Go to the replied message"
           onPress={() => {
             jump({ position: quoted.position, timeline: item.timeline });
           }}
@@ -301,8 +301,8 @@ const Piece = ({ part, timeline }: { readonly part: Part; readonly timeline: Tim
 const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }) => {
   const format = useAtomValue(timeShown);
   const shown = clockFor(format);
-  const from = formattedAt(shown, gap.from.at) ?? "an unknown time";
-  const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "an unknown time");
+  const from = formattedAt(shown, gap.from.at) ?? "unknown time";
+  const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "unknown time");
 
   const span =
     to === undefined ? `not connected since ${from}` : `not connected from ${from} to ${to}`;
@@ -332,7 +332,7 @@ const dayCommanded = (at: number): string => {
 };
 
 /**
- * Where the day changes: the day's words, as `ui.timeline.dateFormat` says, after a rule. Its time column is
+ * Where the day changes: the day's words, as `ui.conversation.dateFormat` says, after a rule. Its time column is
  * there and empty, so the line shows and lines up whether or not any line's time does. The
  * words offer to go to another day: pressed, they start `/date` with this day in the
  * composer, to change and send, so the line keeps its height.
@@ -351,7 +351,7 @@ const DayLine = ({ at }: { readonly at: number }) => {
       <span aria-hidden className={styles.rule} />
       <span className={styles.dayText}>
         {written === undefined ? (
-          "an unknown day"
+          "unknown day"
         ) : (
           <AriaButton
             aria-label={`${written}: go to another day`}
@@ -383,8 +383,8 @@ const RepeatedWords = ({
   readonly to: number;
 }) => {
   const shown = clockFor(useAtomValue(timeShown));
-  const first = formattedAt(shown, from) ?? "an unknown time";
-  const latest = formattedAt(shown, to) ?? "an unknown time";
+  const first = formattedAt(shown, from) ?? "unknown time";
+  const latest = formattedAt(shown, to) ?? "unknown time";
 
   return <span className={styles.repeated}>{` \u00D7${count}, ${first}\u2013${latest}`}</span>;
 };
@@ -446,9 +446,9 @@ const MessageMenu = ({
             onClose();
             reply({ answering, timeline });
           }}
-          textValue="Reply"
+          textValue="reply"
         >
-          Reply
+          reply
         </MenuItem>
       </Menu>
     </Popover>
@@ -456,7 +456,7 @@ const MessageMenu = ({
 };
 
 /**
- * Where a Message stands: on a line of its own, or under `ui.timeline.layout` stacked, a run's head or
+ * Where a Message stands: on a line of its own, or under `ui.conversation.layout` stacked, a run's head or
  * a later Message of one.
  */
 type Place = "Line" | "Head" | "Later";

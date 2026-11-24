@@ -79,7 +79,7 @@ const KeptRow = ({
       <span className={styles.about}>
         {renaming ? (
           <RenameField
-            label={`New name for ${name}`}
+            label={`new name for ${name}`}
             name={name}
             onClose={() => {
               setRenaming(false);
@@ -117,11 +117,11 @@ const KeptRow = ({
           size="small"
           variant="quiet"
         >
-          Rename
+          rename
         </Button>
         <IconButton
           icon="close"
-          label={`Dismiss ${name}, leaving its link`}
+          label={`Dismiss ${name} but keep its link`}
           onPress={() => {
             drop(file.key);
           }}
@@ -156,7 +156,7 @@ const Row = ({ file }: { readonly file: Pending }) => {
         </span>
         {failure === undefined ? (
           <progress
-            aria-label={`Sending ${file.name}`}
+            aria-label={`Uploading ${file.name}`}
             className={styles.progress}
             max={progress?.total}
             value={progress?.loaded}
@@ -205,7 +205,7 @@ export const PendingUploads = ({ place }: { readonly place: Place }) => {
           <p>{held}</p>
           <IconButton
             icon="close"
-            label="Dismiss the note"
+            label="dismiss note"
             onPress={() => {
               dismissNote(place);
             }}
@@ -222,11 +222,11 @@ export const PendingUploads = ({ place }: { readonly place: Place }) => {
             }}
             size="small"
           >
-            Open the options
+            open settings
           </Button>
           <IconButton
             icon="close"
-            label="Dismiss the note"
+            label="dismiss note"
             onPress={() => {
               dismissNote(place);
             }}

@@ -456,8 +456,8 @@ export const colourNames: readonly string[] = [
   "light cyan",
   "light blue",
   "pink",
-  "grey",
-  "light grey",
+  "gray",
+  "light gray",
 ];
 
 /** The colours a Frontend offers, in order: the default, then the sixteen. */
@@ -483,11 +483,11 @@ export const colouredStyle = (colour: Colour | undefined): Style => ({
  */
 export const colourName = (colour: Colour | undefined): string => {
   if (colour === undefined) {
-    return "default colour";
+    return "default color";
   }
 
   return colour._tag === "Palette"
-    ? (colourNames[colour.index] ?? `colour ${colour.index}`)
+    ? (colourNames[colour.index] ?? `color ${colour.index}`)
     : `#${colour.hex}`;
 };
 
@@ -502,8 +502,8 @@ export const backgroundName = (colour: Colour | undefined): string =>
 const flagNames: Readonly<Record<Flag, string>> = {
   bold: "bold",
   italic: "italic",
-  monospace: "fixed pitch",
-  reverse: "reversed",
+  monospace: "monospace",
+  reverse: "reversed colors",
   strikethrough: "strikethrough",
   underline: "underline",
 };

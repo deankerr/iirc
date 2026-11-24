@@ -184,7 +184,7 @@ const joined = (sequence: number): typeof TimelineItem.Encoded => ({
 });
 
 /**
- * A kick in `#iirc`, which `ui.timeline.activity none` hides, and which joins no run of joins, parts,
+ * A kick in `#iirc`, which `ui.conversation.activity none` hides, and which joins no run of joins, parts,
  * quits, and changes of nick, so each stands as a row of its own.
  * @param sequence - Its sequence.
  * @returns The item.
@@ -710,7 +710,7 @@ const at = (type: string, clientX: number) =>
  * The grip on the rule between nick and text, over the log.
  * @returns It, or none.
  */
-const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
+const nickGrip = () => document.querySelector<HTMLElement>('[aria-label="resize nick column"]');
 
 describe("what the view says it shows", () => {
   beforeEach(() => {
@@ -776,13 +776,13 @@ describe("what the view says it shows", () => {
     ]);
   });
 
-  it("reads older pages without scrolling while ui.timeline.activity hides every row of the latest, and marks read up to the row drawn", async () => {
+  it("reads older pages without scrolling while ui.conversation.activity hides every row of the latest, and marks read up to the row drawn", async () => {
     // One Message, then 250 joins: the latest two pages hold only joins.
     const items = [message(1), ...Array.from({ length: 250 }, (_, index) => joined(index + 2))];
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { "timeline.activity": "quiet" });
+      registry.set(deviceUi, { "conversation.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();
@@ -799,7 +799,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("keeps the line read where it was when ui.timeline.activity hides or shows rows above it", async () => {
+  it("keeps the line read where it was when ui.conversation.activity hides or shows rows above it", async () => {
     // Messages at odd steps, joins at even ones, 60 in all: the start of the Timeline is
     // the first row, then the day, so step `n` is row `n + 1`.
     const items = Array.from({ length: 60 }, (_, index) =>
@@ -831,7 +831,7 @@ describe("what the view says it shows", () => {
 
     await act(async () => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.activity": "quiet" });
+        registry.set(deviceUi, { "conversation.activity": "quiet" });
         await Promise.resolve();
       });
       await Promise.resolve();
@@ -860,7 +860,7 @@ describe("what the view says it shows", () => {
     const { daemon, registry } = fake;
 
     await act(async () => {
-      registry.set(deviceUi, { "timeline.activity": "quiet" });
+      registry.set(deviceUi, { "conversation.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();
@@ -871,11 +871,11 @@ describe("what the view says it shows", () => {
 
     // Read on purpose: the newest go past the cap, and the Message is reached without
     // scrolling, with a way back to the latest.
-    await press("Load older");
+    await press("load older");
     await settled(() => logOf().textContent?.includes("line 1"));
 
     const reached = {
-      jump: document.body.textContent?.includes("Jump to latest"),
+      jump: document.body.textContent?.includes("jump to latest"),
       reads: [...daemon.reads],
     };
 
@@ -901,7 +901,7 @@ describe("what the view says it shows", () => {
     };
 
     live(1102);
-    await press("Jump to latest");
+    await press("jump to latest");
     await settled(() => logOf().textContent?.includes("line 1102"));
     await settled(() => daemon.reads.length === 1);
 
@@ -911,7 +911,7 @@ describe("what the view says it shows", () => {
     await settled(() => daemon.reads.length === 2);
 
     expect({
-      jumpAfter: document.body.textContent?.includes("Jump to latest"),
+      jumpAfter: document.body.textContent?.includes("jump to latest"),
       reached,
       reads: daemon.reads,
       unasked,
@@ -927,7 +927,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("keeps a row in view when ui.timeline.activity hides every row before it, anchoring to the next that shows", async () => {
+  it("keeps a row in view when ui.conversation.activity hides every row before it, anchoring to the next that shows", async () => {
     // A Message long ago, kicks 2 to 60, then Messages 61 to 120: the latest page begins
     // with 40 kicks, with more before it, read up to its latest so no divider shows.
     const items = Array.from({ length: 120 }, (_, index) =>
@@ -966,7 +966,7 @@ describe("what the view says it shows", () => {
 
     await act(async () => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.activity": "none" });
+        registry.set(deviceUi, { "conversation.activity": "none" });
         await Promise.resolve();
       });
       await Promise.resolve();
@@ -996,7 +996,7 @@ describe("what the view says it shows", () => {
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { "timeline.activity": "quiet" });
+      registry.set(deviceUi, { "conversation.activity": "quiet" });
       await Promise.resolve();
     });
     layout.view = 0;
@@ -1049,7 +1049,7 @@ describe("what the view says it shows", () => {
       const { daemon, registry } = await signedIn([], items);
 
       await act(async () => {
-        registry.set(deviceUi, { "timeline.activity": "quiet" });
+        registry.set(deviceUi, { "conversation.activity": "quiet" });
         await Promise.resolve();
       });
       layout.view = 0;
@@ -1095,7 +1095,7 @@ describe("what the view says it shows", () => {
     expect({
       closed: withClosed?.includes("not connected"),
       open: logOf().textContent?.includes("not connected since"),
-      start: withClosed?.includes("The start of this Timeline"),
+      start: withClosed?.includes("The start of this conversation"),
     }).toStrictEqual({ closed: false, open: true, start: true });
   });
 
@@ -1107,7 +1107,7 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 2"));
 
     const said = [...logOf().querySelectorAll<HTMLElement>("p")].find(
-      (one) => one.textContent === "The start of this Timeline"
+      (one) => one.textContent === "The start of this conversation"
     );
 
     const style = said === undefined ? undefined : getComputedStyle(said);
@@ -1361,7 +1361,7 @@ describe("what the view says it shows", () => {
     );
 
     const button = row?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Go to the message this answers"]'
+      'button[aria-label="Go to the replied message"]'
     );
 
     const before = {
@@ -1453,7 +1453,10 @@ describe("what the view says it shows", () => {
     const inline = linesOf();
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
+      uiRead(registry, {
+        options: { ...uiDefaults, "conversation.layout": "stacked" },
+        sequence: 1,
+      });
       await Promise.resolve();
     });
 
@@ -1467,7 +1470,7 @@ describe("what the view says it shows", () => {
 
   // Catches brackets that stay on a sender's nick when turned off, or that take a NOTICE's
   // or an action's marks with them, which are all that tell those kinds apart.
-  it("draws a PRIVMSG's sender without brackets under ui.timeline.nickBrackets off, in columns and inline, a NOTICE's and an action's as they are, and a stacked head bare either way", async () => {
+  it("draws a PRIVMSG's sender without brackets under ui.conversation.nickBrackets off, in columns and inline, a NOTICE's and an action's as they are, and a stacked head bare either way", async () => {
     const of = (sequence: number, kind: "Privmsg" | "Notice" | "Action") => {
       const item = message(sequence);
 
@@ -1485,7 +1488,10 @@ describe("what the view says it shows", () => {
 
     const drawn = async (layout: "columns" | "inline" | "stacked", brackets: boolean) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.layout": layout, "timeline.nickBrackets": brackets });
+        registry.set(deviceUi, {
+          "conversation.layout": layout,
+          "conversation.nickBrackets": brackets,
+        });
         await Promise.resolve();
       });
 
@@ -1508,8 +1514,8 @@ describe("what the view says it shows", () => {
   });
 
   // Catches a sender's prefix missing, drawn outside the brackets, or taken for part of the
-  // nick, in any layout and for any kind, or still drawn once ui.timeline.nickPrefix is off.
-  it("draws the prefix its sender held before their nick, inside any brackets, in each layout and for each kind, and nothing once ui.timeline.nickPrefix is off or they held none", async () => {
+  // nick, in any layout and for any kind, or still drawn once ui.conversation.nickPrefix is off.
+  it("draws the prefix its sender held before their nick, inside any brackets, in each layout and for each kind, and nothing once ui.conversation.nickPrefix is off or they held none", async () => {
     const { registry } = await signedIn(
       [],
       [
@@ -1527,7 +1533,10 @@ describe("what the view says it shows", () => {
 
     const drawn = async (layout: "columns" | "inline" | "stacked", prefix: boolean) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.layout": layout, "timeline.nickPrefix": prefix });
+        registry.set(deviceUi, {
+          "conversation.layout": layout,
+          "conversation.nickPrefix": prefix,
+        });
         await Promise.resolve();
       });
 
@@ -1598,7 +1607,7 @@ describe("what the view says it shows", () => {
 
   // Catches the sender's nick drawn anew as its prefix comes or goes, from another device's
   // change, which would take focus, and an open menu, from it.
-  it("keeps focus on a sender's nick as ui.timeline.nickPrefix turns off and on", async () => {
+  it("keeps focus on a sender's nick as ui.conversation.nickPrefix turns off and on", async () => {
     const { registry } = await signedIn([], [heldBy(1, "@")]);
 
     await openFromPalette();
@@ -1613,7 +1622,7 @@ describe("what the view says it shows", () => {
 
     const kept = async (prefix: boolean) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.nickPrefix": prefix });
+        registry.set(deviceUi, { "conversation.nickPrefix": prefix });
         await Promise.resolve();
       });
 
@@ -1629,7 +1638,7 @@ describe("what the view says it shows", () => {
 
   // Catches the sender's nick drawn anew as brackets come or go, from another device's change,
   // which would take focus, and an open menu, from it.
-  it("keeps focus on a sender's nick as ui.timeline.nickBrackets turns off and on", async () => {
+  it("keeps focus on a sender's nick as ui.conversation.nickBrackets turns off and on", async () => {
     const { registry } = await signedIn();
 
     await openFromPalette();
@@ -1644,7 +1653,7 @@ describe("what the view says it shows", () => {
 
     const kept = async (brackets: boolean) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.nickBrackets": brackets });
+        registry.set(deviceUi, { "conversation.nickBrackets": brackets });
         await Promise.resolve();
       });
 
@@ -1680,14 +1689,14 @@ describe("what the view says it shows", () => {
 
   // Catches a grip on the rule that writes at every step, or none, or one left where no
   // rule is drawn to resize.
-  it("lays one grip over the rule in columns, none inline or stacked, and a drag writes ui.timeline.nickWidth once, as it ends", async () => {
+  it("lays one grip over the rule in columns, none inline or stacked, and a drag writes ui.conversation.nickWidth once, as it ends", async () => {
     const { daemon, registry } = await signedIn();
 
     await openFromPalette();
     await settled(() => registry.get(openTimeline)._tag === "Shown");
     await settled(() => logOf().textContent?.includes("line 2"));
 
-    const grips = document.querySelectorAll('[aria-label="Resize the nick column"]').length;
+    const grips = document.querySelectorAll('[aria-label="resize nick column"]').length;
 
     // Right widens it, three `0`s.
     await act(async () => {
@@ -1706,11 +1715,11 @@ describe("what the view says it shows", () => {
       nickGrip()?.dispatchEvent(at("pointerup", 224));
       await Promise.resolve();
     });
-    await settled(() => daemon.ui.options["timeline.nickWidth"] === 19);
+    await settled(() => daemon.ui.options["conversation.nickWidth"] === 19);
 
     const shown = (layout: "inline" | "stacked") => async () => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.layout": layout });
+        registry.set(deviceUi, { "conversation.layout": layout });
         await Promise.resolve();
       });
 
@@ -1724,7 +1733,7 @@ describe("what the view says it shows", () => {
       moving,
       stacked: await shown("stacked")(),
     }).toStrictEqual({
-      changes: ["PUT timeline.nickWidth"],
+      changes: ["PUT conversation.nickWidth"],
       grips: 1,
       inline: true,
       moving: { changes: 0, now: "19" },
@@ -1746,7 +1755,7 @@ describe("what the view says it shows", () => {
     expect(row?.textContent).toMatch(/^\S+ <\S+> line 2$/u);
   });
 
-  it("says a line's date and time on hover as ui.timeline.timeFormat says, and no time under none", async () => {
+  it("says a line's date and time on hover as ui.conversation.timeFormat says, and no time under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const said = new Date(2026, 10, 15, 15, 7, 9);
 
@@ -1763,7 +1772,7 @@ describe("what the view says it shows", () => {
 
     const drawn = async (time: TimeShown) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.timeFormat": time });
+        registry.set(deviceUi, { "conversation.timeFormat": time });
         await Promise.resolve();
       });
 
@@ -1795,7 +1804,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("draws a run under one nick under ui.timeline.layout stacked, each later Message its text with its time kept, until Activity ends it", async () => {
+  it("draws a run under one nick under ui.conversation.layout stacked, each later Message its text with its time kept, until Activity ends it", async () => {
     const { registry } = await signedIn([], [message(1), message(2), joined(3), message(4)]);
 
     await openFromPalette();
@@ -1803,7 +1812,10 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 4"));
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
+      uiRead(registry, {
+        options: { ...uiDefaults, "conversation.layout": "stacked" },
+        sequence: 1,
+      });
       await Promise.resolve();
     });
 
@@ -1831,7 +1843,7 @@ describe("what the view says it shows", () => {
     });
   });
 
-  it("puts what a run's head answers under its nick under ui.timeline.layout stacked, and a later Message's above its text", async () => {
+  it("puts what a run's head answers under its nick under ui.conversation.layout stacked, and a later Message's above its text", async () => {
     const answered = {
       kind: "Privmsg",
       position: message(1).position,
@@ -1851,7 +1863,10 @@ describe("what the view says it shows", () => {
     await settled(() => logOf().textContent?.includes("line 3"));
 
     await act(async () => {
-      uiRead(registry, { options: { ...uiDefaults, "timeline.layout": "stacked" }, sequence: 1 });
+      uiRead(registry, {
+        options: { ...uiDefaults, "conversation.layout": "stacked" },
+        sequence: 1,
+      });
       await Promise.resolve();
     });
 
@@ -1921,11 +1936,11 @@ describe("what the view says it shows", () => {
       ]);
     });
 
-    it("is written as ui.timeline.dateFormat says", async () => {
+    it("is written as ui.conversation.dateFormat says", async () => {
       const { registry } = await opened();
 
       await act(async () => {
-        registry.set(deviceUi, { "timeline.dateFormat": "iso" });
+        registry.set(deviceUi, { "conversation.dateFormat": "iso" });
         await Promise.resolve();
       });
 
@@ -2211,7 +2226,7 @@ describe("where the view stands as its rows wrap again", () => {
     // Each row keeps half the room between rows under itself, and the log the rest.
     const under = async (spacing: number) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.spacing": spacing });
+        registry.set(deviceUi, { "conversation.spacing": spacing });
         await Promise.resolve();
       });
 
@@ -2247,7 +2262,7 @@ describe("where the view stands as its rows wrap again", () => {
     const before = firstInView();
 
     await act(async () => {
-      registry.set(deviceUi, { "timeline.spacing": 1.5 });
+      registry.set(deviceUi, { "conversation.spacing": 1.5 });
       await Promise.resolve();
     });
 
@@ -2349,7 +2364,7 @@ describe("where the view stands as its rows wrap again", () => {
       grip?.dispatchEvent(at("pointerup", 240));
       await Promise.resolve();
     });
-    await settled(() => daemon.ui.options["timeline.nickWidth"] === 21);
+    await settled(() => daemon.ui.options["conversation.nickWidth"] === 21);
 
     const released = logOf().dataset.line;
 
@@ -2368,7 +2383,7 @@ describe("where the view stands as its rows wrap again", () => {
       released,
     }).toStrictEqual({
       cancelled: "21",
-      changes: ["PUT timeline.nickWidth"],
+      changes: ["PUT conversation.nickWidth"],
       held: { changes: 0, grip: true, line: undefined },
       released: "inline",
     });
@@ -2688,7 +2703,7 @@ describe("replying to a Message", () => {
     await settled(() => document.querySelector('[role="menu"]') !== null);
 
     expect({ items: menuItems(), tagged, untagged }).toStrictEqual({
-      items: ["Reply"],
+      items: ["reply"],
       tagged: [true, null],
       untagged: [null, null],
     });
@@ -2705,7 +2720,7 @@ describe("replying to a Message", () => {
         ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    await chooseFromMenu("Reply");
+    await chooseFromMenu("reply");
     await settled(() => answeringShown() !== undefined);
 
     expect({
@@ -2722,13 +2737,13 @@ describe("replying to a Message", () => {
         menuButtonIn(rowSaying("said 1"))?.click();
         await Promise.resolve();
       });
-      await chooseFromMenu("Reply");
+      await chooseFromMenu("reply");
       await settled(() => answeringShown() !== undefined);
     };
 
     await choose();
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Stop replying"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="stop replying"]')?.click();
       await Promise.resolve();
     });
     const byButton = answeringShown();
@@ -2754,7 +2769,7 @@ describe("replying to a Message", () => {
       menuButtonIn(rowSaying("said 1"))?.click();
       await Promise.resolve();
     });
-    await chooseFromMenu("Reply");
+    await chooseFromMenu("reply");
     await settled(() => answeringShown() !== undefined);
 
     await act(async () => {
@@ -2984,7 +2999,7 @@ describe("going to a date", () => {
     await sentWithEnter();
     await landedOn("<peer> line 1");
 
-    const first = logOf().textContent?.includes("The start of this Timeline");
+    const first = logOf().textContent?.includes("The start of this conversation");
 
     await typed("/date 2100-01-01");
     await sentWithEnter();
@@ -2993,13 +3008,13 @@ describe("going to a date", () => {
     expect({ day, first }).toStrictEqual({ day: { both: true, read: [["around"]] }, first: true });
   });
 
-  it("reads newer without scrolling from a date before the start while ui.timeline.activity hides every row there", async () => {
+  it("reads newer without scrolling from a date before the start while ui.conversation.activity hides every row there", async () => {
     // 300 joins, then one Message: a jump before the start lands on more joins than a read gives.
     const items = [...Array.from({ length: 300 }, (_, index) => joined(index + 1)), message(301)];
     const { daemon, registry } = await signedIn([], items);
 
     await act(async () => {
-      registry.set(deviceUi, { "timeline.activity": "quiet" });
+      registry.set(deviceUi, { "conversation.activity": "quiet" });
       await Promise.resolve();
     });
     await openFromPalette();

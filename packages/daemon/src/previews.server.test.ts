@@ -63,7 +63,7 @@ import {
 } from "./testing/world.ts";
 import type { World } from "./testing/world.ts";
 
-const floor = configured({ ircds: [{ host: "irc.test", port: 6667, tls: false }] });
+const floor = configured({ servers: [{ host: "irc.test", port: 6667, tls: false }] });
 
 /** What a test over a real server gets. */
 interface Served {
@@ -1262,11 +1262,11 @@ const setBucket = (served: Served, endpoint = "http://bucket.test") =>
       );
     }
 
-    yield* setOption(served, "store.s3.endpoint", endpoint);
-    yield* setOption(served, "store.s3.bucket", "previews");
-    yield* setOption(served, "store.s3.region", "us-east-1");
-    yield* setOption(served, "store.s3.accessKeyId", "bucket-key-id");
-    yield* setOption(served, "store.s3.secretAccessKey", "bucket-secret");
+    yield* setOption(served, "storage.s3.endpoint", endpoint);
+    yield* setOption(served, "storage.s3.bucket", "previews");
+    yield* setOption(served, "storage.s3.region", "us-east-1");
+    yield* setOption(served, "storage.s3.accessKeyId", "bucket-key-id");
+    yield* setOption(served, "storage.s3.secretAccessKey", "bucket-secret");
   });
 
 const decodeUploaded = Schema.decodeUnknownSync(
@@ -1751,11 +1751,11 @@ describe("a Preview's image over a real server", () => {
           yield* previewedOn(served, CAT);
           const path = `/api/previews/images/${sha256(png)}`;
 
-          yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+          yield* setOption(served, "storage.s3.endpoint", unreachableEndpoint);
           const unreachable = yield* served.request(path);
 
           yield* expecting(
-            served.request("/api/options/store.s3.bucket", { method: "DELETE" }),
+            served.request("/api/options/storage.s3.bucket", { method: "DELETE" }),
             200
           );
           const unset = yield* served.request(path);
@@ -2710,14 +2710,17 @@ const press = (
   });
 
 /**
- * Sets `ui.previews.timelines`, whole.
+ * Sets `ui.previews.conversations`, whole.
  * @param served - The server.
  * @param timelines - Each Timeline's id, and its mode.
  * @returns An Effect that sets it.
  */
 const setOverrides = (served: Served, timelines: Readonly<Record<string, string>>) =>
   expecting(
-    served.request("/api/ui/previews.timelines", { method: "PUT", ...json({ value: timelines }) }),
+    served.request("/api/ui/previews.conversations", {
+      method: "PUT",
+      ...json({ value: timelines }),
+    }),
     200
   );
 
@@ -3949,7 +3952,7 @@ describe("what each fetch for a Preview came to, in the Tail as a Frontend reads
           // Each line is logged as its fetch's Scope closes, before its Preview settles.
           const { lines } = decodeTail(yield* bodyOf(yield* served.request("/api/tail")));
 
-          return lines.filter((line) => line.message === "Fetched a link for a Preview");
+          return lines.filter((line) => line.message === "Fetched link for preview");
         })
       )
     );

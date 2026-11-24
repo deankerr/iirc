@@ -151,9 +151,9 @@ describe("the import dialog", () => {
     const { status, text } = await importing(instantThemeReader);
 
     await typeInto(text, kitty);
-    await settled(() => status() === "Read as Kitty.");
+    await settled(() => status() === "Recognized as Kitty.");
 
-    expect(status()).toBe("Read as Kitty.");
+    expect(status()).toBe("Recognized as Kitty.");
   });
 
   it("ends a read the next text supersedes, still taking text while it reads", async () => {
@@ -187,7 +187,7 @@ describe("the import dialog", () => {
 
     expect({ ended, reading, started, typed: text.value }).toStrictEqual({
       ended: ["base00: a"],
-      reading: "Reading…",
+      reading: "Loading…",
       started: ["base00: a", "base00: ab"],
       typed: "base00: ab",
     });

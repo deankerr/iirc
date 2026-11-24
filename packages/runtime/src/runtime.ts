@@ -686,7 +686,7 @@ export const makeRuntime = <S>(
           return startNetwork(ports, id, fresh(client), false).pipe(
             Scope.provide(drivers),
             Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
-            Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
+            Effect.tap(() => Effect.logInfo("Added network", { network: id }))
           );
         }
       );
@@ -729,7 +729,7 @@ export const makeRuntime = <S>(
 
               for (const name of gone) {
                 yield* ports.vault.forget(name);
-                yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
+                yield* Effect.logInfo("Deleted credential", { credential: name, network: id });
               }
 
               return gone;
@@ -808,7 +808,7 @@ export const makeRuntime = <S>(
           );
         }
 
-        yield* Effect.logInfo("Removed a Network", { keep, network: id });
+        yield* Effect.logInfo("Removed network", { keep, network: id });
         yield* retire(network, ports.timing.stopTimeout);
         yield* forgetCredentials(id);
 
@@ -823,7 +823,7 @@ export const makeRuntime = <S>(
 
         if (!keep) {
           yield* Ref.update(kept, (all) => without(all, id));
-          yield* Effect.logInfo("Dropped a removed Network's Timelines", { network: id });
+          yield* Effect.logInfo("Deleted conversation history of removed network", { network: id });
         }
 
         yield* forgetCredentials(id);
@@ -887,12 +887,12 @@ export const makeRuntime = <S>(
       yield* adding.withPermit(forgetCredentials(id)).pipe(
         Effect.catchTags({
           JournalFailed: (error) =>
-            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+            Effect.logWarning("Could not delete credentials of removed network", {
               network: id,
               reason: error.reason,
             }),
           VaultFailed: (error) =>
-            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+            Effect.logWarning("Could not delete credentials of removed network", {
               network: id,
               reason: error.reason,
             }),

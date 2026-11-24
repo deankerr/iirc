@@ -289,9 +289,9 @@ const searchQueryOf = (read: SearchRequest): SearchQuery => {
 
 /** Why a search found nothing, in words, by what the Daemon answered. */
 const searchRefusals: ReadonlyMap<string, string> = new Map([
-  ["InvalidRequest", "The Daemon could not read this search, so nothing was searched."],
-  ["UnknownNetwork", "That Network is not configured, so nothing was searched."],
-  ["UnknownTimeline", "That Timeline is gone, so nothing was searched."],
+  ["InvalidRequest", "The daemon could not read this search, so nothing was searched."],
+  ["UnknownNetwork", "That network is not configured, so nothing was searched."],
+  ["UnknownTimeline", "That conversation is gone, so nothing was searched."],
 ]);
 
 /**

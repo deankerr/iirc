@@ -22,7 +22,7 @@ describe("the Tail across a restart", () => {
         const first = yield* startDaemon({ dataDir }, key);
 
         yield* first.api.ui.set({
-          params: { option: "timeline.timeFormat" },
+          params: { option: "conversation.timeFormat" },
           payload: { value: "none" },
           query: {},
         });
@@ -43,8 +43,8 @@ describe("the Tail across a restart", () => {
     const optionLines = (lines: typeof result.before.lines) =>
       lines.filter(
         (line) =>
-          line.message.startsWith("Changed a ui option") &&
-          line.message.includes('"timeline.timeFormat"')
+          line.message.startsWith("Changed ui option") &&
+          line.message.includes('"conversation.timeFormat"')
       );
 
     const [first] = result.before.lines;

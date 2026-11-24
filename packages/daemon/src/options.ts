@@ -162,7 +162,7 @@ export const layerOwnerConfiguration = Layer.effect(OwnerConfiguration)(
             const sequence = yield* journal.append({ _tag: "Change", change: one });
 
             yield* SubscriptionRef.set(held, foldOption(before, one, sequence));
-            yield* Effect.logInfo("Changed an option", { option: one.option });
+            yield* Effect.logInfo("Changed option", { option: one.option });
 
             return sequence;
           })

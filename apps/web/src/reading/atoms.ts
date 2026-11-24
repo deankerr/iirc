@@ -49,8 +49,8 @@ const refusedWith = (tag: string, mark: MarkRead): Outcome => {
     _tag: "NotDone",
     message:
       tag === "UnknownTimeline"
-        ? `The Daemon has no such Timeline on ${mark.network}, so nothing was marked read.`
-        : `The Daemon did not mark a Timeline on ${mark.network} read. Try /read again.`,
+        ? `Conversation not found on ${mark.network}, so nothing was marked read.`
+        : `The daemon did not mark the conversation on ${mark.network} as read. Try /read again.`,
   };
 };
 

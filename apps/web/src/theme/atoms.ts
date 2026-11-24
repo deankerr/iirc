@@ -76,7 +76,7 @@ const readLimit = "1 second";
 
 /** Why text that took longer than `readLimit` to read was not imported, in words. */
 const tooLong =
-  "This took too long to read, so it was not imported. A terminal theme reads at once.";
+  "This took too long to read, so it wasn't imported. A terminal theme reads right away.";
 
 /** The last text the reader was given, and what it read it as, none while it reads. */
 const lastRead = Atom.make<
@@ -160,7 +160,7 @@ export const drawnTheme = Atom.make((get) => {
   const ui = get(uiInEffect);
   const palette = get(previewed) ?? paletteNamed(ui.theme, ui, get(prefersDark));
 
-  return drawn(palette, ui["timeline.colours"]);
+  return drawn(palette, ui["conversation.colors"]);
 });
 
 /**
@@ -184,11 +184,11 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
     ["--font-mono", monoStack(font)],
     [
       "--widest-line",
-      ui["timeline.maxWidth"] === "none" ? undefined : `${ui["timeline.maxWidth"]}ch`,
+      ui["conversation.maxWidth"] === "none" ? undefined : `${ui["conversation.maxWidth"]}ch`,
     ],
-    ["--nick-width", `${widths["timeline.nickWidth"]}ch`],
+    ["--nick-width", `${widths["conversation.nickWidth"]}ch`],
     ["--members-width", `${widths["members.width"]}ch`],
-    ["--row-spacing", String(ui["timeline.spacing"])],
+    ["--row-spacing", String(ui["conversation.spacing"])],
   ];
 });
 
@@ -300,7 +300,7 @@ export const chooseFile = runtime
       if (file.size > importLimit) {
         applyImport(registry, {
           fileName: file.name,
-          notice: `${file.name} is longer than 256 KB, which no terminal theme is.`,
+          notice: `${file.name} is larger than 256 KB, which is too large for a terminal theme.`,
           text: "",
         });
 
@@ -314,7 +314,7 @@ export const chooseFile = runtime
           registry,
           Option.isSome(text)
             ? { fileName: file.name, text: text.value }
-            : { fileName: file.name, notice: `${file.name} could not be read.`, text: "" }
+            : { fileName: file.name, notice: `Couldn't read ${file.name}.`, text: "" }
         );
       }
     })
@@ -362,7 +362,7 @@ export const saveImport = runtime
       };
 
       if (read?._tag !== "Parsed") {
-        say(read?.message ?? "Paste a theme, or choose its file, and wait for it to be read.");
+        say(read?.message ?? "Paste a theme or choose a file, then wait for it to load.");
 
         return;
       }

@@ -70,7 +70,7 @@ const nameOf = (registry: AtomRegistry.AtomRegistry, close: Close): string =>
   close._tag === "CloseTarget"
     ? close.target
     : (registry.get(timelinesState).networks.get(close.network)?.timelines.get(close.timeline)
-        ?.name ?? "That Timeline");
+        ?.name ?? "That conversation");
 
 /**
  * Carries out a close that shows at once, when it names a Timeline held: it is folded in as
@@ -129,17 +129,17 @@ const refusedWith = (close: Close, name: string, tag: string): Outcome => {
   }
 
   const reasons: ReadonlyMap<string, string> = new Map([
-    ["UnknownNetwork", `The Daemon has no Network ${close.network}, so nothing was closed.`],
-    ["UnknownTimeline", `The Daemon has no ${name}, so nothing was closed.`],
+    ["UnknownNetwork", `Network ${close.network} not found, so nothing was closed.`],
+    ["UnknownTimeline", `${name} not found, so nothing was closed.`],
     [
       "NetworkStopped",
-      `${close.network} has stopped, so whether ${name} was closed is unknown. Closing it again is safe.`,
+      `${close.network} has stopped, so it's unknown whether ${name} was closed. Closing it again is safe.`,
     ],
   ]);
 
   return {
     _tag: "NotDone",
-    message: reasons.get(tag) ?? `The Daemon did not close ${name}. Try again.`,
+    message: reasons.get(tag) ?? `The daemon did not close ${name}. Try again.`,
   };
 };
 
@@ -205,8 +205,8 @@ export const closeTimeline = (
         _tag: "NotDone",
         message:
           close._tag === "CloseTarget"
-            ? `${close.target} names no one Timeline, so nothing was closed.`
-            : `${nameOf(registry, close)} cannot be closed, so nothing was closed.`,
+            ? `${close.target} doesn't match one conversation, so nothing was closed.`
+            : `${nameOf(registry, close)} can't be closed.`,
       } satisfies Outcome;
     }
 
@@ -237,14 +237,14 @@ const unleftWith = (leave: Extract<Leave, { readonly _tag: "Act" }>, tag: string
     return { _tag: "SignedOut" };
   }
 
-  const channel = leave.action._tag === "Part" ? leave.action.channel : "the Channel";
+  const channel = leave.action._tag === "Part" ? leave.action.channel : "the channel";
 
   return {
     _tag: "NotDone",
     message:
       tag === "UnknownNetwork"
-        ? `The Daemon has no Network ${leave.network}, so ${channel} was not left.`
-        : `The Daemon did not answer, so whether ${channel} was left is unknown. Check before leaving it again.`,
+        ? `Network ${leave.network} not found, so you did not leave ${channel}.`
+        : `The daemon did not answer, so it's unknown whether you left ${channel}. Check before leaving it again.`,
   };
 };
 
@@ -272,8 +272,8 @@ const parted = (leave: Extract<Leave, { readonly _tag: "Act" }>) =>
       _tag: "NotDone",
       message:
         answer.reason._tag === "Offline"
-          ? `${leave.network} is not connected, so nothing was sent. Leave it once it is.`
-          : "The Channel's name could not be sent as it is, so it was not left.",
+          ? `${leave.network} is not connected, so nothing was sent. Leave once it is.`
+          : "The channel's name can't be sent as it is, so you did not leave it.",
     } satisfies Outcome;
   }).pipe(Effect.catch((error) => Effect.succeed(unleftWith(leave, error._tag))));
 

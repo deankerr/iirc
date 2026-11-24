@@ -369,8 +369,8 @@ describe("the members", () => {
       note: header?._tag === "Channel" ? header.note : undefined,
       out,
     }).toStrictEqual({
-      note: "kicked from this Channel, which is joined again",
-      out: { _tag: "Out", note: "kicked from this Channel, which is joined again", timeline: iirc },
+      note: "kicked from this channel, and iirc will rejoin",
+      out: { _tag: "Out", note: "kicked from this channel, and iirc will rejoin", timeline: iirc },
     });
   });
 });
@@ -409,8 +409,7 @@ describe("/query and how the Network folds names", () => {
       opened: openOf(registry.get(timelinesState)),
     }).toStrictEqual({
       failed: iirc,
-      notice:
-        "The Daemon did not say how libera compares nicks, so /query [BOB] opened nothing, rather than risk another's Direct Message. Try again.",
+      notice: "Couldn't compare nicks on libera, so /query [BOB] opened nothing. Try again.",
       // Under ascii, `[BOB]` is `[bob]`, never `{bob}`.
       opened: squareBob,
     });

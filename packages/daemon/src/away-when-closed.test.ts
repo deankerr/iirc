@@ -136,7 +136,7 @@ describe("the aways the Journal holds", () => {
 
 const network = NetworkId.make("libera");
 
-const floor = configured({ ircds: [{ host: "irc.test", port: 6667, tls: false }] });
+const floor = configured({ servers: [{ host: "irc.test", port: 6667, tls: false }] });
 
 const makeClient = HttpApiTest.groups(DaemonApi, ["networks", "news", "timelines", "options"]);
 

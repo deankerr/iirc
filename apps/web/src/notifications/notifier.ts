@@ -165,7 +165,7 @@ const keptOrNot = (kept: boolean, now: "on" | "off"): Outcome =>
     ? { _tag: "Done" }
     : {
         _tag: "NotDone",
-        message: `Notifications are ${now} for this page only: this browser would not keep the choice for the device.`,
+        message: `Notifications are ${now} for this page only: this browser can't keep the choice for this device.`,
       };
 
 /**
@@ -193,19 +193,19 @@ export const notifying = (on: boolean): Effect.Effect<Outcome> =>
         return {
           _tag: "NotDone",
           message:
-            "This browser blocks notifications from iirc. Allow them in its settings for this site, then /notify on again.",
+            "This browser blocks notifications from iirc. Allow them in its settings for this site, then run /notify on again.",
         } as const;
       }
 
       case "Default": {
         return {
           _tag: "NotDone",
-          message: "Notifications were not allowed, so they stay off. /notify on asks again.",
+          message: "Notifications weren't allowed, so they stay off. /notify on asks again.",
         } as const;
       }
 
       case "Unsupported": {
-        return { _tag: "NotDone", message: "This browser cannot show notifications." } as const;
+        return { _tag: "NotDone", message: "This browser can't show notifications." } as const;
       }
 
       default: {

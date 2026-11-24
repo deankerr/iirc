@@ -179,7 +179,7 @@ describe("themes", () => {
     }).toStrictEqual({
       after: before,
       badName:
-        "Nord Mine is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+        "Nord Mine is not a valid theme name: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.",
       before: "#111314",
       changes: [
         { ifSequence: "0", route: "PUT theme.imported" },
@@ -192,7 +192,7 @@ describe("themes", () => {
       refused: "not a theme",
       shared: ["nord-mine"],
       unnamed:
-        "A theme needs a name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+        "A theme needs a name: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.",
     });
   });
 
@@ -239,9 +239,9 @@ describe("themes", () => {
       shared: fake.daemon.ui.options.theme,
       unknown,
     }).toStrictEqual({
-      builtIn: "nord is built in, so it is never removed.",
+      builtIn: "nord is built in, so it can't be removed.",
       device: ["#fdf6e3", '{"theme":"solarized-light"}'],
-      missing: "No theme mine was imported. /theme lists them.",
+      missing: "You haven't imported a theme named mine. /theme lists them.",
       shared: "gruvbox-dark",
       unknown: "There is no theme nope. /theme lists them, and /theme import adds one.",
     });
@@ -412,8 +412,8 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = widestLine();
 
-    await type("/set ui.timeline.maxWidth 72");
-    await until(registry, uiInEffect, (ui) => ui["timeline.maxWidth"] === 72);
+    await type("/set ui.conversation.maxWidth 72");
+    await until(registry, uiInEffect, (ui) => ui["conversation.maxWidth"] === 72);
     const shared = widestLine();
 
     stop();
@@ -426,12 +426,12 @@ describe("themes", () => {
     const stop = watchTheme(registry);
     const before = columnWidths();
 
-    await type("/set ui.timeline.nickWidth 24");
+    await type("/set ui.conversation.nickWidth 24");
     await type("/set ui.members.width 30");
     await until(
       registry,
       uiInEffect,
-      (ui) => ui["timeline.nickWidth"] === 24 && ui["members.width"] === 30
+      (ui) => ui["conversation.nickWidth"] === 24 && ui["members.width"] === 30
     );
     const set = columnWidths();
 
@@ -452,8 +452,8 @@ describe("themes", () => {
     await until(registry, uiInEffect, (ui) => ui["font.lineHeight"] === 1.8);
     const leading = { leading: lineHeight(), spacing: rowSpacing() };
 
-    await type("/set ui.timeline.spacing 1");
-    await until(registry, uiInEffect, (ui) => ui["timeline.spacing"] === 1);
+    await type("/set ui.conversation.spacing 1");
+    await until(registry, uiInEffect, (ui) => ui["conversation.spacing"] === 1);
     const spaced = { leading: lineHeight(), spacing: rowSpacing() };
 
     stop();

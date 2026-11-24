@@ -26,7 +26,7 @@ const keeping = <State>(
     news: [],
     outputs:
       input._tag === "Configured" && state === undefined
-        ? [{ _tag: "Dial", connection: ConnectionId.make(1), ircd: input.configuration.ircds[0] }]
+        ? [{ _tag: "Dial", connection: ConnectionId.make(1), ircd: input.configuration.servers[0] }]
         : [],
     state: make(state),
   }),

@@ -475,7 +475,7 @@ describe("the search view", () => {
     const target = container.querySelector("[data-target]");
 
     const jump = [...container.querySelectorAll("button")].some(
-      (button) => button.textContent === "Jump to latest"
+      (button) => button.textContent === "jump to latest"
     );
 
     if (log === null) {
@@ -509,13 +509,13 @@ describe("the search view", () => {
           text: "<img src=x onerror=alert(1)> WoRd ten",
         },
       },
-      status: "60 found, newest first.",
+      status: "60 results, newest first.",
       // The start, the day, then items 1 to 10: the tenth's middle, 230, in the middle of 400.
       target: [true, 30],
     });
   });
 
-  it("draws each result's time as ui.timeline.timeFormat says, and HH:mm under none", async () => {
+  it("draws each result's time as ui.conversation.timeFormat says, and HH:mm under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const said = new Date(2026, 10, 15, 15, 7, 9);
     const { container, registry } = await signedIn(0, () => said.getTime());
@@ -526,7 +526,7 @@ describe("the search view", () => {
 
     const drawn = async (time: TimeShown | undefined) => {
       await act(async () => {
-        registry.set(deviceUi, time === undefined ? {} : { "timeline.timeFormat": time });
+        registry.set(deviceUi, time === undefined ? {} : { "conversation.timeFormat": time });
         await Promise.resolve();
       });
 

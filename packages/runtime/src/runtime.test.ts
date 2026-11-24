@@ -210,7 +210,7 @@ describe("carrying out", () => {
         return world.logged
           .filter((one) => one.level === "Info")
           .map((one) => one.message)
-          .filter((message) => JSON.stringify(message).includes("Conn"));
+          .filter((message) => /Connection closed|Connected as/u.test(JSON.stringify(message)));
       })
     );
 
@@ -624,7 +624,7 @@ describe("a Line `encode` rejects", () => {
     );
 
     expect(result.heard).toBe("NICK iirc\r\n");
-    expect(JSON.stringify(result.errors)).toContain("encode rejected");
+    expect(JSON.stringify(result.errors)).toContain("could not be encoded");
   });
 });
 
@@ -696,7 +696,7 @@ describe("one Network's failure", () => {
     expect(result.networks).toStrictEqual(
       new Map<NetworkId, NetworkStatus>([
         [libera, { _tag: "Running" }],
-        [oftc, { _tag: "Stopped", reason: "The Journal failed: disk full" }],
+        [oftc, { _tag: "Stopped", reason: "Journal failed: disk full" }],
       ])
     );
     expect(result.retry).toBeInstanceOf(NetworkStopped);
@@ -745,12 +745,12 @@ describe("one Network's failure", () => {
       })
     );
 
-    const stopped: NetworkStatus = { _tag: "Stopped", reason: "The Client threw: Error: boom" };
+    const stopped: NetworkStatus = { _tag: "Stopped", reason: "Client error: Error: boom" };
 
     // A Frontend reading the Tail tells which Network stopped by its annotation alone.
     expect(result.errors).toStrictEqual([
       {
-        message: ["The Network stopped on restart", { reason: "Error: boom" }],
+        message: ["Network stopped on restart", { reason: "Error: boom" }],
         network: oftc,
       },
     ]);

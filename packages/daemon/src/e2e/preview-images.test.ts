@@ -99,11 +99,11 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
             };
 
             const options = {
-              "store.s3.accessKeyId": "minio-key",
-              "store.s3.bucket": minio.bucket,
-              "store.s3.endpoint": minio.endpoint,
-              "store.s3.region": minio.region,
-              "store.s3.secretAccessKey": "minio-secret",
+              "storage.s3.accessKeyId": "minio-key",
+              "storage.s3.bucket": minio.bucket,
+              "storage.s3.endpoint": minio.endpoint,
+              "storage.s3.region": minio.region,
+              "storage.s3.secretAccessKey": "minio-secret",
             };
 
             const held = yield* Effect.forEach(Object.entries(credentials), ([name, value]) =>
@@ -127,8 +127,8 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
               params: { network },
               payload: configured({
                 channels: [{ name: channel }],
-                ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
                 nicks: ["iirc"],
+                servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
               }),
               query: {},
             });

@@ -98,7 +98,7 @@ const Text = ({ kind, text }: { readonly kind: Kind; readonly text: string }) =>
 const Shown = ({ kind, value }: { readonly kind: Kind; readonly value: Value }) => {
   switch (value._tag) {
     case "Reading": {
-      return <span className={styles.muted}>reading…</span>;
+      return <span className={styles.muted}>loading…</span>;
     }
 
     case "Shown": {
@@ -106,7 +106,7 @@ const Shown = ({ kind, value }: { readonly kind: Kind; readonly value: Value }) 
     }
 
     case "Unset": {
-      return <span className={styles.muted}>unset</span>;
+      return <span className={styles.muted}>not set</span>;
     }
 
     case "Credential": {
@@ -115,11 +115,11 @@ const Shown = ({ kind, value }: { readonly kind: Kind; readonly value: Value }) 
           <bdi>{value.name}</bdi>{" "}
           {value.held === undefined || value.held === "NotKnown" ? (
             <span className={styles.muted}>
-              {value.held === undefined ? "reading…" : "not known"}
+              {value.held === undefined ? "loading…" : "not known"}
             </span>
           ) : (
             <span className={value.held ? styles.held : styles.missing}>
-              {value.held ? "held" : "not held"}
+              {value.held ? "set" : "not set"}
             </span>
           )}
         </span>
@@ -147,7 +147,7 @@ const startsInWords = (starts: string) => (starts === "" ? "empty" : starts);
  */
 const Starts = ({ kind, starts }: { readonly kind: Kind; readonly starts: string | undefined }) => {
   if (starts === undefined) {
-    return "must be given";
+    return "required";
   }
 
   return (
@@ -342,7 +342,7 @@ const ChoiceMenu = ({
 
   const entries = [
     ...menu.choices.map((text, index) => ({ id: String(index), text })),
-    ...(menu.custom ? [{ id: customKey, text: "Custom…" }] : []),
+    ...(menu.custom ? [{ id: customKey, text: "custom…" }] : []),
   ];
 
   const chosen =
@@ -442,10 +442,10 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
         size="small"
         variant="primary"
       >
-        Unset
+        unset
       </Button>
       <Button onKeyDown={escape} onPress={keep} size="small">
-        Keep
+        keep
       </Button>
     </div>
   );
@@ -608,20 +608,23 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys, and any key to let a pending Custom… go.
     <section
-      aria-label="Options"
+      aria-label="Settings"
       className={styles.view}
       onKeyDown={onViewKeyDown}
       onKeyDownCapture={onViewKeyDownCapture}
     >
-      <PaneBar name="options" pane={pane} />
+      <PaneBar name="settings" pane={pane} />
       <div className={styles.header}>
         <SearchField
-          aria-label="Filter options"
+          aria-label="Filter settings"
           className={styles.filter}
           onChange={setFilter}
           value={filter}
         >
-          <Input className={styles.filterInput} placeholder="Filter, as font or network.*" />
+          <Input
+            className={styles.filterInput}
+            placeholder="filter settings (e.g. font, network.*)"
+          />
         </SearchField>
       </div>
       {notice === undefined ? null : (
@@ -631,10 +634,10 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
       )}
       {asked === undefined ? null : <Confirm done={focusRow(asked.name)} option={asked} />}
       {waits.length === 0 ? null : (
-        <ul aria-label="Being read" className={styles.waits}>
+        <ul aria-label="Loading" className={styles.waits}>
           {waits.map((name) => (
             <li key={name}>
-              Reading <bdi>{name}</bdi>…
+              Loading <bdi>{name}</bdi>…
             </li>
           ))}
         </ul>
@@ -644,7 +647,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
         <div className={styles.scroller} onKeyDown={onKeyDown} ref={list}>
           <GridList
             {...(notice === undefined ? {} : { "aria-describedby": noticeId })}
-            aria-label="Options"
+            aria-label="Settings"
             className={styles.list}
             items={groups}
             // A row has no part of its own to move to but an open editor, whose caret takes
@@ -654,7 +657,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
             onAction={onAction}
             renderEmptyState={() =>
               // While Networks are read, their options may yet match, which the waits say.
-              waits.length === 0 ? <p className={styles.muted}>No option matches.</p> : null
+              waits.length === 0 ? <p className={styles.muted}>No settings match.</p> : null
             }
           >
             {(group: OptionGroup) => (

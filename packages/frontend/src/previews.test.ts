@@ -196,7 +196,7 @@ describe("whether to ask", () => {
     ]);
   });
 
-  it("makes or removes one Timeline's own choice, leaving the others", () => {
+  it("makes or removes one conversation's own choice, leaving the others", () => {
     const timelines = { [other]: "off", [timeline]: "on" } as const;
 
     expect([
@@ -206,7 +206,7 @@ describe("whether to ask", () => {
     ]).toStrictEqual([{ [other]: "off", [timeline]: "text" }, { [other]: "off" }, {}]);
   });
 
-  it("follows the stream while any Timeline asks, even with ui.previews off", () => {
+  it("follows the stream while any conversation asks, even with ui.previews off", () => {
     expect([
       asksAnywhere(undefined),
       asksAnywhere(everywhere("off")),
@@ -216,7 +216,7 @@ describe("whether to ask", () => {
     ]).toStrictEqual([false, false, false, true, true]);
   });
 
-  it("watches only a Message with a link that may be previewed, while the mode asks", () => {
+  it("watches only a message with a link that may be previewed, while the mode asks", () => {
     expect([
       mayPreview("text", links),
       mayPreview("text", said("irc://irc.libera.chat/#iirc and no web link")),
@@ -227,7 +227,7 @@ describe("whether to ask", () => {
 });
 
 describe("asking", () => {
-  it("asks for a Message only once it was shown, and only while the stream is followed", () => {
+  it("asks for a message only once it was shown, and only while the stream is followed", () => {
     const shown = fold(initialPreviews, {
       _tag: "Shown",
       direct: false,
@@ -254,7 +254,7 @@ describe("asking", () => {
     ]).toStrictEqual([[], []]);
   });
 
-  it("asks once for a Message shown again and again", () => {
+  it("asks once for a message shown again and again", () => {
     const { ask, state } = asking(1);
 
     const again = fold(
@@ -268,7 +268,7 @@ describe("asking", () => {
     expect(asksWanted(again, everywhere("on"), opened)).toStrictEqual([]);
   });
 
-  it("never asks again for a Message the Daemon refused", () => {
+  it("never asks again for a message the daemon refused", () => {
     const { ask, state } = asking(1);
     const refused = fold(state, { _tag: "Refused", ask });
 
@@ -278,7 +278,7 @@ describe("asking", () => {
     expect(previewsOf(refused, "on", timeline, at(1), links, drawing)).toStrictEqual([]);
   });
 
-  it("asks again, once followed again, for a Message still pending when the stream was lost", () => {
+  it("asks again, once followed again, for a message still pending when the stream was lost", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", pending)] });
 
@@ -294,7 +294,7 @@ describe("asking", () => {
     ).toStrictEqual([ask.key]);
   });
 
-  it("does not ask again for a Message whose Previews all settled before the stream was lost", () => {
+  it("does not ask again for a message whose Previews all settled before the stream was lost", () => {
     const { ask, state } = asking(1);
 
     const settled = fold(
@@ -319,8 +319,8 @@ describe("asking", () => {
   });
 });
 
-describe("asking per Timeline", () => {
-  it("asks only for Messages in a Timeline whose own mode asks", () => {
+describe("asking per conversation", () => {
+  it("asks only for messages in a conversation whose own mode asks", () => {
     const shown = fold(
       initialPreviews,
       { _tag: "Followed" },
@@ -337,7 +337,7 @@ describe("asking per Timeline", () => {
     ]).toStrictEqual([[timeline], [other]]);
   });
 
-  it("asks again for a Message waiting for a press once its Timeline chooses to be previewed", () => {
+  it("asks again for a message waiting for a press once its conversation chooses to be previewed", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
 
@@ -384,7 +384,7 @@ const waiting = () => {
 };
 
 describe("a link waiting for a press", () => {
-  it("is a press of its Message's place and its index, at the stream's count", () => {
+  it("is a press of its message's place and its index, at the stream's count", () => {
     const state = fold(waiting(), { _tag: "Changed", item: item("a", ready) });
 
     expect(pressOf(state, timeline, at(1), 1)).toStrictEqual({
@@ -416,7 +416,7 @@ describe("a link waiting for a press", () => {
     ]);
   });
 
-  it("asks its Message again when a press is refused, so what is drawn is the Daemon's", () => {
+  it("asks its message again when a press is refused, so what is drawn is the daemon's", () => {
     const state = waiting();
     const press = pressOf(state, timeline, at(1), 1);
     const refused = fold(state, { _tag: "PressRefused", press });
@@ -489,7 +489,7 @@ describe("whether a Preview is open", () => {
       true,
     ],
     [
-      "closed in a Direct Message with no mode of its own, whatever start says",
+      "closed in a direct message with no mode of its own, whatever start says",
       initialPreviews,
       undefined,
       opening("open"),
@@ -497,7 +497,7 @@ describe("whether a Preview is open", () => {
       false,
     ],
     [
-      "opened by the Owner in a Direct Message with no mode of its own",
+      "opened by the Owner in a direct message with no mode of its own",
       initialPreviews,
       undefined,
       opening("closed", [[0, true]]),
@@ -505,7 +505,7 @@ describe("whether a Preview is open", () => {
       true,
     ],
     [
-      "as start says in a Direct Message set to on",
+      "as start says in a direct message set to on",
       initialPreviews,
       "on",
       opening("open"),
@@ -513,7 +513,7 @@ describe("whether a Preview is open", () => {
       true,
     ],
     [
-      "as start says in a Direct Message set to text",
+      "as start says in a direct message set to text",
       initialPreviews,
       "text",
       opening("closed"),
@@ -521,7 +521,7 @@ describe("whether a Preview is open", () => {
       false,
     ],
     [
-      "closed where the Daemon says its link waits for a press",
+      "closed where the daemon says its link waits for a press",
       waitingHere(),
       undefined,
       opening("open"),
@@ -529,7 +529,7 @@ describe("whether a Preview is open", () => {
       false,
     ],
     [
-      "as start says where a link waited before its Timeline chose a mode",
+      "as start says where a link waited before its conversation chose a mode",
       waitingHere(),
       "on",
       opening("open"),
@@ -559,7 +559,7 @@ const askedFor = (direct: boolean, modes: PreviewsModes, how: Opening) =>
     how
   ).length === 1;
 
-describe("whether a Message is asked for", () => {
+describe("whether a message is asked for", () => {
   it.each([
     ["while start is open", false, choosingHere(), opening("open"), true],
     ["not while start is closed", false, choosingHere(), opening("closed"), false],
@@ -589,35 +589,35 @@ describe("whether a Message is asked for", () => {
     ],
     ["not under off, whatever is open", false, choosingHere("off"), opening("open"), false],
     [
-      "in a Direct Message with no mode of its own under open, as the Daemon fetches nothing there",
+      "in a direct message with no mode of its own under open, as the daemon fetches nothing there",
       true,
       choosingHere(),
       opening("open"),
       true,
     ],
     [
-      "in a Direct Message with no mode of its own under closed, as the Daemon fetches nothing there",
+      "in a direct message with no mode of its own under closed, as the daemon fetches nothing there",
       true,
       choosingHere(),
       opening("closed"),
       true,
     ],
     [
-      "not in a Direct Message set to on while start is closed",
+      "not in a direct message set to on while start is closed",
       true,
       choosingHere("on"),
       opening("closed"),
       false,
     ],
     [
-      "in a Direct Message set to on while start is open",
+      "in a direct message set to on while start is open",
       true,
       choosingHere("on"),
       opening("open"),
       true,
     ],
     [
-      "in a Direct Message set to text once one link is opened",
+      "in a direct message set to text once one link is opened",
       true,
       choosingHere("text"),
       opening("closed", [[0, true]]),
@@ -627,7 +627,7 @@ describe("whether a Message is asked for", () => {
     expect(askedFor(direct, modes, how)).toBe(expected);
   });
 
-  it("asks again for a Message waiting for a press, once its Timeline chooses a mode, only while one is open", () => {
+  it("asks again for a message waiting for a press, once its conversation chooses a mode, only while one is open", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
 
@@ -698,8 +698,8 @@ describe("a press let go of before it was answered", () => {
   });
 });
 
-describe("a Message shown again with more links", () => {
-  it("is asked for once its new link is opened, as an Ircd's echo may add one", () => {
+describe("a message shown again with more links", () => {
+  it("is asked for once its new link is opened, as a server's echo may add one", () => {
     const state = fold(
       initialPreviews,
       { _tag: "Followed" },
@@ -711,7 +711,7 @@ describe("a Message shown again with more links", () => {
   });
 });
 
-describe("a Message answered, then shown with more links", () => {
+describe("a message answered, then shown with more links", () => {
   it("is asked for again, and an answer for its old links settles nothing", () => {
     const { ask, state } = asking(1);
     const more = { _tag: "Shown", direct: false, links: 2, position: at(1), timeline } as const;
@@ -764,7 +764,7 @@ describe("where a toggle stands", () => {
 });
 
 describe("folding a change", () => {
-  it("replaces the item held under its id, in every Message that shows it", () => {
+  it("replaces the item held under its id, in every message that shows it", () => {
     const first = asking(1);
 
     const one = fold(first.state, {
@@ -868,7 +868,7 @@ const heldIn = (state: Previews, previews: readonly HeldItem[]) => {
 };
 
 describe("a held read", () => {
-  it("draws a row held before it is drawn, with no placeholder, while other Messages are answered", () => {
+  it("draws a row held before it is drawn, with no placeholder, while other messages are answered", () => {
     const held = heldIn(initialPreviews, [
       heldItem("a", ready),
       heldItem("b", { _tag: "Failed", reason: "Refused" }),
@@ -920,7 +920,7 @@ describe("a held read", () => {
     ).toStrictEqual(["Ready"]);
   });
 
-  it("draws a link not held as a placeholder, and still asks for its Message once shown", () => {
+  it("draws a link not held as a placeholder, and still asks for its message once shown", () => {
     const held = fold(heldIn(initialPreviews, [heldItem("a", ready), heldItem("b", notHeld)]), {
       _tag: "Followed",
     });
@@ -941,7 +941,7 @@ describe("a held read", () => {
     ]);
   });
 
-  it("draws a placeholder, not another link's card, when the Message's links changed since the read", () => {
+  it("draws a placeholder, not another link's card, when the message's links changed since the read", () => {
     const held = heldIn(initialPreviews, [heldItem("a", ready)]);
 
     expect(
@@ -951,7 +951,7 @@ describe("a held read", () => {
     ).toStrictEqual(["Pending"]);
   });
 
-  it("draws a link not held once the stream says another Frontend's ask fetched it", () => {
+  it("draws a link not held once the stream says another device's ask fetched it", () => {
     const held = heldIn(fold(initialPreviews, { _tag: "Followed" }), [heldItem("a", notHeld)]);
     const changed = fold(held, { _tag: "Changed", item: item("a", ready) });
 
@@ -963,7 +963,7 @@ describe("a held read", () => {
   });
 });
 
-describe("what a Message shows", () => {
+describe("what a message shows", () => {
   it("shows a placeholder for each link that may be previewed before it is answered", () => {
     expect(previewsOf(initialPreviews, "text", timeline, at(1), links, drawing)).toStrictEqual([
       {
@@ -987,7 +987,7 @@ describe("what a Message shows", () => {
     expect(previewsOf(initialPreviews, "on", timeline, at(1), four, drawing)).toHaveLength(3);
   });
 
-  it("shows nothing while the mode is off or unknown, nor for anything but a Message", () => {
+  it("shows nothing while the mode is off or unknown, nor for anything but a message", () => {
     const joined = Schema.decodeSync(ItemContent)({
       _tag: "Activity",
       activity: { _tag: "Joined", channel: "#iirc", nick: "https://a.example/" },
@@ -1034,7 +1034,7 @@ describe("what a Message shows", () => {
       {
         _tag: "Failed",
         key: "1",
-        reason: "No preview: the Daemon never fetches this address.",
+        reason: "No preview: the daemon never fetches this address.",
       },
       {
         _tag: "Pending",
@@ -1049,7 +1049,7 @@ describe("what a Message shows", () => {
     ]);
   });
 
-  it("draws the links its Message holds, never an address the Daemon gave", () => {
+  it("draws the links its message holds, never an address the daemon gave", () => {
     const { ask, state } = asking(1);
 
     const answered = fold(state, {
@@ -1142,11 +1142,11 @@ describe("a Preview's image", () => {
     });
   });
 
-  it("is none when the Daemon kept none", () => {
+  it("is none when the daemon kept none", () => {
     expect(shownReady({ image: null })?.image).toBeUndefined();
   });
 
-  it("carries its dimensions in pixels, or none where the Daemon read none", () => {
+  it("carries its dimensions in pixels, or none where the daemon read none", () => {
     const sized = { animated: false, dimensions: { height: 48, width: 64 }, hash, size: 10 };
 
     expect([
@@ -1239,7 +1239,7 @@ describe("a Preview's player", () => {
     ).toStrictEqual([undefined, undefined, undefined, undefined]);
   });
 
-  it("is a page with its image once the list no longer names its host, as the Daemon would answer it", () => {
+  it("is a page with its image once the list no longer names its host, as the daemon would answer it", () => {
     const shown = shownReady(playing, "on", ["player.vimeo.com"]);
 
     expect([
@@ -1457,7 +1457,7 @@ describe("a file's card", () => {
     [
       "its type and size when its lines are blank",
       { description: " \n\n", size: 0, type: "text/plain" },
-      "text/plain \u00B7 0 bytes",
+      "text/plain \u00B7 0 B",
     ],
     [
       "its type and size",
@@ -1465,7 +1465,7 @@ describe("a file's card", () => {
       "application/pdf \u00B7 1.2 MB",
     ],
     ["its type alone with no size", { type: "application/pdf" }, "application/pdf"],
-    ["its size alone with no type", { size: 1 }, "1 byte"],
+    ["its size alone with no type", { size: 1 }, "1 B"],
     ["no description with neither", {}, "-"],
     ["its type contained", { type: "a/b\u202E" }, "a/b\u202E\u202C"],
   ] as const)("has %s", (_name, fields, description) => {
@@ -1492,16 +1492,16 @@ describe("a file's card", () => {
 
 describe("how big a file is said to be", () => {
   it.each([
-    [0, "0 bytes"],
-    [1, "1 byte"],
-    [2, "2 bytes"],
-    [999, "999 bytes"],
-    [1000, "1.0 kB"],
-    [1234, "1.2 kB"],
-    [9949, "9.9 kB"],
-    [9950, "10 kB"],
-    [12_345, "12 kB"],
-    [999_499, "999 kB"],
+    [0, "0 B"],
+    [1, "1 B"],
+    [2, "2 B"],
+    [999, "999 B"],
+    [1000, "1.0 KB"],
+    [1234, "1.2 KB"],
+    [9949, "9.9 KB"],
+    [9950, "10 KB"],
+    [12_345, "12 KB"],
+    [999_499, "999 KB"],
     [999_500, "1.0 MB"],
     [999_999, "1.0 MB"],
     [1_200_000, "1.2 MB"],
@@ -1542,7 +1542,7 @@ describe("the host a card names", () => {
     expect(hostNamed(address, read)).toBe(expected);
   });
 
-  it("is said on a card read from another host than its Message's link", () => {
+  it("is said on a card read from another host than its message's link", () => {
     expect([
       shownReady({ link: "https://www.example.com/cats" })?.host,
       shownReady({ link: "https://a.example/" })?.host,
@@ -1551,7 +1551,7 @@ describe("the host a card names", () => {
 });
 
 describe("a Preview's media", () => {
-  it("is a video to stream under on, from the route by the Message's place", () => {
+  it("is a video to stream under on, from the route by the message's place", () => {
     expect(streamed({ kind: "video", type: "video/mp4" })).toStrictEqual({
       kind: "video",
       src: `/api/previews/${idOf("a")}/stream?timeline=${timeline}&position=${cursorOf(at(1))}`,
@@ -1559,7 +1559,7 @@ describe("a Preview's media", () => {
     });
   });
 
-  it("is a sound likewise, and has no type when the Daemon read none", () => {
+  it("is a sound likewise, and has no type when the daemon read none", () => {
     expect(streamed({ kind: "audio", type: null })?.kind).toBe("audio");
     expect(streamed({ kind: "audio", type: null })?.type).toBeNull();
   });
@@ -1590,8 +1590,8 @@ describe("a failure's words", () => {
         ] as const
       ).map((reason) => reasonWords(reason))
     ).toStrictEqual([
-      "No preview: the Daemon never fetches this address.",
-      "No preview: the Daemon could not reach this link.",
+      "No preview: the daemon never fetches this address.",
+      "No preview: the daemon could not reach this link.",
       "No preview: this link took too long to answer.",
       "No preview: this link's answer was too large to read.",
       "No preview: this link answered with an error.",

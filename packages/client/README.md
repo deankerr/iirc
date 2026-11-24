@@ -63,14 +63,14 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 - **`tls` says whether to present a client certificate,** `none` or `certificate` with the Credential holding it. An `Output.Dial` names that Credential as `certificate` when the address dialled is TLS, an STS upgrade included, and names none for a plaintext one. A `Configured` written before `tls` existed decodes as `none`.
 - **A `Sasl` login's `mechanism` is `auto`, `plain`, or `scram-sha-256`.** `auto` uses `SCRAM-SHA-256` where the cap lists it and `PLAIN` otherwise, and the others pin one. A new Network starts with `auto`, and a `Configured` written before it existed decodes as `plain`.
 - **An `External` login needs `tls` to be `certificate`.** A Configuration with one and no certificate does not decode.
-- **`userModes` and `lines` are sent as each Session begins,** after the welcome and any service login and before any Channel is joined: `userModes` as one `MODE` on Self, then each Line in order, with no intent.
-- **Each of `lines` is parsed by the rule `/quote` applies,** in `src/quoted.ts`. One that `/quote` would refuse at that moment is `Ignored` as `Unsendable`.
+- **`userModes` and `commands` are sent as each Session begins,** after the welcome and any service login and before any Channel is joined: `userModes` as one `MODE` on Self, then each Line in order, with no intent.
+- **Each of `commands` is parsed by the rule `/quote` applies,** in `src/quoted.ts`. One that `/quote` would refuse at that moment is `Ignored` as `Unsendable`.
 - **A field added later decodes old Journals as the Client behaved before it,** so an old Journal replays as it happened. `answerCtcp` and `whoOnJoin` start on and decode as off. `bot` starts and decodes as off.
 
 ### When the Client dials
 
 - **A `Configured` or `Started` with the Network enabled dials at once.** There is no backoff before a first dial.
-- **After a `Closed` it waits on the backoff,** then dials the next Ircd in `ircds`, round and round. `Retry` cuts the wait short.
+- **After a `Closed` it waits on the backoff,** then dials the next Ircd in `servers`, round and round. `Retry` cuts the wait short.
 - **Disabling the Network sends `QUIT`,** hangs up, and waits for the `Closed`.
 - **A `Removed` does the same and dials nothing again.** Each Lookup still waiting reports what it has in the removal's own step.
 - **A `Stopping` does the same,** and then nothing is dialled and every `Say`, `Act`, and `Look` is refused until the next `Started`.
@@ -258,7 +258,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Taking the first nick back** (`reclaim.test.ts`, `monitor.test.ts`, `watch.test.ts`). When Self holds another nick it settled for, it asks once for the first configured nick as soon as it sees that nick's holder leave it, by a `QUIT` or a `NICK` to another nick (not a change of case), or `MONITOR` or `WATCH` reports it offline. A refusal is not retried until the holder is seen to leave again, and nothing polls.
 - **Taking back stops for the Session** once the Owner sets a nick, or once the Network renames Self off the first nick with no `NICK` of ours asking. The ask's answer is never taken for an answer to the Owner's own `NICK`, and it is Activity like any other change of Self's nick.
 - **The Session and ISUPPORT** (`session.test.ts`). `001` begins a Session. ISUPPORT accumulates over every `005`, at most 256 tokens. Self's mask is never read from `001`.
-- **What the Owner sends as a Session begins** (`session-start.test.ts`). The `userModes` and `lines` under "Configuration".
+- **What the Owner sends as a Session begins** (`session-start.test.ts`). The `userModes` and `commands` under "Configuration".
 - **A service login** (`service-login.test.ts`, `self-account.test.ts`). With a `Service` login, each Session begins by telling the service `IDENTIFY <account> <credential>` in a `PRIVMSG`, or `IDENTIFY <credential>` when the login names no account, and its Channels wait. Which is told comes from the Configuration alone, and nothing is tried again. A `900`, or with `account-notify` an `ACCOUNT` for Self that names an account, also makes Self's account known and lets them be joined, as do the Configuration's `wait` running out, an unfilled Credential, and a Configuration with no service login. No user mode and no `NOTICE` from the service counts.
 - **A service login never tells its Credential while the Ircd may echo it.** It stops `echo-message` being asked for on later Connections, and a Session that finds it on or asked for at `001` tells nothing and joins at once. A Connection that has `echo-message` keeps the Feature on, so each echo is still matched to its Message.
 - **What an Ircd says** (`numerics.test.ts`). A live numeric that nothing else reports, such as the welcome, the counts of Users, or a `422`, is a `Numeric` Activity in the Network's own Timeline, by its number and its parameters after the one that names Self, as they came. One collected for a Lookup, tied to an action, or answering a Line the Client sent itself is not shown, nor is one the Client reads otherwise, which `unshown` in `src/lines.ts` lists.
@@ -381,7 +381,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Learning.** Over TLS, a `duration` stores a policy for the Connection's host, on this Connection's port. `duration=0` removes it.
 - **Upgrading.** Over plaintext, a `port` ends the Connection and dials the same host over TLS on that port at once. If that TLS fails, it is never retried in plaintext.
 - **Dialling.** While a policy holds for a host, every dial to it is TLS on the policy's port.
-- **Hosts.** Policies are keyed by DNS name, and an IP literal never gets one. Only hosts in the Owner's `ircds` can have one.
+- **Hosts.** Policies are keyed by DNS name, and an IP literal never gets one. Only hosts in the Owner's `servers` can have one.
 - **Derived.** Policies come from journaled Lines, so replay rebuilds them across a restart.
 
 ### Recorded Ircds

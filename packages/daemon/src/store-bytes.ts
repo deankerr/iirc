@@ -103,7 +103,7 @@ export const layerStoreBytes = Layer.effect(StoreBytes)(
             const previewed = yield* cache.refers(hash).pipe(
               Effect.catch((error) =>
                 Effect.as(
-                  Effect.logWarning("Could not ask the Preview cache, so the bytes stay", {
+                  Effect.logWarning("Could not check the preview cache, so the bytes were kept", {
                     hash,
                     reason: error.reason,
                   }),
@@ -132,10 +132,10 @@ export const layerStoreBytes = Layer.effect(StoreBytes)(
           const store = yield* how.store;
 
           yield* store.delete(hash);
-          yield* Effect.logInfo("Released bytes from the store", { hash });
+          yield* Effect.logInfo("Released bytes from storage", { hash });
         }).pipe(
           Effect.catchTag("ByteStoreUnavailable", (error) =>
-            Effect.logWarning("Could not release bytes, which stay in the store", {
+            Effect.logWarning("Could not release bytes, so they stay in storage", {
               hash,
               reason: error.reason,
             })

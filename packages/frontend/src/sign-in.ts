@@ -141,23 +141,23 @@ export const reduce = (state: SignIn, event: SignInEvent): SignIn => {
 export const explain = (failure: Failure): string => {
   switch (failure) {
     case "WrongKey": {
-      return "That key matches none the Daemon holds. Check it, or make one with iirc key create.";
+      return "That API key does not match any the daemon has. Check it, or make one with iirc key create.";
     }
 
     case "CrossOrigin": {
-      return "The Daemon refused a request it could not tell came from its own address. Open this page from the Daemon's own address.";
+      return "The daemon refused this request because it could not confirm it came from the daemon's own address. Open this page from that address.";
     }
 
     case "NotSaved": {
-      return "The Daemon could not save its sign-ins, so nothing changed. Try again.";
+      return "The daemon could not save your session, so nothing changed. Try again.";
     }
 
     case "Unreachable": {
-      return "The Daemon did not answer. Check that it is running, then try again.";
+      return "The daemon did not answer. Check that it is running, then try again.";
     }
 
     case "Unexpected": {
-      return "The Daemon gave an answer this page could not read. It may be a different version.";
+      return "The daemon sent a reply this page could not read. It may be a different version.";
     }
 
     default: {

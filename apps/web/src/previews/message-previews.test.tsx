@@ -330,14 +330,16 @@ const layOut = () => {
 };
 
 /** How cards start, how tall their media is, and how a line is laid out. */
-type Look = Partial<Pick<UiOptions, "previews.start" | "previews.mediaHeight" | "timeline.layout">>;
+type Look = Partial<
+  Pick<UiOptions, "previews.start" | "previews.mediaHeight" | "conversation.layout">
+>;
 
 /**
  * The Frontend signed in, with `ui.previews` as given and `#iirc` open, or a Direct Message
  * with `peer` where `also.direct` is set, holding a Message with a link to a page, which the Daemon answers for with the item given.
  * @param previews - `ui.previews`.
  * @param answer - What the Daemon answers for the Message, as it stands then.
- * @param timelines - `ui.previews.timelines`, none unless given.
+ * @param timelines - `ui.previews.conversations`, none unless given.
  * @param animate - `ui.previews.animate`, shared, off unless given.
  * @param also - How cards start and are sized, shared, `open` unless given so each is drawn
  *   whole, a second link's answer, which the Message then holds after the first, and
@@ -372,8 +374,8 @@ const opened = async (
       ...uiDefaults,
       previews,
       "previews.animate": animate,
+      "previews.conversations": timelines,
       "previews.start": "open",
-      "previews.timelines": timelines,
       ...also.look,
     },
     sequence: 1,
@@ -872,7 +874,7 @@ describe("a Message's Previews", () => {
       links: list()?.querySelectorAll("a").length,
     }).toStrictEqual({
       buttons: 0,
-      drawn: [{ state: "failed", text: "No preview: the Daemon could not reach this link." }],
+      drawn: [{ state: "failed", text: "No preview: the daemon could not reach this link." }],
       links: 0,
     });
   });
@@ -1166,7 +1168,7 @@ describe("a Message's Previews", () => {
     const name = "A cat";
 
     const play = () => imageButton(`Play ${name}`);
-    const enlarge = () => imageButton(`Open ${name} large`);
+    const enlarge = () => imageButton(`enlarge ${name}`);
 
     it("draws its poster from the images route with a play button, and no video, and asks the stream for nothing", async () => {
       const media = stubMedia();
@@ -1307,7 +1309,7 @@ describe("a Message's Previews", () => {
       const video = list()?.querySelector("video");
 
       expect({
-        enlarge: imageButton(`Open ${name} large`) !== null,
+        enlarge: imageButton(`enlarge ${name}`) !== null,
         preload: video?.getAttribute("preload"),
         src: video?.getAttribute("src"),
       }).toStrictEqual({ enlarge: true, preload: "none", src: streamOfCats });
@@ -1324,7 +1326,7 @@ describe("a Message's Previews", () => {
       const video = list()?.querySelector("video");
 
       expect({
-        enlarge: imageButton(`Open ${name} large`) !== null,
+        enlarge: imageButton(`enlarge ${name}`) !== null,
         image: list()?.querySelector("img"),
         poster: video?.getAttribute("poster") ?? null,
         preload: video?.getAttribute("preload"),
@@ -1363,7 +1365,7 @@ describe("a Message's Previews", () => {
       await scrolledIntoView();
       await settled(() => list()?.querySelector("video") !== null);
 
-      const label = "Open https://example.com/cats large";
+      const label = "enlarge https://example.com/cats";
 
       await pressed(imageButton(label));
       await settled(() => larger() !== null);
@@ -1693,7 +1695,7 @@ describe("a Message's Previews", () => {
       "stands right after its link, as a button the keyboard reaches, under layout %s",
       async (layout) => {
         const { daemon } = await opened("on", catsItem(ready), {}, false, {
-          look: { "timeline.layout": layout },
+          look: { "conversation.layout": layout },
         });
 
         await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
@@ -1803,7 +1805,7 @@ describe("a Message's Previews", () => {
           drawn: [
             {
               state: "failed",
-              text: "No preview: the Daemon could not reach this link.Try again",
+              text: "No preview: the daemon could not reach this link.Try again",
             },
           ],
           presses: [],
@@ -2080,9 +2082,9 @@ describe("a Message's Previews", () => {
     await scrolledIntoView();
     await settled(() => drawn()[0]?.state === "ready");
     await imageSeen();
-    await settled(() => imageButton("Open https://example.com/cats large") !== null);
+    await settled(() => imageButton("enlarge https://example.com/cats") !== null);
 
-    const button = imageButton("Open https://example.com/cats large");
+    const button = imageButton("enlarge https://example.com/cats");
 
     await pressed(button);
     await settled(() => larger() !== null);
@@ -2127,9 +2129,9 @@ describe("a Message's Previews", () => {
     await scrolledIntoView();
     await settled(() => drawn()[0]?.state === "ready");
     await imageSeen();
-    await settled(() => imageButton("Open Cats large") !== null);
+    await settled(() => imageButton("enlarge Cats") !== null);
 
-    const button = imageButton("Open Cats large");
+    const button = imageButton("enlarge Cats");
 
     await pressed(button);
     await settled(() => larger() !== null);
@@ -2212,12 +2214,12 @@ describe("a Message's Previews", () => {
     await imageSeen();
     await settled(() => list()?.querySelector("canvas") !== null);
 
-    const stillOnly = imageButton("Open Cats large");
+    const stillOnly = imageButton("enlarge Cats");
 
     await pressed(imageButton("Play Cats"));
-    await settled(() => imageButton("Open Cats large") !== null);
+    await settled(() => imageButton("enlarge Cats") !== null);
 
-    const enlarge = imageButton("Open Cats large");
+    const enlarge = imageButton("enlarge Cats");
 
     await pressed(enlarge);
     await settled(() => larger() !== null);

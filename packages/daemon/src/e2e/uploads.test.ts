@@ -57,11 +57,11 @@ const configured = (bucket: string, listen: number) =>
     };
 
     const options = {
-      "store.s3.accessKeyId": "minio-key",
-      "store.s3.bucket": bucket,
-      "store.s3.endpoint": minio.endpoint,
-      "store.s3.region": minio.region,
-      "store.s3.secretAccessKey": "minio-secret",
+      "storage.s3.accessKeyId": "minio-key",
+      "storage.s3.bucket": bucket,
+      "storage.s3.endpoint": minio.endpoint,
+      "storage.s3.region": minio.region,
+      "storage.s3.secretAccessKey": "minio-secret",
       "uploads.listen": `${loopback}:${listen}`,
       "uploads.publicUrl": "https://up.example",
     };

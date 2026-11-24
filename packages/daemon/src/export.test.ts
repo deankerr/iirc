@@ -225,7 +225,7 @@ describe("an export's line", () => {
         opened: false,
         reason: { _tag: "Silent" },
       },
-      "-- Could not connect to irc.test:6697 with TLS: the Ircd stopped answering",
+      "-- Could not connect to irc.test:6697 with TLS: the server stopped responding",
     ],
     [
       "an action the Ircd refused",
@@ -236,7 +236,7 @@ describe("an export's line", () => {
         intent: IntentId.make("i"),
         reason: { _tag: "Rejected", reply: "482" },
       },
-      "-- Your topic change for #iirc was refused (482)",
+      "-- Could not change the topic of #iirc (482)",
     ],
     [
       "an action that never left",
@@ -247,7 +247,7 @@ describe("an export's line", () => {
         intent: IntentId.make("i"),
         reason: { _tag: "Unsent" },
       },
-      "-- Your kick of a, b from #iirc was not sent: its connection ended first",
+      "-- Could not kick a, b from #iirc: the connection ended first",
     ],
   ])("writes %s", (_name, content, expected) => {
     expect(textOf(content)).toBe(`${expected}\n`);

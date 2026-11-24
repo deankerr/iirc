@@ -111,7 +111,7 @@ export const expand = (line: AliasLine, args: string): Parsed<string> => {
 
   if (named > 0 && !all && words.length > named) {
     return invalid(
-      `${line} takes ${named === 1 ? "one word" : `${named} words`}, and ${words.length} were given. Nothing is dropped, so $* takes the rest.`
+      `${line} takes ${named === 1 ? "one word" : `${named} words`}, and you gave ${words.length}. Nothing is dropped, so $* takes the rest.`
     );
   }
 
@@ -142,13 +142,13 @@ export const editAliases = (aliases: Aliases, edit: AliasesEdit): Parsed<Aliases
 
   if (edit._tag === "Remove") {
     return at === -1
-      ? invalid(`No alias ${name} was made. /alias lists them.`)
+      ? invalid(`You have no alias ${name}. /alias lists them.`)
       : parsed(aliases.filter((_one, index) => index !== at));
   }
 
   if (at === -1) {
     return aliases.length >= aliasesCap
-      ? invalid(`${aliasesCap} aliases are made already. /alias remove one first.`)
+      ? invalid(`You already have ${aliasesCap} aliases. /alias remove one first.`)
       : parsed([...aliases, edit.alias]);
   }
 

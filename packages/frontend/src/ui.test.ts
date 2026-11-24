@@ -17,37 +17,37 @@ import {
 const shared = {
   options: {
     aliases: [],
-    "composer.enter": "newline",
-    "composer.nickSuffix": ": ",
-    "composer.spellcheck": true,
+    "conversation.activity": "quiet",
+    "conversation.colors": "theme",
+    "conversation.dateFormat": "long",
+    "conversation.layout": "columns",
+    "conversation.maxWidth": "none",
+    "conversation.nickBrackets": true,
+    "conversation.nickPrefix": true,
+    "conversation.nickWidth": 16,
+    "conversation.spacing": 0.3,
+    "conversation.timeFormat": "HH:mm:ss",
     font: "commit-mono",
     "font.lineHeight": 1.45,
     "font.size": 16,
+    "input.enter": "newline",
+    "input.nickSuffix": ": ",
+    "input.spellcheck": true,
+    logs: "info",
     "members.width": 18,
     previews: "off",
     "previews.animate": true,
+    "previews.conversations": {},
     "previews.mediaHeight": "medium",
     "previews.players": ["player.vimeo.com"],
     "previews.start": "open",
-    "previews.timelines": {},
     "sidebar.networks": [],
     "sidebar.order": [],
     "sidebar.pinned": [],
-    tail: "info",
     theme: "dark",
     "theme.dark": "dark",
     "theme.imported": [],
     "theme.light": "light",
-    "timeline.activity": "quiet",
-    "timeline.colours": "theme",
-    "timeline.dateFormat": "long",
-    "timeline.layout": "columns",
-    "timeline.maxWidth": "none",
-    "timeline.nickBrackets": true,
-    "timeline.nickPrefix": true,
-    "timeline.nickWidth": 16,
-    "timeline.spacing": 0.3,
-    "timeline.timeFormat": "HH:mm:ss",
     "unread.markRead": "latest",
     "unread.muted": [],
     "unread.quietBots": false,
@@ -58,60 +58,55 @@ const shared = {
 describe("a device's overrides", () => {
   it("are read back from the text they are kept as, option by option", () => {
     expect({
-      back: deviceUiOf(deviceUiText({ theme: "light", "timeline.timeFormat": "none" })),
+      back: deviceUiOf(deviceUiText({ "conversation.timeFormat": "none", theme: "light" })),
       empty: deviceUiText(noOverrides),
       family: deviceUiOf('{"font":"Iosevka Term"}'),
-      habits: deviceUiOf(
-        '{"composer.enter":"send","composer.spellcheck":false,"composer.nickSuffix":", "}'
-      ),
+      habits: deviceUiOf('{"input.enter":"send","input.spellcheck":false,"input.nickSuffix":", "}'),
       habitsOut: deviceUiOf(
-        '{"composer.enter":"shift","composer.spellcheck":"no","composer.nickSuffix":"\\u0003","font.size":20}'
+        '{"input.enter":"shift","input.spellcheck":"no","input.nickSuffix":"\\u0003","font.size":20}'
       ),
       habitsTooLong: deviceUiOf(
-        '{"composer.nickSuffix":"123456789","tail":"info","composer.enter":"newline"}'
+        '{"input.nickSuffix":"123456789","logs":"info","input.enter":"newline"}'
       ),
       lineHeight: deviceUiOf('{"font.lineHeight":1.2}'),
       lineHeightFine: deviceUiOf('{"font.lineHeight":1.455,"font.size":20}'),
       lineHeights: deviceUiOf('{"font.lineHeight":3,"font.size":20}'),
       long: deviceUiOf(`{"theme":"light","x":"${"x".repeat(50_000)}"}`),
       mixed: deviceUiOf(
-        '{"theme":"light","timeline.timeFormat":"noon","palette":"dusk","timeline.activity":3}'
+        '{"theme":"light","conversation.timeFormat":"noon","palette":"dusk","conversation.activity":3}'
       ),
-      // Kept under the name an option had before, which is the option's still.
-      namedBefore: deviceUiOf('{"size":20,"time":"none"}'),
       none: deviceUiOf(undefined),
       notAnObject: deviceUiOf("[1,2]"),
       notJson: deviceUiOf("{theme"),
       sized: deviceUiOf('{"font.size":24,"font":"jetbrains-mono"}'),
       sizes: deviceUiOf('{"font.size":9,"font":"Ios\\"evka"}'),
-      widths: deviceUiOf('{"timeline.maxWidth":"none","font.size":20}'),
-      widthsOut: deviceUiOf('{"timeline.maxWidth":0,"font.size":20}'),
-      widthsSet: deviceUiOf('{"timeline.maxWidth":72}'),
+      widths: deviceUiOf('{"conversation.maxWidth":"none","font.size":20}'),
+      widthsOut: deviceUiOf('{"conversation.maxWidth":0,"font.size":20}'),
+      widthsSet: deviceUiOf('{"conversation.maxWidth":72}'),
     }).toStrictEqual({
-      back: { theme: "light", "timeline.timeFormat": "none" },
+      back: { "conversation.timeFormat": "none", theme: "light" },
       empty: undefined,
       family: { font: "Iosevka Term" },
       habits: {
-        "composer.enter": "send",
-        "composer.nickSuffix": ", ",
-        "composer.spellcheck": false,
+        "input.enter": "send",
+        "input.nickSuffix": ", ",
+        "input.spellcheck": false,
       },
       habitsOut: { "font.size": 20 },
-      habitsTooLong: { "composer.enter": "newline" },
+      habitsTooLong: { "input.enter": "newline" },
       lineHeight: { "font.lineHeight": 1.2 },
       lineHeightFine: { "font.size": 20 },
       lineHeights: { "font.size": 20 },
       long: {},
       mixed: { theme: "light" },
-      namedBefore: { "font.size": 20, "timeline.timeFormat": "none" },
       none: {},
       notAnObject: {},
       notJson: {},
       sized: { font: "jetbrains-mono", "font.size": 24 },
       sizes: {},
-      widths: { "font.size": 20, "timeline.maxWidth": "none" },
+      widths: { "conversation.maxWidth": "none", "font.size": 20 },
       widthsOut: { "font.size": 20 },
-      widthsSet: { "timeline.maxWidth": 72 },
+      widthsSet: { "conversation.maxWidth": 72 },
     });
   });
 
@@ -124,28 +119,13 @@ describe("a device's overrides", () => {
     });
   });
 
-  it("read one kept under ui.previews.folded as ui.previews.start, open as open and summary or chip as closed", () => {
-    expect(
-      ["open", "summary", "chip", "nope"].map((folded) => {
-        const device = deviceUiOf(`{"previews.folded":"${folded}","previews.mediaHeight":"large"}`);
-
-        return { device, start: effectiveUi(shared, device)["previews.start"] };
-      })
-    ).toStrictEqual([
-      { device: { "previews.mediaHeight": "large", "previews.start": "open" }, start: "open" },
-      { device: { "previews.mediaHeight": "large", "previews.start": "closed" }, start: "closed" },
-      { device: { "previews.mediaHeight": "large", "previews.start": "closed" }, start: "closed" },
-      { device: { "previews.mediaHeight": "large" }, start: "open" },
-    ]);
-  });
-
   it("override one option, or stop, and never keep a value its Schema refuses", () => {
     const light = overridden(noOverrides, "theme", "light");
 
     expect({
       back: overridden(light, "theme", undefined),
       light,
-      refused: overridden(light, "timeline.timeFormat", "noon"),
+      refused: overridden(light, "conversation.timeFormat", "noon"),
       replaced: overridden(light, "theme", "dark"),
     }).toStrictEqual({
       back: {},
@@ -174,13 +154,13 @@ describe("a device's overrides", () => {
 
     const badOne = deviceUiOf(
       JSON.stringify({
+        "conversation.timeFormat": "none",
         theme: "dark",
         "theme.imported": [
           ...themes.slice(0, 2),
           { name: "nord", palette },
           { name: "x", palette: {} },
         ],
-        "timeline.timeFormat": "none",
       })
     );
 
@@ -192,9 +172,9 @@ describe("a device's overrides", () => {
     }).toStrictEqual({
       back: full,
       badOne: {
+        "conversation.timeFormat": "none",
         theme: "dark",
         "theme.imported": themes.slice(0, 2),
-        "timeline.timeFormat": "none",
       },
       count: 32,
       theme: "dark",
@@ -210,15 +190,27 @@ describe("a device's overrides", () => {
     }).toStrictEqual({
       before: {
         aliases: [],
-        "composer.enter": "send",
-        "composer.nickSuffix": ": ",
-        "composer.spellcheck": true,
+        "conversation.activity": "all",
+        "conversation.colors": "theme",
+        "conversation.dateFormat": "full",
+        "conversation.layout": "columns",
+        "conversation.maxWidth": "none",
+        "conversation.nickBrackets": true,
+        "conversation.nickPrefix": true,
+        "conversation.nickWidth": 16,
+        "conversation.spacing": 0.3,
+        "conversation.timeFormat": "HH:mm",
         font: "system",
         "font.lineHeight": 1.45,
         "font.size": 14,
+        "input.enter": "send",
+        "input.nickSuffix": ": ",
+        "input.spellcheck": true,
+        logs: "info",
         "members.width": 18,
         previews: "off",
         "previews.animate": true,
+        "previews.conversations": {},
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -229,25 +221,13 @@ describe("a device's overrides", () => {
           "player.twitch.tv",
         ],
         "previews.start": "open",
-        "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
         "theme.light": "light",
-        "timeline.activity": "all",
-        "timeline.colours": "theme",
-        "timeline.dateFormat": "full",
-        "timeline.layout": "columns",
-        "timeline.maxWidth": "none",
-        "timeline.nickBrackets": true,
-        "timeline.nickPrefix": true,
-        "timeline.nickWidth": 16,
-        "timeline.spacing": 0.3,
-        "timeline.timeFormat": "HH:mm",
         "unread.markRead": "latest",
         "unread.muted": [],
         "unread.quietBots": false,
@@ -258,7 +238,7 @@ describe("a device's overrides", () => {
     });
   });
 
-  it("know when a Timeline is marked read only once this device or the shared options say", () => {
+  it("know when a conversation is marked read only once this device or the shared options say", () => {
     const asked = {
       ...shared,
       options: { ...shared.options, "unread.markRead": "asked" as const },
@@ -347,8 +327,8 @@ const quit = (sequence: number, at: number, nick: string) =>
 
 const minute = 60_000;
 
-describe("which items a Timeline shows", () => {
-  it("in a Channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {
+describe("which items a conversation shows", () => {
+  it("in a channel's, all Activity, all but joins, parts, and quits, or none, and every item elsewhere", () => {
     const parted = happened(2, 2, { _tag: "Parted", channel: "#iirc", nick: "peer", reason: null });
 
     const kicked = happened(4, 4, {
@@ -376,7 +356,7 @@ describe("which items a Timeline shows", () => {
     ]);
   });
 
-  it("under spoke, in a Channel's, shows a join, part, or quit only of Self's or of a User who spoke up to five minutes before it, and every one while Self's nick is unknown", () => {
+  it("under spoke, in a channel's, shows a join, part, or quit only of your or of a user who spoke up to five minutes before it, and every one while your nick is unknown", () => {
     const items = [
       said(1, 0, "alice"),
       said(2, 0, "Bob", "Action"),
@@ -431,7 +411,7 @@ describe("which items a Timeline shows", () => {
     });
   });
 
-  it("under spoke, follows a User across a change of nick, and measures from their latest Message", () => {
+  it("under spoke, follows a user across a change of nick, and measures from their latest message", () => {
     const items = [
       said(1, 0, "bob"),
       happened(2, minute, { _tag: "NickChanged", from: "bob", to: "bobby" }),
@@ -452,7 +432,7 @@ describe("which items a Timeline shows", () => {
     ]);
   });
 
-  it("under spoke, leaves a Network's and a Direct Message's Timeline alone", () => {
+  it("under spoke, leaves a network's and a direct message's conversation alone", () => {
     const items = [quit(1, 0, "erin")];
 
     expect(

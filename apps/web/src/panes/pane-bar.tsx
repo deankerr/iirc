@@ -40,7 +40,7 @@ export const PaneBar = ({
     <header className={styles.bar} data-dim={number !== undefined && !one && !focused}>
       <div className={styles.line}>
         {number === undefined ? null : (
-          <span className={styles.dim} title={`Pane ${number}`}>
+          <span className={styles.dim} title={`pane ${number}`}>
             {number}
           </span>
         )}

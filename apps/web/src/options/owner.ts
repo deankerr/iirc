@@ -158,32 +158,35 @@ const ownerFailed = (tag: string): Outcome => {
       return {
         _tag: "NotDone",
         message:
-          "The options under store, uploads, and previews changed while this was being made, twice, so nothing was changed. Try again.",
+          "The storage, uploads, and previews settings changed while this was being saved, so nothing was changed. Try again.",
       };
     }
 
     case "InvalidRequest": {
-      return { _tag: "NotDone", message: "The Daemon could not take this as the option's value." };
+      return {
+        _tag: "NotDone",
+        message: "The daemon could not accept this as the setting's value.",
+      };
     }
 
     case "JournalFailed": {
       return {
         _tag: "NotDone",
-        message: "The Daemon could not record this, so nothing was changed.",
+        message: "The daemon could not record this, so nothing was changed.",
       };
     }
 
     case "VaultFailed": {
       return {
         _tag: "NotDone",
-        message: "The Daemon could not write its Credentials, so nothing was held.",
+        message: "The daemon could not write its passwords, so nothing was saved.",
       };
     }
 
     default: {
       return {
         _tag: "NotDone",
-        message: "The Daemon did not answer, so whether this was changed is unknown.",
+        message: "The daemon did not answer, so it's unknown whether this was changed.",
       };
     }
   }

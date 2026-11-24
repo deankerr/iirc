@@ -150,7 +150,7 @@ describe("reading a query", () => {
     ]);
   });
 
-  it("finds in: by exact name, then by the Daemon's key, never guessing past ASCII", () => {
+  it("finds in: by exact name, then by the daemon's key, never guessing past ASCII", () => {
     expect([
       read("word in:#IIRC"),
       read("word in:BOB"),
@@ -167,11 +167,11 @@ describe("reading a query", () => {
       filters({ text: "word", timeline: idOf(2) }),
       // Exactly the detached one's name, which comes before any key.
       filters({ text: "word", timeline: idOf(3) }),
-      "libera has no Timeline called #oftc-only.",
-      "#iirc names Timelines on libera and oftc. Say which with network:<id>.",
+      "libera has no conversation called #oftc-only.",
+      "#iirc matches conversations on libera and oftc. Pick one with network:<id>.",
       filters({ text: "word", timeline: idOf(7) }),
-      "#TWICE names more than one Timeline on libera.",
-      "oftc has no Timeline called #nowhere.",
+      "#TWICE matches more than one conversation on libera.",
+      "oftc has no conversation called #nowhere.",
       // Two are called carol: the detached one is found only when nothing else is.
       filters({ text: "word", timeline: idOf(9) }),
     ]);
@@ -223,26 +223,26 @@ describe("reading a query", () => {
       read("word since:2026-11-10T09:30+99:99"),
     ]).toStrictEqual([
       "Search for at least 3 characters.",
-      "Say what to search for: at least 3 characters, with from:, in:, network:, since:, or until: to narrow it.",
-      "Say what to search for: at least 3 characters, with from:, in:, network:, since:, or until: to narrow it.",
+      "Enter at least 3 characters to search for. Narrow it with from:, in:, network:, since:, or until:.",
+      "Enter at least 3 characters to search for. Narrow it with from:, in:, network:, since:, or until:.",
       "Search for at most 510 characters.",
-      'There is no filter sender:. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "sender:peer".',
-      'There is no filter http:. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "http://example.com".',
-      "from: is given twice.",
-      "from: needs a value after it.",
+      'sender: is not a filter. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "sender:peer".',
+      'http: is not a filter. A search takes from:, in:, network:, since:, and until:. Put text with a colon in quotes, such as "http://example.com".',
+      "from: is used twice.",
+      "from: needs a value.",
       "from: takes one nick, with no space in it.",
       'A quote is not closed. Close it with another ".',
-      "No Network is called nowhere.",
-      "2026-02-30 is no day of the calendar. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "2026-11-10T09:30 needs its zone, such as Z or +01:00, or a date alone. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
-      "2026-11-10T24:00Z is no time of the calendar. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
+      "No network is called nowhere.",
+      "2026-02-30 is not a valid date. since: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
+      "since: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
+      "2026-11-10T09:30 needs a time zone, such as Z or +01:00, or a date alone. since: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
+      "2026-11-10T24:00Z is not a valid time. since: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
       "since: must come before until:.",
-      "+99:99 is no zone's offset. since: takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
+      "+99:99 is not a valid time zone offset. since: takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.",
     ]);
   });
 
-  it("counts characters once folded, as the Daemon does: three astral characters are enough", () => {
+  it("counts characters once folded, as the daemon does: three astral characters are enough", () => {
     expect([read("\u{1F600}\u{1F600}\u{1F600}"), read("e\u0301")]).toStrictEqual([
       filters({ text: "\u{1F600}\u{1F600}\u{1F600}" }),
       "Search for at least 3 characters.",
@@ -418,7 +418,7 @@ describe("the search", () => {
 
     const failed = reduceSearch(reduceSearch(search, { _tag: "Started", read: request }), {
       _tag: "Failed",
-      message: "No Timeline has that id.",
+      message: "No conversation has that id.",
       read: request,
     });
 
@@ -429,7 +429,7 @@ describe("the search", () => {
       failed: [failed.error, failed.reading, searchWanted(reduceSearch(failed, { _tag: "More" }))],
     }).toStrictEqual({
       bad: ["Search for at least 3 characters.", undefined, "hi"],
-      failed: ["No Timeline has that id.", false, undefined],
+      failed: ["No conversation has that id.", false, undefined],
     });
   });
 
@@ -512,7 +512,7 @@ describe("marking what was found", () => {
     );
   });
 
-  it("marks each run that holds what was searched for, folded as the Daemon folds it", () => {
+  it("marks each run that holds what was searched for, folded as the daemon folds it", () => {
     expect([
       matchRuns("Hello WORLD, hello world", "hello"),
       matchRuns("\u0130STANBUL and istanbul", "istanbul"),
@@ -575,7 +575,7 @@ describe("marking what was found", () => {
     ]);
   });
 
-  it("leaves uncoloured what a Timeline would not draw as a nick: under a mIRC colour, or inside a link", () => {
+  it("leaves uncoloured what a conversation would not draw as a nick: under a mIRC colour, or inside a link", () => {
     const under = foundOf(
       message(5, "\u00034alice\u0003 alice", "peer", [
         { end: 5, start: 0 },
@@ -604,7 +604,7 @@ describe("marking what was found", () => {
     });
   });
 
-  it("finds the spans of the confirmed text for one of ours the Ircd confirmed", () => {
+  it("finds the spans of the confirmed text for one of ours the server confirmed", () => {
     const item = message(4, "hello", "iirc", [], {
       _tag: "Confirmed",
       at: { _tag: "Unknown" },

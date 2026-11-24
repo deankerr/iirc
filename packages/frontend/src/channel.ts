@@ -831,7 +831,7 @@ export const standingText = (standing: Standing | null): string | undefined => {
     }
 
     case "Wanted": {
-      return "not in this Channel yet: it is joined once the Network is connected";
+      return "not in this channel yet: you join once the network is connected";
     }
 
     case "Joining": {
@@ -839,15 +839,15 @@ export const standingText = (standing: Standing | null): string | undefined => {
     }
 
     case "Refused": {
-      return "not in this Channel: the Ircd refused the join, which is tried again";
+      return "not in this channel: the server refused the join, and iirc will try again";
     }
 
     case "Kicked": {
-      return "kicked from this Channel, which is joined again";
+      return "kicked from this channel, and iirc will rejoin";
     }
 
     case null: {
-      return "not in this Channel — /join to rejoin";
+      return "not in this channel — /join to rejoin";
     }
 
     default: {
@@ -1031,7 +1031,7 @@ export const headerOf = (
         _tag: "Direct",
         name,
         note: description.detached
-          ? "no longer follows its partner, who changed nick: use /msg <nick> <text>"
+          ? "no longer follows the other person, who changed nick: use /msg <nick> <text>"
           : undefined,
         presence: presenceOf(network, description),
         timeline,
@@ -1274,7 +1274,7 @@ export const rosterOf = (
   if (roster.notIn !== undefined) {
     return {
       _tag: "Out",
-      note: standingText(roster.notIn.standing) ?? "not in this Channel",
+      note: standingText(roster.notIn.standing) ?? "not in this channel",
       timeline,
     };
   }

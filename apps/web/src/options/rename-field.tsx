@@ -81,10 +81,10 @@ export const RenameField = ({ label, name, onClose, onRename }: RenameFieldProps
         />
       </TextField>
       <Button isDisabled={typed === undefined} size="small" type="submit">
-        Save
+        save
       </Button>
       <Button onPress={onClose} size="small" variant="quiet">
-        Cancel
+        cancel
       </Button>
     </form>
   );

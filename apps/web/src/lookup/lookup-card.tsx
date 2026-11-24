@@ -157,7 +157,7 @@ const Profile = ({
       <Field label="modes" value={profile.modes} />
       <Field label="away:" value={profile.away} />
       {profile.channels.length === 0 ? null : (
-        <ul aria-label="Channels" className={styles.channels}>
+        <ul aria-label="channels" className={styles.channels}>
           {profile.channels.map((channel, index) => (
             // A Channel's place in the reply tells two apart, and it never moves.
             // oxlint-disable-next-line react/no-array-index-key
@@ -210,7 +210,7 @@ const Mask = ({ mask, pane }: { readonly mask: MaskShown; readonly pane: string 
         <IconButton
           className={styles.remove}
           icon="close"
-          label={`Remove ${mask.mask}`}
+          label={`remove ${mask.mask}`}
           onPress={() => {
             removeOne({ act: remove.act, mask: remove.mask, pane });
           }}
@@ -399,7 +399,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
           className={styles.close}
           icon="close"
           keys="Esc"
-          label="Close the Lookup"
+          label="close"
           onPress={() => {
             close();
           }}
@@ -420,7 +420,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
         {body._tag === "Masks" ? (
           <>
             {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
-            <ul aria-label="Masks" className={styles.masks}>
+            <ul aria-label="masks" className={styles.masks}>
               {body.masks.map((mask, index) => (
                 // A mask holds no state of its own, so one a removal moves draws the same.
                 // oxlint-disable-next-line react/no-array-index-key
@@ -432,7 +432,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
         {body._tag === "Members" ? (
           <>
             {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
-            <ul aria-label="Members" className={styles.members}>
+            <ul aria-label="members" className={styles.members}>
               {body.members.map((member, index) => (
                 // A member's place in the reply tells two apart, and it never moves.
                 // oxlint-disable-next-line react/no-array-index-key
@@ -444,7 +444,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
         {body._tag === "Users" ? (
           <>
             {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
-            <ul aria-label="Users" className={styles.users}>
+            <ul aria-label="users" className={styles.users}>
               {body.users.map((user, index) => (
                 // A User's place in the reply tells two apart, and it never moves.
                 // oxlint-disable-next-line react/no-array-index-key
@@ -456,7 +456,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
         {body._tag === "Directory" ? (
           <>
             {body.note === undefined ? null : <p className={styles.note}>{body.note}</p>}
-            <ul aria-label="Channels" className={styles.directory}>
+            <ul aria-label="channels" className={styles.directory}>
               {body.channels.map((listed, index) => (
                 // A Channel's place in the list tells two apart, and a page only adds after it.
                 // oxlint-disable-next-line react/no-array-index-key
@@ -472,7 +472,7 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
                   }}
                   size="small"
                 >
-                  More Channels
+                  load more
                 </Button>
                 <span className={styles.dim}>{body.more.words} shown</span>
               </p>

@@ -38,7 +38,7 @@ const happened: (registry: AtomRegistry.AtomRegistry, event: LookupsEvent) => vo
   lookupsHappened;
 
 /**
- * An instant as the Owner reads a date and a time, the time as `ui.timeline.timeFormat` says, or none
+ * An instant as the Owner reads a date and a time, the time as `ui.conversation.timeFormat` says, or none
  * when a `Date` cannot hold the instant. A signon is no line's time, so it
  * shows even under `none`, as `HH:mm`.
  * @param shown - How a line's time shows.
@@ -51,7 +51,7 @@ const timeFor =
 
 /**
  * What a Pane's card shows, by the Pane's id, while the Pane has open the Timeline it was
- * asked from, with a time in the Owner's time zone, as `ui.timeline.timeFormat` says, and a mask of a
+ * asked from, with a time in the Owner's time zone, as `ui.conversation.timeFormat` says, and a mask of a
  * Channel's list removable by the head of that list's own Channel, which is followed as a
  * Pane's Channel's is while the card lasts.
  */

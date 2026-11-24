@@ -174,7 +174,7 @@ export const logged = (
       Effect.gen(function* () {
         const took = Number(((yield* Clock.monotonicTimeNanos) - started) / 1_000_000n);
 
-        yield* Effect.logDebug("Fetched a link for a Preview").pipe(
+        yield* Effect.logDebug("Fetched link for preview").pipe(
           Effect.annotateLogs(annotationsOf(link, purpose, yield* Ref.get(known), took))
         );
       })

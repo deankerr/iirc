@@ -112,7 +112,7 @@ const pngChunk = (type: string, data: Uint8Array): Uint8Array => {
  */
 export const stripPng = (bytes: Uint8Array): Stripped => {
   if (bytes.length < signature.length || signature.some((byte, i) => bytes[i] !== byte)) {
-    return unreadable("a PNG begins with its signature");
+    return unreadable("invalid PNG: missing signature");
   }
 
   // Every chunk is copied from the PNG, but the `eXIf`, rebuilt from nothing, whose 38 bytes
@@ -139,11 +139,11 @@ export const stripPng = (bytes: Uint8Array): Stripped => {
     const end = at + 12 + length;
 
     if (at + 12 > bytes.length || length > 0x7f_ff_ff_ff || end > bytes.length) {
-      return imaged ? assemble() : unreadable("a PNG chunk runs past the end");
+      return imaged ? assemble() : unreadable("PNG chunk runs past the end of file");
     }
 
     if (headerEnd === 0 && !asciiAt(bytes, at + 4, "IHDR")) {
-      return unreadable("a PNG begins with IHDR");
+      return unreadable("invalid PNG: missing IHDR header");
     }
 
     const type = readBe(bytes, at + 4, 4);
@@ -169,7 +169,7 @@ export const stripPng = (bytes: Uint8Array): Stripped => {
     }
 
     if (type === iendType) {
-      return imaged ? assemble() : unreadable("a PNG ends before its image data");
+      return imaged ? assemble() : unreadable("truncated PNG: ends before image data");
     }
 
     at = end;

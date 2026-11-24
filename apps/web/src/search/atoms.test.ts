@@ -194,7 +194,7 @@ describe("searching", () => {
       reads: daemon.searchesRead.length,
       short: short.error,
     }).toStrictEqual({
-      gone: "That Timeline is gone, so nothing was searched.",
+      gone: "That conversation is gone, so nothing was searched.",
       reads: 1,
       short: "Search for at least 3 characters.",
     });

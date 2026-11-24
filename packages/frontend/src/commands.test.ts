@@ -102,11 +102,11 @@ describe("the command registry", () => {
     }).toStrictEqual({ ids: commands.length, lower: true, unique: true });
   });
 
-  it("says nothing in a Direct Message that no longer follows its partner, saying why", () => {
+  it("says nothing in a direct message that no longer follows its partner, saying why", () => {
     const detached: CommandContext = { ...inDirect, focus: focus("Direct", "x", true) };
 
     const why =
-      "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>.";
+      "The other person changed nick, so this direct message no longer follows them. Use /msg <nick> <text>.";
 
     expect([message("hello", detached), message("/me waves", detached)]).toStrictEqual([why, why]);
   });
@@ -123,7 +123,7 @@ const closingTarget = (target: string) => ({
 });
 
 describe("reading a line", () => {
-  it("says plain text to the open Channel or Direct Message", () => {
+  it("says plain text to the open channel or direct message", () => {
     expect([interpret("hello", inChannel), interpret("hi there", inDirect)]).toStrictEqual([
       { _tag: "Parsed", value: [say("#iirc", "hello")] },
       { _tag: "Parsed", value: [say("peer", "hi there")] },
@@ -137,7 +137,7 @@ describe("reading a line", () => {
     ]);
   });
 
-  it("says what is typed in a Direct Message not yet begun to its nick, opening it once placed", () => {
+  it("says what is typed in a direct message not yet begun to its nick, opening it once placed", () => {
     const drafting: CommandContext = { ...nowhere, draft: { network, nick: "bob" }, session: true };
     const offline: CommandContext = { ...drafting, session: false };
 
@@ -151,17 +151,17 @@ describe("reading a line", () => {
       said: interpret("/SAY hi", drafting),
     }).toStrictEqual({
       action: { _tag: "Parsed", value: [say("bob", "waves", "Action", true)] },
-      empty: "Say what? Type it after /say.",
+      empty: "Add a message after /say.",
       literal: { _tag: "Parsed", value: [say("bob", "/shrug", "Privmsg", true)] },
-      offline: "libera is not connected, so nothing can be said there now.",
+      offline: "libera is not connected, so you can't send there now.",
       // Any other command reads as anywhere else: with no Timeline in focus, it needs one.
-      other: { _tag: "Invalid", message: "Open a Timeline first." },
+      other: { _tag: "Invalid", message: "Open a conversation first." },
       plain: { _tag: "Parsed", value: [say("bob", "hello", "Privmsg", true)] },
       said: { _tag: "Parsed", value: [say("bob", "hi", "Privmsg", true)] },
     });
   });
 
-  it("connects and disconnects a Network by setting its `enabled`, the focused one unless named", () => {
+  it("connects and disconnects a network by setting its `enabled`, the focused one unless named", () => {
     const enabled = (text: "on" | "off", on = network) => ({
       _tag: "Parsed",
       value: [{ _tag: "Configure", edit: { _tag: "Set", path: ["enabled"], text }, network: on }],
@@ -178,17 +178,17 @@ describe("reading a line", () => {
       namedOff: interpret("/disconnect oftc", inChannel),
       none: message("/connect", nowhere),
     }).toStrictEqual({
-      bad: 'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Not-An-Id". /connect [id]',
+      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Not-An-Id". /connect [id]',
       connect: enabled("on"),
       disconnect: enabled("off"),
       drafting: enabled("off"),
       named: enabled("on", oftc),
       namedOff: enabled("off", oftc),
-      none: "Name a Network, or open one of its Timelines first. /connect [id]",
+      none: "Name a network, or open one of its conversations first. /connect [id]",
     });
   });
 
-  it("asks to remove a Network, the focused one unless named, starting on keep or drop when given", () => {
+  it("asks to remove a network, the focused one unless named, starting on keep or drop when given", () => {
     const oftc = Schema.decodeSync(NetworkId)("oftc");
 
     const asks = (on: typeof network, keep: boolean | undefined) => ({
@@ -220,68 +220,71 @@ describe("reading a line", () => {
       none: message("/network remove", nowhere),
       unknownChoice: message("/network remove oftc forget", nowhere),
     }).toStrictEqual({
-      bad: 'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
+      bad: 'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
       drafting: asks(network, undefined),
       dropFocused: asks(network, false),
       dropNone:
-        "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
+        "Name a network, or open one of its conversations first. /network remove [id] [keep|drop]",
       dropping: asks(oftc, false),
       focused: asks(network, undefined),
       keepDrafting: asks(network, true),
       keepFocused: asks(network, true),
       keepNone:
-        "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
+        "Name a network, or open one of its conversations first. /network remove [id] [keep|drop]",
       keeping: asks(oftc, true),
       kept: asks(network, undefined),
       named: asks(oftc, undefined),
       namedDrop: asks(Schema.decodeSync(NetworkId)("drop"), true),
       namedKeep: asks(Schema.decodeSync(NetworkId)("keep"), true),
-      none: "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
+      none: "Name a network, or open one of its conversations first. /network remove [id] [keep|drop]",
       unknownChoice: "Usage: /network remove [id] [keep|drop]",
     });
   });
 
-  it("closes a Timeline by its id, the focused one unless named, never a Network's own or a pane", () => {
+  it("closes a conversation by its id, the focused one unless named, never a network's own or a pane", () => {
     const held = Schema.decodeSync(TimelineId)("00000000000009-00000000-00000000");
     const named = [{ kind: "Direct", name: "Bob", network, timeline: held }] as const;
 
     expect({
-      channel: interpret("/close-timeline", inChannel),
+      channel: interpret("/close-conversation", inChannel),
       // A Direct Message that no longer follows its partner has no Target, and closes by its id.
-      detached: interpret("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
-      direct: interpret("/close-timeline", inDirect),
-      list: message("/close-timeline #a,#b", inChannel),
+      detached: interpret("/close-conversation", {
+        ...inDirect,
+        focus: focus("Direct", "x", true),
+      }),
+      direct: interpret("/close-conversation", inDirect),
+      list: message("/close-conversation #a,#b", inChannel),
       // A name is a Target, which the Network's Client resolves by its own naming, held or not.
-      named: interpret("/close-timeline  bob ", { ...inNetwork, named }),
-      network: message("/close-timeline", inNetwork),
-      notHeld: interpret("/close-timeline @#elsewhere", { ...inNetwork, named }),
+      named: interpret("/close-conversation  bob ", { ...inNetwork, named }),
+      network: message("/close-conversation", inNetwork),
+      notHeld: interpret("/close-conversation @#elsewhere", { ...inNetwork, named }),
       // Offline, it is closed all the same: the Daemon journals it.
-      offline: interpret("/close-timeline", offline),
-      own: interpret("/close-timeline libera", {
+      offline: interpret("/close-conversation", offline),
+      own: interpret("/close-conversation libera", {
         ...inChannel,
         named: [{ kind: "Network", name: "libera", network, timeline: held }],
       }),
       // `/close` closes a Pane, and never a Timeline.
       pane: message("/close", inChannel),
       // What a removed Network kept is closed too.
-      removed: interpret("/close-timeline", { ...inChannel, focus: removedFocus }),
+      removed: interpret("/close-conversation", { ...inChannel, focus: removedFocus }),
     }).toStrictEqual({
       channel: closing(timeline),
       detached: closing(timeline),
       direct: closing(timeline),
-      list: "Close one Timeline at a time. /close-timeline [#channel|nick]",
+      list: "Close one conversation at a time. /close-conversation [#channel|nick]",
       named: closingTarget("bob"),
       network:
-        "A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. /close-timeline [#channel|nick]",
+        "A network's own conversation can't be closed. Name a channel or nick, or open one. /close-conversation [#channel|nick]",
       notHeld: closingTarget("@#elsewhere"),
       offline: closing(timeline),
       own: closingTarget("libera"),
-      pane: "There is only one Pane. /split makes another.",
+      pane: "There is only one pane. /split makes another.",
       removed: closing(timeline),
     });
   });
 
-  it("names a removed Network whose id is keep or drop with drop, in how to drop its Timelines", () => {
+  it("names a removed network whose id is keep or drop with drop, in how to drop its conversations", () => {
     const removedAs = (["drop", "keep"] as const).map((id): CommandContext => ({
       ...inChannel,
       focus: { ...removedFocus, network: Schema.decodeSync(NetworkId)(id) },
@@ -291,16 +294,16 @@ describe("reading a line", () => {
       drop: message("hello", removedAs[0] ?? inChannel),
       keep: message("hello", removedAs[1] ?? inChannel),
     }).toStrictEqual({
-      drop: "drop was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove drop drop drops them.",
-      keep: "keep was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove keep drop drops them.",
+      drop: "drop was removed, so its conversations are read-only. /network remove drop drop drops them.",
+      keep: "keep was removed, so its conversations are read-only. /network remove keep drop drops them.",
     });
   });
 
-  it("says and does nothing in a removed Network's Timeline, but reads it and moves on", () => {
+  it("says and does nothing in a removed network's conversation, but reads it and moves on", () => {
     const removed: CommandContext = { ...inChannel, focus: removedFocus, session: false };
 
     const refusal =
-      "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.";
+      "libera was removed, so its conversations are read-only. /network remove libera drops them.";
 
     expect({
       connect: message("/connect", removed),
@@ -328,21 +331,21 @@ describe("reading a line", () => {
     });
   });
 
-  it("says `/msg` to its Target and opens the Direct Message, from any Timeline", () => {
+  it("says `/msg` to its channel or user and opens the direct message, from any conversation", () => {
     expect(interpret("/msg peer hi  there", inNetwork)).toStrictEqual({
       _tag: "Parsed",
       value: [say("peer", "hi  there", "Privmsg", true)],
     });
   });
 
-  it("sends `/notice` to its Target, opening nothing", () => {
+  it("sends `/notice` to its channel or user, opening nothing", () => {
     expect(interpret("/NOTICE #other heads up", inChannel)).toStrictEqual({
       _tag: "Parsed",
       value: [say("#other", "heads up", "Notice")],
     });
   });
 
-  it("opens a Timeline by name with `/query`, from any Timeline of the Network", () => {
+  it("opens a conversation by name with `/query`, from any conversation of the network", () => {
     expect({
       channel: interpret("/query peer", inChannel),
       list: message("/query a,b", inChannel),
@@ -352,11 +355,11 @@ describe("reading a line", () => {
       text: message("/query peer hi", inChannel),
     }).toStrictEqual({
       channel: { _tag: "Parsed", value: [{ _tag: "Query", name: "peer", network }] },
-      list: "Give one nick. To say something to them, use /msg <nick> <text>.",
+      list: "Give one nick. To message them, use /msg <nick> <text>.",
       network: { _tag: "Parsed", value: [{ _tag: "Query", name: "{bob}", network }] },
-      none: "With whom? /query <nick>",
-      nowhere: "Open a Timeline first.",
-      text: "Give one nick. To say something to them, use /msg <nick> <text>.",
+      none: "Add a nick. /query <nick>",
+      nowhere: "Open a conversation first.",
+      text: "Give one nick. To message them, use /msg <nick> <text>.",
     });
   });
 
@@ -388,7 +391,7 @@ describe("reading a line", () => {
     ]);
   });
 
-  it("shows the Uploads with `/uploads`, from anywhere, and takes nothing after it", () => {
+  it("shows the uploads with `/uploads`, from anywhere, and takes nothing after it", () => {
     expect([
       interpret("/uploads", nowhere),
       interpret("/UPLOADS ", inChannel),
@@ -402,44 +405,44 @@ describe("reading a line", () => {
 
   it("refuses an unknown command, and a bare `/`, sending nothing", () => {
     expect([message("/frobnicate x", inChannel), message("/ x", inChannel)]).toStrictEqual([
-      "There is no command /frobnicate. Start with // to say text that begins with /.",
-      "Type a command after /, or start with // to say text that begins with /.",
+      "There is no command /frobnicate. Start with // to send text that begins with /.",
+      "Type a command after /, or start with // to send text that begins with /.",
     ]);
   });
 
-  it("refuses missing arguments and a list of Targets", () => {
+  it("refuses missing arguments and a list of channels or users", () => {
     expect([
       message("/me", inChannel),
       message("/msg", inChannel),
       message("/msg peer", inChannel),
       message("/msg a,b hi", inChannel),
     ]).toStrictEqual([
-      "Say what? /me <text>",
-      "To whom? /msg <target> <text>",
-      "Say what? /msg <target> <text>",
-      "Say it to one Target at a time.",
+      "Add a message. /me <text>",
+      "Add a channel or user. /msg <target> <text>",
+      "Add a message. /msg <target> <text>",
+      "Send to one channel or user at a time.",
     ]);
   });
 
-  it("refuses plain text in the Network's own Timeline, saying why, and takes commands there", () => {
+  it("refuses plain text in the network's own conversation, saying why, and takes commands there", () => {
     expect({
       msg: interpret("/msg peer hi", inNetwork)._tag,
       plain: message("hello", inNetwork),
     }).toStrictEqual({
       msg: "Parsed",
       plain:
-        "The Network's own Timeline has no Target to say it to. Open a Channel or a Direct Message, or use /msg <target> <text>.",
+        "You can't send from the network's own conversation. Open a channel or a direct message, or use /msg <target> <text>.",
     });
   });
 
-  it("refuses to say anything on a Network with no Session", () => {
+  it("refuses to say anything on a network with no connection", () => {
     expect([message("hello", offline), message("/msg peer hi", offline)]).toStrictEqual([
-      "libera is not connected, so nothing can be said there now.",
-      "libera is not connected, so nothing can be said there now.",
+      "libera is not connected, so you can't send there now.",
+      "libera is not connected, so you can't send there now.",
     ]);
   });
 
-  it("refuses to say anything while whether the Network has a Session is not known, without calling it not connected", () => {
+  it("refuses to say anything while whether the network has a connection is not known, without calling it not connected", () => {
     const unknown: CommandContext = { ...offline, session: undefined };
 
     const drafting: CommandContext = {
@@ -453,13 +456,13 @@ describe("reading a line", () => {
       message("/msg peer hi", unknown),
       message("hello", drafting),
     ]).toStrictEqual([
-      "Whether libera is connected is not known yet, so nothing can be said there now.",
-      "Whether libera is connected is not known yet, so nothing can be said there now.",
-      "Whether libera is connected is not known yet, so nothing can be said there now.",
+      "Whether libera is connected is not known yet, so you can't send there now.",
+      "Whether libera is connected is not known yet, so you can't send there now.",
+      "Whether libera is connected is not known yet, so you can't send there now.",
     ]);
   });
 
-  it("moves to the next and previous Timeline, and focuses the composer or starts a command in it, from anywhere", () => {
+  it("moves to the next and previous conversation, and focuses the composer or starts a command in it, from anywhere", () => {
     const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
     const listed: CommandContext = { ...nowhere, open: timeline, timelines: [timeline, other] };
 
@@ -474,15 +477,15 @@ describe("reading a line", () => {
     }).toStrictEqual({
       focus: { _tag: "Parsed", value: [{ _tag: "FocusComposer", text: undefined }] },
       next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
-      none: "There are no Timelines yet. Add a Network with /network add.",
-      palette: "There is no command /palette. Start with // to say text that begins with /.",
+      none: "There are no conversations yet. Add a network with /network add.",
+      palette: "There is no command /palette. Start with // to send text that begins with /.",
       prev: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
       started: { _tag: "Parsed", value: [{ _tag: "StartCommand", text: "/go " }] },
       trailing: "/next takes nothing after it.",
     });
   });
 
-  it("moves the open Timeline up or down with /move, and pins or unpins it with /pin, which the Network's own Timeline never is", () => {
+  it("moves the open conversation up or down with /move, and pins or unpins it with /pin, which the network's own conversation never is", () => {
     expect({
       down: chosen("/move DOWN", inChannel),
       network: chosen("/pin", inNetwork),
@@ -494,16 +497,16 @@ describe("reading a line", () => {
     }).toStrictEqual({
       down: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Down", timeline } }],
       network:
-        "libera's own Timeline is the Network's row, so it is not pinned. /move moves the Network.",
+        "libera's own conversation is the network's row, so it can't be pinned. /move moves the network.",
       networkMoved: [{ _tag: "Arrange", edit: { _tag: "Move", direction: "Up", timeline } }],
-      nowhere: "Open a Timeline first.",
+      nowhere: "Open a conversation first.",
       pin: [{ _tag: "Arrange", edit: { _tag: "Pin", timeline } }],
       trailing: "/pin takes nothing after it.",
-      which: "Move it which way? /move up|down",
+      which: "Move it up or down: /move up|down",
     });
   });
 
-  it("mutes or unmutes the open Timeline with /mute and /unmute, a Network's own included, and refuses anything after them or no Timeline", () => {
+  it("mutes or unmutes the open conversation with /mute and /unmute, a network's own included, and refuses anything after them or no conversation", () => {
     expect({
       mute: chosen("/mute", inChannel),
       muteNetwork: chosen("/mute", inNetwork),
@@ -513,27 +516,27 @@ describe("reading a line", () => {
     }).toStrictEqual({
       mute: [{ _tag: "Mute", muted: true, timeline }],
       muteNetwork: [{ _tag: "Mute", muted: true, timeline }],
-      nowhere: ["Open a Timeline first.", "Open a Timeline first."],
+      nowhere: ["Open a conversation first.", "Open a conversation first."],
       trailing: ["/mute takes nothing after it.", "/unmute takes nothing after it."],
       unmute: [{ _tag: "Mute", muted: false, timeline }],
     });
   });
 
-  it("jumps to the open Timeline's latest with /latest, and takes nothing after it", () => {
+  it("jumps to the open conversation's latest with /latest, and takes nothing after it", () => {
     const run = (line: string) => interpret(line, inChannel);
 
     expect([run("/latest"), run("/latest now"), interpret("/latest", nowhere)]).toStrictEqual([
       { _tag: "Parsed", value: [{ _tag: "Latest", timeline: inChannel.focus?.timeline }] },
       { _tag: "Invalid", message: "/latest takes nothing after it." },
-      { _tag: "Invalid", message: "Open a Timeline first." },
+      { _tag: "Invalid", message: "Open a conversation first." },
     ]);
   });
 
-  it("goes to a date or a time with its zone in the open Timeline with /date, as search reads them", () => {
+  it("goes to a date or a time with its zone in the open conversation with /date, as search reads them", () => {
     const run = (line: string) => chosen(line, inChannel);
 
     const usage =
-      "/date takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
+      "/date takes a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
 
     expect([
       run("/date 2026-11-10"),
@@ -549,20 +552,20 @@ describe("reading a line", () => {
       goes({ _tag: "Day", day: { day: 10, month: 11, year: 2026 } }),
       [{ _tag: "GoToDate", moment: { _tag: "At", at: 1_794_299_415_250 }, timeline }],
       [{ _tag: "GoToDate", moment: { _tag: "At", at: -60_000 }, timeline }],
-      `Go to when? ${usage}`,
+      `Add a date or time. ${usage}`,
       usage,
-      `2026-02-30 is no day of the calendar. ${usage}`,
-      `2026-11-10T09:30 needs its zone, such as Z or +01:00, or a date alone. ${usage}`,
+      `2026-02-30 is not a valid date. ${usage}`,
+      `2026-11-10T09:30 needs a time zone, such as Z or +01:00, or a date alone. ${usage}`,
       usage,
-      "Open a Timeline first.",
+      "Open a conversation first.",
     ]);
   });
 
-  it("exports the open Timeline with /export, the whole or between two moments read as search reads them, a day taken whole as until", () => {
+  it("exports the open conversation with /export, the whole or between two moments read as search reads them, a day taken whole as until", () => {
     const run = (line: string) => chosen(line, inChannel);
 
     const usage =
-      "/export takes a date, such as 2026-11-10, a day in your time zone, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00, to start from, and another to stop at, each optional.";
+      "/export takes an optional start and an optional end. Each is a date, such as 2026-11-10, or a time with its zone, such as 2026-11-10T09:30Z or 2026-11-10T09:30+01:00.";
 
     expect([
       run("/export"),
@@ -591,9 +594,9 @@ describe("reading a line", () => {
       "/export: the start must come before the end.",
       "/export: the start must come before the end.",
       usage,
-      `2026-02-30 is no day of the calendar. ${usage}`,
+      `2026-02-30 is not a valid date. ${usage}`,
       usage,
-      "Open a Timeline first.",
+      "Open a conversation first.",
     ]);
   });
 });
@@ -632,7 +635,7 @@ const idAt = (sequence: number) =>
  */
 const opens = (timeline: TimelineId) => [{ _tag: "Open", timeline }];
 
-describe("going to a Timeline by name", () => {
+describe("going to a conversation by name", () => {
   const oftc = Schema.decodeSync(NetworkId)("oftc");
   const id = idAt;
 
@@ -644,7 +647,7 @@ describe("going to a Timeline by name", () => {
     { kind: "Channel", name: "#debian", network: oftc, timeline: id(5) },
   ] as const;
 
-  it("opens the one on the Network in focus, the one Network that has it, or the one on the Network named", () => {
+  it("opens the one on the network in focus, the one network that has it, or the one on the network named", () => {
     const here: CommandContext = { ...inChannel, named };
 
     expect({
@@ -664,7 +667,7 @@ describe("going to a Timeline by name", () => {
     });
   });
 
-  it("refuses a name no Timeline has, or one on several Networks with none in focus, in words with the usage", () => {
+  it("refuses a name no conversation has, or one on several networks with none in focus, in words with the usage", () => {
     const away: CommandContext = { ...nowhere, named };
 
     expect({
@@ -675,15 +678,15 @@ describe("going to a Timeline by name", () => {
       unknownOnNetwork: chosen("/go oftc peer", away),
     }).toStrictEqual({
       ambiguous:
-        "#iirc is on libera, oftc. Name its Network, as in /go libera #iirc. Usage: /go [network] <name>",
-      empty: "Name a Timeline. Usage: /go [network] <name>",
-      tooMany: "Give a name, or a Network's id and a name. Usage: /go [network] <name>",
-      unknown: "There is no Timeline named #nowhere. Usage: /go [network] <name>",
-      unknownOnNetwork: "There is no Timeline peer on oftc. Usage: /go [network] <name>",
+        "#iirc is on libera, oftc. Name its network, as in /go libera #iirc. Usage: /go [network] <name>",
+      empty: "Name a conversation. Usage: /go [network] <name>",
+      tooMany: "Give a name, or a network's id and a name. Usage: /go [network] <name>",
+      unknown: "There is no conversation named #nowhere. Usage: /go [network] <name>",
+      unknownOnNetwork: "There is no conversation peer on oftc. Usage: /go [network] <name>",
     });
   });
 
-  it("goes from a Direct Message not yet begun on its Network", () => {
+  it("goes from a direct message not yet begun on its network", () => {
     const drafting: CommandContext = {
       ...nowhere,
       draft: { network: oftc, nick: "someone" },
@@ -718,7 +721,7 @@ describe("themes", () => {
       badName: {
         _tag: "Invalid",
         message:
-          "tokyo_night is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+          "tokyo_night is not a valid theme name: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.",
       },
       device: {
         _tag: "Parsed",
@@ -772,7 +775,7 @@ describe("themes", () => {
       setSystem:
         "ui.theme.dark must not be system, which follows the device and draws no theme of its own.",
       system:
-        "system follows the device, so it is never the theme drawn while the device is light. Name a theme, such as light.",
+        "system follows the device, so it can't be the theme for a light device. Name a theme, such as light.",
       twice: usage,
     });
   });
@@ -819,7 +822,7 @@ describe("aliases of the Owner's own", () => {
     ["a line that names another alias", "/alias add j /k $1"],
     ["a line that names no command", "/alias add j /frobnicate $1"],
     ["a line that names its command by a placeholder", "/alias add j /$1"],
-    ["a line that types a Credential", "/alias add p /quote PASS $1"],
+    ["a line that types a password", "/alias add p /quote PASS $1"],
     ["a line with no name", "/alias add"],
     ["a name with no line", "/alias add j"],
     ["a removal with no name", "/alias remove"],
@@ -829,13 +832,13 @@ describe("aliases of the Owner's own", () => {
     expect(interpret(line, inChannel)._tag).toBe("Invalid");
   });
 
-  it("clears a line that makes an alias of a Credential's value, as it clears the Credential", () => {
+  it("clears a line that makes an alias of a password's value, as it clears the password", () => {
     expect([
       credentialRefusal("/alias add p /quote PASS $1", []),
       credentialRefusal("/alias add p /quote PRIVMSG $1", []),
       credentialRefusal("/alias list", []),
     ]).toStrictEqual([
-      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
       undefined,
       undefined,
     ]);
@@ -896,7 +899,7 @@ describe("aliases of the Owner's own", () => {
     ]).toStrictEqual(["Invalid", "Invalid", "Invalid"]);
   });
 
-  it("says what an alias expands to in a Direct Message not yet begun to its nick", () => {
+  it("says what an alias expands to in a direct message not yet begun to its nick", () => {
     const drafting: CommandContext = {
       ...withAliases([{ line: "/say $*", name: "s" }]),
       draft: { network, nick: "bob" },
@@ -910,7 +913,7 @@ describe("aliases of the Owner's own", () => {
     });
   });
 
-  it("refuses a line an alias expands to a Credential's value of, and clears it", () => {
+  it("refuses a line an alias expands to a password's value of, and clears it", () => {
     const aliases = [{ line: "/quote $*", name: "p" }];
 
     expect([
@@ -928,7 +931,7 @@ describe("aliases of the Owner's own", () => {
       false,
       true,
       true,
-      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
     ]);
   });
 });
@@ -979,7 +982,7 @@ describe("what is unread", () => {
     });
   });
 
-  it("marks the open Timeline read with /read, every one with /read all, and nothing when read", () => {
+  it("marks the open conversation read with /read, every one with /read all, and nothing when read", () => {
     expect({
       all: outcome("/read all", opened(timeline)),
       nothing: outcome("/read", opened(timeline, [])),
@@ -989,9 +992,9 @@ describe("what is unread", () => {
     }).toStrictEqual({
       all: unread.map((one) => one.mark),
       nothing: [],
-      nowhere: "Open a Timeline first, or use /read all.",
+      nowhere: "Open a conversation first, or use /read all.",
       open: [mark(timeline)],
-      other: "Use /read for the open Timeline, or /read all for every Timeline.",
+      other: "Use /read for the open conversation, or /read all for every conversation.",
     });
   });
 
@@ -1007,7 +1010,7 @@ describe("what is unread", () => {
     ]);
   });
 
-  it("chooses the focused Timeline's own Previews with /previews, or returns it to ui.previews", () => {
+  it("chooses the focused conversation's own Previews with /previews, or returns it to ui.previews", () => {
     expect({
       default: chosen("/previews default"),
       linksOnly: chosen("/previews links only"),
@@ -1023,7 +1026,7 @@ describe("what is unread", () => {
       linksOnly: "Use /previews off, text, on, or default.",
       network: [{ _tag: "ChoosePreviews", mode: "off", timeline }],
       none: "Use /previews off, text, on, or default.",
-      nowhere: "Open a Timeline first.",
+      nowhere: "Open a conversation first.",
       on: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
       removed: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
       sometimes: "Use /previews off, text, on, or default.",
@@ -1045,12 +1048,12 @@ const pane = (line: string) => {
     : read.message;
 };
 
-describe("the Panes", () => {
+describe("the panes", () => {
   const idOf = Schema.decodeSync(TimelineId);
   const calling = idOf("00000000000004-00000000-00000000");
   const shown = idOf("00000000000005-00000000-00000000");
 
-  it("splits side by side, or one above another, opening what calls most that no Pane shows", () => {
+  it("splits side by side, or one above another, opening what calls most that no pane shows", () => {
     const unread: readonly Unseen[] = [unseen(shown, "Highlight"), unseen(calling, "Direct")];
 
     const context = { ...inChannel, shown: [timeline, shown], unread };
@@ -1068,7 +1071,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("closes, moves, swaps, equalizes, zooms, grows, and shrinks, with more than one Pane", () => {
+  it("closes, moves, swaps, equalizes, zooms, grows, and shrinks, with more than one pane", () => {
     expect({
       bad: pane("/pane over"),
       close: pane("/close"),
@@ -1086,7 +1089,7 @@ describe("the Panes", () => {
       equalize: [{ _tag: "Equalize" }],
       grow: [{ _tag: "Grow" }],
       move: [{ _tag: "Move", direction: "Left" }],
-      oneOnly: "There is only one Pane. /split makes another.",
+      oneOnly: "There is only one pane. /split makes another.",
       shrink: [{ _tag: "Shrink" }],
       swap: [{ _tag: "Swap", direction: "Down" }],
       trailing: "/zoom takes nothing after it.",
@@ -1141,7 +1144,7 @@ const words = (line: string, context = acting) => {
   return read._tag === "Invalid" ? read.message : read.value;
 };
 
-describe("acting on a Network", () => {
+describe("acting on a network", () => {
   it("sets the topic exactly, clears it with -delete, and with nothing starts it for editing", () => {
     expect({
       clear: interpret("/topic -delete", acting),
@@ -1182,7 +1185,7 @@ describe("acting on a Network", () => {
       reason: interpret("/kick a,b  go away", acting),
     }).toStrictEqual({
       empty: 'Give nicks separated by single commas, not "a,,b".',
-      none: "Kick whom? /kick <nick>[,<nick>…] [reason]",
+      none: "Add a nick. /kick <nick>[,<nick>…] [reason]",
       one: act({ _tag: "Kick", channel: "#iirc", nicks: ["peer"], reason: null }),
       reason: act({ _tag: "Kick", channel: "#iirc", nicks: ["a", "b"], reason: " go away" }),
     });
@@ -1201,7 +1204,7 @@ describe("acting on a Network", () => {
       unsigned: words("/mode #iirc o peer"),
     }).toStrictEqual({
       ban: "+b needs a parameter. /mode [target] <changes> [parameters…]",
-      extra: "Nothing takes x. /mode [target] <changes> [parameters…]",
+      extra: "No mode takes x. /mode [target] <changes> [parameters…]",
       many: act({
         _tag: "Mode",
         changes: [
@@ -1229,13 +1232,13 @@ describe("acting on a Network", () => {
         ],
         target: "iirc",
       }),
-      selfParams: "Self's modes take no parameters here. Use /quote MODE iirc … for that.",
-      unknownLetter: "libera has no Channel mode q, as its CHANMODES and PREFIX say.",
+      selfParams: "Your modes take no parameters here. Use /quote MODE iirc … for that.",
+      unknownLetter: "libera does not support the channel mode q.",
       unsigned: '"o" is not a mode change: give signs and letters, such as +o or -v+l.',
     });
   });
 
-  it("takes a first word as a `+` Channel only where CHANTYPES has `+` and changes follow", () => {
+  it("takes a first word as a `+` channel only where CHANTYPES has `+` and changes follow", () => {
     const plus = { ...acting, head: headOf({ chantypes: "#&+!" }) };
 
     expect({
@@ -1274,9 +1277,9 @@ describe("acting on a Network", () => {
       typesCredential("/quote PRIVMSG #a :pass", []),
       typesCredential("//quote PASS x", []),
     ]).toStrictEqual([
-      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
-      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
-      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
+      "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
+      "Don't put a password in a raw command. PASS and AUTHENTICATE carry one, and history records raw commands whole. It was cleared and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
       true,
       true,
       true,
@@ -1294,8 +1297,8 @@ describe("acting on a Network", () => {
       typesCredential("/operator x", []),
       typesCredential("//oper admin pw", []),
     ]).toStrictEqual([
-      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
-      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
+      "OPER carries a password, and history records raw commands whole. Set network.<id>.oper.name and network.<id>.oper.password instead, and iirc signs in as an operator each time it connects. It was cleared and nothing was sent.",
       true,
       true,
       false,
@@ -1303,19 +1306,19 @@ describe("acting on a Network", () => {
     ]);
   });
 
-  it("needs the Network's rules for a Channel's modes, and a target outside a Channel", () => {
+  it("needs the network's rules for a channel's modes, and a target outside a channel", () => {
     expect({
       fromNetwork: words("/mode +m", { ...inNetwork, head: undefined }),
       unread: words("/mode +m", inChannel),
     }).toStrictEqual({
       fromNetwork:
-        "Name whose modes to change, or open the Channel. /mode [target] <changes> [parameters…]",
+        "Name a nick or channel, or open a channel. /mode [target] <changes> [parameters…]",
       unread:
-        "The modes libera has are not known yet: open a Channel on it, wait for its head to be read, and try again.",
+        "The modes libera supports are not known yet. Open a channel on it, wait for it to load, and try again.",
     });
   });
 
-  it("gives and takes ranks as Mode, and says when the Network's PREFIX has no such rank", () => {
+  it("gives and takes ranks as Mode, and says when the network's PREFIX has no such rank", () => {
     const noVoice = { ...acting, head: headOf({ ranks: [{ mode: "o", symbol: "@" }] }) };
 
     expect({
@@ -1336,8 +1339,8 @@ describe("acting on a Network", () => {
         changes: [{ mode: "v", param: "a", set: false }],
         target: "#iirc",
       }),
-      noVoice: "libera has no voice rank (v): its PREFIX gives @ (o).",
-      none: "Whom? /op <nick>…",
+      noVoice: "libera has no voice rank (v). Its ranks are @ (o).",
+      none: "Add a nick. /op <nick>…",
       op: act({
         _tag: "Mode",
         changes: [
@@ -1374,7 +1377,7 @@ describe("acting on a Network", () => {
         ],
         target: "#iirc",
       }),
-      noBans: "libera has no ban list (b) in its CHANMODES.",
+      noBans: "libera does not support bans.",
       unban: act({
         _tag: "Mode",
         changes: [{ mode: "b", param: "*!*@bad.test", set: false }],
@@ -1383,7 +1386,7 @@ describe("acting on a Network", () => {
     });
   });
 
-  it("bans a User by account with /ban -a, one nick, where the Network names accounts in bans", () => {
+  it("bans a user by account with /ban -a, one nick, where the network names accounts in bans", () => {
     const byAccount = {
       ...acting,
       head: headOf({ accountBan: { names: ["account", "a"], prefix: "~" } }),
@@ -1397,7 +1400,7 @@ describe("acting on a Network", () => {
       }),
     };
 
-    const usage = "Ban whose account? /ban -a <nick>";
+    const usage = "Name the nick whose account to ban. /ban -a <nick>";
 
     expect({
       ban: interpret("/ban -a bob", byAccount),
@@ -1419,12 +1422,12 @@ describe("acting on a Network", () => {
     }).toStrictEqual({
       ban: act({ _tag: "BanAccount", channel: "#iirc", nick: "bob" }),
       bareFlag: usage,
-      channel: "A ban by account takes one nick, never a Channel or a mask. /ban -a <nick>",
-      mask: "A ban by account takes one nick, never a Channel or a mask. /ban -a <nick>",
-      noAccountBan: "libera offers no ban by account (no ACCOUNTEXTBAN in its ISUPPORT).",
-      noBans: "libera has no ban list (b) in its CHANMODES.",
+      channel: "A ban by account takes one nick, never a channel or a mask. /ban -a <nick>",
+      mask: "A ban by account takes one nick, never a channel or a mask. /ban -a <nick>",
+      noAccountBan: "libera does not support bans by account.",
+      noBans: "libera does not support bans.",
       noHead:
-        "The modes libera has are not known yet: open a Channel on it, wait for its head to be read, and try again.",
+        "The modes libera supports are not known yet. Open a channel on it, wait for it to load, and try again.",
       plain: act({
         _tag: "Mode",
         changes: [{ mode: "b", param: "bob!*@*", set: true }],
@@ -1439,7 +1442,7 @@ describe("acting on a Network", () => {
     });
   });
 
-  it("invites to the open Channel or one named, sets away and back, a nick, and a raw Line", () => {
+  it("invites to the open channel or one named, sets away and back, a nick, and a raw command", () => {
     expect({
       away: interpret("/away gone fishing", acting),
       awayNone: interpret("/away", inNetwork),
@@ -1459,25 +1462,25 @@ describe("acting on a Network", () => {
       back: act({ _tag: "Away", message: null }),
       backWords: "/back takes nothing after it. To be away with a message, use /away <message>.",
       invite: act({ _tag: "Invite", channel: "#iirc", nick: "peer" }),
-      inviteFromNetwork: "To which Channel? /invite <nick> <channel>, or open the Channel.",
+      inviteFromNetwork: "Add a channel. /invite <nick> <channel>, or open the channel.",
       inviteNamed: act({ _tag: "Invite", channel: "#other", nick: "peer" }),
       nick: act({ _tag: "Nick", nick: "other" }),
       nickTwo: 'Give one nick, not "a b".',
       quote: act({ _tag: "Raw", line: "WHOIS peer" }),
-      quoteNone: "Send what? /quote <raw line>",
+      quoteNone: "Add a raw command. /quote <raw command>",
       raw: act({ _tag: "Raw", line: "PING x" }),
     });
   });
 
-  it("sets Self's real name for the Session, the rest of the line as typed, and only with a Session", () => {
+  it("sets your real name for the connection, the rest of the line as typed, and only with a connection", () => {
     expect({
       none: words("/setname   "),
       offline: message("/setname Someone", offline),
       setname: interpret("/setname  Some  One ", inNetwork),
       setnameInChannel: interpret("/setname Someone", acting),
     }).toStrictEqual({
-      none: "Set it to what? /setname <real name>",
-      offline: "libera is not connected, so nothing can be said there now.",
+      none: "Add a name. /setname <real name>",
+      offline: "libera is not connected, so you can't send there now.",
       setname: act({ _tag: "Setname", realname: " Some  One " }),
       setnameInChannel: act({ _tag: "Setname", realname: "Someone" }),
     });
@@ -1503,25 +1506,25 @@ describe("acting on a Network", () => {
       ctcp: act({ _tag: "Ctcp", args: "", command: "VERSION", nick: "peer" }),
       ctcpAction: "ACTION is what /me sends: /me <text>",
       ctcpChannel:
-        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ctcp <nick> <command> [text]",
+        "A CTCP request goes to one nick, never a channel, a mask, or a list. /ctcp <nick> <command> [text]",
       ctcpDcc: "DCC is not sent. /ctcp <nick> <command> [text]",
       ctcpMask:
-        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ctcp <nick> <command> [text]",
-      ctcpNoCommand: "Which request? /ctcp <nick> <command> [text]",
-      ctcpNone: "To whom? /ctcp <nick> <command> [text]",
-      ctcpOffline: "libera is not connected, so nothing can be said there now.",
+        "A CTCP request goes to one nick, never a channel, a mask, or a list. /ctcp <nick> <command> [text]",
+      ctcpNoCommand: "Add a request. /ctcp <nick> <command> [text]",
+      ctcpNone: "Add a nick. /ctcp <nick> <command> [text]",
+      ctcpOffline: "libera is not connected, so you can't send there now.",
       ctcpPrefix:
         "Leave off the prefix @: a nick does not start with it. /ctcp <nick> <command> [text]",
       ctcpText: act({ _tag: "Ctcp", args: " are  you there ", command: "FINGER", nick: "peer" }),
       ping: act({ _tag: "Ping", nick: "peer" }),
       pingChannel:
-        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ping <nick>",
-      pingNone: "To whom? /ping <nick>",
+        "A CTCP request goes to one nick, never a channel, a mask, or a list. /ping <nick>",
+      pingNone: "Add a nick. /ping <nick>",
       pingTwo: "Give one nick. /ping <nick>",
     });
   });
 
-  it("acts only where it can: a Channel's commands in a Channel, and with a Session but for away", () => {
+  it("acts only where it can: a channel's commands in a channel, and with a connection but for away", () => {
     expect({
       awayOffline: interpret("/away brb", offline),
       kickInDirect: message("/kick peer", inDirect),
@@ -1530,10 +1533,10 @@ describe("acting on a Network", () => {
       topicInNetwork: message("/topic hi", inNetwork),
     }).toStrictEqual({
       awayOffline: act({ _tag: "Away", message: "brb" }),
-      kickInDirect: "Open a Channel first.",
-      kickOffline: "libera is not connected, so nothing can be said there now.",
-      nickOffline: "libera is not connected, so nothing can be said there now.",
-      topicInNetwork: "Open a Channel first.",
+      kickInDirect: "Open a channel first.",
+      kickOffline: "libera is not connected, so you can't send there now.",
+      nickOffline: "libera is not connected, so you can't send there now.",
+      topicInNetwork: "Open a channel first.",
     });
   });
 });
@@ -1547,7 +1550,7 @@ describe("the formatting commands", () => {
     }).toStrictEqual({
       colour: {
         _tag: "Invalid",
-        message: "There is no command /colour. Start with // to say text that begins with /.",
+        message: "There is no command /colour. Start with // to send text that begins with /.",
       },
       format: { _tag: "Parsed", value: [{ _tag: "ChooseFormat" }] },
       formatWith: "Invalid",

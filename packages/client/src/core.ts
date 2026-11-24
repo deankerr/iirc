@@ -91,7 +91,7 @@ const lagToken = "iirc";
 
 // The Network
 
-// Dials the next Ircd in `ircds`, or, for an upgrade, the same one again, without
+// Dials the next Ircd in `servers`, or, for an upgrade, the same one again, without
 // moving on. Either way an STS policy for its host decides the address.
 const dial = (run: Run, upgrade?: IrcdAddress): void => {
   const { configuration } = run.state;
@@ -108,8 +108,8 @@ const dial = (run: Run, upgrade?: IrcdAddress): void => {
   }
 
   const id = run.state.dialled + 1;
-  const { ircds } = configuration;
-  const next = upgrade ?? ircds[run.state.rotation % ircds.length] ?? ircds[0];
+  const { servers } = configuration;
+  const next = upgrade ?? servers[run.state.rotation % servers.length] ?? servers[0];
   const ircd = addressFor(run.state, next, run.at);
 
   run.state = {

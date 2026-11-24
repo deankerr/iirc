@@ -107,8 +107,8 @@ describe("ergo, bot mode", () => {
         payload: configured({
           bot,
           channels: [{ name: channel }],
-          ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
           nicks: ["iirc"],
+          servers: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
         }),
         query: {},
       });

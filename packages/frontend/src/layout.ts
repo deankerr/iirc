@@ -157,7 +157,7 @@ export const focusedPane = <V>(layout: Layout<V>): Pane<V> => {
 
   // The focus is always on a Pane of the tree, and a tree has one at least.
   if (found === undefined) {
-    throw new Error("A layout holds no Pane.");
+    throw new Error("A layout needs at least one pane.");
   }
 
   return found;

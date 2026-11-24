@@ -183,7 +183,7 @@ const toggle = () => bar()?.querySelector<HTMLElement>("[data-members-toggle]") 
  * The members shown, as a column or over the Timeline.
  * @returns Them, or none.
  */
-const members = () => document.querySelector<HTMLElement>('section[aria-label="Members"]');
+const members = () => document.querySelector<HTMLElement>('section[aria-label="members"]');
 
 /**
  * What a disclosure's trigger controls.
@@ -237,7 +237,7 @@ const measure = async (registry: Parameters<typeof paneMeasured>[0], width: numb
  * The grip on the members' edge, beside a Timeline.
  * @returns It, or none.
  */
-const grip = () => document.querySelector<HTMLElement>('[aria-label="Resize the members"]');
+const grip = () => document.querySelector<HTMLElement>('[aria-label="resize members"]');
 
 /**
  * Has the page measure each of the font's `0` as eight pixels, from a grip's unseen measure
@@ -349,7 +349,7 @@ describe("a Pane's status bar", () => {
       shows: frames.map((frame) => [
         frame.includes("+n"),
         frame.includes("the plan"),
-        frame.endsWith("Members, 2"),
+        frame.endsWith("members, 2"),
       ]),
     }).toStrictEqual({ held: true, shows: frames.map(() => [true, true, true]) });
     expect(frames.length).toBeGreaterThan(0);
@@ -357,7 +357,7 @@ describe("a Pane's status bar", () => {
 
   it("says the count once, in the toggle, and discloses the topic in full, isolated, under its one line", async () => {
     await signedIn();
-    await settled(() => toggle()?.getAttribute("aria-label") === "Members, 2");
+    await settled(() => toggle()?.getAttribute("aria-label") === "members, 2");
 
     const topic = bar()?.querySelector<HTMLElement>("button[aria-expanded]");
 
@@ -408,12 +408,12 @@ describe("a topic's time", () => {
     }
   });
 
-  it("is drawn as ui.timeline.timeFormat says, HH:mm under none", async () => {
+  it("is drawn as ui.conversation.timeFormat says, HH:mm under none", async () => {
     // Local mid-afternoon, so no form of the clock writes it as another does.
     const set = new Date(2026, 10, 15, 15, 7, 9);
     const { registry } = await signedIn(set.getTime());
 
-    await settled(() => toggle()?.getAttribute("aria-label") === "Members, 2");
+    await settled(() => toggle()?.getAttribute("aria-label") === "members, 2");
 
     const topic = bar()?.querySelector<HTMLElement>("button[aria-expanded]");
 
@@ -422,7 +422,7 @@ describe("a topic's time", () => {
 
     const drawn = async (time: TimeShown) => {
       await act(async () => {
-        registry.set(deviceUi, { "timeline.timeFormat": time });
+        registry.set(deviceUi, { "conversation.timeFormat": time });
         await Promise.resolve();
       });
 
@@ -601,7 +601,7 @@ describe("a Pane's members", () => {
     await press(toggle());
     await settled(() => grip() !== null);
 
-    const nick = document.querySelector<HTMLElement>('[aria-label="Resize the nick column"]');
+    const nick = document.querySelector<HTMLElement>('[aria-label="resize nick column"]');
 
     await act(async () => {
       nick?.dispatchEvent(at("pointerdown", 200));
@@ -620,7 +620,7 @@ describe("a Pane's members", () => {
     await settled(() => daemon.uiChanges.length === 2);
     restore();
 
-    expect({ meanwhile, written: daemon.ui.options["timeline.nickWidth"] }).toStrictEqual({
+    expect({ meanwhile, written: daemon.ui.options["conversation.nickWidth"] }).toStrictEqual({
       meanwhile: "19",
       written: 19,
     });
@@ -725,7 +725,7 @@ describe("a Pane's members", () => {
     await settled(() => document.querySelector('[role="menu"]') === null);
     await settled(() => container.querySelector('[role="log"]') === null);
 
-    expect({ first, members: members() }).toStrictEqual({ first: "Query peer", members: null });
+    expect({ first, members: members() }).toStrictEqual({ first: "query peer", members: null });
   });
 
   it("says in a member's menu which account they are logged in to, or that they are logged out, and nothing when it is not known", async () => {
@@ -836,37 +836,37 @@ describe("a Pane's members", () => {
       peer: await offered("peer"),
     }).toStrictEqual({
       founder: [
-        "Query founder",
-        "Whois founder",
-        "Mention founder",
-        "Ignore founder",
-        "Ban founder",
-        "Op founder",
-        "Voice founder",
+        "query founder",
+        "whois founder",
+        "mention founder",
+        "ignore founder",
+        "ban founder",
+        "op founder",
+        "voice founder",
       ],
       op: [
-        "Query op",
-        "Whois op",
-        "Mention op",
-        "Ignore op",
-        "Ban op",
-        "Op op",
-        "Deop op",
-        "Voice op",
-        "Devoice op",
-        "Kick op",
+        "query op",
+        "whois op",
+        "mention op",
+        "ignore op",
+        "ban op",
+        "op op",
+        "deop op",
+        "voice op",
+        "devoice op",
+        "kick op",
       ],
       peer: [
-        "Query peer",
-        "Whois peer",
-        "Mention peer",
-        "Ignore peer",
-        "Ban peer",
-        "Op peer",
-        "Deop peer",
-        "Voice peer",
-        "Devoice peer",
-        "Kick peer",
+        "query peer",
+        "whois peer",
+        "mention peer",
+        "ignore peer",
+        "ban peer",
+        "op peer",
+        "deop peer",
+        "voice peer",
+        "devoice peer",
+        "kick peer",
       ],
     });
   });

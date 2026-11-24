@@ -64,7 +64,7 @@ export const identify = (run: Run): void => {
     return;
   }
 
-  const { account, credential, service } = login;
+  const { account, password: credential, service } = login;
 
   sendSecret(
     run,

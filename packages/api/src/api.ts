@@ -379,7 +379,7 @@ export class UiGroup extends HttpApiGroup.make("ui")
 
 /**
  * The Owner's options beyond `ui`, each by its full name, such as
- * `store.s3.bucket`, as the `ui` group's are: read whole, set or unset one at a time, made
+ * `storage.s3.bucket`, as the `ui` group's are: read whole, set or unset one at a time, made
  * from the options read, and followed as Server-Sent Events, the options whole each time
  * they change.
  */

@@ -413,8 +413,8 @@ const tags = (reads: readonly ChannelRead[]) =>
 // The kinds of read a Channel wants now, its members showing.
 const asks = (channel: Channel) => tags(channelReads(channel, inIirc, true)).map((one) => one.tag);
 
-describe("the open Channel", () => {
-  it("is the open Timeline when its Network lists it as a Channel's, and the options are not shown", () => {
+describe("the open channel", () => {
+  it("is the open conversation when its network lists it as a channel's, and the options are not shown", () => {
     const options = reduceTimelines(world(iirc), { _tag: "OptionsShown", filter: "" });
 
     expect({
@@ -452,7 +452,7 @@ describe("the open Channel", () => {
     });
   });
 
-  it("reads again when its Timeline's head moved, though the change that says so was gathered from later steps, and once for each move", () => {
+  it("reads again when its conversation's head moved, though the change that says so was gathered from later steps, and once for each move", () => {
     const { state } = settled();
 
     // What a Frontend that fell behind is told: the head moved at step 9, then a Read
@@ -496,7 +496,7 @@ describe("the open Channel", () => {
     });
   });
 
-  it("reads both again, after a moment, when a change may have changed the Channel", () => {
+  it("reads both again, after a moment, when a change may have changed the channel", () => {
     const { state } = settled();
 
     // Which changes touch the Channel is `touches`'s, tested below: this is its wiring.
@@ -635,7 +635,7 @@ describe("the open Channel", () => {
     expect(members?._tag === "Members" ? members.limit : undefined).toBe(500);
   });
 
-  it("starts afresh for another Channel opened", () => {
+  it("starts afresh for another channel opened", () => {
     const { state } = settled();
     const inOther: OpenChannel = { network, timeline: timelineId(other) };
     const [read] = channelReads(state, inOther, false);
@@ -723,7 +723,7 @@ const removed = (open: string) =>
   });
 
 describe("the header", () => {
-  it("shows a Channel's topic, formatted, who set it and when, its modes, and how many are in it", () => {
+  it("shows a channel's topic, formatted, who set it and when, its modes, and how many are in it", () => {
     const topic = {
       _tag: "Known",
       at: 1,
@@ -748,7 +748,7 @@ describe("the header", () => {
     });
   });
 
-  it("says where Self stands when not in the Channel, and shows no members or topic then", () => {
+  it("says where you stands when not in the channel, and shows no members or topic then", () => {
     expect({
       gone: standingShown(null),
       joining: standingShown("Joining"),
@@ -756,16 +756,16 @@ describe("the header", () => {
       refused: standingShown("Refused"),
       wanted: standingShown("Wanted"),
     }).toStrictEqual({
-      gone: ["not in this Channel — /join to rejoin", undefined, "Unknown"],
+      gone: ["not in this channel — /join to rejoin", undefined, "Unknown"],
       joining: ["joining…", undefined, "Unknown"],
-      kicked: ["kicked from this Channel, which is joined again", undefined, "Unknown"],
+      kicked: ["kicked from this channel, and iirc will rejoin", undefined, "Unknown"],
       refused: [
-        "not in this Channel: the Ircd refused the join, which is tried again",
+        "not in this channel: the server refused the join, and iirc will try again",
         undefined,
         "Unknown",
       ],
       wanted: [
-        "not in this Channel yet: it is joined once the Network is connected",
+        "not in this channel yet: you join once the network is connected",
         undefined,
         "Unknown",
       ],
@@ -796,7 +796,7 @@ describe("the header", () => {
     });
   });
 
-  it("says a removed Network's Timelines are removed, and never to join or connect", () => {
+  it("says a removed network's conversations are removed, and never to join or connect", () => {
     const channel = headerOf(removed(iirc), withHead(null));
 
     expect({
@@ -808,7 +808,7 @@ describe("the header", () => {
     });
   });
 
-  it("shows the Channel's name alone before its head is read, and a simpler header elsewhere", () => {
+  it("shows the channel's name alone before its head is read, and a simpler header elsewhere", () => {
     expect({
       direct: headerOf(world(peer), initialChannel),
       network: headerOf(world(own), initialChannel),
@@ -889,8 +889,8 @@ const activityIn = (
   },
 });
 
-describe("a Direct Message's partner", () => {
-  it("shows whether they are on the Network as `known` says, and nothing it does not say", () => {
+describe("a direct message's partner", () => {
+  it("shows whether they are on the network as `known` says, and nothing it does not say", () => {
     expect([
       presenceShown(world(peer, [], partnersKnown(true))),
       presenceShown(world(peer, [], partnersKnown(false))),
@@ -900,7 +900,7 @@ describe("a Direct Message's partner", () => {
     ]).toStrictEqual(["Here", "Gone", "Unknown", "Unknown", "Unknown"]);
   });
 
-  it("reads `known` again when one comes, goes, quits, or changes nick in their Timeline, and on opening it", () => {
+  it("reads `known` again when one comes, goes, quits, or changes nick in their conversation, and on opening it", () => {
     const quiet = world(own);
 
     const arrived = (activity: typeof Activity.Encoded, timeline: string) =>
@@ -1001,7 +1001,7 @@ describe("the members", () => {
   });
 
   // Catches a bot mark drawn on what is not known, or only guessed from an old fact.
-  it("marks a member as a bot only when their User is known now to be one", () => {
+  it("marks a member as a bot only when their user is known now to be one", () => {
     const { ranks } = header("Joined");
 
     const bots = [
@@ -1027,7 +1027,7 @@ describe("the members", () => {
     ]);
   });
 
-  it("shows each one's account as their User is known, and says it in words", () => {
+  it("shows each one's account as their user is known, and says it in words", () => {
     const { ranks } = header("Joined");
 
     const decoded = page([
@@ -1069,7 +1069,7 @@ describe("the members", () => {
     });
   });
 
-  it("says Self is not in the Channel when the members route says so", () => {
+  it("says you is not in the channel when the members route says so", () => {
     const first = takeOn(initialChannel);
     const [, read] = first.reads;
 
@@ -1080,14 +1080,14 @@ describe("the members", () => {
 
     expect(rosterOf(world(iirc), out)).toStrictEqual({
       _tag: "Out",
-      note: "kicked from this Channel, which is joined again",
+      note: "kicked from this channel, and iirc will rejoin",
       timeline: iirc,
     });
   });
 });
 
 describe("touching", () => {
-  it("is an Activity in the Channel's Timeline, its head moved past the one seen, or a Gap of its Network", () => {
+  it("is an Activity in the channel's conversation, its head moved past the one seen, or a Gap of its network", () => {
     expect({
       activity: touchesIirc({ items: [joined(11)] }),
       elsewhere: touchesIirc({ items: [joined(11, other)] }),
@@ -1134,7 +1134,7 @@ describe("touching", () => {
 });
 
 describe("/query", () => {
-  it("opens the Timeline the name keys, as the Network folds names, or a Direct Message not yet begun", () => {
+  it("opens the conversation the name keys, as the network folds names, or a direct message not yet begun", () => {
     const state = world(undefined);
 
     expect({
@@ -1166,7 +1166,7 @@ const fold = (events: readonly ChannelsEvent[]) => {
   return state;
 };
 
-describe("the Channels the Panes show", () => {
+describe("the channels the panes show", () => {
   const inOther: OpenChannel = { network, timeline: timelineId(other) };
 
   const twoPanes = () =>
@@ -1175,7 +1175,7 @@ describe("the Channels the Panes show", () => {
       change: { _tag: "Split", axis: "Horizontal", timeline: timelineId(other) },
     });
 
-  it("lists each Channel a Pane shows, the focused Pane's first, and each Pane's header", () => {
+  it("lists each channel a pane shows, the focused pane's first, and each pane's header", () => {
     const state = twoPanes();
 
     // The new Pane's window is not read yet, so its header waits.
@@ -1185,7 +1185,7 @@ describe("the Channels the Panes show", () => {
     }).toStrictEqual({ headers: ["#iirc", undefined], open: [other, iirc] });
   });
 
-  it("reads the members of only the Channels whose members show", () => {
+  it("reads the members of only the channels whose members show", () => {
     const reads = channelsReads(initialChannels, [inIirc, inOther], new Set([timelineId(other)]));
 
     expect(reads.map((read) => [read._tag, read.timeline])).toStrictEqual([
@@ -1195,7 +1195,7 @@ describe("the Channels the Panes show", () => {
     ]);
   });
 
-  it("reads each Channel's head, keeps each apart, and lets go of one no longer held", () => {
+  it("reads each channel's head, keeps each apart, and lets go of one no longer held", () => {
     const reads = channelsReads(initialChannels, [inIirc, inOther], new Set());
     const started = reads.map((read): ChannelsEvent => ({ _tag: "ReadStarted", at: 0, read }));
     const [forIirc, forOther] = reads;
@@ -1230,14 +1230,14 @@ describe("the Channels the Panes show", () => {
     });
   });
 
-  it("holds the head of each Channel the Sidebar lists, those the Panes show first", () => {
+  it("holds the head of each channel the Sidebar lists, those the panes show first", () => {
     expect({
       none: heldChannels(world(undefined)).map((one) => one.timeline),
       shown: heldChannels(world(other)).map((one) => one.timeline),
     }).toStrictEqual({ none: [iirc, other], shown: [other, iirc] });
   });
 
-  it("keeps the head of a Channel no Pane shows, and lets go of its members", () => {
+  it("keeps the head of a channel no pane shows, and lets go of its members", () => {
     const { state } = settled();
     const held: Channels = new Map([[timelineId(iirc), state]]);
 

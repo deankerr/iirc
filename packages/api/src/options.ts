@@ -3,7 +3,7 @@
  * `previews`: when Self is marked away by itself, where Uploads' bytes are kept, how Uploads
  * are served, and how many bytes Previews' images may take (ADR 0013, ADR 0016). They are
  * the Owner's rather than a device's, so no device overrides them. Each field is named in full, such as
- * `store.s3.bucket`, and says what it is and what it starts as in its annotations, which a
+ * `storage.s3.bucket`, and says what it is and what it starts as in its annotations, which a
  * Frontend reads to offer every field as an option. A field with no `default` is unset until
  * set, and absent from the options in force. This module is the Schema alone, so a
  * Frontend's pure core can derive its options from it without the HTTP contract.
@@ -167,7 +167,7 @@ export type ListenAddress = typeof ListenAddress.Type;
 export const BucketName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u, {
     message:
-      "must be 3 to 63 lower-case letters, digits, . and -, starting and ending with a letter or digit",
+      "must be 3 to 63 lowercase letters, digits, . and -, starting and ending with a letter or digit",
   })
 ).annotate({ identifier: "BucketName" });
 
@@ -180,7 +180,7 @@ export type BucketName = typeof BucketName.Type;
  */
 export const RegionName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/u, {
-    message: "must be 1 to 64 lower-case letters, digits, and -, such as us-east-1",
+    message: "must be 1 to 64 lowercase letters, digits, and -, such as us-east-1",
   })
 ).annotate({ identifier: "RegionName" });
 
@@ -208,7 +208,7 @@ const awayAfterBounds = { maximum: 10_080, minimum: 1 } as const;
 const AwayMessage = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.makeFilter(
-    (text: string) => !/[\0\r\n]/u.test(text) || "must not hold a line break or NUL"
+    (text: string) => !/[\0\r\n]/u.test(text) || "must not contain a line break or NUL"
   )
 ).annotate({ identifier: "AwayMessage" });
 
@@ -216,10 +216,10 @@ const AwayMessage = Schema.String.check(
 export const defaultAwayMessage = "Away";
 
 /** 100 MiB, in bytes: what `uploads.maxSize` starts as. */
-export const defaultMaxSize = 104_857_600;
+export const defaultMaxSize = 100_000_000;
 
 /** 1 GiB, in bytes: what `previews.maxTotal` starts as. */
-export const defaultPreviewsMaxTotal = 1_073_741_824;
+export const defaultPreviewsMaxTotal = 1_000_000_000;
 
 /**
  * The options beyond `ui`, each named in full, with its
@@ -231,68 +231,68 @@ export const defaultPreviewsMaxTotal = 1_073_741_824;
 export const OwnerOptions = Schema.Struct({
   "away.after": Schema.optionalKey(
     Schema.Int.check(Schema.isBetween(awayAfterBounds)).annotate({
-      description: `How many minutes after the last Frontend closes Self is marked away, on every Network where it is not away already, from ${awayAfterBounds.minimum} to ${awayAfterBounds.maximum}. Self is back shortly after a Frontend opens. Unset, Self is never marked away by itself.`,
+      description: `How many minutes after your last device or client closes you are marked away on every network where you are not already away, from ${awayAfterBounds.minimum} to ${awayAfterBounds.maximum}. You are back shortly after one opens. When not set, you are never marked away automatically.`,
     })
   ),
   "away.message": Schema.optionalKey(
     AwayMessage.annotate({
-      description: `The away message used when Self is marked away by away.after. Unset, it is ${defaultAwayMessage}.`,
+      description: `The away message used when away.after marks you away. When not set, it is ${defaultAwayMessage}.`,
     })
   ),
   "previews.maxTotal": ByteCount.annotate({
     default: defaultPreviewsMaxTotal,
     description:
-      "The most bytes of Previews' images the store may hold. Past it, the images shown least recently are deleted first. The default is 1 GiB.",
+      "The maximum size of preview images that storage may hold. Past it, the images shown least recently are deleted first. The default is 1 GB.",
   }),
-  "store.s3.accessKeyId": Schema.optionalKey(
+  "storage.s3.accessKeyId": Schema.optionalKey(
     CredentialName.annotate({
-      description: "The Credential that holds the bucket's access key id.",
+      description: "The secret that holds the bucket's access key ID.",
     })
   ),
-  "store.s3.bucket": Schema.optionalKey(
+  "storage.s3.bucket": Schema.optionalKey(
     BucketName.annotate({
-      description: "The S3 bucket that keeps the bytes of Uploads and of Previews' images.",
+      description: "The S3 bucket that stores uploads and preview images.",
     })
   ),
-  "store.s3.endpoint": Schema.optionalKey(
+  "storage.s3.endpoint": Schema.optionalKey(
     HttpUrl.annotate({
       description:
         "The bucket's S3 endpoint, an http or https URL, such as https://s3.us-east-1.amazonaws.com.",
     })
   ),
-  "store.s3.region": Schema.optionalKey(
+  "storage.s3.region": Schema.optionalKey(
     RegionName.annotate({ description: "The bucket's region, such as us-east-1, or auto." })
   ),
-  "store.s3.secretAccessKey": Schema.optionalKey(
+  "storage.s3.secretAccessKey": Schema.optionalKey(
     CredentialName.annotate({
-      description: "The Credential that holds the bucket's secret access key.",
+      description: "The secret that holds the bucket's secret access key.",
     })
   ),
   "uploads.expireAfter": Schema.optionalKey(
     Schema.Int.check(Schema.isBetween(expireAfterBounds)).annotate({
-      description: `How many days an Upload is kept before it is deleted, from ${expireAfterBounds.minimum} to ${expireAfterBounds.maximum}. Unset, an Upload is kept until the Owner deletes it.`,
+      description: `How many days an upload is kept before it is deleted, from ${expireAfterBounds.minimum} to ${expireAfterBounds.maximum}. When not set, an upload is kept until you delete it.`,
     })
   ),
   "uploads.listen": Schema.optionalKey(
     ListenAddress.annotate({
       description:
-        "The address the Link listener listens on, as host:port, such as 127.0.0.1:7668.",
+        "The address the upload server listens on, as host:port, such as 127.0.0.1:7668.",
     })
   ),
   "uploads.maxSize": ByteCount.annotate({
     default: defaultMaxSize,
-    description: "The largest an Upload may be, in bytes. The default is 100 MiB.",
+    description: "The maximum size of an upload, in bytes. The default is 100 MB.",
   }),
   "uploads.maxTotal": Schema.optionalKey(
     ByteCount.annotate({
       description:
-        "The most bytes of Uploads the store may hold, each distinct file counted once. An upload that would pass it is refused, and nothing is deleted to make room. Unset, there is no limit.",
+        "The maximum total size of uploads that storage may hold, in bytes, counting each distinct file once. An upload that would exceed it is refused, and nothing is deleted to make room. When not set, there is no limit.",
     })
   ),
   "uploads.publicUrl": Schema.optionalKey(
     HttpUrl.annotate({
       description:
-        "The address every Upload's link starts with, an http or https URL, such as https://files.example.com.",
+        "The address every upload link starts with, an http or https URL, such as https://files.example.com.",
     })
   ),
 });
@@ -300,7 +300,7 @@ export const OwnerOptions = Schema.Struct({
 /** The decoded form of {@link OwnerOptions}. */
 export type OwnerOptions = typeof OwnerOptions.Type;
 
-/** An option's full name, such as `store.s3.bucket`: one of {@link OwnerOptions}' fields. */
+/** An option's full name, such as `storage.s3.bucket`: one of {@link OwnerOptions}' fields. */
 export const OwnerOptionName = Schema.Literals(Struct.keys(OwnerOptions.fields)).annotate({
   description: "An option beyond ui, such as uploads.maxSize.",
   identifier: "OwnerOptionName",

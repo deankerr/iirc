@@ -308,7 +308,7 @@ describe("the keys", () => {
     const said = () => container.querySelector('[role="alert"] p')?.textContent;
 
     const dismiss = () =>
-      container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]');
+      container.querySelector<HTMLButtonElement>('button[aria-label="dismiss"]');
 
     await write("/d");
     await press(composer, { code: "Enter", key: "Enter" });
@@ -334,7 +334,7 @@ describe("the keys", () => {
     }).toStrictEqual({
       dismissed: undefined,
       edited: undefined,
-      first: "There is no command /d. Start with // to say text that begins with /.",
+      first: "There is no command /d. Start with // to send text that begins with /.",
       text: "/de",
     });
   });

@@ -38,7 +38,7 @@ const commandOf = (id: string): Entry => {
 
 describe("an entry's key and the words it is matched by", () => {
   it("is keyed so each kind is remembered and found apart, and matched by its names and description", () => {
-    const previous = commandOf("timeline.previous");
+    const previous = commandOf("conversation.previous");
 
     const timeline = timelineEntry({
       kind: "Channel",
@@ -53,21 +53,21 @@ describe("an entry's key and the words it is matched by", () => {
     expect({
       alias: matchedBy(previous).names,
       chords: previous._tag === "Command" ? previous.chords.map(formatChord) : undefined,
-      keys: [previous.key, timeline.key, live.key, commandKey("timeline.previous")],
+      keys: [previous.key, timeline.key, live.key, commandKey("conversation.previous")],
       network: [matchedBy(live).description, matchedBy(removed).description],
       timeline: matchedBy(timeline).names,
     }).toStrictEqual({
       alias: ["previous", "prev"],
       chords: ["alt+arrowup"],
       keys: [
-        "command:timeline.previous",
+        "command:conversation.previous",
         `timeline:${channel}`,
         "network:libera",
-        "command:timeline.previous",
+        "command:conversation.previous",
       ],
       network: [
-        "network: remove it, asking first whether its Timelines stay readable",
-        "network: drop the Timelines kept since it was removed, which frees its name",
+        "network: remove it, asking first whether to keep its conversations to read",
+        "network: delete its kept conversations and free its name",
       ],
       timeline: ["#iirc", "libera #iirc"],
     });
@@ -124,7 +124,7 @@ describe("the fonts listed", () => {
       current: ["font:commit-mono"],
       family: { _tag: "Font", current: true, key: "font:Fira Code", name: "Fira Code" },
       familyNames: ["font Fira Code", "Fira Code"],
-      said: ["font: sans", "font: a family on this device"],
+      said: ["font: sans", "font: a font family on this device"],
     });
   });
 

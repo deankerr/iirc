@@ -55,21 +55,21 @@ The core decides and this package draws and does the I/O.
 
 - **Shows a Timeline live, as terminal lines:** the time, the sender in their colour, and the text with its formatting and links.
 - **A name in a Message's text that the Client found to be a User is drawn in that nick's colour,** as a search result's text is, unless the sender's own mIRC colour covers it.
-- **Lays its rows out as `ui.timeline.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
+- **Lays its rows out as `ui.conversation.layout` says.** `columns`, the default, puts the time and the sender in columns every row shares. `inline` makes each row one run of text that wraps under itself.
 - **`stacked` puts a run of one User's Messages under one head,** the nick in their colour and the time, each Message's text on a line of its own. Everything else is drawn as `inline` draws it.
 - **A later Message of a stacked run shows its own time while its row is hovered or focused,** and a screen reader reads it.
-- **Rows stand `ui.timeline.spacing` apart,** a multiple of the text's size, 0.3 to start, apart from the line height. At 0 they touch. A Highlight's tint and the rule after the nick column cover the room, and a stacked run's head keeps a little more above it. The last row stands as far from the Composer, and never nearer than half the text's size.
-- **A Message's sender stands in `<` and `>` while `ui.timeline.nickBrackets` is on,** as it is to start, in columns and inline. Off, only those go: a `NOTICE` keeps `-nick-` and an action `* nick`. A stacked run's head has none either way.
-- **A Message's sender has the prefix it held before their nick while `ui.timeline.nickPrefix` is on,** as it is to start, dim as a member's symbol is, inside any brackets, for a `PRIVMSG`, a `NOTICE`, and an action, in each layout, a stacked run's head included. It is no part of the nick, whose colour, menu, and focus are as without it, and it counts toward the nick column's width. A sender who held none has nothing drawn.
-- **The nick column is `ui.timeline.nickWidth` characters wide,** each as wide as the font's `0`, in any font. A longer nick is cut with an ellipsis. A thin rule stands after it, unbroken down the rows.
-- **The rule after the nick column drags, or takes the arrows, Home, and End once focused,** as the Sidebar's edge does, and resizes every row's nick column as it moves. Letting go, or each key, writes `ui.timeline.nickWidth` in whole characters, this device's own where it overrides the option, else the shared one, and the Composer says why if it is refused. A drag the browser cancels writes nothing. While the rule is dragged the rows stay in columns, and a drag across the log selects and scrolls nothing. A Timeline drawn inline or stacked has no grip.
+- **Rows stand `ui.conversation.spacing` apart,** a multiple of the text's size, 0.3 to start, apart from the line height. At 0 they touch. A Highlight's tint and the rule after the nick column cover the room, and a stacked run's head keeps a little more above it. The last row stands as far from the Composer, and never nearer than half the text's size.
+- **A Message's sender stands in `<` and `>` while `ui.conversation.nickBrackets` is on,** as it is to start, in columns and inline. Off, only those go: a `NOTICE` keeps `-nick-` and an action `* nick`. A stacked run's head has none either way.
+- **A Message's sender has the prefix it held before their nick while `ui.conversation.nickPrefix` is on,** as it is to start, dim as a member's symbol is, inside any brackets, for a `PRIVMSG`, a `NOTICE`, and an action, in each layout, a stacked run's head included. It is no part of the nick, whose colour, menu, and focus are as without it, and it counts toward the nick column's width. A sender who held none has nothing drawn.
+- **The nick column is `ui.conversation.nickWidth` characters wide,** each as wide as the font's `0`, in any font. A longer nick is cut with an ellipsis. A thin rule stands after it, unbroken down the rows.
+- **The rule after the nick column drags, or takes the arrows, Home, and End once focused,** as the Sidebar's edge does, and resizes every row's nick column as it moves. Letting go, or each key, writes `ui.conversation.nickWidth` in whole characters, this device's own where it overrides the option, else the shared one, and the Composer says why if it is refused. A drag the browser cancels writes nothing. While the rule is dragged the rows stay in columns, and a drag across the log selects and scrolls nothing. A Timeline drawn inline or stacked has no grip.
 - **A Timeline reads as `inline` where `columns` would leave its text fewer than about thirty characters,** from its first frame, as a Pane split a few times, or a phone, does, and again at once as the font, the text's size, the time's format, or the nick column changes.
 - **Activity is dimmer than what was said.** An Ircd's numeric replies are not.
 - **A run of joins, parts, quits, and changes of nick is one dim line** that says how many and who. A press opens it to each one's own line, and closes it again. A netsplit or a netjoin is likewise one dim line that opens to its nicks.
 - **Connections that fail again and again are one row,** with how many and when the first and the latest were.
 - **An Ircd's message of the day is one dim line** that says how many lines it has, and that it was cut short if it was. A press, Enter, or Space opens it to a block in the monospace font with every space kept and no line wrapped, which scrolls sideways within itself.
 - **A `FAIL` is set apart as a refusal is.**
-- **A Gap is a divider, and so is a change of day.** The day is written as `ui.timeline.dateFormat` says in the device's time zone, even under `ui.timeline.timeFormat` `none`, and a press on it starts `/date` for that day in the Composer.
+- **A Gap is a divider, and so is a change of day.** The day is written as `ui.conversation.dateFormat` says in the device's time zone, even under `ui.conversation.timeFormat` `none`, and a press on it starts `/date` for that day in the Composer.
 - **Our own Messages say only when they are sending, not sent, or refused.**
 - **A reply says what it answers in one dim line above it,** `↳ alice: the first of their text`, cut to the line's width. Pressing or activating it goes to that Message, as a jump from the search does.
 - **A reply that answers nothing the Timeline holds is an ordinary Message.**
@@ -77,12 +77,12 @@ The core decides and this package draws and does the I/O.
 - **Opens at the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up.**
 - **A view that cannot scroll reads older pages on its own,** as when the latest page is all hidden Activity, up to the window's cap. Past that, "Load older" asks on purpose.
 - **Read back to its start, it draws nothing above its first line,** and tells only a screen reader that nothing is before it.
-- **Bounds how wide a Timeline's text runs by `ui.timeline.maxWidth`,** from 40 to 400 characters, each as wide as the font's `0`, so the bound grows with the size. At `none`, the default, text runs the width of its Pane.
+- **Bounds how wide a Timeline's text runs by `ui.conversation.maxWidth`,** from 40 to 400 characters, each as wide as the font's `0`, so the bound grows with the size. At `none`, the default, text runs the width of its Pane.
 - **A Pane narrower than the bound is drawn as without one.** The Composer and the Sidebar are never bounded.
 
 ### Previews
 
-- **Previews a Message's links while its Timeline's mode is `text` or `on`,** its own in `ui.previews.timelines` or else `ui.previews`. Each is a card under the text, with room above and below, and each is updated in place from the stream of Previews.
+- **Previews a Message's links while its Timeline's mode is `text` or `on`,** its own in `ui.previews.conversations` or else `ui.previews`. Each is a card under the text, with room above and below, and each is updated in place from the stream of Previews.
 - **Each of a Message's first three previewable links has a toggle right after it,** in every layout: a bare caret, as a Network's row in the Sidebar has, and a button the keyboard reaches, which says whether its Preview is open. Its press reaches past the caret, away from the link. A closed Preview draws nothing and takes no room.
 - **A Preview starts open or closed as `ui.previews.start` says,** `open` unless set. What the Owner opened or closed is kept while a row scrolls away and back, and forgotten when the page is loaded again.
 - **A row whose Previews the Daemon already holds is drawn whole the first time.** What the Daemon holds is read with each window, before its rows are drawn, and fetches nothing.
@@ -147,17 +147,17 @@ The core decides and this package draws and does the I/O.
 ### Saving and closing a Timeline
 
 - **Saves a Timeline as text,** from its row's menu or `/export [since] [until]`, as a file the browser downloads. A day given is placed in the Owner's time zone.
-- **Closes a Timeline by its id,** from its row's menu or `/close-timeline`, a detached Direct Message and a removed Network's kept Timeline too. It leaves the Sidebar as the close is asked, and comes back, with why, if the Daemon refuses it or the request fails.
+- **Closes a Timeline by its id,** from its row's menu or `/close-conversation`, a detached Direct Message and a removed Network's kept Timeline too. It leaves the Sidebar as the close is asked, and comes back, with why, if the Daemon refuses it or the request fails.
 - **A closed Timeline is out of the Sidebar until something arrives in it.** `/go` and the search still find it, and it shows in the Sidebar while a Pane has it open.
 - **A Channel Self is in is never closed.** A dialog offers to leave it instead, by the edit of its Network's Configuration that `/part` sends where the Configuration names it, and otherwise by parting it. Signing out lets the offer go.
 - **Leaving a Channel does not close its Timeline,** since the part arrives in it as Activity.
 
 ### The Composer
 
-- **Enter sends and Shift+Enter starts a new line.** Under `ui.composer.enter` `newline`, Enter starts a new line and Mod+Enter sends, with a send button beside the Composer.
+- **Enter sends and Shift+Enter starts a new line.** Under `ui.input.enter` `newline`, Enter starts a new line and Mod+Enter sends, with a send button beside the Composer.
 - **Up and Down recall what was sent.**
 - **A draft of more than five lines asks before it is sent.** A blank line does not count.
-- **Spelling is checked unless `ui.composer.spellcheck` is off.**
+- **Spelling is checked unless `ui.input.spellcheck` is off.**
 - **Why something was not said is shown under it,** with a way to dismiss it, and to send or check again when that is safe. It goes when it stops being true.
 - **Mod+Shift+K, or `/format`, opens the formatting list above the line:** a row of the formats, each its letter, B, I, U, M for fixed pitch, R for reverse, and S for strikethrough, marked while the selection has it, a row of the default and the sixteen colours for the text, and a row of the same for its background, each row of colours named before it. A format's letter turns it over, the arrows and Enter choose any item, as a press does, and Escape puts the list away. One choice is made each time it opens, on the selection, or with nothing selected, on what is typed next, which is named beside the prompt until then. No format has a key of its own, so Mod+R reloads the page wherever the focus is.
 - **The draft is drawn with its formatting,** and what is sent is IRC's formatting codes. In a font named as monospace it is drawn as a Timeline draws it. In any other font, a family the device has among them, bold is a stroke of the text's own colour, italic a dotted line under the run, and fixed pitch only its tint, so every letter stays where the caret expects it.
@@ -171,7 +171,7 @@ The core decides and this package draws and does the I/O.
 - **An alias is shared by every device,** made with `/alias add` and taken away with `/alias remove`.
 - **After a command, the list offers what it takes:** an option after `/set`, a Channel after `/join` or `/part`, an alias after `/alias` or `/alias remove`, a Timeline of any Network after `/go`, a theme after `/theme`, a font or a family typed by name after `/set ui.font`, and a Network, a removed one too, after `/network remove`. Each says what it is and what is in effect.
 - **An emoji is offered once a word is `:` and two letters of its name,** drawn and named as `:smile:`. The names load the first time one is typed, never with the page.
-- **Tab completes a nick or a Channel,** a nick at the start of a line followed by `ui.composer.nickSuffix`, `: ` unless set.
+- **Tab completes a nick or a Channel,** a nick at the start of a line followed by `ui.input.nickSuffix`, `: ` unless set.
 - **Tab, Shift+Tab, and, while the list is open, Up and Down move through it,** writing the one highlighted into the draft. A press on one writes it in, and Escape closes the list and gives back what was typed. Enter sends what the draft says.
 - **Mod+Shift+P starts `/` and Mod+K starts `/go `,** with the list open, in the focused Pane's Composer. Either works from anywhere on the page, a Pane with no Timeline included, and from inside an option's editor, which it commits nothing of. `/go` lists every Timeline, closed ones too.
 - **Where the pointer is coarse, a button beside the Composer starts `/` too.**
@@ -235,16 +235,16 @@ The core decides and this package draws and does the I/O.
 
 ### The Tail
 
-- **Shows the Tail in iirc's own view, labelled `iirc`,** in a Pane with nothing open, or in the focused Pane from `/tail`, the palette, or the Sidebar's `iirc` row.
+- **Shows the Tail in iirc's own view, labelled `iirc`,** in a Pane with nothing open, or in the focused Pane from `/logs`, the palette, or the Sidebar's `iirc` row.
 - **A banner stands above the oldest line and scrolls with the lines:** `iirc` drawn in blocks in the monospace font, the Daemon's version under it, and, while no Network is configured, how to start.
-- **The lines shown are those at the level `ui.tail` names and above,** Info unless set, oldest first.
-- **Each line is its time as `ui.timeline.timeFormat` says, its words, its annotations as `name=value`, dimmer, and its cause,** a line of text for each of its lines.
+- **The lines shown are those at the level `ui.logs` names and above,** Info unless set, oldest first.
+- **Each line is its time as `ui.conversation.timeFormat` says, its words, its annotations as `name=value`, dimmer, and its cause,** a line of text for each of its lines.
 - **A line at Warn and above is in the theme's colour for danger.**
 - **Everything a line holds is drawn as text,** its controls as symbols, never as markup.
 - **The view stays at the latest line while the Owner is there,** as a Timeline does.
 - **At most 4096 lines are held,** followed while a Pane shows the Tail.
 - **After the Daemon restarts, the view shows the new Tail from its start.**
-- **A change of `ui.tail` on any device shows at once on every one,** a lower level showing the lines already held, each where its time puts it.
+- **A change of `ui.logs` on any device shows at once on every one,** a lower level showing the lines already held, each where its time puts it.
 
 ### The Uploads
 
@@ -340,7 +340,7 @@ The core decides and this package draws and does the I/O.
 - **A row's layout follows its Timeline's own width,** never the screen's. Nothing in a Timeline scrolls sideways: a row breaks what has no place to break, and the view clips what is left.
 - **No width counts characters.** The time column, the Composer's prompt, and a Pane's choice in the switcher are sized from samples drawn in the font, and the nick column and the members' column in the font's own `0`, so every row lines up in any font.
 - **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page.
-- **The first row whose top is in view stays still** as rows are added above, dropped, hidden by `ui.timeline.activity`, or wrapped again at a new width or text size, and a view at the latest stays there.
+- **The first row whose top is in view stays still** as rows are added above, dropped, hidden by `ui.conversation.activity`, or wrapped again at a new width or text size, and a view at the latest stays there.
 - **A window's held Previews are read before the window is drawn.** A held read that fails, or is not answered within `Waits.held`, is let go of, and the window is drawn all the same.
 - **The view tells the core what the Owner has seen:** whether it is at the latest, and the last item in view.
 - **Only a scroll the Owner made moves the view off the latest,** never one the view made itself or one the browser made as the log's box changed. So a Timeline opened at a search's result is not at the latest until the Owner goes there.

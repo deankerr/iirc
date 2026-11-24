@@ -76,16 +76,16 @@ export type Standing = "Live" | "Kept" | "Unknown";
  */
 const failureOf = (network: NetworkId, error: string | undefined): string => {
   const failures: ReadonlyMap<string | undefined, string> = new Map([
-    ["UnknownNetwork", `The Daemon has no Network ${network}, so nothing was removed.`],
+    ["UnknownNetwork", `The daemon has no network ${network}, so nothing was removed.`],
     [
       "NetworkStopped",
-      `${network} has stopped, so it cannot be removed until the Daemon starts again.`,
+      `${network} has stopped, so it cannot be removed until the daemon starts again.`,
     ],
   ]);
 
   return (
     failures.get(error) ??
-    `The Daemon did not answer, so whether ${network} was removed is unknown. Removing it again is safe.`
+    `The daemon did not answer, so it's unknown whether ${network} was removed. Removing it again is safe.`
   );
 };
 
@@ -101,16 +101,16 @@ const toldOf = (network: NetworkId, error: string | undefined): string | undefin
   switch (error ?? "") {
     // The removal stands, but a Credential its Configuration named may still be held.
     case "VaultFailed": {
-      return `${network} was removed, but the Daemon could not forget every Credential its Configuration named.`;
+      return `${network} was removed, but the daemon could not delete every password in its settings.`;
     }
 
     // The removal may have been journaled before what followed it failed.
     case "JournalFailed": {
-      return `The Daemon could not write its Journal, so whether ${network} was removed is unknown. The Networks are read again to show where it stands, and if it was removed, the Daemon forgets its Credentials when it next starts.`;
+      return `The daemon could not write its history, so it's unknown whether ${network} was removed. The networks are reloaded to show where it stands, and if it was removed, the daemon forgets its passwords when it next starts.`;
     }
 
     case "LifeChanged": {
-      return `${network} was removed or added again since you were asked, so nothing was removed. Ask again about it as it is now.`;
+      return `${network} was removed or added again since you were asked, so nothing was removed. Try again with its current state.`;
     }
 
     default: {
@@ -201,15 +201,15 @@ export interface Question {
 export const questionOf = (network: NetworkId, standing: Standing): Question =>
   standing === "Kept"
     ? {
-        body: `${network} was removed, and its Timelines were kept to read. Dropping them deletes them for every Frontend, and lets a new Network take the name ${network}.`,
+        body: `${network} was removed, and its conversations were kept to read. Dropping them deletes them on every device and frees the name ${network} for a new network.`,
         choosing: false,
-        confirm: "Drop them",
-        title: `Drop ${network}'s Timelines?`,
+        confirm: "drop them",
+        title: `Drop ${network}'s conversations?`,
       }
     : {
-        body: `Its Session ends, and its Configuration and Credentials go. Kept, its Timelines can still be read and searched, and the name ${network} stays taken until they are dropped.`,
+        body: `This ends its connection and deletes its settings and passwords. If you keep its conversations, you can still read and search them, and the name ${network} stays taken until you drop them.`,
         choosing: true,
-        confirm: "Remove",
+        confirm: "remove",
         title: `Remove ${network}?`,
       };
 

@@ -45,7 +45,7 @@ export type Sequence = typeof Sequence.Type;
  * - `UiSet`: an option under `ui` set to a value, by its name under `ui`, such as `time`.
  * - `UiUnset`: an option under `ui` back to its default.
  * - `OptionSet`: an option under another root set to a value, by its full name, such as
- *   `store.s3.bucket`.
+ *   `storage.s3.bucket`.
  * - `OptionUnset`: an option under another root back to its default, or to none.
  *
  * An Upload's Changes are records keyed by its id instead (ADR 0016):

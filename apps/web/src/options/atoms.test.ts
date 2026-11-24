@@ -118,7 +118,7 @@ describe("the options", () => {
     }).toStrictEqual({
       enabled: true,
       notice:
-        "libera's Configuration changed while this was being made, twice, so nothing was changed. Try again.",
+        "libera's settings changed while this was being saved, so nothing was changed. Try again.",
       puts: 2,
     });
   });
@@ -145,7 +145,7 @@ describe("the options", () => {
     await type("/network add libera irc.libera.chat bot", "Nowhere");
 
     expect({
-      added: daemon.configurations.get("oftc")?.configuration.ircds,
+      added: daemon.configurations.get("oftc")?.configuration.servers,
       notice: notice("Nowhere"),
       puts: daemon.puts,
     }).toStrictEqual({
@@ -162,7 +162,7 @@ describe("the options", () => {
     const { daemon, notice, registry, type } = await configuring();
     const secret = "hunter2-correct-horse";
 
-    await type("/set network.libera.login.credential");
+    await type("/set network.libera.login.password");
     const { prompting } = registry.get(optionsState);
 
     await type(`/set network.libera.password ${secret}`);
@@ -177,14 +177,14 @@ describe("the options", () => {
     }).toStrictEqual({
       draft: "",
       held: 0,
-      history: ["/set network.libera.login.credential"],
+      history: ["/set network.libera.login.password"],
       inAtoms: false,
       notice:
-        "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set network.libera.password alone, which asks for it in a password prompt.",
+        "Don't type a password into the message input. It was cleared and nothing was sent. Use /set network.libera.password alone to enter it in a password prompt.",
       prompting: {
-        name: "network.libera.login.credential",
+        name: "network.libera.login.password",
         network: libera,
-        path: ["login", "credential"],
+        path: ["login", "password"],
       },
     });
   });

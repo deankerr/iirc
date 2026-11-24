@@ -179,7 +179,7 @@ describe("redialling", () => {
 
   it("rotates through the Ircds in order", () => {
     const two = configured({
-      ircds: [
+      servers: [
         { host: "a.test", port: 6697, tls: true },
         { host: "b.test", port: 6667, tls: false },
       ],

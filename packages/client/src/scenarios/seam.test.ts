@@ -427,8 +427,8 @@ describe("history, and hooks that act", () => {
     login: {
       _tag: "Sasl",
       account: "iirc",
-      credential: CredentialName.make("pw"),
       mechanism: "auto",
+      password: CredentialName.make("pw"),
       required: true,
     },
   });

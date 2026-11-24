@@ -148,7 +148,7 @@ const signedIn = () => {
  * @returns The rows.
  */
 const rows = (container: HTMLElement) =>
-  [...container.querySelectorAll<HTMLElement>('section[aria-label="Options"] [data-key]')].map(
+  [...container.querySelectorAll<HTMLElement>('section[aria-label="Settings"] [data-key]')].map(
     (row) => {
       // A row's one grid cell holds two lines: its name and value, then its description
       // and what it starts as.
@@ -177,7 +177,7 @@ const linesOf = (container: HTMLElement, name: string) =>
  * @returns The headings.
  */
 const headingsOf = (container: HTMLElement) =>
-  [...container.querySelectorAll('section[aria-label="Options"] [role="rowheader"]')].map(
+  [...container.querySelectorAll('section[aria-label="Settings"] [role="rowheader"]')].map(
     (heading) => heading.textContent
   );
 
@@ -199,7 +199,7 @@ const readAt = async (registry: AtomRegistry.AtomRegistry, sequence: number) => 
   await settled(() => registry.get(optionsState).owner?.sequence === sequence);
 };
 
-describe("the options view, under store, uploads, and previews", () => {
+describe("the options view, under storage, uploads, and previews", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
@@ -216,33 +216,33 @@ describe("the options view, under store, uploads, and previews", () => {
     expect(rows(container)).toStrictEqual([
       [
         "uploads.expireAfter",
-        "unset",
+        "not set",
         "default: unset",
-        "How many days an Upload is kept before it is deleted, from 1 to 36500. Unset, an Upload is kept until the Owner deletes it.",
+        "How many days an upload is kept before it is deleted, from 1 to 36500. When not set, an upload is kept until you delete it.",
       ],
       [
         "uploads.listen",
-        "unset",
+        "not set",
         "default: unset",
-        "The address the Link listener listens on, as host:port, such as 127.0.0.1:7668.",
+        "The address the upload server listens on, as host:port, such as 127.0.0.1:7668.",
       ],
       [
         "uploads.maxSize",
-        "104857600",
-        "default: 104857600",
-        "The largest an Upload may be, in bytes. The default is 100 MiB.",
+        "100000000",
+        "default: 100000000",
+        "The maximum size of an upload, in bytes. The default is 100 MB.",
       ],
       [
         "uploads.maxTotal",
-        "unset",
+        "not set",
         "default: unset",
-        "The most bytes of Uploads the store may hold, each distinct file counted once. An upload that would pass it is refused, and nothing is deleted to make room. Unset, there is no limit.",
+        "The maximum total size of uploads that storage may hold, in bytes, counting each distinct file once. An upload that would exceed it is refused, and nothing is deleted to make room. When not set, there is no limit.",
       ],
       [
         "uploads.publicUrl",
-        "unset",
+        "not set",
         "default: unset",
-        "The address every Upload's link starts with, an http or https URL, such as https://files.example.com.",
+        "The address every upload link starts with, an http or https URL, such as https://files.example.com.",
       ],
     ]);
   });
@@ -251,13 +251,13 @@ describe("the options view, under store, uploads, and previews", () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
 
-    await type("/set store");
+    await type("/set storage");
     await readAt(registry, 0);
-    await type("/set store.s3.bucket My_Bucket");
+    await type("/set storage.s3.bucket My_Bucket");
     const refused = fake.daemon.ownerChanges.length;
 
-    await type("/set store.s3.bucket my-bucket");
-    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "my-bucket");
+    await type("/set storage.s3.bucket my-bucket");
+    await settled(() => rowOf(container, "storage.s3.bucket")?.[1] === "my-bucket");
     await type("/unset uploads.maxSize");
     await settled(() => fake.daemon.ownerChanges.length === 2);
 
@@ -267,14 +267,14 @@ describe("the options view, under store, uploads, and previews", () => {
       refused,
     }).toStrictEqual({
       changes: [
-        { ifSequence: "0", route: "PUT store.s3.bucket" },
+        { ifSequence: "0", route: "PUT storage.s3.bucket" },
         { ifSequence: "10", route: "DELETE uploads.maxSize" },
       ],
       owner: {
         options: {
-          "previews.maxTotal": 1_073_741_824,
-          "store.s3.bucket": "my-bucket",
-          "uploads.maxSize": 104_857_600,
+          "previews.maxTotal": 1_000_000_000,
+          "storage.s3.bucket": "my-bucket",
+          "uploads.maxSize": 100_000_000,
         },
         sequence: 11,
       },
@@ -286,12 +286,12 @@ describe("the options view, under store, uploads, and previews", () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
 
-    await type("/set store");
+    await type("/set storage");
     await readAt(registry, 0);
-    await type("/set store.s3.bucket my-bucket");
-    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "my-bucket");
+    await type("/set storage.s3.bucket my-bucket");
+    await settled(() => rowOf(container, "storage.s3.bucket")?.[1] === "my-bucket");
 
-    const row = container.querySelector<HTMLElement>('[data-key="store.s3.bucket"]');
+    const row = container.querySelector<HTMLElement>('[data-key="storage.s3.bucket"]');
 
     if (row === null) {
       throw new Error("no row");
@@ -302,7 +302,7 @@ describe("the options view, under store, uploads, and previews", () => {
     const question = container.querySelector('[role="alertdialog"]')?.textContent;
 
     const button = [...container.querySelectorAll('[role="alertdialog"] button')].find(
-      (one) => one.textContent === "Unset"
+      (one) => one.textContent === "unset"
     );
 
     if (button === undefined) {
@@ -314,16 +314,16 @@ describe("the options view, under store, uploads, and previews", () => {
     await doing(() => {
       button.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
     });
-    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "unset");
+    await settled(() => rowOf(container, "storage.s3.bucket")?.[1] === "not set");
 
     expect({
       changes: fake.daemon.ownerChanges.map((one) => one.route),
       question,
-      row: rowOf(container, "store.s3.bucket")?.[1],
+      row: rowOf(container, "storage.s3.bucket")?.[1],
     }).toStrictEqual({
-      changes: ["PUT store.s3.bucket", "DELETE store.s3.bucket"],
-      question: "Unset store.s3.bucket?UnsetKeep",
-      row: "unset",
+      changes: ["PUT storage.s3.bucket", "DELETE storage.s3.bucket"],
+      question: "Unset storage.s3.bucket?unsetkeep",
+      row: "not set",
     });
   });
 
@@ -357,7 +357,7 @@ describe("the options view, under store, uploads, and previews", () => {
     await edit("0");
 
     const notice = container.querySelector(
-      'section[aria-label="Options"] [role="alert"]'
+      'section[aria-label="Settings"] [role="alert"]'
     )?.textContent;
 
     await edit("1048576");
@@ -378,7 +378,7 @@ describe("the options view, under store, uploads, and previews", () => {
 
     // Another device's Change, which this page has not heard of yet.
     fake.daemon.owner = {
-      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 2048 },
+      options: { "previews.maxTotal": 1_000_000_000, "uploads.maxSize": 2048 },
       sequence: 7,
     };
     await type("/set uploads.expireAfter 30");
@@ -391,7 +391,7 @@ describe("the options view, under store, uploads, and previews", () => {
       ],
       owner: {
         options: {
-          "previews.maxTotal": 1_073_741_824,
+          "previews.maxTotal": 1_000_000_000,
           "uploads.expireAfter": 30,
           "uploads.maxSize": 2048,
         },
@@ -405,28 +405,28 @@ describe("the options view, under store, uploads, and previews", () => {
     const first = await page(fake);
     const second = await page(fake);
 
-    await first.type("/set store.s3.region");
-    await second.type("/set store.s3.region");
+    await first.type("/set storage.s3.region");
+    await second.type("/set storage.s3.region");
     await eventually(() => fake.daemon.ownerFollowers.length === 2);
-    await second.type("/set store.s3.region us-east-1");
-    await settled(() => rowOf(first.container, "store.s3.region")?.[1] === "us-east-1");
+    await second.type("/set storage.s3.region us-east-1");
+    await settled(() => rowOf(first.container, "storage.s3.region")?.[1] === "us-east-1");
 
-    expect(rowOf(first.container, "store.s3.region")).toStrictEqual([
-      "store.s3.region",
+    expect(rowOf(first.container, "storage.s3.region")).toStrictEqual([
+      "storage.s3.region",
       "us-east-1",
       "default: unset",
       "The bucket's region, such as us-east-1, or auto.",
     ]);
   });
 
-  it("shows a Credential another device held again under the name an option already gave it as held", async () => {
+  it("shows a Credential another device held again under the name an option already gave it as set", async () => {
     const fake = signedIn();
 
     fake.daemon.owner = {
       options: {
-        "previews.maxTotal": 1_073_741_824,
-        "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
-        "uploads.maxSize": 104_857_600,
+        "previews.maxTotal": 1_000_000_000,
+        "storage.s3.accessKeyId": "Owner.storage.s3.accessKeyId",
+        "uploads.maxSize": 100_000_000,
       },
       sequence: 1,
     };
@@ -434,17 +434,17 @@ describe("the options view, under store, uploads, and previews", () => {
     const first = await page(fake);
     const second = await page(fake);
 
-    await first.type("/set store.s3.access*");
-    await second.type("/set store.s3.access*");
+    await first.type("/set storage.s3.access*");
+    await second.type("/set storage.s3.access*");
     await eventually(() => fake.daemon.ownerFollowers.length === 2);
     await readAt(first.registry, 1);
     await readAt(second.registry, 1);
     await settled(
       () =>
-        rowOf(first.container, "store.s3.accessKeyId")?.[1] ===
-        "Owner.store.s3.accessKeyId not held"
+        rowOf(first.container, "storage.s3.accessKeyId")?.[1] ===
+        "Owner.storage.s3.accessKeyId not set"
     );
-    await second.type("/set store.s3.accessKeyId");
+    await second.type("/set storage.s3.accessKeyId");
 
     const field = second.container.querySelector<HTMLInputElement>('input[name="value"]');
 
@@ -458,27 +458,27 @@ describe("the options view, under store, uploads, and previews", () => {
     });
     await settled(
       () =>
-        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
+        rowOf(first.container, "storage.s3.accessKeyId")?.[1] === "Owner.storage.s3.accessKeyId set"
     );
 
     expect({
       changes: fake.daemon.ownerChanges,
-      row: rowOf(first.container, "store.s3.accessKeyId")?.[1],
+      row: rowOf(first.container, "storage.s3.accessKeyId")?.[1],
     }).toStrictEqual({
-      changes: [{ ifSequence: "1", route: "PUT store.s3.accessKeyId" }],
-      row: "Owner.store.s3.accessKeyId held",
+      changes: [{ ifSequence: "1", route: "PUT storage.s3.accessKeyId" }],
+      row: "Owner.storage.s3.accessKeyId set",
     });
   });
 
-  it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is held", async () => {
+  it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is set", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
     const secret = "the-bucket's-secret-access-key";
 
-    await type("/set store.s3.secret*");
+    await type("/set storage.s3.secret*");
     await readAt(registry, 0);
-    await type("/set store.s3.secretAccessKey");
-    const before = rowOf(container, "store.s3.secretAccessKey");
+    await type("/set storage.s3.secretAccessKey");
+    const before = rowOf(container, "storage.s3.secretAccessKey");
 
     const field = container.querySelector<HTMLInputElement>('input[name="value"]');
 
@@ -492,7 +492,8 @@ describe("the options view, under store, uploads, and previews", () => {
     });
     await settled(
       () =>
-        rowOf(container, "store.s3.secretAccessKey")?.[1] === "Owner.store.s3.secretAccessKey held"
+        rowOf(container, "storage.s3.secretAccessKey")?.[1] ===
+        "Owner.storage.s3.secretAccessKey set"
     );
 
     expect({
@@ -500,28 +501,28 @@ describe("the options view, under store, uploads, and previews", () => {
       before,
       changes: fake.daemon.ownerChanges,
       held: Object.fromEntries(fake.daemon.credentials),
-      option: fake.daemon.owner.options["store.s3.secretAccessKey"],
+      option: fake.daemon.owner.options["storage.s3.secretAccessKey"],
       page: container.textContent.includes(secret),
       prompt: container.querySelector('input[name="value"]'),
-      row: rowOf(container, "store.s3.secretAccessKey"),
+      row: rowOf(container, "storage.s3.secretAccessKey"),
     }).toStrictEqual({
       atoms: false,
       before: [
-        "store.s3.secretAccessKey",
-        "unset",
+        "storage.s3.secretAccessKey",
+        "not set",
         "default: unset",
-        "The Credential that holds the bucket's secret access key.",
+        "The secret that holds the bucket's secret access key.",
       ],
-      changes: [{ ifSequence: "0", route: "PUT store.s3.secretAccessKey" }],
-      held: { "Owner.store.s3.secretAccessKey": secret },
-      option: "Owner.store.s3.secretAccessKey",
+      changes: [{ ifSequence: "0", route: "PUT storage.s3.secretAccessKey" }],
+      held: { "Owner.storage.s3.secretAccessKey": secret },
+      option: "Owner.storage.s3.secretAccessKey",
       page: false,
       prompt: null,
       row: [
-        "store.s3.secretAccessKey",
-        "Owner.store.s3.secretAccessKey held",
+        "storage.s3.secretAccessKey",
+        "Owner.storage.s3.secretAccessKey set",
         "default: unset",
-        "The Credential that holds the bucket's secret access key.",
+        "The secret that holds the bucket's secret access key.",
       ],
     });
   });
@@ -577,7 +578,7 @@ const held = async () => {
     () =>
       shown.registry.get(optionsState).ui !== undefined &&
       shown.registry.get(optionsState).owner !== undefined &&
-      rowOf(shown.container, "ui.timeline.timeFormat")?.[1] === "HH:mm"
+      rowOf(shown.container, "ui.conversation.timeFormat")?.[1] === "HH:mm"
   );
   state.holding = true;
 
@@ -591,7 +592,7 @@ describe("an option's change, while it is on its way", () => {
     }
   });
 
-  it("shows a Network's option as asked, while the write is held", async () => {
+  it("shows a Network's option as asked, while the write is set", async () => {
     const { container, type, writes } = await held();
 
     await type("/set network.libera.realname Dean");
@@ -607,7 +608,7 @@ describe("an option's change, while it is on its way", () => {
     expect(whileHeld).toStrictEqual([1, "Dean"]);
   });
 
-  it("unsets a Network's option on the Daemon, showing at once, when unset while its set is held", async () => {
+  it("unsets a Network's option on the Daemon, showing at once, when unset while its set is set", async () => {
     const { container, fake, registry, state, writes } = await held();
     const realname = ["realname"];
 
@@ -639,13 +640,13 @@ describe("an option's change, while it is on its way", () => {
     }).toStrictEqual({ configuration: liberaConfiguration, puts: 2, whileHeld: 1 });
   });
 
-  it("shows an option under store as asked, while the write is held", async () => {
+  it("shows an option under storage as asked, while the write is set", async () => {
     const { container, type, writes } = await held();
 
-    await type("/set store.s3.bucket my-bucket");
+    await type("/set storage.s3.bucket my-bucket");
     await settled(() => writes.length === 1);
-    await settled(() => rowOf(container, "store.s3.bucket")?.[1] === "my-bucket");
-    const whileHeld = [writes.length, rowOf(container, "store.s3.bucket")?.[1]];
+    await settled(() => rowOf(container, "storage.s3.bucket")?.[1] === "my-bucket");
+    const whileHeld = [writes.length, rowOf(container, "storage.s3.bucket")?.[1]];
 
     // Let go, so no write is left waiting when the page is taken down.
     for (const release of writes.splice(0)) {
@@ -659,22 +660,22 @@ describe("an option's change, while it is on its way", () => {
     const { container, state, type, writes } = await held();
 
     state.refusing = true;
-    await type("/set ui.timeline.timeFormat HH:mm:ss");
+    await type("/set ui.conversation.timeFormat HH:mm:ss");
     await settled(() => writes.length === 1);
-    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm:ss");
-    const whileHeld = rowOf(container, "ui.timeline.timeFormat")?.[1];
+    await settled(() => rowOf(container, "ui.conversation.timeFormat")?.[1] === "HH:mm:ss");
+    const whileHeld = rowOf(container, "ui.conversation.timeFormat")?.[1];
 
     for (const release of writes.splice(0)) {
       release();
     }
 
-    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm");
+    await settled(() => rowOf(container, "ui.conversation.timeFormat")?.[1] === "HH:mm");
 
     expect({
       notice: container.querySelector('[role="alert"]')?.firstChild?.textContent,
       whileHeld,
     }).toStrictEqual({
-      notice: "The Daemon could not record this, so nothing was changed.",
+      notice: "The daemon could not record this, so nothing was changed.",
       whileHeld: "HH:mm:ss",
     });
   });
@@ -727,7 +728,7 @@ const configured = () => {
     options: {
       ...fake.daemon.owner.options,
       "previews.maxTotal": 4096,
-      "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
+      "storage.s3.accessKeyId": "Owner.storage.s3.accessKeyId",
       "uploads.publicUrl": "https://files.example.com",
     },
     sequence: 3,
@@ -736,7 +737,7 @@ const configured = () => {
     configuration: { ...liberaConfiguration, password: "libera.password" },
     sequence: 2,
   });
-  fake.daemon.credentials.set("Owner.store.s3.accessKeyId", "an-access-key-id");
+  fake.daemon.credentials.set("Owner.storage.s3.accessKeyId", "an-access-key-id");
   fake.daemon.credentials.set("libera.password", "a-password");
 
   return fake;
@@ -744,21 +745,21 @@ const configured = () => {
 
 /**
  * Whatever in the view would read as an answer while it is not known: a default, "not
- * held", an empty filter, or a Network with no rows and no wait.
+ * set", an empty filter, or a Network with no rows and no wait.
  * @param container - The page.
  * @returns What the view says of each.
  */
 const answers = (container: HTMLElement) => {
-  const text = container.querySelector('section[aria-label="Options"]')?.textContent ?? "";
+  const text = container.querySelector('section[aria-label="Settings"]')?.textContent ?? "";
 
   return {
-    accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+    accessKeyId: rowOf(container, "storage.s3.accessKeyId")?.[1],
     libera: rows(container).some(([name]) => name?.startsWith("network.libera.") === true),
     maxTotal: rowOf(container, "previews.maxTotal")?.[1],
     nothingMatches: text.includes("No option matches."),
     password: rowOf(container, "network.libera.password")?.[1],
     publicUrl: rowOf(container, "uploads.publicUrl")?.[1],
-    waits: [...container.querySelectorAll('[aria-label="Being read"] li')].map(
+    waits: [...container.querySelectorAll('[aria-label="Loading"] li')].map(
       (wait) => wait.textContent
     ),
   };
@@ -766,11 +767,11 @@ const answers = (container: HTMLElement) => {
 
 /** What the view says once everything is read. */
 const allRead = {
-  accessKeyId: "Owner.store.s3.accessKeyId held",
+  accessKeyId: "Owner.storage.s3.accessKeyId set",
   libera: true,
   maxTotal: "4096",
   nothingMatches: false,
-  password: "libera.password held",
+  password: "libera.password set",
   publicUrl: "https://files.example.com",
   waits: [],
 };
@@ -801,7 +802,7 @@ const opened = async (held: readonly string[], holding: ReturnType<typeof answer
   await settled(() => {
     const now = answers(shown.container);
 
-    return now.waits.length === 0 && !JSON.stringify(now).includes("reading…");
+    return now.waits.length === 0 && !JSON.stringify(now).includes("loading…");
   });
 
   return answers(shown.container);
@@ -814,12 +815,12 @@ describe("the options view, opened while what it shows is read", () => {
     }
   });
 
-  it("draws each option under store, uploads, and previews as being read, never its default, until they are", async () => {
+  it("draws each option under storage, uploads, and previews as being read, never its default, until they are", async () => {
     const reading = {
       ...allRead,
-      accessKeyId: "reading…",
-      maxTotal: "reading…",
-      publicUrl: "reading…",
+      accessKeyId: "loading…",
+      maxTotal: "loading…",
+      publicUrl: "loading…",
     };
 
     await expect(opened(["/api/options/changes"], reading)).resolves.toStrictEqual(allRead);
@@ -828,8 +829,8 @@ describe("the options view, opened while what it shows is read", () => {
   it("draws whether a Credential is held as being read, never as not held, until the names held are", async () => {
     const reading = {
       ...allRead,
-      accessKeyId: "Owner.store.s3.accessKeyId reading…",
-      password: "libera.password reading…",
+      accessKeyId: "Owner.storage.s3.accessKeyId loading…",
+      password: "libera.password loading…",
     };
 
     await expect(opened(["/api/credentials"], reading)).resolves.toStrictEqual(allRead);
@@ -840,7 +841,7 @@ describe("the options view, opened while what it shows is read", () => {
       ...allRead,
       libera: false,
       password: undefined,
-      waits: ["Reading network.libera.*…"],
+      waits: ["Loading network.libera.*…"],
     };
 
     await expect(opened(["/api/networks/libera/configuration"], reading)).resolves.toStrictEqual(
@@ -900,28 +901,28 @@ describe("the options view, opened when a read fails", () => {
     const { container } = await failed(["/api/networks"]);
 
     expect({
-      accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+      accessKeyId: rowOf(container, "storage.s3.accessKeyId")?.[1],
       notice: container.querySelector('[role="alert"]')?.textContent,
       waits: answers(container).waits,
     }).toStrictEqual({
-      accessKeyId: "Owner.store.s3.accessKeyId held",
+      accessKeyId: "Owner.storage.s3.accessKeyId set",
       notice:
-        "The Daemon did not list its Networks, so their options are not shown. Open the options again to read them.",
+        "The daemon did not list its networks, so their settings are not shown. Open settings again to load them.",
       waits: [],
     });
   });
 
-  it("says whether each Credential is held is not known, and never that one is not held", async () => {
+  it("says whether each Credential is held is not known, and never that one is not set", async () => {
     const { container } = await failed(["/api/credentials"]);
 
     expect({
-      accessKeyId: rowOf(container, "store.s3.accessKeyId")?.[1],
+      accessKeyId: rowOf(container, "storage.s3.accessKeyId")?.[1],
       notice: container.querySelector('[role="alert"]')?.textContent,
       password: rowOf(container, "network.libera.password")?.[1],
     }).toStrictEqual({
-      accessKeyId: "Owner.store.s3.accessKeyId not known",
+      accessKeyId: "Owner.storage.s3.accessKeyId not known",
       notice:
-        "The Daemon did not say which Credentials it holds, so whether each is held is not known. Open the options again to read them.",
+        "The daemon did not say which passwords are saved, so it's unknown whether each is set. Open settings again to load them.",
       password: "libera.password not known",
     });
   });
@@ -930,14 +931,14 @@ describe("the options view, opened when a read fails", () => {
     const { container } = await failed(["/api/networks", "/api/credentials"]);
 
     await settled(() =>
-      (container.querySelector('[role="alert"]')?.textContent ?? "").includes("Credentials")
+      (container.querySelector('[role="alert"]')?.textContent ?? "").includes("passwords")
     );
 
     const notice = container.querySelector('[role="alert"]')?.textContent ?? "";
 
     expect({
-      credentials: notice.includes("did not say which Credentials it holds"),
-      networks: notice.includes("did not list its Networks"),
+      credentials: notice.includes("did not say which passwords are saved"),
+      networks: notice.includes("did not list its networks"),
     }).toStrictEqual({ credentials: true, networks: true });
   });
 
@@ -950,7 +951,7 @@ describe("the options view, opened when a read fails", () => {
     await settled(() => shown.registry.get(optionsState).ui !== undefined);
     reads.paths.add("/api/options/changes");
     await shown.type("/set");
-    await settled(() => rowOf(shown.container, "uploads.publicUrl")?.[1] === "reading…");
+    await settled(() => rowOf(shown.container, "uploads.publicUrl")?.[1] === "loading…");
 
     const row = shown.container.querySelector<HTMLElement>('[data-key="uploads.publicUrl"]');
 
@@ -1103,7 +1104,7 @@ const uiShown = async (fake: ReturnType<typeof fakeDaemon>) => {
 
   shown.registry.mount(uiSync);
   await shown.type("/set ui.");
-  await settled(() => rowOf(shown.container, "ui.timeline.timeFormat")?.[1] === "HH:mm");
+  await settled(() => rowOf(shown.container, "ui.conversation.timeFormat")?.[1] === "HH:mm");
 
   return shown;
 };
@@ -1197,7 +1198,7 @@ describe("an option chosen from a menu", () => {
   it("opens on Enter with the value in force marked and focused, and Enter on another sets what /set sets", async () => {
     const chosen = signedIn();
     const { container } = await uiShown(chosen);
-    const menu = await menuFor(container, "ui.timeline.timeFormat");
+    const menu = await menuFor(container, "ui.conversation.timeFormat");
     const entries = entriesOf(menu);
     const focusedFirst = document.activeElement?.textContent;
 
@@ -1205,13 +1206,15 @@ describe("an option chosen from a menu", () => {
     const focusedNext = document.activeElement?.textContent;
 
     await enter(document.activeElement ?? document.body);
-    await settled(() => rowOf(container, "ui.timeline.timeFormat")?.[1] === "HH:mm:ss");
-    await settled(() => document.activeElement === rowElement(container, "ui.timeline.timeFormat"));
+    await settled(() => rowOf(container, "ui.conversation.timeFormat")?.[1] === "HH:mm:ss");
+    await settled(
+      () => document.activeElement === rowElement(container, "ui.conversation.timeFormat")
+    );
 
     const typed = signedIn();
     const other = await uiShown(typed);
 
-    await other.type("/set ui.timeline.timeFormat HH:mm:ss");
+    await other.type("/set ui.conversation.timeFormat HH:mm:ss");
     await settled(() => typed.daemon.uiChanges.length === 1);
 
     expect({
@@ -1231,20 +1234,20 @@ describe("an option chosen from a menu", () => {
     });
   });
 
-  // Regression: `ui.tail` is not offered, or offers values the contract does not take.
-  it("offers ui.tail's levels, info in force, and /set and /unset change it for every device", async () => {
+  // Regression: `ui.logs` is not offered, or offers values the contract does not take.
+  it("offers ui.logs's levels, info in force, and /set and /unset change it for every device", async () => {
     const fake = signedIn();
     const { container, type } = await uiShown(fake);
-    const row = rowOf(container, "ui.tail");
-    const entries = entriesOf(await menuFor(container, "ui.tail"));
+    const row = rowOf(container, "ui.logs");
+    const entries = entriesOf(await menuFor(container, "ui.logs"));
 
     await press(document.activeElement ?? document.body, "Escape");
-    await type("/set ui.tail debug");
-    await settled(() => rowOf(container, "ui.tail")?.[1] === "debug");
-    const set = fake.daemon.ui.options.tail;
+    await type("/set ui.logs debug");
+    await settled(() => rowOf(container, "ui.logs")?.[1] === "debug");
+    const set = fake.daemon.ui.options.logs;
 
-    await type("/unset ui.tail");
-    await settled(() => rowOf(container, "ui.tail")?.[1] === "info");
+    await type("/unset ui.logs");
+    await settled(() => rowOf(container, "ui.logs")?.[1] === "info");
 
     expect({
       changes: fake.daemon.uiChanges.map((one) => one.route),
@@ -1252,13 +1255,13 @@ describe("an option chosen from a menu", () => {
       row,
       set,
     }).toStrictEqual({
-      changes: ["PUT tail", "DELETE tail"],
+      changes: ["PUT logs", "DELETE logs"],
       entries: ["debug", "* info", "warning", "error"],
       row: [
-        "ui.tail",
+        "ui.logs",
         "info",
         "default: info",
-        "The least level of what the Daemon logged that the iirc view shows, along with every level above it. It changes what is shown, never what the Daemon keeps. Every device shares it.",
+        "The minimum level of daemon logs to show, along with every level above it. It changes what is shown, never what the daemon keeps. Every device shares it.",
       ],
       set: "debug",
     });
@@ -1268,18 +1271,20 @@ describe("an option chosen from a menu", () => {
     const fake = signedIn();
     const { container } = await uiShown(fake);
 
-    await menuFor(container, "ui.timeline.timeFormat");
+    await menuFor(container, "ui.conversation.timeFormat");
     await press(document.activeElement ?? document.body, "Escape");
     await settled(() => document.querySelector('[role="menu"]') === null);
-    await settled(() => document.activeElement === rowElement(container, "ui.timeline.timeFormat"));
+    await settled(
+      () => document.activeElement === rowElement(container, "ui.conversation.timeFormat")
+    );
 
     // Escape once more, on the row, is the view's own: it closes.
-    const before = container.querySelector('section[aria-label="Options"]') !== null;
+    const before = container.querySelector('section[aria-label="Settings"]') !== null;
 
-    await press(rowElement(container, "ui.timeline.timeFormat"), "Escape");
+    await press(rowElement(container, "ui.conversation.timeFormat"), "Escape");
 
     expect({
-      after: container.querySelector('section[aria-label="Options"]') !== null,
+      after: container.querySelector('section[aria-label="Settings"]') !== null,
       before,
       changes: fake.daemon.uiChanges,
     }).toStrictEqual({ after: false, before: true, changes: [] });
@@ -1337,7 +1342,7 @@ describe("an option chosen from a menu", () => {
         "atkinson-hyperlegible-next",
         "source-sans-3",
         "inter",
-        "Custom…",
+        "custom…",
       ],
       menu: false,
       starting: "system",
@@ -1361,7 +1366,7 @@ describe("an option chosen from a menu", () => {
       custom.focus();
     });
 
-    const other = rowElement(container, "ui.timeline.timeFormat");
+    const other = rowElement(container, "ui.conversation.timeFormat");
 
     // Custom…, and then, within the same frame, Enter on another row.
     await doing(() => {
@@ -1384,19 +1389,19 @@ describe("an option chosen from a menu", () => {
     expect({
       editing: registry.get(optionsState).editing,
       field: container.querySelector('input[aria-label="Value of ui.font"]') !== null,
-    }).toStrictEqual({ editing: "ui.timeline.timeFormat", field: false });
+    }).toStrictEqual({ editing: "ui.conversation.timeFormat", field: false });
   });
 
   it("opens a value that is none of the choices as Custom…", async () => {
     const fake = signedIn();
     const { container, type } = await uiShown(fake);
 
-    await type("/set ui.timeline.maxWidth 120");
-    await settled(() => rowOf(container, "ui.timeline.maxWidth")?.[1] === "120");
+    await type("/set ui.conversation.maxWidth 120");
+    await settled(() => rowOf(container, "ui.conversation.maxWidth")?.[1] === "120");
 
-    expect(entriesOf(await menuFor(container, "ui.timeline.maxWidth"))).toStrictEqual([
+    expect(entriesOf(await menuFor(container, "ui.conversation.maxWidth"))).toStrictEqual([
       "none",
-      "* Custom…",
+      "* custom…",
     ]);
   });
 });
@@ -1423,27 +1428,11 @@ describe("the options under headings", () => {
     const all = headingsOf(shown.container);
 
     await shown.type("/set *maxTotal");
-    await settled(() => rowOf(shown.container, "ui.timeline.timeFormat") === undefined);
+    await settled(() => rowOf(shown.container, "ui.conversation.timeFormat") === undefined);
 
     expect({ all, filtered: headingsOf(shown.container) }).toStrictEqual({
-      all: ["away", "network.libera", "previews", "store", "ui", "uploads"],
+      all: ["away", "network.libera", "previews", "storage", "ui", "uploads"],
       filtered: ["previews", "uploads"],
-    });
-  });
-
-  it("heads a Network whose id is another's name and option apart from that option", async () => {
-    const shown = await uiShown(signedIn());
-
-    await shown.type("/network add libera.nicks irc.example.net me");
-    await shown.type("/set network.libera");
-    await settled(() => rowOf(shown.container, "network.libera.nicks.nicks") !== undefined);
-
-    expect({
-      headings: headingsOf(shown.container),
-      nicks: rowOf(shown.container, "network.libera.nicks")?.[1],
-    }).toStrictEqual({
-      headings: ["network.libera", "network.libera.nicks"],
-      nicks: "iirc",
     });
   });
 
@@ -1483,7 +1472,7 @@ describe("the options under headings", () => {
       intoPreviews,
       up,
     }).toStrictEqual({
-      asked: "Unset previews.maxTotal, back to 1073741824?",
+      asked: "Unset previews.maxTotal, back to 1000000000?",
       down: "uploads.expireAfter",
       intoPreviews: "previews.maxTotal",
       up: "ui.unread.quietBots",
@@ -1493,13 +1482,14 @@ describe("the options under headings", () => {
   it("gives an option two lines, and says beside a value this device overrides the one every device shares", async () => {
     const shown = await uiShown(signedIn());
 
-    await shown.type("/set -device ui.timeline.timeFormat HH:mm:ss");
+    await shown.type("/set -device ui.conversation.timeFormat HH:mm:ss");
     await settled(
-      () => rowOf(shown.container, "ui.timeline.timeFormat")?.[1]?.startsWith("HH:mm:ss") === true
+      () =>
+        rowOf(shown.container, "ui.conversation.timeFormat")?.[1]?.startsWith("HH:mm:ss") === true
     );
 
-    expect(linesOf(shown.container, "ui.timeline.timeFormat")).toStrictEqual([
-      "ui.timeline.timeFormatHH:mm:ss on this device, over HH:mm",
+    expect(linesOf(shown.container, "ui.conversation.timeFormat")).toStrictEqual([
+      "ui.conversation.timeFormatHH:mm:ss on this device, over HH:mm",
       expect.stringMatching(/^How .*default: HH:mm$/u),
     ]);
   });

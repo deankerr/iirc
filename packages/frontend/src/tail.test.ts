@@ -65,7 +65,7 @@ describe("the Tail held", () => {
     });
   });
 
-  it("lets go of the Tail held when the stream is of a Daemon that started anew, and keeps it for the same", () => {
+  it("lets go of the Tail held when the stream is of a daemon that started anew, and keeps it for the same", () => {
     const held = read([1, 2]);
 
     const opened = (at: number) =>
@@ -105,8 +105,8 @@ describe("the Tail held", () => {
     ]);
   });
 
-  // Regression: a `ui.tail` value names the wrong level, so the view shows too much or too little.
-  it("takes each ui.tail value as the least level it names", () => {
+  // Regression: a `ui.logs` value names the wrong level, so the view shows too much or too little.
+  it("takes each ui.logs value as the least level it names", () => {
     expect(
       (["debug", "info", "warning", "error"] as const).map((tail) => [tail, leastShown(tail)])
     ).toStrictEqual([

@@ -14,7 +14,7 @@
  *
  * Each row is a grid of its own, as the rows are placed one by one, so each sizes its time
  * column from the same unseen sample, the times of the format shown drawn in the font the
- * text is, and its senders' column from `ui.timeline.nickWidth`, in the font's own `0`. Every
+ * text is, and its senders' column from `ui.conversation.nickWidth`, in the font's own `0`. Every
  * row's columns are then as wide as every other's, in any font.
  *
  * The senders' column holds the nick, then room, then a thin rule, which the row draws the
@@ -22,7 +22,7 @@
  * The column's gap then sets what was said as far past it. A Gap or a Day draws a rule of
  * its own across.
  *
- * Every row keeps half of `ui.timeline.spacing` above and half below inside itself, as rows
+ * Every row keeps half of `ui.conversation.spacing` above and half below inside itself, as rows
  * are placed and measured one by one, so a Highlight's tint and the rule cover the room.
  */
 .message,
@@ -474,7 +474,7 @@
 
 /*
  * A row that reads as one run of text that wraps under itself, as the time, the sender,
- * then the text, in place of the shared columns: under `ui.timeline.layout` inline or
+ * then the text, in place of the shared columns: under `ui.conversation.layout` inline or
  * stacked at any width, and in a Timeline too narrow for columns, as the Timeline's
  * `data-line` says. Stacked then sets a run's Messages apart below.
  */
@@ -556,7 +556,7 @@
 }
 
 /*
- * Under `ui.timeline.layout` stacked, a run of plain speech from one User: its head has the nick, in
+ * Under `ui.conversation.layout` stacked, a run of plain speech from one User: its head has the nick, in
  * its colour, and the time beside it on a line of their own, a little apart from the row
  * above, and each Message's text, the head's too, starts a line of its own below. These rows
  * are only ever drawn under stacked, in a Pane of any width. The room the head keeps above

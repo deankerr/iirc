@@ -110,7 +110,7 @@ export interface Sources {
   readonly recent: readonly string[];
   /** Self's nick, if known, which comes last. */
   readonly self: string | undefined;
-  /** What follows a nick completed at the start of a line, as `ui.composer.nickSuffix` says. */
+  /** What follows a nick completed at the start of a line, as `ui.input.nickSuffix` says. */
   readonly suffix: string;
 }
 
@@ -476,7 +476,7 @@ const wholeIn = (line: string): { readonly start: number; readonly whole: Whole 
     more === null ? undefined : { start: head[0].length + more[0].length, whole };
 
   switch (command.id) {
-    case "timeline.go": {
+    case "conversation.go": {
       return { start: head[0].length, whole: { _tag: "Timelines" } };
     }
 
@@ -1553,7 +1553,7 @@ const chantypesNow = (
 
 /**
  * What completion lists from beyond the Timelines, as a Frontend holds it: the options
- * read, each Network's `CHANTYPES`, `ui.composer.nickSuffix` in effect, the keymap, the keys of the
+ * read, each Network's `CHANTYPES`, `ui.input.nickSuffix` in effect, the keymap, the keys of the
  * commands run recently, every theme, the one each theme option names on this device, and
  * the font in effect on it, the aliases the Owner made, and every emoji once loaded.
  */

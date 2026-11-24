@@ -13,11 +13,11 @@ const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\
 
 const service = configured({
   channels: [{ name: "#iirc" }],
-  lines: ["PRIVMSG HostServ :ON"],
+  commands: ["PRIVMSG HostServ :ON"],
   login: {
     _tag: "Service",
     account: "acct",
-    credential: CredentialName.make("pw"),
+    password: CredentialName.make("pw"),
     service: "NickServ",
     wait: 5,
   },

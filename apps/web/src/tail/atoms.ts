@@ -92,7 +92,7 @@ const tailHeld = Atom.make((get): HeldTail | undefined =>
 /** The Daemon's version, once the Tail is read. */
 export const tailVersion = Atom.make((get) => get(tailHeld)?.version);
 
-/** The lines the view shows, oldest first: those at the level `ui.tail` names and above. */
+/** The lines the view shows, oldest first: those at the level `ui.logs` names and above. */
 export const tailShown = Atom.make((get) => {
   const held = get(tailHeld);
 

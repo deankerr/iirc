@@ -65,12 +65,12 @@ export const SignInScreen = ({ attempt }: { readonly attempt: Attempt }) => {
       <Form className={styles.form} onSubmit={submitted(signIn)}>
         <h1 className={styles.title}>iirc</h1>
         <p className={styles.hint}>
-          Sign in with a key. Make one with <code>iirc key create &lt;name&gt;</code>.
+          Sign in with an API key. Make one with <code>iirc key create &lt;name&gt;</code>.
         </p>
         <PasswordField
           autoComplete="current-password"
           errorId={attempt._tag === "Failed" ? failureId : undefined}
-          label="Key"
+          label="api key"
           name="key"
         />
         {attempt._tag === "Failed" ? (
@@ -80,7 +80,7 @@ export const SignInScreen = ({ attempt }: { readonly attempt: Attempt }) => {
         ) : null}
         <div className={styles.actions}>
           <Button isPending={attempt._tag === "Waiting"} type="submit" variant="primary">
-            {attempt._tag === "Waiting" ? "Signing in…" : "Sign in"}
+            {attempt._tag === "Waiting" ? "signing in…" : "sign in"}
           </Button>
         </div>
       </Form>

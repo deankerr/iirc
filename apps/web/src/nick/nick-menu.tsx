@@ -33,7 +33,7 @@ const longPressMs = 500;
 const longPressSlop = 10;
 
 /** The id of the wait drawn where more entries will go. */
-const waitId = "reading";
+const waitId = "loading";
 
 /**
  * The wait drawn where more entries will go, which cannot be chosen.
@@ -43,8 +43,8 @@ const waitId = "reading";
 const waitFor = (nick: string): NickEntry => ({
   id: waitId,
   intents: [],
-  label: `Reading what else can be done with ${nick}`,
-  text: "reading…",
+  label: `Loading more actions for ${nick}`,
+  text: "loading…",
 });
 
 /**

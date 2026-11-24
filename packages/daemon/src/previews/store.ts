@@ -1,5 +1,5 @@
 /**
- * The byte store Previews keep their images in: the bucket the `store.s3.*` options name,
+ * The byte store Previews keep their images in: the bucket the `storage.s3.*` options name,
  * with the keys the Vault holds now. It is made each time it is used, so it always follows
  * the options and the Credentials. Uploads make theirs the same way, and need a public URL
  * besides, which Previews do not.
@@ -29,11 +29,11 @@ export const previewStore = Effect.gen(function* () {
     const { options } = yield* owner.inForce;
 
     const {
-      "store.s3.accessKeyId": accessKeyId,
-      "store.s3.bucket": bucket,
-      "store.s3.endpoint": endpoint,
-      "store.s3.region": region,
-      "store.s3.secretAccessKey": secretAccessKey,
+      "storage.s3.accessKeyId": accessKeyId,
+      "storage.s3.bucket": bucket,
+      "storage.s3.endpoint": endpoint,
+      "storage.s3.region": region,
+      "storage.s3.secretAccessKey": secretAccessKey,
     } = options;
 
     if (
@@ -52,8 +52,8 @@ export const previewStore = Effect.gen(function* () {
           new ByteStoreUnavailable({
             reason:
               error._tag === "CredentialMissing"
-                ? `the Credential ${error.credential} is not held`
-                : "the Credentials could not be read",
+                ? `the credential ${error.credential} is not held`
+                : "the credentials could not be read",
           })
       )
     );

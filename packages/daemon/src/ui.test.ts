@@ -44,25 +44,36 @@ describe("folding the ui options", () => {
   it("takes the latest Change of each option, and an unset back to its default", () => {
     expect(
       fold([
-        set("timeline.timeFormat", "HH:mm:ss"),
+        set("conversation.timeFormat", "HH:mm:ss"),
         set("theme", "dark"),
-        set("timeline.timeFormat", "none"),
-        // Journaled under the name the option had before, which is the option's still.
-        set("activity", "quiet"),
+        set("conversation.timeFormat", "none"),
+        set("conversation.activity", "quiet"),
         unset("theme"),
       ])
     ).toStrictEqual({
       options: {
         aliases: [],
-        "composer.enter": "send",
-        "composer.nickSuffix": ": ",
-        "composer.spellcheck": true,
+        "conversation.activity": "quiet",
+        "conversation.colors": "theme",
+        "conversation.dateFormat": "full",
+        "conversation.layout": "columns",
+        "conversation.maxWidth": "none",
+        "conversation.nickBrackets": true,
+        "conversation.nickPrefix": true,
+        "conversation.nickWidth": 16,
+        "conversation.spacing": 0.3,
+        "conversation.timeFormat": "none",
         font: "system",
         "font.lineHeight": 1.45,
         "font.size": 14,
+        "input.enter": "send",
+        "input.nickSuffix": ": ",
+        "input.spellcheck": true,
+        logs: "info",
         "members.width": 18,
         previews: "off",
         "previews.animate": true,
+        "previews.conversations": {},
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -73,25 +84,13 @@ describe("folding the ui options", () => {
           "player.twitch.tv",
         ],
         "previews.start": "open",
-        "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
         "theme.light": "light",
-        "timeline.activity": "quiet",
-        "timeline.colours": "theme",
-        "timeline.dateFormat": "full",
-        "timeline.layout": "columns",
-        "timeline.maxWidth": "none",
-        "timeline.nickBrackets": true,
-        "timeline.nickPrefix": true,
-        "timeline.nickWidth": 16,
-        "timeline.spacing": 0.3,
-        "timeline.timeFormat": "none",
         "unread.markRead": "latest",
         "unread.muted": [],
         "unread.quietBots": false,
@@ -103,23 +102,35 @@ describe("folding the ui options", () => {
   it("changes no option for a Change it cannot read, though its sequence is the last", () => {
     expect(
       fold([
-        set("timeline.timeFormat", "HH:mm:ss"),
-        set("timeline.timeFormat", "noon"),
+        set("conversation.timeFormat", "HH:mm:ss"),
+        set("conversation.timeFormat", "noon"),
         set("palette", "dusk"),
         unset("nope"),
       ])
     ).toStrictEqual({
       options: {
         aliases: [],
-        "composer.enter": "send",
-        "composer.nickSuffix": ": ",
-        "composer.spellcheck": true,
+        "conversation.activity": "all",
+        "conversation.colors": "theme",
+        "conversation.dateFormat": "full",
+        "conversation.layout": "columns",
+        "conversation.maxWidth": "none",
+        "conversation.nickBrackets": true,
+        "conversation.nickPrefix": true,
+        "conversation.nickWidth": 16,
+        "conversation.spacing": 0.3,
+        "conversation.timeFormat": "HH:mm:ss",
         font: "system",
         "font.lineHeight": 1.45,
         "font.size": 14,
+        "input.enter": "send",
+        "input.nickSuffix": ": ",
+        "input.spellcheck": true,
+        logs: "info",
         "members.width": 18,
         previews: "off",
         "previews.animate": true,
+        "previews.conversations": {},
         "previews.mediaHeight": "medium",
         "previews.players": [
           "www.youtube-nocookie.com",
@@ -130,25 +141,13 @@ describe("folding the ui options", () => {
           "player.twitch.tv",
         ],
         "previews.start": "open",
-        "previews.timelines": {},
         "sidebar.networks": [],
         "sidebar.order": [],
         "sidebar.pinned": [],
-        tail: "info",
         theme: "system",
         "theme.dark": "dark",
         "theme.imported": [],
         "theme.light": "light",
-        "timeline.activity": "all",
-        "timeline.colours": "theme",
-        "timeline.dateFormat": "full",
-        "timeline.layout": "columns",
-        "timeline.maxWidth": "none",
-        "timeline.nickBrackets": true,
-        "timeline.nickPrefix": true,
-        "timeline.nickWidth": 16,
-        "timeline.spacing": 0.3,
-        "timeline.timeFormat": "HH:mm:ss",
         "unread.markRead": "latest",
         "unread.muted": [],
         "unread.quietBots": false,
@@ -170,28 +169,6 @@ describe("a Change of ui.previews.style, which is gone", () => {
     expect({ options, sequence }).toStrictEqual({
       options: { ...uiDefaults, "previews.mediaHeight": "large" },
       sequence: 4,
-    });
-  });
-});
-
-const startAfter = (...changes: readonly Change[]) => fold(changes).options["previews.start"];
-
-describe("a Change journaled under ui.previews.folded, which is now ui.previews.start", () => {
-  it("is read as start, open as open and summary or chip as closed, and fails nothing", () => {
-    expect({
-      chip: startAfter(set("previews.folded", "chip")),
-      open: startAfter(set("previews.folded", "summary"), set("previews.folded", "open")),
-      summary: startAfter(set("previews.folded", "summary")),
-      thenStart: startAfter(set("previews.folded", "chip"), set("previews.start", "open")),
-      unknown: startAfter(set("previews.folded", "chip"), set("previews.folded", "nope")),
-      unset: startAfter(set("previews.folded", "chip"), unset("previews.folded")),
-    }).toStrictEqual({
-      chip: "closed",
-      open: "open",
-      summary: "closed",
-      thenStart: "open",
-      unknown: "closed",
-      unset: "open",
     });
   });
 });
@@ -239,10 +216,13 @@ describe("the ui options, kept", () => {
         const first = yield* Effect.gen(function* () {
           const options = yield* UiConfiguration;
 
-          yield* options.change(set("timeline.timeFormat", "HH:mm:ss"), 0);
+          yield* options.change(set("conversation.timeFormat", "HH:mm:ss"), 0);
           yield* journal.append(retry);
           yield* options.change(set("theme", "light"), undefined);
-          const stale = yield* options.change(unset("timeline.timeFormat"), 1).pipe(Effect.flip);
+
+          const stale = yield* options
+            .change(unset("conversation.timeFormat"), 1)
+            .pipe(Effect.flip);
 
           return { inForce: yield* options.inForce, stale };
         }).pipe(Effect.provide(layer));
@@ -259,15 +239,27 @@ describe("the ui options, kept", () => {
       again: {
         options: {
           aliases: [],
-          "composer.enter": "send",
-          "composer.nickSuffix": ": ",
-          "composer.spellcheck": true,
+          "conversation.activity": "all",
+          "conversation.colors": "theme",
+          "conversation.dateFormat": "full",
+          "conversation.layout": "columns",
+          "conversation.maxWidth": "none",
+          "conversation.nickBrackets": true,
+          "conversation.nickPrefix": true,
+          "conversation.nickWidth": 16,
+          "conversation.spacing": 0.3,
+          "conversation.timeFormat": "HH:mm:ss",
           font: "system",
           "font.lineHeight": 1.45,
           "font.size": 14,
+          "input.enter": "send",
+          "input.nickSuffix": ": ",
+          "input.spellcheck": true,
+          logs: "info",
           "members.width": 18,
           previews: "off",
           "previews.animate": true,
+          "previews.conversations": {},
           "previews.mediaHeight": "medium",
           "previews.players": [
             "www.youtube-nocookie.com",
@@ -278,25 +270,13 @@ describe("the ui options, kept", () => {
             "player.twitch.tv",
           ],
           "previews.start": "open",
-          "previews.timelines": {},
           "sidebar.networks": [],
           "sidebar.order": [],
           "sidebar.pinned": [],
-          tail: "info",
           theme: "light",
           "theme.dark": "dark",
           "theme.imported": [],
           "theme.light": "light",
-          "timeline.activity": "all",
-          "timeline.colours": "theme",
-          "timeline.dateFormat": "full",
-          "timeline.layout": "columns",
-          "timeline.maxWidth": "none",
-          "timeline.nickBrackets": true,
-          "timeline.nickPrefix": true,
-          "timeline.nickWidth": 16,
-          "timeline.spacing": 0.3,
-          "timeline.timeFormat": "HH:mm:ss",
           "unread.markRead": "latest",
           "unread.muted": [],
           "unread.quietBots": false,
@@ -307,15 +287,27 @@ describe("the ui options, kept", () => {
         inForce: {
           options: {
             aliases: [],
-            "composer.enter": "send",
-            "composer.nickSuffix": ": ",
-            "composer.spellcheck": true,
+            "conversation.activity": "all",
+            "conversation.colors": "theme",
+            "conversation.dateFormat": "full",
+            "conversation.layout": "columns",
+            "conversation.maxWidth": "none",
+            "conversation.nickBrackets": true,
+            "conversation.nickPrefix": true,
+            "conversation.nickWidth": 16,
+            "conversation.spacing": 0.3,
+            "conversation.timeFormat": "HH:mm:ss",
             font: "system",
             "font.lineHeight": 1.45,
             "font.size": 14,
+            "input.enter": "send",
+            "input.nickSuffix": ": ",
+            "input.spellcheck": true,
+            logs: "info",
             "members.width": 18,
             previews: "off",
             "previews.animate": true,
+            "previews.conversations": {},
             "previews.mediaHeight": "medium",
             "previews.players": [
               "www.youtube-nocookie.com",
@@ -326,25 +318,13 @@ describe("the ui options, kept", () => {
               "player.twitch.tv",
             ],
             "previews.start": "open",
-            "previews.timelines": {},
             "sidebar.networks": [],
             "sidebar.order": [],
             "sidebar.pinned": [],
-            tail: "info",
             theme: "light",
             "theme.dark": "dark",
             "theme.imported": [],
             "theme.light": "light",
-            "timeline.activity": "all",
-            "timeline.colours": "theme",
-            "timeline.dateFormat": "full",
-            "timeline.layout": "columns",
-            "timeline.maxWidth": "none",
-            "timeline.nickBrackets": true,
-            "timeline.nickPrefix": true,
-            "timeline.nickWidth": 16,
-            "timeline.spacing": 0.3,
-            "timeline.timeFormat": "HH:mm:ss",
             "unread.markRead": "latest",
             "unread.muted": [],
             "unread.quietBots": false,
@@ -385,7 +365,7 @@ describe("the ui options, kept", () => {
           const options = yield* UiConfiguration;
 
           const first = yield* Effect.forkChild(
-            options.change(set("timeline.timeFormat", "HH:mm:ss"), 0)
+            options.change(set("conversation.timeFormat", "HH:mm:ss"), 0)
           );
 
           yield* Deferred.await(appending);
@@ -408,7 +388,7 @@ describe("the ui options, kept", () => {
     );
 
     expect(result).toStrictEqual({
-      changes: ["UiSet timeline.timeFormat"],
+      changes: ["UiSet conversation.timeFormat"],
       first: Exit.succeed(1),
       second: Exit.fail(new UiChangedSince({ sequence: 1 })),
     });
@@ -416,7 +396,7 @@ describe("the ui options, kept", () => {
 });
 
 describe("a ui option's value, parsed as it is set", () => {
-  it("refuses a key of ui.previews.timelines that is not a Timeline's id, and drops an extra field of a theme as it always did", () => {
+  it("refuses a key of ui.previews.conversations that is not a Timeline's id, and drops an extra field of a theme as it always did", () => {
     const palette = {
       ansi: Array.from({ length: 16 }, () => "#808080"),
       background: "#000000",
@@ -425,7 +405,7 @@ describe("a ui option's value, parsed as it is set", () => {
 
     expect({
       themes: parseUiValue("theme.imported", [{ extra: true, name: "mine", palette }]),
-      timelines: Option.isNone(parseUiValue("previews.timelines", { "#iirc": "on" })),
+      timelines: Option.isNone(parseUiValue("previews.conversations", { "#iirc": "on" })),
     }).toStrictEqual({
       themes: Option.some([{ name: "mine", palette }]),
       timelines: true,

@@ -55,7 +55,7 @@ const Asking = ({
       {question.choosing ? (
         <RadioGroup
           aria-describedby={bodyId}
-          aria-label="Its Timelines"
+          aria-label="Its conversations"
           className={styles.choices}
           isDisabled={removal.sending}
           onChange={(value) => {
@@ -65,12 +65,12 @@ const Asking = ({
         >
           <RadioField value="keep">
             <RadioButton className={styles.choice}>
-              Keep its Timelines, to read and search
+              Keep its conversations to read and search
             </RadioButton>
           </RadioField>
           <RadioField value="drop">
             <RadioButton className={styles.choice}>
-              Drop its Timelines, and free its name
+              Drop its conversations and free its name
             </RadioButton>
           </RadioField>
         </RadioGroup>
@@ -99,7 +99,7 @@ const Asking = ({
             close(undefined);
           }}
         >
-          Cancel
+          cancel
         </Button>
       </div>
     </div>
@@ -117,7 +117,7 @@ const Told = ({ message }: { readonly message: string }) => {
   return (
     <div className={styles.content}>
       <Heading className={styles.heading} slot="title">
-        Removed
+        Network removed
       </Heading>
       <p className={styles.failure} role="alert">
         {message}
@@ -131,7 +131,7 @@ const Told = ({ message }: { readonly message: string }) => {
           }}
           variant="primary"
         >
-          OK
+          ok
         </Button>
       </div>
     </div>

@@ -170,7 +170,7 @@ const standingOf = (network: SidebarNetwork): Standing => {
       return {
         mark: { className: styles.connecting, icon: "unknown" },
         why: undefined,
-        word: "not known yet",
+        word: "unknown",
       };
     }
 
@@ -205,7 +205,7 @@ const rowLabel = (
 ): string =>
   pane === undefined
     ? labelOf(name, activity, muted)
-    : `${labelOf(name, activity, muted)}, in Pane ${pane}`;
+    : `${labelOf(name, activity, muted)}, in pane ${pane}`;
 
 /**
  * The class that dims a name further when its Timeline is muted and has no Highlight to
@@ -445,7 +445,7 @@ const TimelineActions = ({
         selectedKeys={chosen === undefined ? [] : [chosen]}
         selectionMode="single"
       >
-        <Header className={styles.header}>Previews</Header>
+        <Header className={styles.header}>previews</Header>
         {previewsChoices.map((choice) => (
           <MenuItem
             className={styles.action}
@@ -453,7 +453,7 @@ const TimelineActions = ({
             key={choice.id}
             // The choice in force, chosen again, changes nothing, and closes the menu.
             onAction={onClose}
-            textValue={`Previews ${choice.id}`}
+            textValue={`previews ${choice.id}`}
           >
             {({ isSelected }) => (
               <>
@@ -474,9 +474,9 @@ const TimelineActions = ({
               { _tag: "Export", since: undefined, timeline: timeline.id, until: undefined },
             ]);
           }}
-          textValue="Export as text"
+          textValue="export as text"
         >
-          Export as text
+          export as text
         </MenuItem>
       </MenuSection>
       <MenuSection className={styles.section}>
@@ -487,9 +487,9 @@ const TimelineActions = ({
             onClose();
             carryOut([{ _tag: "Mute", muted: !muted, timeline: timeline.id }]);
           }}
-          textValue={muted ? "Unmute" : "Mute"}
+          textValue={muted ? "unmute" : "mute"}
         >
-          {muted ? "Unmute" : "Mute"}
+          {muted ? "unmute" : "mute"}
         </MenuItem>
         {/* A Network's own Timeline is its row, never pinned, and is never closed. */}
         {timeline.kind === "Network" ? null : (
@@ -505,9 +505,9 @@ const TimelineActions = ({
                 },
               ]);
             }}
-            textValue={pinned ? "Unpin" : "Pin"}
+            textValue={pinned ? "unpin" : "pin"}
           >
-            {pinned ? "Unpin" : "Pin"}
+            {pinned ? "unpin" : "pin"}
           </MenuItem>
         )}
         {close === undefined ? null : (
@@ -518,9 +518,9 @@ const TimelineActions = ({
               onClose();
               carryOut([close]);
             }}
-            textValue="Close"
+            textValue="close"
           >
-            Close
+            close
           </MenuItem>
         )}
       </MenuSection>
@@ -553,9 +553,9 @@ const NetworkActions = ({
           onClose();
           ask(network.network);
         }}
-        textValue={network.removed ? "Drop Timelines" : "Remove Network"}
+        textValue={network.removed ? "drop history" : "remove network"}
       >
-        {network.removed ? "Drop Timelines…" : "Remove Network…"}
+        {network.removed ? "drop history…" : "remove network…"}
       </MenuItem>
     </MenuSection>
   );
@@ -686,10 +686,14 @@ const NetworkRow = ({
 // The Tail has its row at the top of the sidebar, not in the foot.
 type FootView = Exclude<OwnView, "Tail">;
 
-const ownViews: readonly { readonly view: FootView; readonly command: string }[] = [
-  { command: "search.open", view: "Search" },
-  { command: "uploads.open", view: "Uploads" },
-  { command: "options.set", view: "Options" },
+const ownViews: readonly {
+  readonly view: FootView;
+  readonly command: string;
+  readonly name: string;
+}[] = [
+  { command: "search.open", name: "search", view: "Search" },
+  { command: "uploads.open", name: "uploads", view: "Uploads" },
+  { command: "options.set", name: "settings", view: "Options" },
 ];
 
 /**
@@ -713,7 +717,7 @@ const ViewItem = ({
 
   return (
     <ListBoxItem
-      aria-label={pane === undefined ? name : `${name}, in Pane ${pane}`}
+      aria-label={pane === undefined ? name : `${name}, in pane ${pane}`}
       className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
       id={view}
       textValue={name}
@@ -751,14 +755,14 @@ const TailRow = () => {
 
   return (
     <ListBox
-      aria-label="iirc"
+      aria-label="logs"
       className={styles.views}
       escapeKeyBehavior="none"
       onSelectionChange={onSelectionChange}
       selectedKeys={chosen._tag === "Tail" ? ["Tail"] : []}
       selectionMode="single"
     >
-      <ViewItem command="tail.open" name="iirc" pane={others.get("Tail")} view="Tail" />
+      <ViewItem command="logs.open" name="logs" pane={others.get("Tail")} view="Tail" />
     </ListBox>
   );
 };
@@ -818,8 +822,8 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
         selectedKeys={shown === undefined ? [] : [shown]}
         selectionMode="single"
       >
-        {ownViews.map(({ command, view }) => (
-          <ViewItem command={command} key={view} pane={others.get(view)} view={view} />
+        {ownViews.map(({ command, name, view }) => (
+          <ViewItem command={command} key={view} name={name} pane={others.get(view)} view={view} />
         ))}
       </ListBox>
       {attempt._tag === "Failed" ? (
@@ -834,7 +838,7 @@ const Footer = ({ attempt }: { readonly attempt: Attempt }) => {
             className={styles.hide}
             command="sidebar.toggle"
             icon="hideSidebar"
-            label="Hide the sidebar"
+            label="hide sidebar"
             onPress={() => {
               carryOut([{ _tag: "ShowSidebar", shown: false }]);
             }}
@@ -1043,7 +1047,7 @@ const PinnedTree = ({ pins }: { readonly pins: readonly Pin[] }) => {
   return (
     <Part menu={part.menuElement} onContextMenu={part.handleContextMenu}>
       <Tree
-        aria-label="Pinned Timelines"
+        aria-label="Pinned conversations"
         className={styles.tree}
         dragAndDropHooks={part.dragAndDropHooks}
         onSelectionChange={part.handleSelectionChange}
@@ -1169,11 +1173,11 @@ const NetworkTrees = ({
                 <TreeItem
                   className={styles.item}
                   id={readingKey(network.network)}
-                  textValue="Reading…"
+                  textValue="loading…"
                 >
                   <TreeItemContent>
                     <span aria-hidden className={styles.gutter} />
-                    <span className={styles.reading}>Reading…</span>
+                    <span className={styles.reading}>loading…</span>
                   </TreeItemContent>
                 </TreeItem>
               )}
@@ -1217,21 +1221,23 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
         <TailRow />
         {pinned.length === 0 ? null : (
           <>
-            <h2 className={styles.heading}>Pinned</h2>
+            <h2 className={styles.heading}>pinned</h2>
             <PinnedTree pins={pinned} />
           </>
         )}
         {live.length > 0 ? (
-          <NetworkTrees label="Networks and their Timelines" networks={live} />
+          <NetworkTrees label="Networks and their conversations" networks={live} />
         ) : (
           // Until the list is read, having none says nothing, so a wait is drawn.
-          <p className={styles.muted}>{listed ? "No Networks are configured yet." : "Reading…"}</p>
+          <p className={styles.muted}>
+            {listed ? "No networks yet. Add one with /network add." : "loading…"}
+          </p>
         )}
         {removed.length === 0 ? null : (
           <>
-            <h2 className={styles.heading}>Removed</h2>
+            <h2 className={styles.heading}>removed</h2>
             <NetworkTrees
-              label="Removed Networks and their Timelines, kept to read"
+              label="Removed networks and their conversations, kept to read"
               networks={removed}
             />
           </>

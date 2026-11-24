@@ -137,7 +137,7 @@ const Members = ({
         shouldObserveItemSize
       >
         <GridList
-          aria-label="Members"
+          aria-label="members"
           className={styles.list}
           items={rows}
           onAction={(key) => {
@@ -173,7 +173,7 @@ const Members = ({
                 askMore(timeline);
               }}
             >
-              reading more…
+              loading more…
             </GridListLoadMoreItem>
           ) : null}
         </GridList>
@@ -277,7 +277,7 @@ const Floating = ({
   }, [dismiss, menuOpen, pane]);
 
   return (
-    <Dialog aria-label="Members" className={`${styles.panel} ${styles.floating}`} ref={panel}>
+    <Dialog aria-label="members" className={`${styles.panel} ${styles.floating}`} ref={panel}>
       {children}
     </Dialog>
   );
@@ -297,7 +297,7 @@ const Shown = ({ pane }: { readonly pane: string }) => {
   const headingId = useId();
   const [menu, setMenu] = useState<string | undefined>(undefined);
 
-  let body = <p className={styles.dim}>Reading…</p>;
+  let body = <p className={styles.dim}>loading…</p>;
   let count: string | undefined;
 
   switch (members._tag) {
@@ -312,7 +312,7 @@ const Shown = ({ pane }: { readonly pane: string }) => {
     }
 
     case "Failed": {
-      body = <p className={styles.dim}>The Daemon has no such Channel.</p>;
+      body = <p className={styles.dim}>Channel not found.</p>;
       break;
     }
 
@@ -360,7 +360,7 @@ const Shown = ({ pane }: { readonly pane: string }) => {
                 className={styles.close}
                 command="members.toggle"
                 icon="close"
-                label="Hide the members"
+                label="hide members"
                 onPress={() => {
                   toggle({ pane, shown: false });
                 }}
@@ -382,11 +382,11 @@ const Shown = ({ pane }: { readonly pane: string }) => {
   }
 
   return (
-    <section aria-label="Members" className={`${styles.panel} ${styles.beside}`}>
+    <section aria-label="members" className={`${styles.panel} ${styles.beside}`}>
       <ColumnEdge
         className={styles.edge}
         grows="Left"
-        label="Resize the members"
+        label="resize members"
         option="members.width"
       />
       {body}

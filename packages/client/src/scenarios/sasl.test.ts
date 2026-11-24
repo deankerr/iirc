@@ -17,8 +17,8 @@ const login = (required: boolean, mechanism: SaslMechanism = "auto") =>
     login: {
       _tag: "Sasl",
       account: "iirc",
-      credential: CredentialName.make("pw"),
       mechanism,
+      password: CredentialName.make("pw"),
       required,
     },
   });
@@ -154,8 +154,8 @@ const certificates = (played: ReturnType<typeof play>) =>
 describe("presenting a client certificate", () => {
   const cert = CredentialName.make("cert");
 
-  const certified = (...ircds: readonly [IrcdAddress, ...IrcdAddress[]]) =>
-    configured({ ircds, tls: { _tag: "Certificate", certificate: cert } });
+  const certified = (...servers: readonly [IrcdAddress, ...IrcdAddress[]]) =>
+    configured({ servers, tls: { _tag: "Certificate", certificate: cert } });
 
   it("names it on a Dial over TLS, and on none in plaintext", () => {
     const tls = { host: "irc.test", port: 6697, tls: true };
@@ -517,8 +517,8 @@ describe("a required login never goes unmet", () => {
       login: {
         _tag: "Sasl",
         account: "iirc",
-        credential: CredentialName.make("pw"),
         mechanism: "auto",
+        password: CredentialName.make("pw"),
         required: true,
       },
     });

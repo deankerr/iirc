@@ -178,7 +178,7 @@ const directoryFiles = Effect.fnUntraced(function* (directory: string) {
     .realPath(directory)
     .pipe(
       Effect.mapError((error) =>
-        unusable(error.reason._tag === "NotFound" ? "it holds no index.html" : error.message)
+        unusable(error.reason._tag === "NotFound" ? "it has no index.html" : error.message)
       )
     );
 
@@ -199,7 +199,7 @@ const directoryFiles = Effect.fnUntraced(function* (directory: string) {
   const index = yield* fileAt(["index.html"]);
 
   if (Option.isNone(index)) {
-    return yield* unusable("it holds no index.html");
+    return yield* unusable("it has no index.html");
   }
 
   yield* fs

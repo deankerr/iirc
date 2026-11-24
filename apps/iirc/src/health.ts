@@ -49,7 +49,7 @@ export const askedAt = ({ host, port }: Listen): Listen => {
 
 export const health = Command.make(
   "health",
-  { listen: listenFlag("Where the Daemon's API listens, as given to iirc daemon") },
+  { listen: listenFlag("Address the daemon's API listens on, as given to iirc daemon") },
   ({ listen }) =>
     Effect.gen(function* () {
       const address = encodeListen(askedAt(listen));
@@ -68,23 +68,23 @@ export const health = Command.make(
           switch (error._tag) {
             case "Unwell": {
               return failed(
-                `The Daemon at ${address} is unwell: its ${error.part} has stopped until it restarts.`
+                `The daemon at ${address} is unhealthy: its ${error.part} has stopped until it restarts.`
               );
             }
 
             case "TimeoutError": {
-              return failed(`Nothing answered at ${address} within ${Duration.format(patience)}.`);
+              return failed(`No response from ${address} within ${Duration.format(patience)}.`);
             }
 
             case "HttpClientError": {
               return error.reason._tag === "TransportError"
-                ? failed(`Nothing answered at ${address}.`)
-                : failed(`Something at ${address} answered, but not as an iirc Daemon.`);
+                ? failed(`No response from ${address}.`)
+                : failed(`Something at ${address} responded, but it is not an iirc daemon.`);
             }
 
             case "InvalidRequest":
             case "SchemaError": {
-              return failed(`Something at ${address} answered, but not as an iirc Daemon.`);
+              return failed(`Something at ${address} responded, but it is not an iirc daemon.`);
             }
 
             default: {
@@ -96,6 +96,6 @@ export const health = Command.make(
     }).pipe(Effect.provide(direct), reportedOnStderr)
 ).pipe(
   Command.withDescription(
-    "Ask the Daemon whether it is well: exit 0 if so, and 1 with one line on stderr if not"
+    "Check whether the daemon is healthy: exits 0 if so, or 1 with one line on stderr if not"
   )
 );

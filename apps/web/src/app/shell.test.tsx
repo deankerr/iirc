@@ -145,7 +145,7 @@ describe("the shell", () => {
 
     expect({ stopped: alerts(), whileFolded }).toStrictEqual({
       stopped: [
-        "The Daemon hit a fatal error. The Timelines stopped updating, and stay behind until the Daemon restarts.TimelineStoreFailed: cannot apply: disk I/O error (SQLITE_IOERR_GETTEMPPATH)",
+        "The daemon hit a fatal error. Conversations stopped updating and stay as they are until the daemon restarts.TimelineStoreFailed: cannot apply: disk I/O error (SQLITE_IOERR_GETTEMPPATH)",
       ],
       whileFolded: [],
     });

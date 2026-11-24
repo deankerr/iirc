@@ -55,7 +55,7 @@ export const exportTimeline = (intent: Export): string | undefined => {
     (intent.since !== undefined && since === undefined) ||
     (intent.until !== undefined && until === undefined)
   ) {
-    return "/export: that day has no time that can be kept in your time zone.";
+    return "/export: that day has no matching time in your time zone.";
   }
 
   if (since !== undefined && until !== undefined && since >= until) {

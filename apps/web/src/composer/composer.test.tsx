@@ -218,7 +218,7 @@ const moveCaret = async (container: HTMLElement, caret: number) => {
 };
 
 const sendButton = (container: HTMLElement) =>
-  container.querySelector<HTMLButtonElement>('button[aria-label="Send"]');
+  container.querySelector<HTMLButtonElement>('button[aria-label="send"]');
 
 /**
  * What React DOM's value tracker on the composer holds, the last value it saw, which no walk
@@ -310,8 +310,8 @@ describe("the Composer's habits", () => {
     }).toStrictEqual({ button: null, left: false, said: ["hello"], spellcheck: "true" });
   });
 
-  it("under ui.composer.enter newline, leaves Enter to begin a line and sends on Ctrl+Enter", async () => {
-    const { container, daemon } = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, leaves Enter to begin a line and sends on Ctrl+Enter", async () => {
+    const { container, daemon } = await signedIn({ "input.enter": "newline" });
 
     await typeIn(container, "one");
 
@@ -337,8 +337,8 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("draws a send button only under ui.composer.enter newline, which sends as Ctrl+Enter does", async () => {
-    const { container, daemon, registry } = await signedIn({ "composer.enter": "newline" });
+  it("draws a send button only under ui.input.enter newline, which sends as Ctrl+Enter does", async () => {
+    const { container, daemon, registry } = await signedIn({ "input.enter": "newline" });
     const button = sendButton(container);
 
     await typeIn(container, "from a phone");
@@ -349,7 +349,7 @@ describe("the Composer's habits", () => {
     await settled(() => daemon.says.length === 1);
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.enter": "send" });
+      registry.set(deviceUi, { "input.enter": "send" });
       await Promise.resolve();
     });
 
@@ -361,7 +361,7 @@ describe("the Composer's habits", () => {
   });
 
   it("names the chord that sends in a paste's confirmation, which that chord or the button confirms", async () => {
-    const { container, daemon, registry } = await signedIn({ "composer.enter": "newline" });
+    const { container, daemon, registry } = await signedIn({ "input.enter": "newline" });
     const lines = ["1", "2", "3", "4", "5", "6"];
 
     await typeIn(container, lines.join("\n"));
@@ -374,7 +374,7 @@ describe("the Composer's habits", () => {
     const newline = alert();
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.enter": "send" });
+      registry.set(deviceUi, { "input.enter": "send" });
       await Promise.resolve();
     });
 
@@ -384,15 +384,17 @@ describe("the Composer's habits", () => {
     await settled(() => daemon.says.length === lines.length);
 
     expect({
-      newline: newline.includes("Ctrl+Enter sends them, Escape keeps them here."),
+      newline: newline.includes(
+        "Ctrl+Enter sends them, and Escape keeps them in the message input."
+      ),
       plainEnter,
       said: daemon.says.map((one) => one.text),
-      send: send.includes("? Enter sends them, Escape keeps them here."),
+      send: send.includes("? Enter sends them, and Escape keeps them in the message input."),
     }).toStrictEqual({ newline: true, plainEnter: false, said: lines, send: true });
   });
 
-  it("under ui.composer.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
-    const shown = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
+    const shown = await signedIn({ "input.enter": "newline" });
     const secret = "hunter2-held-by-the-vault";
     const typed = `hello\n/set network.libera.password ${secret}`;
 
@@ -425,8 +427,8 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("under ui.composer.enter newline, lets go of a Credential in any line at once on the send button, and sends nothing", async () => {
-    const shown = await signedIn({ "composer.enter": "newline" });
+  it("under ui.input.enter newline, lets go of a Credential in any line at once on the send button, and sends nothing", async () => {
+    const shown = await signedIn({ "input.enter": "newline" });
     const secret = "hunter2-held-by-the-vault";
 
     await typeIn(shown.container, `/set network.libera.password ${secret}\nhello`);
@@ -448,12 +450,12 @@ describe("the Composer's habits", () => {
     });
   });
 
-  it("checks spelling only as ui.composer.spellcheck says", async () => {
-    const { container, registry } = await signedIn({ "composer.spellcheck": false });
+  it("checks spelling only as ui.input.spellcheck says", async () => {
+    const { container, registry } = await signedIn({ "input.spellcheck": false });
     const off = composerOf(container).getAttribute("spellcheck");
 
     await act(async () => {
-      registry.set(deviceUi, { "composer.spellcheck": true });
+      registry.set(deviceUi, { "input.spellcheck": true });
       await Promise.resolve();
     });
 
@@ -463,8 +465,8 @@ describe("the Composer's habits", () => {
     ]);
   });
 
-  it("puts ui.composer.nickSuffix after a nick completed at the start of a line", async () => {
-    const { container } = await signedIn({ "composer.nickSuffix": ", " });
+  it("puts ui.input.nickSuffix after a nick completed at the start of a line", async () => {
+    const { container } = await signedIn({ "input.nickSuffix": ", " });
 
     await typeIn(container, "pe");
     await pressIn(container, "Tab");
@@ -538,9 +540,7 @@ describe("the Composer's note on its Network's connection", () => {
 
     await settled(() => offlineNoteIn(container) !== undefined);
 
-    expect(offlineNoteIn(container)).toBe(
-      "libera is not connected: nothing can be said there until it is."
-    );
+    expect(offlineNoteIn(container)).toBe("libera is not connected, so you can't send there now.");
   });
 });
 
@@ -790,18 +790,18 @@ describe("the Composer's list of everything it can complete", () => {
 
     expect({ listedAll, opened: placeOf(registry), picked }).toStrictEqual({
       listedAll: [
-        "liberaNetwork on libera",
-        "#iircChannel on libera",
-        "oftcNetwork on oftc",
-        "#helpChannel on oftc",
-        "oldNetwork on old",
+        "liberanetwork on libera",
+        "#iircchannel on libera",
+        "oftcnetwork on oftc",
+        "#helpchannel on oftc",
+        "oldnetwork on old",
       ],
       opened: oftcHelp,
       picked: "/go #help",
     });
   });
 
-  it("lists the themes after /theme, draws the one highlighted, and gives the one in effect back on Escape, and when the draft is typed over", async () => {
+  it("lists the themes after /theme, draws the one highlighted, and gives the one current back on Escape, and when the draft is typed over", async () => {
     const { container, registry } = await signedIn();
     const stop = await act(() => watchTheme(registry));
 
@@ -868,7 +868,7 @@ describe("the Composer's list of everything it can complete", () => {
     expect({
       escaped: escaped === inEffect,
       names,
-      row: row.find((one) => one.includes("in effect")),
+      row: row.find((one) => one.includes("current")),
       typed,
     }).toStrictEqual({
       escaped: true,
@@ -885,7 +885,7 @@ describe("the Composer's list of everything it can complete", () => {
         "source-sans-3",
         "inter",
       ],
-      row: "systemfont: the device's own monospace font, in effect",
+      row: "systemfont: this device's monospace font, current",
       typed: ["/set ui.font Fira Code", true],
     });
   });
@@ -923,9 +923,9 @@ describe("the Composer's list of everything it can complete", () => {
       asked: "Remove libera?",
       highlighted: ["/network remove oftc", true],
       listedAll: [
-        "liberanetwork: remove it, asking first whether its Timelines stay readable",
-        "oftcnetwork: remove it, asking first whether its Timelines stay readable",
-        "oldnetwork: drop the Timelines kept since it was removed, which frees its name",
+        "liberanetwork: remove it, asking first whether to keep its conversations to read",
+        "oftcnetwork: remove it, asking first whether to keep its conversations to read",
+        "oldnetwork: delete its kept conversations and free its name",
       ],
       picked: ["/network remove libera", true],
       removals: [],
@@ -1116,7 +1116,7 @@ const groupName = (group: Element) => {
  * @param row - The row's name.
  * @returns The names.
  */
-const namesIn = (container: HTMLElement, row: "Formats" | "Text colours" | "Backgrounds") =>
+const namesIn = (container: HTMLElement, row: "Formats" | "text colors" | "backgrounds") =>
   [...(formatListOf(container)?.querySelectorAll('[role="group"]') ?? [])]
     .filter((group) => groupName(group) === row)
     .flatMap((group) => [...group.querySelectorAll('[role="option"]')])
@@ -1266,7 +1266,7 @@ describe("the Composer's formatting", () => {
     await chordIn(container, "k", true);
 
     const formats = namesIn(container, "Formats");
-    const colours = namesIn(container, "Text colours");
+    const colours = namesIn(container, "text colors");
 
     // From the default, past white, black, blue, green, and red, to brown, and back to red.
     await pressIn(container, "ArrowRight");
@@ -1291,13 +1291,13 @@ describe("the Composer's formatting", () => {
       gone,
       said: daemon.says.map((one) => one.text),
     }).toStrictEqual({
-      colours: [17, "default colour", "red"],
+      colours: [17, "default color", "red"],
       drawn: [
         { backed: false, bold: false, coloured: false, text: "a " },
         { backed: false, bold: false, coloured: true, text: "b" },
         { backed: false, bold: false, coloured: false, text: " c" },
       ],
-      formats: ["bold", "italic", "underline", "fixed pitch", "reverse", "strikethrough"],
+      formats: ["bold", "italic", "underline", "monospace", "reverse colors", "strikethrough"],
       gone: undefined,
       said: ["a \u000304b\u000399 c"],
     });
@@ -1310,7 +1310,7 @@ describe("the Composer's formatting", () => {
     await select(container, 2, 3);
     await chordIn(container, "k", true);
 
-    const backgrounds = namesIn(container, "Backgrounds");
+    const backgrounds = namesIn(container, "backgrounds");
 
     const swatch = formatListOf(container)?.querySelector<HTMLElement>(
       '[role="option"][aria-label="red background"]'
@@ -1372,7 +1372,7 @@ describe("the Composer's formatting", () => {
     await settled(() => daemon.says.length === 1);
 
     expect({ pending, said: daemon.says.map((one) => one.text) }).toStrictEqual({
-      pending: "light grey background",
+      pending: "light gray background",
       said: ["hello \u000399,15you"],
     });
   });
@@ -1401,7 +1401,7 @@ describe("the Composer's formatting", () => {
 
     expect({ drawn, formats: namesIn(container, "Formats"), highlighted }).toStrictEqual({
       drawn: ["a ", "b", " c"],
-      formats: ["bold", "italic, on", "underline", "fixed pitch", "reverse", "strikethrough"],
+      formats: ["bold", "italic, on", "underline", "monospace", "reverse colors", "strikethrough"],
       highlighted: "italic",
     });
   });
@@ -1528,7 +1528,7 @@ describe("the Composer's aliases of the Owner's own", () => {
     }).toStrictEqual({
       changes: [{ ifSequence: "0", route: "PUT aliases" }],
       completed: "/j ",
-      listed: ["/j", "/j<1>An alias of your own: /join #$1"],
+      listed: ["/j", "/j<1>Your alias: /join #$1"],
       shared: [{ line: "/join #$1", name: "j" }],
     });
   });

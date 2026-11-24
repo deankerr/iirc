@@ -53,9 +53,9 @@ describe("ngircd, the Owner's start to a Session", () => {
           params: { network },
           payload: configured({
             channels: [{ name: channel }],
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
-            lines: ["PRIVMSG pal :first", "PRIVMSG pal :second", "PRIVMSG pal :third"],
+            commands: ["PRIVMSG pal :first", "PRIVMSG pal :second", "PRIVMSG pal :third"],
             nicks: ["iirc"],
+            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             userModes: "+i",
           }),
           query: {},

@@ -86,7 +86,7 @@ describe("formatting a range", () => {
     ]);
   });
 
-  it("gives a selection a background over the default colour, which reads back as that background and the default colour", () => {
+  it("gives a selection a background over the default color, which reads back as that background and the default color", () => {
     const backed = formattedIn("a b c", 2, 3, onRed);
 
     expect([parseFormatting(backed), formattedIn(backed, 0, 5, unbacked)]).toStrictEqual([
@@ -160,7 +160,7 @@ describe("formatting a range", () => {
     });
   });
 
-  it("writes a style across a line break again at the start of the next line, so each Message carries it", () => {
+  it("writes a style across a line break again at the start of the next line, so each message carries it", () => {
     const text = formattedIn("ab\ncd", 1, 4, bold);
 
     expect([text, linesOf(text).map((line) => parseFormatting(line))]).toStrictEqual([
@@ -357,7 +357,7 @@ describe("a style pending, in words", () => {
     ]).toStrictEqual([
       ["italic", "red"],
       ["not bold"],
-      ["default colour"],
+      ["default color"],
       [],
       ["red background"],
       ["default background"],

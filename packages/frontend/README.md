@@ -148,9 +148,9 @@ The one registry of commands, `commands`, as data, behind the Composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/ignore`, `/unignore`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Aliases | `/alias`, `/alias add`, `/alias remove` |
-| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/tail`, `/focus` |
+| Moving | `/go`, `/next`, `/previous`, `/next-unread`, `/latest`, `/date`, `/search`, `/uploads`, `/logs`, `/focus` |
 | Arranging | `/move`, `/pin`, `/mute`, `/unmute` |
-| Reading | `/read`, `/read all`, `/close-timeline`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
+| Reading | `/read`, `/read all`, `/close-conversation`, `/export`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 | Formatting | `/bold`, `/italic`, `/underline`, `/monospace`, `/reverse`, `/strikethrough`, `/format` |
 
@@ -166,7 +166,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **`/ignore` and `/unignore` take a nick or a mask.** A bare nick means `nick!*@*`, a mask that does not parse is refused saying why, and masks are compared under the Network's casemapping.
 - **`/ignore` alone opens the options on the Network's `ignores`.**
 - **`/query` opens a Timeline by name and never makes one.** `queried` finds it by the casemapping `known` reports, and with none shows a Direct Message not yet begun.
-- **`/close-timeline [#channel|nick]` closes the focused Timeline by its id, or a named Target,** never a Network's own, and never a Pane. A name is left to the Network's Client as a Target (`CloseTarget`), which resolves it by the Network's own naming. Whether Self is in a Channel is the Daemon's to answer.
+- **`/close-conversation [#channel|nick]` closes the focused Timeline by its id, or a named Target,** never a Network's own, and never a Pane. A name is left to the Network's Client as a Target (`CloseTarget`), which resolves it by the Network's own naming. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove` only asks.** It names the Network, the focused one unless an id is given, and `keep` or `drop` to start on. A lone `keep` or `drop` is the choice about the focused Network, so a Network of that id is named with both words, as `/network remove keep keep`. Nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the Composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, a raw `PASS`, `AUTHENTICATE`, or `OPER`, and `/oper` are refused, `/oper` naming the `oper` options to set instead.
 - **`/go [network] <name>` opens a Timeline by name, closed ones too.** A name alone finds it on the Composer's Network first, else on the one Network that has it. A name no Timeline has, or one on several Networks with none of them the Composer's, is refused, naming the Networks.
@@ -209,7 +209,7 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **Most defaults fire while typing in a field.** Mod+Shift+K, for the formatting list, fires only in the Composer, and no format has a key of its own, so Mod and a letter, such as Mod+R to reload, stays the browser's. No two defaults share a chord where both can fire.
 - **A key that types goes to the Composer, unless it is bound** (`typesInComposer`). A printable character, a dead key, the start of an input method's composition, a character AltGr or Option types, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not.
 - **A key pressed in a field that takes text, with an overlay holding the focus, or with no Composer to write to, is left alone.**
-- **Enter in the Composer is not a binding, but `ui.composer.enter`** (`enterPressed`). Under `send`, Enter sends and Shift+Enter begins a line. Under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
+- **Enter in the Composer is not a binding, but `ui.input.enter`** (`enterPressed`). Under `send`, Enter sends and Shift+Enter begins a line. Under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
 - **A key bound to a command that requires arguments, with none given, starts it** in the Composer, and `chordsFor` lists the key beside the command.
 - **`mod+k` and `mod+shift+p` have no `when`,** so they work from anywhere, with the Composer's list open or not, and in a Pane with no Timeline.
 - **The `palette` context key means that the Composer's list is open.** No default binding consults it.
@@ -270,7 +270,7 @@ The one list a draft's formatting is chosen from, as data for a view to draw: `f
 
 Configuration as an option tree. Every option comes from the annotations on the Client's `NetworkConfiguration` Schema, so a new field is a new option.
 
-An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. Ids and Channel names may hold dots, so a name is an option only when exactly one way of splitting it is valid.
+An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. A Network's id holds no dot, so the id is what sits before the first dot, though a Channel's name may hold dots.
 
 | Kind               | Text                                                          |
 | ------------------ | ------------------------------------------------------------- |
@@ -302,23 +302,23 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 ### The options under `ui`
 
-An option under `ui` is named `ui.<option>`, such as `ui.timeline.timeFormat`, and is derived from `UiOptions` in `@iirc/api/ui`.
+An option under `ui` is named `ui.<option>`, such as `ui.conversation.timeFormat`, and is derived from `UiOptions` in `@iirc/api/ui`.
 
 - **Every device shares them, and one may override any for itself with `-device`,** but those the contract marks shared only, such as `ui.previews`, `ui.unread.muted`, and `ui.sidebar.order`, which `-device` refuses. An override a device kept of one of those is dropped.
 - **`effectiveUi` gives the override, else the shared value, else the default.**
 - **A change is written for this device when it overrides the option, and for a font's family always** (`writtenOnDevice`), for the options view and `/set` alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
-- **`ui.timeline.activity` changes what is drawn, never what is counted.** `showsIn` works out which items a Channel's Timeline draws, and any other Timeline draws every item. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`.
+- **`ui.conversation.activity` changes what is drawn, never what is counted.** `showsIn` works out which items a Channel's Timeline draws, and any other Timeline draws every item. Its values hide more one after the other: `all`, `spoke`, `quiet`, `none`.
 - **`spoke` hides the joins, parts, and quits of a User who said no Message in the window in the five minutes before,** by the items' own times, following the User across a change of nick. Only the window's Messages count.
 - **Self's joins, parts, and quits always show,** as far as `rowsOf` knows Self, and every one shows while Self's nick is unknown.
 - **A font's family the device lacks is said to be not found** when it is the one in effect. The device hands the families it lacks to `uiOptionsOf`.
 
-### The options under `away`, `store`, `uploads`, and `previews`
+### The options under `away`, `storage`, `uploads`, and `previews`
 
-An option under `away`, `store`, `uploads`, or `previews` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options`.
+An option under `away`, `storage`, `uploads`, or `previews` is named in full, such as `storage.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options`.
 
 - **They are the Owner's, not a device's,** so `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
-- **A Credential option names `Owner.` and the option's name until it names another,** such as `Owner.store.s3.accessKeyId`. No Network's Credential is ever named so.
+- **A Credential option names `Owner.` and the option's name until it names another,** such as `Owner.storage.s3.accessKeyId`. No Network's Credential is ever named so.
 
 ## Uploads
 
@@ -343,7 +343,7 @@ The Tail as a Frontend holds it, as a reducer (`reduceTail`): read whole, then e
 - **A line is taken once.** One numbered at or before the last held changes nothing. `lastNumber` says where to follow from.
 - **At most `tailCap` lines are held, 4096,** and one more lets go of the oldest.
 - **A stream of another Daemon lets go of the Tail held.** `Opened` with another `started` is a Daemon that restarted, and nothing is held until the Tail is read again.
-- **`linesShown` gives the lines at a least level and above,** oldest first, and `atLeast` compares two levels. `leastShown` gives the level each value of `ui.tail` names: `debug` Debug, `info` Info, `warning` Warn, and `error` Error, under which Fatal shows too.
+- **`linesShown` gives the lines at a least level and above,** oldest first, and `atLeast` compares two levels. `leastShown` gives the level each value of `ui.logs` names: `debug` Debug, `info` Info, `warning` Warn, and `error` Error, under which Fatal shows too.
 
 ## Uploading
 
@@ -373,7 +373,7 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 - **No palette makes text unreadable.** A colour below its floor on what it is drawn on is moved by the least change of lightness that reaches it, its hue kept, or is white or black when none does. One that reads already is kept exactly.
 - **The floor is WCAG 2's contrast ratio:** 4.5 for text, and 3 for dim text and the focus ring.
 - **Nicks are spread over 16 slots,** drawn from the palette's own hues, or from six fixed hues when it has fewer than three of its own.
-- **mIRC's first 16 colours are the theme's ANSI colours, or mIRC's own,** as `ui.timeline.colours` says. Colours 16 to 98 are always mIRC's own.
+- **mIRC's first 16 colours are the theme's ANSI colours, or mIRC's own,** as `ui.conversation.colors` says. Colours 16 to 98 are always mIRC's own.
 - **Themes are built in or imported.** The built-in ones are in `src/builtin-themes.ts`, each with its source and licence. A name that names no theme draws as `system`.
 - **`system` draws `ui.theme.light` or `ui.theme.dark` as the device prefers.** Each is the built-in one of its name until `/theme -light` or `/theme -dark` sets it to any theme but `system`, and draws the built-in one again when it names no theme.
 - **A theme named in `ui.theme` wins over both.**
@@ -476,7 +476,7 @@ What the Composer can complete, as a reducer, and the list it shows above the Co
 - **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, or RFC 2811's `#&+!` while they are unknown, never by a Timeline's name.
 - **A nick in a Channel is asked of the Daemon's members route, only on Tab.** An answer is put in only if the Composer still holds the exact text it was asked for. A Direct Message offers its partner, and a Network's own Timeline no nick.
 - **Who spoke latest comes first,** and Self last.
-- **A nick at the start of a line is followed by `ui.composer.nickSuffix`,** `: ` to start, and anything else by a space.
+- **A nick at the start of a line is followed by `ui.input.nickSuffix`,** `: ` to start, and anything else by a space.
 - **A list belongs to its place, its draft, and its caret.** Another place, a draft changed other than by completion, or the caret moved without typing shows none.
 - **`owns` says whether completion takes Tab, the arrows, Escape, and a press:** exactly while `listOf` shows a list, or while a nick is asked for.
 - **A list opened as the draft is typed is announced by its count,** such as `3 completions`, and a Tab that finds nothing says `Nothing completes <word>` (`announced`).
@@ -508,7 +508,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line, `quotedOf
 - **A numeric shows its number dim where a nick would be,** and its parameters as one run of text in the `Numeric` tone, with its links and formatting.
 - **The message of the day is a `Motd` line:** a `summary` of how many lines it has and whether it was cut short, and its lines formatted and linked, each with RFC 2812's leading `- ` dropped and every other space kept.
 - **A netsplit or a netjoin is a `Split` line:** a `marker`, a `summary` naming the two servers and how many of the Channel's members quit or joined, and a `Nick` part for each.
-- **`ui.timeline.activity` treats a `Split` as the quits or joins it tells:** `quiet` hides it, and `spoke` shows it when any of its nicks said a Message within the span.
+- **`ui.conversation.activity` treats a `Split` as the quits or joins it tells:** `quiet` hides it, and `spoke` shows it when any of its nicks said a Message within the span.
 - **An invitation says who invited Self to which Channel,** with a `Join` part that offers to join it.
 
 ## Previews
@@ -518,7 +518,7 @@ What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the
 - **Nothing is fetched ahead of the screen.** A Message is asked for once, only once the view says it came into view, and only while the stream is followed. `asksWanted` gives the asks to make.
 - **What the Daemon holds is read ahead of the screen** (`heldReadOf`), since a held read fetches nothing. A link held nothing of (`NotHeld`) folds in nothing.
 - **A change the stream gives while a held read is in flight is held,** so a read that lands late never undoes it.
-- **A Timeline's mode is its own in `ui.previews.timelines`, else `ui.previews`** (`modeIn`), from the shared values alone. Under `off`, or before they are read, nothing of it is asked for or shown.
+- **A Timeline's mode is its own in `ui.previews.conversations`, else `ui.previews`** (`modeIn`), from the shared values alone. Under `off`, or before they are read, nothing of it is asked for or shown.
 - **The stream is followed while any Timeline's mode asks** (`asksAnywhere`).
 - **`choosing` makes or removes one Timeline's choice** in the map, which is sent whole.
 - **A link waiting for a press is pressed once the Owner opens it,** by its index (`pressOf`), and is pending meanwhile. A refused press asks its Message again.

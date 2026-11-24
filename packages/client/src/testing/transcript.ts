@@ -481,7 +481,7 @@ const readService = (text: string): Login | undefined => {
     return undefined;
   }
 
-  const login = { _tag: "Service", credential, service, wait: Number(wait) };
+  const login = { _tag: "Service", password: credential, service, wait: Number(wait) };
 
   return asLogin(account === "" ? login : { ...login, account });
 };
@@ -510,7 +510,13 @@ const readLogin = (text: string): Login | undefined => {
     isMechanism(mechanism) &&
     (mechanism !== "auto" || text.split(",").length === 3) &&
     rest.length === 0
-    ? asLogin({ _tag: "Sasl", account, credential, mechanism, required: kind === "required" })
+    ? asLogin({
+        _tag: "Sasl",
+        account,
+        mechanism,
+        password: credential,
+        required: kind === "required",
+      })
     : undefined;
 };
 
@@ -525,7 +531,7 @@ const readOper = (text: string): Oper | undefined => {
   }
 
   const [name, credential, ...rest] = text.split(",");
-  const decoded = decodeOper({ _tag: "Login", credential, name });
+  const decoded = decodeOper({ _tag: "Login", name, password: credential });
 
   return [name, credential].every(present) && rest.length === 0 && Result.isSuccess(decoded)
     ? decoded.success
@@ -634,11 +640,11 @@ const writeLogin = (login: Login): string => {
     }
 
     case "Service": {
-      return `login=service,${login.service},${login.account ?? ""},${login.credential},${login.wait}`;
+      return `login=service,${login.service},${login.account ?? ""},${login.password},${login.wait}`;
     }
 
     case "Sasl": {
-      return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}${
+      return `login=${login.required ? "required" : "optional"},${login.account},${login.password}${
         login.mechanism === "auto" ? "" : `,${login.mechanism}`
       }`;
     }
@@ -700,7 +706,7 @@ const writeChange = (change: Change): string => {
     case "Oper": {
       const { oper } = change;
 
-      return oper._tag === "None" ? "oper=none" : `oper=${oper.name},${oper.credential}`;
+      return oper._tag === "None" ? "oper=none" : `oper=${oper.name},${oper.password}`;
     }
 
     default: {

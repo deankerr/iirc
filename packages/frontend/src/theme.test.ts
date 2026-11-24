@@ -308,12 +308,12 @@ describe("the themes there are", () => {
       bad: {
         _tag: "Invalid",
         message:
-          "tokyo night is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+          "tokyo night is not a valid theme name: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.",
       },
       empty: {
         _tag: "Invalid",
         message:
-          "A theme needs a name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+          "A theme needs a name: use 1 to 32 letters and digits, with words joined by -, such as tokyo-night.",
       },
       known: { _tag: "Parsed", value: "mine" },
       unknown: {
@@ -342,20 +342,24 @@ describe("the themes there are", () => {
       added: { _tag: "Parsed", value: [mine] },
       builtIn: {
         _tag: "Invalid",
-        message: "nord is built in, so it is never imported. Give it another name.",
+        message: "nord is built in, so it can't be imported. Give it another name.",
       },
       full: {
         _tag: "Invalid",
-        message: "32 themes are imported already. /theme remove one first.",
+        message: "You already imported 32 themes. /theme remove one first.",
       },
       fullReplace: "Parsed",
-      missing: { _tag: "Invalid", message: "No theme other was imported. /theme lists them." },
-      removeBuiltIn: { _tag: "Invalid", message: "system is built in, so it is never removed." },
+      missing: {
+        _tag: "Invalid",
+        message: "You haven't imported a theme named other. /theme lists them.",
+      },
+      removeBuiltIn: { _tag: "Invalid", message: "system is built in, so it can't be removed." },
       removed: { _tag: "Parsed", value: [] },
       replaced: { _tag: "Parsed", value: [other] },
       word: {
         _tag: "Invalid",
-        message: "import is a word /theme takes, so no theme is named it. Give it another name.",
+        message:
+          "import is a word /theme uses, so a theme can't have that name. Give it another name.",
       },
     });
   });

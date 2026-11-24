@@ -1,7 +1,7 @@
 /**
  * iirc's own view, labelled `iirc`, which a Pane with nothing open shows: a banner, `iirc`
  * drawn in blocks with the Daemon's version under it, then the Tail's lines at the level
- * `ui.tail` names and above, oldest first, each its time, its words, its annotations,
+ * `ui.logs` names and above, oldest first, each its time, its words, its annotations,
  * dimmer, and its cause. A line at Warn and above is drawn in the theme's colour for
  * danger. Everything a line holds is text, never markup. The banner stands above the oldest line and scrolls with
  * the lines, and the view stays at the latest line while the Owner is there, as a Timeline
@@ -34,7 +34,7 @@ const art = [
 
 /** How to start, while no Network is configured. */
 const hint =
-  "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.";
+  "Choose a conversation, or add a network with /network add <id> <host>[/port] [plain] <nick>. /set opens settings.";
 
 /**
  * Whether no Network is configured, as the Network list read says: none until it is read,
@@ -88,9 +88,9 @@ export const TailView = () => {
   const none = useAtomValue(noNetworks);
 
   return (
-    <section aria-label="iirc" className={styles.view}>
+    <section aria-label="logs" className={styles.view}>
       <div
-        aria-label="What the Daemon logged"
+        aria-label="Daemon logs"
         className={styles.scroller}
         role="log"
         // The log scrolls by keyboard, as any page does.

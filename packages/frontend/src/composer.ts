@@ -669,7 +669,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   }
 
   if (draft.text.includes("\0")) {
-    return refuse("It holds a NUL character, which no IRC Line can carry. Nothing was sent.");
+    return refuse("It contains a NUL character, which IRC can't carry. Nothing was sent.");
   }
 
   const intents: Intent[] = [];
@@ -678,7 +678,9 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
     const read = interpret(line, context);
 
     if (read._tag === "Invalid") {
-      return refuse(lines.length === 1 ? read.message : `Line ${index + 1}: ${read.message}`);
+      return refuse(
+        lines.length === 1 ? read.message : `Raw command ${index + 1}: ${read.message}`
+      );
     }
 
     intents.push(...read.value);
@@ -759,12 +761,12 @@ export const takeOffer = (
 export const refusal = (reason: StepRefusal, target: string, action?: ActionRequest): string => {
   const what =
     action === undefined
-      ? `Not said to ${contained(target)}`
+      ? `Not sent to ${contained(target)}`
       : `${attemptedText(requested(action))} was not sent`;
 
   switch (reason._tag) {
     case "Offline": {
-      return `${what}: the Network had no Session when it arrived.`;
+      return `${what}: the network had no connection at the time.`;
     }
 
     case "AccountUnknown": {
@@ -772,13 +774,13 @@ export const refusal = (reason: StepRefusal, target: string, action?: ActionRequ
     }
 
     case "NoAccount": {
-      return `${what}: they are logged in to no account.`;
+      return `${what}: they are not logged in to an account.`;
     }
 
     case "Unsendable": {
       return action === undefined
-        ? `${what}: no IRC Line can carry it there.`
-        : `${what}: the Network cannot carry it whole, as its ISUPPORT says, or it is not one the Client sends.`;
+        ? `${what}: IRC can't carry it there.`
+        : `${what}: the network can't carry it whole, or iirc doesn't send it.`;
     }
 
     default: {
@@ -814,13 +816,13 @@ export const failed = (
 
     case "Journaled": {
       const journaled = acted
-        ? "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too."
-        : "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery.";
+        ? "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Check the conversation for what the server did, including any refusal."
+        : "iirc saved this, but it's unknown whether it reached the server, and it won't be sent again on its own. Its item in the conversation shows whether it was delivered.";
 
       return more
         ? {
             _tag: "Offering",
-            message: `${journaled} What came after it was not sent.`,
+            message: `${journaled} Nothing after it was sent.`,
             offer: { _tag: "SendAgain", intent: undefined, intents: rest },
           }
         : outcome(journaled);
@@ -829,7 +831,7 @@ export const failed = (
     case "NotJournaled": {
       return {
         _tag: "Offering",
-        message: `The Network stopped before this was journaled, so it was not ${acted ? "sent" : "said"}.`,
+        message: `The network stopped before this was saved, so it was not sent.`,
         offer: { _tag: "SendAgain", intent, intents },
       };
     }
@@ -837,22 +839,24 @@ export const failed = (
     case "Unknown": {
       return {
         _tag: "Offering",
-        message: `The Daemon did not answer, so whether this was ${acted ? "sent" : "said"} is unknown. Nothing after it was sent.`,
+        message: `The daemon did not answer, so it's unknown whether this was sent. Nothing after it was sent.`,
         offer: { _tag: "CheckAgain", intent, intents, network: failure.network },
       };
     }
 
     case "UnknownNetwork": {
-      return outcome(`The Daemon has no Network ${failure.network}.`);
+      return outcome(`The daemon has no network ${failure.network}.`);
     }
 
     case "Malformed": {
-      return outcome(`The Daemon could not read this as something to ${acted ? "do" : "say"}.`);
+      return outcome(
+        `The daemon could not understand this as something to ${acted ? "do" : "send"}.`
+      );
     }
 
     case "Unexpected": {
       return outcome(
-        `The Daemon answered in a way the Frontend could not read, so whether this was ${acted ? "sent" : "said"} is unknown.`
+        `The daemon sent a reply this device could not read, so it's unknown whether this was sent.`
       );
     }
 
@@ -1108,7 +1112,7 @@ export const started = (state: Composers, timeline: Place, text: string | undefi
     state,
     timeline,
     aboutText(
-      `${contained(text.trim())} was not put in, since the composer has text. Clear it and choose again.`
+      `${contained(text.trim())} was not added, since the message input has text. Clear it and choose again.`
     )
   );
 };

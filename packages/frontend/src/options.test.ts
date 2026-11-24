@@ -53,7 +53,7 @@ import type {
 } from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
-const dotted = Schema.decodeSync(NetworkId)("my.net");
+const hyphenated = Schema.decodeSync(NetworkId)("my-net");
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
 const decode = Schema.decodeSync(NetworkConfiguration);
 
@@ -63,10 +63,10 @@ const plain: Configuration = decode({
   declined: [],
   enabled: true,
   fallbackEncoding: "windows-1252",
-  ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
   login: { _tag: "None" },
   nicks: ["dean", "dean_"],
   realname: "Dean",
+  servers: [{ host: "irc.libera.chat", port: 6697, tls: true }],
   username: "dean",
   whoOnJoin: true,
 });
@@ -74,7 +74,7 @@ const plain: Configuration = decode({
 const full: Configuration = decode({
   ...plain,
   channels: [{ key: "libera.channels._23secret.key", name: "#secret" }, { name: "#iirc" }],
-  login: { _tag: "Sasl", account: "dean", credential: "libera.sasl", required: true },
+  login: { _tag: "Sasl", account: "dean", password: "libera.sasl", required: true },
   password: "libera.password",
 });
 
@@ -129,7 +129,7 @@ const nowhere: CommandContext = {
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);
 
 describe("the options, derived from the Schema", () => {
-  it("has a field for every field of the Configuration, each described", () => {
+  it("has a field for every field of the settings, each described", () => {
     const keys = Object.keys(NetworkConfiguration.fields).toSorted();
 
     expect({
@@ -155,26 +155,26 @@ describe("the options, derived from the Schema", () => {
         "network.libera.channels",
         "network.libera.channels.#secret.key",
         "network.libera.channels.#iirc.key",
+        "network.libera.commands",
         "network.libera.declined",
         "network.libera.enabled",
         "network.libera.fallbackEncoding",
         "network.libera.highlights",
         "network.libera.ignores",
-        "network.libera.ircds",
-        "network.libera.lines",
         "network.libera.login",
         "network.libera.login.required",
         "network.libera.login.account",
-        "network.libera.login.credential",
         "network.libera.login.mechanism",
+        "network.libera.login.password",
         "network.libera.login.service",
         "network.libera.login.wait",
         "network.libera.nicks",
         "network.libera.oper",
-        "network.libera.oper.credential",
         "network.libera.oper.name",
+        "network.libera.oper.password",
         "network.libera.password",
         "network.libera.realname",
+        "network.libera.servers",
         "network.libera.tls",
         "network.libera.tls.certificate",
         "network.libera.userModes",
@@ -185,7 +185,7 @@ describe("the options, derived from the Schema", () => {
     });
   });
 
-  it("shows each value in its syntax, and what a new Network starts with", () => {
+  it("shows each value in its syntax, and what a new network starts with", () => {
     const shown = Object.fromEntries(
       optionsOf(libera, full, new Set(["libera.sasl"])).map((option) => [
         option.name.slice("network.libera.".length),
@@ -202,6 +202,7 @@ describe("the options, derived from the Schema", () => {
         starts: "unset",
         value: { _tag: "Credential", held: false, name: "libera.channels._23secret.key" },
       },
+      commands: { starts: "", value: { _tag: "Shown", text: "" } },
       declined: { starts: "", value: { _tag: "Shown", text: "" } },
       enabled: { starts: "on", value: { _tag: "Shown", text: "on" } },
       fallbackEncoding: {
@@ -210,27 +211,26 @@ describe("the options, derived from the Schema", () => {
       },
       highlights: { starts: "", value: { _tag: "Shown", text: "" } },
       ignores: { starts: "", value: { _tag: "Shown", text: "" } },
-      ircds: { starts: undefined, value: { _tag: "Shown", text: "irc.libera.chat/6697" } },
-      lines: { starts: "", value: { _tag: "Shown", text: "" } },
       login: { starts: "none", value: { _tag: "Shown", text: "sasl" } },
       "login.account": { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
-      "login.credential": {
-        starts: "libera.login.credential",
+      "login.mechanism": { starts: "auto", value: { _tag: "Shown", text: "plain" } },
+      "login.password": {
+        starts: "libera.login.password",
         value: { _tag: "Credential", held: true, name: "libera.sasl" },
       },
-      "login.mechanism": { starts: "auto", value: { _tag: "Shown", text: "plain" } },
       "login.required": { starts: "off", value: { _tag: "Shown", text: "on" } },
       "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
       "login.wait": { starts: "5", value: { _tag: "Unset" } },
       nicks: { starts: undefined, value: { _tag: "Shown", text: "dean, dean_" } },
       oper: { starts: "none", value: { _tag: "Shown", text: "none" } },
-      "oper.credential": { starts: "libera.oper.credential", value: { _tag: "Unset" } },
       "oper.name": { starts: "the first nick", value: { _tag: "Unset" } },
+      "oper.password": { starts: "libera.oper.password", value: { _tag: "Unset" } },
       password: {
         starts: "unset",
         value: { _tag: "Credential", held: false, name: "libera.password" },
       },
       realname: { starts: "the first nick", value: { _tag: "Shown", text: "Dean" } },
+      servers: { starts: undefined, value: { _tag: "Shown", text: "irc.libera.chat/6697" } },
       tls: { starts: "none", value: { _tag: "Shown", text: "none" } },
       "tls.certificate": { starts: "libera.tls.certificate", value: { _tag: "Unset" } },
       userModes: { starts: "", value: { _tag: "Shown", text: "" } },
@@ -239,31 +239,31 @@ describe("the options, derived from the Schema", () => {
     });
   });
 
-  it("shows a service login's fields, sharing the account and Credential with SASL's", () => {
+  it("shows a service login's fields, sharing the account and password with SASL's", () => {
     const service = decode({
       ...plain,
       login: {
         _tag: "Service",
         account: "dean",
-        credential: "libera.login.credential",
+        password: "libera.login.password",
         service: "NickServ",
         wait: 5,
       },
     });
 
-    const login = optionsOf(libera, service, new Set(["libera.login.credential"])).filter(
-      (option) => option.name.startsWith("network.libera.login")
+    const login = optionsOf(libera, service, new Set(["libera.login.password"])).filter((option) =>
+      option.name.startsWith("network.libera.login")
     );
 
     expect(login.map((option) => [option.name, option.value])).toStrictEqual([
       ["network.libera.login", { _tag: "Shown", text: "service" }],
       ["network.libera.login.required", { _tag: "Unset" }],
       ["network.libera.login.account", { _tag: "Shown", text: "dean" }],
-      [
-        "network.libera.login.credential",
-        { _tag: "Credential", held: true, name: "libera.login.credential" },
-      ],
       ["network.libera.login.mechanism", { _tag: "Unset" }],
+      [
+        "network.libera.login.password",
+        { _tag: "Credential", held: true, name: "libera.login.password" },
+      ],
       ["network.libera.login.service", { _tag: "Shown", text: "NickServ" }],
       ["network.libera.login.wait", { _tag: "Shown", text: "5" }],
     ]);
@@ -277,36 +277,36 @@ const at = (name: string) => {
 };
 
 describe("names", () => {
-  it("resolve a Network's id with dots, a Channel's name with dots, and nothing else", () => {
+  it("resolve a network's id with a hyphen, a channel's name with dots, and nothing else", () => {
     expect({
       channel: at("network.libera.channels.#a.b.key"),
-      dotted: at("network.my.net.nicks"),
-      member: at("network.my.net.login.account"),
+      hyphenated: at("network.my-net.nicks"),
+      member: at("network.my-net.login.account"),
       noNetwork: at("libera.nicks"),
       none: at("network.libera.nope"),
       uppercase: at("network.Libera.nicks"),
     }).toStrictEqual({
       channel: ["libera", "channels", "#a.b", "key"],
-      dotted: [dotted, "nicks"],
-      member: [dotted, "login", "account"],
+      hyphenated: [hyphenated, "nicks"],
+      member: [hyphenated, "login", "account"],
       noNetwork:
-        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.",
       none: "There is no option network.libera.nope.",
       uppercase: "There is no option network.Libera.nicks.",
     });
   });
 
-  it("derive a Credential's name from the option's, escaping what a name cannot hold", () => {
+  it("derive a password's name from the option's, escaping what a name cannot hold", () => {
     expect({
       channel: derivedCredential(libera, ["channels", "#a_b", "key"]),
-      kept: credentialFor(libera, full, ["login", "credential"]),
+      kept: credentialFor(libera, full, ["login", "password"]),
       long: derivedCredential("x".repeat(60), ["password"])._tag,
-      sasl: derivedCredential(libera, ["login", "credential"]),
+      sasl: derivedCredential(libera, ["login", "password"]),
     }).toStrictEqual({
       channel: { _tag: "Parsed", value: "libera.channels._23a_5fb.key" },
       kept: { _tag: "Parsed", value: "libera.sasl" },
       long: "Invalid",
-      sasl: { _tag: "Parsed", value: "libera.login.credential" },
+      sasl: { _tag: "Parsed", value: "libera.login.password" },
     });
   });
 
@@ -370,7 +370,7 @@ const values: readonly (readonly [string, fc.Arbitrary<readonly [Json, Json]>])[
   ["declined", same(fc.array(anyText, { maxLength: 4 }))],
   ["highlights", same(fc.array(anyText, { maxLength: 4 }))],
   ["nicks", same(fc.array(anyText, { maxLength: 4, minLength: 1 }))],
-  ["ircds", same(fc.array(ircd, { maxLength: 3, minLength: 1 }))],
+  ["servers", same(fc.array(ircd, { maxLength: 3, minLength: 1 }))],
   [
     "channels",
     fc
@@ -397,11 +397,11 @@ describe("the text syntax", () => {
   });
 
   it("reads back a whole number or a word, for every value the Schema takes, and refuses the rest", () => {
-    const kind = uiFields.find((field) => field.key === "timeline.maxWidth")?.kind ?? {
+    const kind = uiFields.find((field) => field.key === "conversation.maxWidth")?.kind ?? {
       _tag: "Text",
     };
 
-    const taken = Schema.decodeUnknownOption(UiOptions.fields["timeline.maxWidth"]);
+    const taken = Schema.decodeUnknownOption(UiOptions.fields["conversation.maxWidth"]);
     const made = fc.oneof(fc.constant("none"), fc.integer({ max: 450, min: 0 }));
 
     fc.assert(
@@ -509,8 +509,8 @@ describe("the text syntax", () => {
     ]);
   });
 
-  it("shows what it reads, once read, for an Ircd list typed any way", () => {
-    const kind = kindOf("ircds");
+  it("shows what it reads, once read, for a server list typed any way", () => {
+    const kind = kindOf("servers");
 
     const typed = fc
       .array(
@@ -542,12 +542,12 @@ describe("the text syntax", () => {
     );
   });
 
-  it("takes on, off, true, and false, an Ircd with or without a port and TLS, and refuses the rest", () => {
+  it("takes on, off, true, and false, a server with or without a port and TLS, and refuses the rest", () => {
     const toggle = kindOf("enabled");
-    const ircds = kindOf("ircds");
+    const servers = kindOf("servers");
 
     expect({
-      ircds: [
+      servers: [
         "irc.test",
         "irc.test/7000",
         "irc.test plain",
@@ -557,15 +557,15 @@ describe("the text syntax", () => {
         "irc.test/6697 -tls",
         "irc.test +tls",
         "",
-      ].map((text) => parseText(ircds, text)),
+      ].map((text) => parseText(servers, text)),
       toggles: ["on", "OFF", "true", "false", "yes"].map((text) => parseText(toggle, text)._tag),
     }).toStrictEqual({
-      ircds: [
+      servers: [
         { _tag: "Parsed", value: [{ host: "irc.test", port: 6697, tls: true }] },
         { _tag: "Parsed", value: [{ host: "irc.test", port: 7000, tls: true }] },
         { _tag: "Parsed", value: [{ host: "irc.test", port: 6667, tls: false }] },
         { _tag: "Parsed", value: [{ host: "::1", port: 6697, tls: false }] },
-        { _tag: "Invalid", message: 'An Ircd\'s port is 1 to 65535, not "0".' },
+        { _tag: "Invalid", message: 'A server\'s port is 1 to 65535, not "0".' },
         { _tag: "Parsed", value: [{ host: "a -tlsx", port: 6697, tls: true }] },
         {
           _tag: "Invalid",
@@ -577,7 +577,7 @@ describe("the text syntax", () => {
           message:
             'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "irc.test +tls".',
         },
-        { _tag: "Invalid", message: "Give at least one Ircd, as host/port." },
+        { _tag: "Invalid", message: "Give at least one server, as host/port." },
       ],
       toggles: ["Parsed", "Parsed", "Parsed", "Parsed", "Invalid"],
     });
@@ -654,7 +654,7 @@ const ignore = (text: string): Edit => ({ _tag: "Ignore", mask: IgnoreMask.make(
 const unignore = (text: string): Edit => ({ _tag: "Unignore", mask: IgnoreMask.make(text) });
 
 describe("editing", () => {
-  it("sets each option to what it shows and gets the same Configuration back", () => {
+  it("sets each option to what it shows and gets the same settings back", () => {
     const again = optionsOf(libera, full, undefined).flatMap((option) =>
       option.value._tag === "Shown"
         ? [valueOf(set(libera, full, option.path, option.value.text))]
@@ -670,12 +670,12 @@ describe("editing", () => {
     });
   });
 
-  it("sets a value, and refuses one that would not be a Configuration", () => {
+  it("sets a value, and refuses one that would not be a settings", () => {
     expect({
       empty: set(libera, plain, ["nicks"], ""),
       nicks: valueOf(set(libera, plain, ["nicks"], "a, b ,c")).nicks,
       off: valueOf(set(libera, plain, ["enabled"], "off")).enabled,
-      port: valueOf(set(libera, plain, ["ircds"], "127.0.0.1/6670 plain")).ircds,
+      port: valueOf(set(libera, plain, ["servers"], "127.0.0.1/6670 plain")).servers,
       wrong: set(libera, plain, ["fallbackEncoding"], "ebcdic")._tag,
     }).toStrictEqual({
       empty: {
@@ -699,8 +699,8 @@ describe("editing", () => {
       account: {
         _tag: "Sasl",
         account: "other",
-        credential: "libera.login.credential",
         mechanism: "auto",
+        password: "libera.login.password",
         required: false,
       },
       none: { _tag: "None" },
@@ -708,14 +708,14 @@ describe("editing", () => {
       sasl: {
         _tag: "Sasl",
         account: "dean",
-        credential: "libera.login.credential",
         mechanism: "auto",
+        password: "libera.login.password",
         required: false,
       },
     });
   });
 
-  it("sets up an operator login by its name, starting with the first nick and a named Credential", () => {
+  it("sets up an operator login by its name, starting with the first nick and a named password", () => {
     const named = valueOf(set(libera, plain, ["oper", "name"], "admin"));
 
     expect({
@@ -726,8 +726,8 @@ describe("editing", () => {
       spaced: set(libera, plain, ["oper", "name"], "two words")._tag,
     }).toStrictEqual({
       colon: "Invalid",
-      login: { _tag: "Login", credential: "libera.oper.credential", name: "dean" },
-      named: { _tag: "Login", credential: "libera.oper.credential", name: "admin" },
+      login: { _tag: "Login", name: "dean", password: "libera.oper.password" },
+      named: { _tag: "Login", name: "admin", password: "libera.oper.password" },
       none: { _tag: "None" },
       spaced: "Invalid",
     });
@@ -745,19 +745,19 @@ describe("editing", () => {
       account: {
         _tag: "Service",
         account: "other",
-        credential: "libera.login.credential",
+        password: "libera.login.password",
         service: "NickServ",
         wait: 5,
       },
       fromSasl: {
         _tag: "Service",
-        credential: "libera.login.credential",
+        password: "libera.login.password",
         service: "NickServ",
         wait: 10,
       },
       service: {
         _tag: "Service",
-        credential: "libera.login.credential",
+        password: "libera.login.password",
         service: "NickServ",
         wait: 5,
       },
@@ -802,21 +802,21 @@ describe("editing", () => {
       plain: {
         _tag: "Sasl",
         account: "dean",
-        credential: "libera.login.credential",
         mechanism: "auto",
+        password: "libera.login.password",
         required: true,
       },
     });
   });
 
-  it("keeps a Channel's key when the Channels are set again, and drops a Channel no longer named", () => {
+  it("keeps a channel's key when the channels are set again, and drops a channel no longer named", () => {
     expect(valueOf(set(libera, full, ["channels"], "#new,#secret")).channels).toStrictEqual([
       { name: "#new" },
       { key: "libera.channels._23secret.key", name: "#secret" },
     ]);
   });
 
-  it("unsets each option to what a new Network starts with, or refuses one that must be given", () => {
+  it("unsets each option to what a new network starts with, or refuses one that must be given", () => {
     expect({
       channelKey: valueOf(unset(libera, full, ["channels", "#secret", "key"])).channels,
       enabled: valueOf(unset(libera, valueOf(set(libera, plain, ["enabled"], "off")), ["enabled"]))
@@ -827,8 +827,8 @@ describe("editing", () => {
       password: "password" in valueOf(unset(libera, full, ["password"])),
       realname: valueOf(unset(libera, plain, ["realname"])).realname,
       required: valueOf(unset(libera, full, ["login", "required"])).login,
-      saslCredential: unset(libera, full, ["login", "credential"]),
-      saslOff: valueOf(unset(libera, plain, ["login", "credential"])),
+      saslCredential: unset(libera, full, ["login", "password"]),
+      saslOff: valueOf(unset(libera, plain, ["login", "password"])),
     }).toStrictEqual({
       channelKey: [{ name: "#secret" }, { name: "#iirc" }],
       enabled: true,
@@ -844,13 +844,13 @@ describe("editing", () => {
       saslCredential: {
         _tag: "Invalid",
         message:
-          "network.libera.login.credential is the Credential login uses, so it cannot be unset. /set network.libera.login none turns login off.",
+          "network.libera.login.password is the password login uses, so it can't be unset. /set network.libera.login none turns login off.",
       },
       saslOff: plain,
     });
   });
 
-  it("points a Credential option at a Credential, and a Channel's key only at a Channel named", () => {
+  it("points a password option at a password, and a channel's key only at a channel named", () => {
     expect({
       key: valueOf(
         apply(libera, plain, { _tag: "Point", credential: "k", path: ["channels", "#iirc", "key"] })
@@ -873,7 +873,7 @@ describe("editing", () => {
     });
   });
 
-  it("joins Channels not already wanted, as the Network folds them, and parts those that are", () => {
+  it("joins channels not already wanted, as the network folds them, and parts those that are", () => {
     const rfc = { casemapping: "rfc1459", chantypes: "#&" } as const;
 
     expect({
@@ -885,14 +885,14 @@ describe("editing", () => {
       unknownCase: valueOf(apply(libera, plain, { _tag: "Join", channels: ["#IIRC"] })).channels,
     }).toStrictEqual({
       joined: [{ name: "#iirc" }, { name: "#new" }],
-      missing: { _tag: "Invalid", message: "#nope is not among the Channels of libera." },
+      missing: { _tag: "Invalid", message: "#nope is not among the channels of libera." },
       parted: [{ key: "libera.channels._23secret.key", name: "#secret" }],
       // With no casemapping known, names are compared exactly.
       unknownCase: [{ name: "#iirc" }, { name: "#IIRC" }],
     });
   });
 
-  it("ignores a mask once, and unignores it compared as the Network folds it", () => {
+  it("ignores a mask once, and unignores it compared as the network folds it", () => {
     const ascii = { casemapping: "ascii", chantypes: "#" } as const;
     const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
     const held = valueOf(set(libera, plain, ["ignores"], "p[a]!*@*,*!*@spam.example"));
@@ -923,7 +923,7 @@ describe("editing", () => {
     });
   });
 
-  it("never merges or parts two Channels an ascii Network tells apart", () => {
+  it("never merges or parts two channels an ascii network tells apart", () => {
     const ascii = { casemapping: "ascii", chantypes: "#" } as const;
     const rfc = { casemapping: "rfc1459", chantypes: "#" } as const;
     const square = valueOf(set(libera, plain, ["channels"], "#[a]"));
@@ -944,7 +944,7 @@ describe("editing", () => {
     }).toStrictEqual({
       folded: {
         _tag: "Invalid",
-        message: "#[A] could be any of #[a], #{a} on libera. Part one by its exact name.",
+        message: "#[A] could be any of #[a], #{a} on libera. Leave one by its exact name.",
       },
       joined: [{ name: "#[a]" }, { name: "#{a}" }],
       parted: [{ name: "#{a}" }],
@@ -952,7 +952,7 @@ describe("editing", () => {
       timeline: [{ name: "#[a]" }],
       timelineFolded: {
         _tag: "Invalid",
-        message: "#[A] could be any of #[a], #{a} on libera. Part one by its exact name.",
+        message: "#[A] could be any of #[a], #{a} on libera. Leave one by its exact name.",
       },
       // Keys are folded by rfc1459 until a Network declares a mapping, as the Daemon folds them.
       timelineUnknown: [],
@@ -970,12 +970,12 @@ describe("editing", () => {
       percent: ["%help"],
       rfc: ["#a", "&b", "+c", "!d"],
       unknown:
-        "libera has not said what its Channels start with, so give %help with its prefix, such as #%help.",
+        "libera has not said what its channel names start with, so include the prefix, such as #%help.",
     });
   });
 
   // Any option of a valid Configuration, set to any text, gives a valid Configuration or says why.
-  it("always gives a Configuration, or why not", () => {
+  it("always gives a settings, or why not", () => {
     const options = optionsOf(libera, full, undefined);
     const valid = Schema.is(NetworkConfiguration);
 
@@ -1005,7 +1005,7 @@ const configureMask = (_tag: "Ignore" | "Unignore", text: string) => ({
 
 const neither = (text: string) => ({
   _tag: "Invalid",
-  message: `${text} is neither a nick nor a mask of nick!user@host, with each part given, at most 255 characters, and no space or comma.`,
+  message: `${text} is not a nick or a nick!user@host mask. Give every part, in at most 255 characters, with no space or comma.`,
 });
 
 describe("the commands", () => {
@@ -1037,7 +1037,7 @@ describe("the commands", () => {
           { _tag: "Configure", edit: { _tag: "Unset", path: ["realname"] }, network: libera },
         ],
       },
-      wrong: { _tag: "Invalid", message: 'network.libera.enabled: Say on or off, not "maybe".' },
+      wrong: { _tag: "Invalid", message: 'network.libera.enabled: Use on or off, not "maybe".' },
     });
   });
 
@@ -1049,24 +1049,24 @@ describe("the commands", () => {
     ]).toStrictEqual([' "two"  spaces ', "", ""]);
   });
 
-  it("ask for a Credential option's value in a prompt, and refuse one typed after it", () => {
+  it("ask for a password option's value in a prompt, and refuse one typed after it", () => {
     expect({
-      prompt: read("/set network.libera.login.credential"),
-      typed: read("/set network.libera.login.credential hunter2 two"),
+      prompt: read("/set network.libera.login.password"),
+      typed: read("/set network.libera.login.password hunter2 two"),
     }).toStrictEqual({
       prompt: {
         _tag: "Parsed",
-        value: [{ _tag: "PromptCredential", network: libera, path: ["login", "credential"] }],
+        value: [{ _tag: "PromptCredential", network: libera, path: ["login", "password"] }],
       },
       typed: {
         _tag: "Invalid",
         message:
-          "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set network.libera.login.credential alone, which asks for it in a password prompt.",
+          "Don't type a password into the message input. It was cleared and nothing was sent. Use /set network.libera.login.password alone to enter it in a password prompt.",
       },
     });
   });
 
-  it("add a Network with one Ircd and one nick, everything else as a new Network starts", () => {
+  it("add a network with one server and one nick, everything else as a new network starts", () => {
     const added = read("/network add test 127.0.0.1/6670 plain bot");
 
     expect({
@@ -1087,10 +1087,10 @@ describe("the commands", () => {
               declined: [],
               enabled: true,
               fallbackEncoding: "windows-1252",
-              ircds: [{ host: "127.0.0.1", port: 6670, tls: false }],
               login: { _tag: "None" },
               nicks: ["bot"],
               realname: "bot",
+              servers: [{ host: "127.0.0.1", port: 6670, tls: false }],
               username: "bot",
               whoOnJoin: true,
             }),
@@ -1101,11 +1101,11 @@ describe("the commands", () => {
       badId: {
         _tag: "Invalid",
         message:
-          'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
+          'A network\'s id is 1 to 64 lowercase letters, digits, _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
       },
       noNick: {
         _tag: "Invalid",
-        message: "Give an Ircd and a nick. /network add <id> <host>[/port] [plain] <nick>",
+        message: "Give a server and a nick. /network add <id> <host>[/port] [plain] <nick>",
       },
       oldFlag: {
         _tag: "Invalid",
@@ -1120,14 +1120,14 @@ describe("the commands", () => {
     });
   });
 
-  it("start a new Network as its Schema says, with what must be given, given", () => {
+  it("start a new network as its Schema says, with what must be given, given", () => {
     expect({
       missing: starting(libera, { nicks: ["x"] }),
-      started: starting(libera, { ircds: [{ host: "h", port: 1, tls: true }], nicks: ["x"] }),
+      started: starting(libera, { nicks: ["x"], servers: [{ host: "h", port: 1, tls: true }] }),
     }).toStrictEqual({
       missing: {
         _tag: "Invalid",
-        message: "network.libera.ircds has no starting value, so it must be given.",
+        message: "network.libera.servers has no starting value, so it must be given.",
       },
       started: {
         _tag: "Parsed",
@@ -1137,10 +1137,10 @@ describe("the commands", () => {
           declined: [],
           enabled: true,
           fallbackEncoding: "windows-1252",
-          ircds: [{ host: "h", port: 1, tls: true }],
           login: { _tag: "None" },
           nicks: ["x"],
           realname: "x",
+          servers: [{ host: "h", port: 1, tls: true }],
           username: "x",
           whoOnJoin: true,
         }),
@@ -1148,7 +1148,7 @@ describe("the commands", () => {
     });
   });
 
-  it("join and part on the focused Network, the open Channel when /part names none", () => {
+  it("join and part on the focused network, the open channel when /part names none", () => {
     expect({
       join: read("/join #a,b", inChannel),
       keyed: read("/join #a key", inChannel)._tag,
@@ -1159,7 +1159,7 @@ describe("the commands", () => {
       // A bare name is prefixed only once the Daemon says what CHANTYPES is.
       join: { _tag: "Parsed", value: configure({ _tag: "Join", channels: ["#a", "b"] }) },
       keyed: "Invalid",
-      nowhere: { _tag: "Invalid", message: "Open a Timeline first." },
+      nowhere: { _tag: "Invalid", message: "Open a conversation first." },
       part: {
         _tag: "Parsed",
         value: configure({ _tag: "PartTimeline", key: "#iirc", name: "#iirc" }),
@@ -1186,7 +1186,7 @@ describe("the commands", () => {
       list: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "network.libera.ignores" }] },
       mask: configureMask("Ignore", "*!*@spam.example"),
       nick: configureMask("Ignore", "Peer!*@*"),
-      nowhere: { _tag: "Invalid", message: "Open a Timeline first." },
+      nowhere: { _tag: "Invalid", message: "Open a conversation first." },
       two: { _tag: "Invalid", message: "Give one nick or mask. /ignore [<nick|mask>]" },
       unignore: configureMask("Unignore", "Peer!*@*"),
       unignoreBad: neither("@host"),
@@ -1194,7 +1194,7 @@ describe("the commands", () => {
     });
   });
 
-  it("clear a Credential's value typed into the composer at once, keeping it nowhere", () => {
+  it("clear a password's value typed into the composer at once, keeping it nowhere", () => {
     const typed = reduceComposers(
       reduceComposers(initialComposers, {
         _tag: "Edited",
@@ -1214,7 +1214,7 @@ describe("the commands", () => {
     expect({
       held: JSON.stringify([...refused.state.drafts]).includes("hunter2"),
       intents: refused.intents,
-      notice: draft.notice?.message.startsWith("A Credential's value is never typed"),
+      notice: draft.notice?.message.startsWith("Don't type a password"),
       text: [draft.text, draft.kept, draft.history],
     }).toStrictEqual({
       held: false,
@@ -1316,11 +1316,11 @@ describe("an option's menu", () => {
 });
 
 describe("the options view", () => {
-  it("lists the options of each Network read, filtered, and keeps the newest read", () => {
+  it("lists the options of each network read, filtered, and keeps the newest read", () => {
     const opened: readonly OptionsEvent[] = [
-      { _tag: "Listed", networks: [libera, dotted] },
+      { _tag: "Listed", networks: [libera, hyphenated] },
       { _tag: "Read", configuration: plain, network: libera, sequence: 5 },
-      { _tag: "Read", configuration: full, network: dotted, sequence: 2 },
+      { _tag: "Read", configuration: full, network: hyphenated, sequence: 2 },
       { _tag: "Read", configuration: full, network: libera, sequence: 3 },
     ];
 
@@ -1335,14 +1335,14 @@ describe("the options view", () => {
       names: listed(state, "*nicks").map((option) => option.name),
     }).toStrictEqual({
       kept: { _tag: "Read", configuration: plain, sequence: 5 },
-      names: ["network.libera.nicks", "network.my.net.nicks"],
+      names: ["network.libera.nicks", "network.my-net.nicks"],
     });
   });
 
-  it("says which Networks are still read: all before they are listed, then each not read yet", () => {
+  it("says which networks are still read: all before they are listed, then each not read yet", () => {
     const listedTwo = reduceOptions(initialOptions, {
       _tag: "Listed",
-      networks: [libera, dotted],
+      networks: [libera, hyphenated],
     });
 
     const oneRead = reduceOptions(listedTwo, {
@@ -1355,7 +1355,7 @@ describe("the options view", () => {
     const bothDone = reduceOptions(oneRead, {
       _tag: "ReadFailed",
       message: "Not read.",
-      network: dotted,
+      network: hyphenated,
     });
 
     expect({
@@ -1365,13 +1365,13 @@ describe("the options view", () => {
       unlisted: networksReading(initialOptions),
     }).toStrictEqual({
       bothDone: [],
-      listed: ["network.libera.*", "network.my.net.*"],
-      oneRead: ["network.my.net.*"],
+      listed: ["network.libera.*", "network.my-net.*"],
+      oneRead: ["network.my-net.*"],
       unlisted: ["network.*"],
     });
   });
 
-  it("shows whether a Credential is held as not known once the names held could not be read, even when some were read before", () => {
+  it("shows whether a password is held as not known once the names held could not be read, even when some were read before", () => {
     const failed = reduceOptions(initialOptions, { _tag: "HeldFailed" });
 
     const kept = reduceOptions(reduceOptions(initialOptions, { _tag: "Held", names: ["a"] }), {
@@ -1384,7 +1384,7 @@ describe("the options view", () => {
     });
   });
 
-  it("lets go of a Network's read that lands before the Networks are listed, as listing reads each again", () => {
+  it("lets go of a network's read that lands before the networks are listed, as listing reads each again", () => {
     const early = reduceOptions(initialOptions, {
       _tag: "Read",
       configuration: plain,
@@ -1424,10 +1424,10 @@ const fontRefused = (text: string) => `ui.font cannot be "${text}".`;
 const leadingRefused = (text: string) =>
   `ui.font.lineHeight: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
-const suffixRefused = (why: string) => `ui.composer.nickSuffix must ${why}.`;
+const suffixRefused = (why: string) => `ui.input.nickSuffix must ${why}.`;
 
 const widthRefused = (text: string) =>
-  `ui.timeline.maxWidth: Give a whole number from 40 to 400, or none, not "${text}".`;
+  `ui.conversation.maxWidth: Give a whole number from 40 to 400, or none, not "${text}".`;
 
 const defaultPlayers =
   "www.youtube-nocookie.com, player.vimeo.com, w.soundcloud.com, bandcamp.com, open.spotify.com, player.twitch.tv";
@@ -1440,44 +1440,44 @@ const defaultPlayers =
  */
 const uiRows = (options: ReturnType<typeof uiOptionsOf>) =>
   options
-    .filter((one) => ["ui.timeline.activity", "ui.font.size", "ui.theme"].includes(one.name))
+    .filter((one) => ["ui.conversation.activity", "ui.font.size", "ui.theme"].includes(one.name))
     .map((one) => [one.name, one.value, one.shared, one.device, one.starts]);
 
 describe("the options under ui", () => {
   const shared = {
     options: {
       aliases: [],
-      "composer.enter": "send",
-      "composer.nickSuffix": ", ",
-      "composer.spellcheck": false,
+      "conversation.activity": "quiet",
+      "conversation.colors": "theme",
+      "conversation.dateFormat": "full",
+      "conversation.layout": "columns",
+      "conversation.maxWidth": "none",
+      "conversation.nickBrackets": true,
+      "conversation.nickPrefix": true,
+      "conversation.nickWidth": 16,
+      "conversation.spacing": 0.3,
+      "conversation.timeFormat": "HH:mm",
       font: "system",
       "font.lineHeight": 1.45,
       "font.size": 14,
+      "input.enter": "send",
+      "input.nickSuffix": ", ",
+      "input.spellcheck": false,
+      logs: "info",
       "members.width": 18,
       previews: "off",
       "previews.animate": true,
+      "previews.conversations": {},
       "previews.mediaHeight": "medium",
       "previews.players": ["player.vimeo.com", "w.soundcloud.com"],
       "previews.start": "open",
-      "previews.timelines": {},
       "sidebar.networks": [],
       "sidebar.order": [],
       "sidebar.pinned": [],
-      tail: "info",
       theme: "dark",
       "theme.dark": "dark",
       "theme.imported": [],
       "theme.light": "light",
-      "timeline.activity": "quiet",
-      "timeline.colours": "theme",
-      "timeline.dateFormat": "full",
-      "timeline.layout": "columns",
-      "timeline.maxWidth": "none",
-      "timeline.nickBrackets": true,
-      "timeline.nickPrefix": true,
-      "timeline.nickWidth": 16,
-      "timeline.spacing": 0.3,
-      "timeline.timeFormat": "HH:mm",
       "unread.markRead": "latest",
       "unread.muted": [],
       "unread.quietBots": false,
@@ -1501,17 +1501,24 @@ describe("the options under ui", () => {
       options: uiRows(uiOptionsOf(shared, { "font.size": 18, theme: "light" })),
     }).toStrictEqual({
       before: [
-        ["ui.font.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined, "14"],
-        ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined, "system"],
         [
-          "ui.timeline.activity",
+          "ui.conversation.activity",
           { _tag: "Shown", text: "all" },
           { _tag: "Unset" },
           undefined,
           "all",
         ],
+        ["ui.font.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined, "14"],
+        ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined, "system"],
       ],
       options: [
+        [
+          "ui.conversation.activity",
+          { _tag: "Shown", text: "quiet" },
+          { _tag: "Shown", text: "quiet" },
+          undefined,
+          "all",
+        ],
         [
           "ui.font.size",
           { _tag: "Shown", text: "18" },
@@ -1525,13 +1532,6 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "dark" },
           { _tag: "Shown", text: "light" },
           "system",
-        ],
-        [
-          "ui.timeline.activity",
-          { _tag: "Shown", text: "quiet" },
-          { _tag: "Shown", text: "quiet" },
-          undefined,
-          "all",
         ],
       ],
     });
@@ -1561,7 +1561,7 @@ describe("the options under ui", () => {
         _tag: "UiRead",
         ui: {
           ...shared,
-          options: { ...shared.options, "timeline.timeFormat": "none" },
+          options: { ...shared.options, "conversation.timeFormat": "none" },
           sequence: 3,
         },
       },
@@ -1572,44 +1572,44 @@ describe("the options under ui", () => {
     expect({
       kept: state.ui,
       named: listed(state, "ui.*").map((option) => option.name),
-      time: listed(state, "*timeFormat", { "timeline.timeFormat": "HH:mm:ss" }).map(
+      time: listed(state, "*timeFormat", { "conversation.timeFormat": "HH:mm:ss" }).map(
         (option) => option.value
       ),
     }).toStrictEqual({
       kept: shared,
       named: [
         "ui.aliases",
-        "ui.composer.enter",
-        "ui.composer.nickSuffix",
-        "ui.composer.spellcheck",
+        "ui.conversation.activity",
+        "ui.conversation.colors",
+        "ui.conversation.dateFormat",
+        "ui.conversation.layout",
+        "ui.conversation.maxWidth",
+        "ui.conversation.nickBrackets",
+        "ui.conversation.nickPrefix",
+        "ui.conversation.nickWidth",
+        "ui.conversation.spacing",
+        "ui.conversation.timeFormat",
         "ui.font",
         "ui.font.lineHeight",
         "ui.font.size",
+        "ui.input.enter",
+        "ui.input.nickSuffix",
+        "ui.input.spellcheck",
+        "ui.logs",
         "ui.members.width",
         "ui.previews",
         "ui.previews.animate",
+        "ui.previews.conversations",
         "ui.previews.mediaHeight",
         "ui.previews.players",
         "ui.previews.start",
-        "ui.previews.timelines",
         "ui.sidebar.networks",
         "ui.sidebar.order",
         "ui.sidebar.pinned",
-        "ui.tail",
         "ui.theme",
         "ui.theme.dark",
         "ui.theme.imported",
         "ui.theme.light",
-        "ui.timeline.activity",
-        "ui.timeline.colours",
-        "ui.timeline.dateFormat",
-        "ui.timeline.layout",
-        "ui.timeline.maxWidth",
-        "ui.timeline.nickBrackets",
-        "ui.timeline.nickPrefix",
-        "ui.timeline.nickWidth",
-        "ui.timeline.spacing",
-        "ui.timeline.timeFormat",
         "ui.unread.markRead",
         "ui.unread.muted",
         "ui.unread.quietBots",
@@ -1661,7 +1661,7 @@ describe("the options under ui", () => {
       device: {
         _tag: "Invalid",
         message:
-          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+          "ui.previews is shared by all your devices, so one device can't override it. Use /set ui.previews without -device.",
       },
       kind: { _tag: "Choice", choices: ["off", "text", "on"] },
       linksOnly: {
@@ -1685,7 +1685,7 @@ describe("the options under ui", () => {
       unsetDevice: {
         _tag: "Invalid",
         message:
-          "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+          "ui.previews is shared by all your devices, so one device can't override it. Use /set ui.previews without -device.",
       },
     });
   });
@@ -1704,7 +1704,7 @@ describe("the options under ui", () => {
       device: {
         _tag: "Invalid",
         message:
-          "ui.previews.players is shared by every device, so no device overrides it. Use /set ui.previews.players without -device.",
+          "ui.previews.players is shared by all your devices, so one device can't override it. Use /set ui.previews.players without -device.",
       },
       kind: { _tag: "Texts", nonEmpty: false },
       notAHost: "Invalid",
@@ -1727,7 +1727,7 @@ describe("the options under ui", () => {
     });
   });
 
-  it("offer ui.sidebar.pinned as a list of Timeline ids, shared by every device, refused when one is named twice, and unset to none", () => {
+  it("offer ui.sidebar.pinned as a list of conversation ids, shared by every device, refused when one is named twice, and unset to none", () => {
     const one = "00000000000002-00000000-00000000";
     const two = "00000000000003-00000000-00000000";
     const option = uiOptionsOf(shared, {}).find((found) => found.option === "sidebar.pinned");
@@ -1755,17 +1755,20 @@ describe("the options under ui", () => {
     });
   });
 
-  it("offer ui.previews.timelines as each Timeline's choice, typed id=mode and read back the same", () => {
+  it("offer ui.previews.conversations as each conversation's choice, typed id=mode and read back the same", () => {
     const one = "00000000000002-00000000-00000000";
     const two = "00000000000003-00000000-00000000";
     const kind: Kind = { _tag: "ChoiceByKey", choices: ["off", "text", "on"] };
     const typed = parseText(kind, ` ${one}=TEXT, ${two} = on `);
-    const option = uiOptionsOf(shared, {}).find((found) => found.option === "previews.timelines");
+
+    const option = uiOptionsOf(shared, {}).find(
+      (found) => found.option === "previews.conversations"
+    );
 
     expect({
       kind: option?.kind,
-      named: read(`/set ui.previews.timelines ${one}=text`),
-      notAnId: read("/set ui.previews.timelines libera=on"),
+      named: read(`/set ui.previews.conversations ${one}=text`),
+      notAnId: read("/set ui.previews.conversations libera=on"),
       shown: [option?.value, option?.starts],
       twice: parseText(kind, `${one}=on,${one}=off`),
       typed,
@@ -1780,12 +1783,12 @@ describe("the options under ui", () => {
           {
             _tag: "ChangeUi",
             device: false,
-            option: "previews.timelines",
+            option: "previews.conversations",
             value: { [one]: "text" },
           },
         ],
       },
-      notAnId: { _tag: "Invalid", message: 'ui.previews.timelines cannot be "libera=on".' },
+      notAnId: { _tag: "Invalid", message: 'ui.previews.conversations cannot be "libera=on".' },
       shown: [{ _tag: "Shown", text: "" }, ""],
       twice: { _tag: "Invalid", message: `${one} is given more than once.` },
       typed: { _tag: "Parsed", value: { [one]: "text", [two]: "on" } },
@@ -1804,58 +1807,62 @@ describe("the options under ui", () => {
 
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {
     expect({
-      alone: read("/set ui.timeline.timeFormat"),
-      anyCase: read("/set ui.timeline.timeFormat hh:mm:ss"),
-      brackets: read("/set -device ui.timeline.nickBrackets off"),
+      alone: read("/set ui.conversation.timeFormat"),
+      anyCase: read("/set ui.conversation.timeFormat hh:mm:ss"),
+      brackets: read("/set -device ui.conversation.nickBrackets off"),
       device: read("/set -device ui.theme light"),
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
-      empty: read("/set ui.timeline.timeFormat "),
+      empty: read("/set ui.conversation.timeFormat "),
       font: read("/set ui.font IBM-Plex-Mono"),
       fontFamily: read("/set ui.font  Fira Code "),
       fontFamilyQuoted: read('/set ui.font Fira" Code'),
       fractional: read("/set ui.font.size 14.5"),
       leading: read("/set ui.font.lineHeight 1.6"),
       leadingTooFine: read("/set ui.font.lineHeight 1.555"),
-      prefix: read("/set -device ui.timeline.nickPrefix off"),
-      prefixShared: read("/set ui.timeline.nickPrefix on"),
+      prefix: read("/set -device ui.conversation.nickPrefix off"),
+      prefixShared: read("/set ui.conversation.nickPrefix on"),
       size: read("/set -device ui.font.size 20"),
-      spacing: read("/set -device ui.timeline.spacing 0.35"),
-      spacingNone: read("/set ui.timeline.spacing 0"),
-      spacingTooFine: read("/set ui.timeline.spacing 0.33"),
-      spellcheck: read("/set ui.composer.spellcheck off"),
-      suffix: read("/set ui.composer.nickSuffix , "),
-      suffixAlone: read("/set -device ui.composer.nickSuffix"),
-      suffixControl: read("/set ui.composer.nickSuffix :\u0003 "),
-      suffixDevice: read("/set -device ui.composer.nickSuffix  -> "),
-      suffixNone: read("/set ui.composer.nickSuffix "),
-      suffixSpace: read("/set ui.composer.nickSuffix  "),
+      spacing: read("/set -device ui.conversation.spacing 0.35"),
+      spacingNone: read("/set ui.conversation.spacing 0"),
+      spacingTooFine: read("/set ui.conversation.spacing 0.33"),
+      spellcheck: read("/set ui.input.spellcheck off"),
+      suffix: read("/set ui.input.nickSuffix , "),
+      suffixAlone: read("/set -device ui.input.nickSuffix"),
+      suffixControl: read("/set ui.input.nickSuffix :\u0003 "),
+      suffixDevice: read("/set -device ui.input.nickSuffix  -> "),
+      suffixNone: read("/set ui.input.nickSuffix "),
+      suffixSpace: read("/set ui.input.nickSuffix  "),
       tooBig: read("/set ui.font.size 25"),
-      twelveHourAnyCase: read("/set ui.timeline.timeFormat H:MM A"),
+      twelveHourAnyCase: read("/set ui.conversation.timeFormat H:MM A"),
       unknown: read("/set ui.palette dusk"),
-      unset: read("/unset ui.timeline.activity"),
+      unset: read("/unset ui.conversation.activity"),
       unsetDevice: read("/unset -device ui.theme"),
-      width: read("/set ui.timeline.maxWidth 80"),
-      widthFractional: read("/set ui.timeline.maxWidth 80.5"),
-      wrongTime: read("/set ui.timeline.timeFormat noon"),
+      width: read("/set ui.conversation.maxWidth 80"),
+      widthFractional: read("/set ui.conversation.maxWidth 80.5"),
+      wrongTime: read("/set ui.conversation.timeFormat noon"),
     }).toStrictEqual({
-      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.timeline.timeFormat" }] },
-      anyCase: change("timeline.timeFormat", "HH:mm:ss", false),
-      brackets: change("timeline.nickBrackets", false, true),
+      alone: {
+        _tag: "Parsed",
+        value: [{ _tag: "OpenOptions", filter: "ui.conversation.timeFormat" }],
+      },
+      anyCase: change("conversation.timeFormat", "HH:mm:ss", false),
+      brackets: change("conversation.nickBrackets", false, true),
       device: change("theme", "light", true),
       deviceAlone: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       deviceNetwork: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       empty: {
         _tag: "Invalid",
-        message: "Give ui.timeline.timeFormat a value, or use /unset ui.timeline.timeFormat.",
+        message:
+          "Give ui.conversation.timeFormat a value, or use /unset ui.conversation.timeFormat.",
       },
       font: change("font", "ibm-plex-mono", false),
       fontFamily: change("font", "Fira Code", false),
@@ -1866,46 +1873,46 @@ describe("the options under ui", () => {
       },
       leading: change("font.lineHeight", 1.6, false),
       leadingTooFine: { _tag: "Invalid", message: leadingRefused("1.555") },
-      prefix: change("timeline.nickPrefix", false, true),
-      prefixShared: change("timeline.nickPrefix", true, false),
+      prefix: change("conversation.nickPrefix", false, true),
+      prefixShared: change("conversation.nickPrefix", true, false),
       size: change("font.size", 20, true),
-      spacing: change("timeline.spacing", 0.35, true),
-      spacingNone: change("timeline.spacing", 0, false),
+      spacing: change("conversation.spacing", 0.35, true),
+      spacingNone: change("conversation.spacing", 0, false),
       spacingTooFine: {
         _tag: "Invalid",
-        message: 'ui.timeline.spacing: Give a number from 0 to 1.5, in steps of 0.05, not "0.33".',
+        message:
+          'ui.conversation.spacing: Give a number from 0 to 1.5, in steps of 0.05, not "0.33".',
       },
-      spellcheck: change("composer.spellcheck", false, false),
+      spellcheck: change("input.spellcheck", false, false),
       // The rest of the line after the name's space, exactly: a trailing space is kept.
-      suffix: change("composer.nickSuffix", ", ", false),
+      suffix: change("input.nickSuffix", ", ", false),
       suffixAlone: {
         _tag: "Invalid",
-        message:
-          "Give ui.composer.nickSuffix a value, or use /unset -device ui.composer.nickSuffix.",
+        message: "Give ui.input.nickSuffix a value, or use /unset -device ui.input.nickSuffix.",
       },
       suffixControl: { _tag: "Invalid", message: suffixRefused("hold no control character") },
-      suffixDevice: change("composer.nickSuffix", " -> ", true),
-      suffixNone: change("composer.nickSuffix", "", false),
-      suffixSpace: change("composer.nickSuffix", " ", false),
+      suffixDevice: change("input.nickSuffix", " -> ", true),
+      suffixNone: change("input.nickSuffix", "", false),
+      suffixSpace: change("input.nickSuffix", " ", false),
       tooBig: {
         _tag: "Invalid",
         message: 'ui.font.size: Give a whole number from 10 to 24, not "25".',
       },
-      twelveHourAnyCase: change("timeline.timeFormat", "h:mm a", false),
+      twelveHourAnyCase: change("conversation.timeFormat", "h:mm a", false),
       unknown: {
         _tag: "Invalid",
         message:
-          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.",
       },
-      unset: change("timeline.activity", undefined, false),
+      unset: change("conversation.activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
-      width: change("timeline.maxWidth", 80, false),
+      width: change("conversation.maxWidth", 80, false),
       widthFractional: { _tag: "Invalid", message: widthRefused("80.5") },
       // The choices as written, so HH:mm is never read as a 12-hour hh:mm.
       wrongTime: {
         _tag: "Invalid",
         message:
-          'ui.timeline.timeFormat: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
+          'ui.conversation.timeFormat: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
       },
     });
   });
@@ -1919,8 +1926,8 @@ const owned = (option: string, value: Json | undefined) => ({
 const owner: OwnerInForce = {
   options: Schema.decodeSync(OwnerOptions)({
     "previews.maxTotal": 2048,
-    "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
-    "store.s3.bucket": "uploads",
+    "storage.s3.accessKeyId": "Owner.storage.s3.accessKeyId",
+    "storage.s3.bucket": "uploads",
     "uploads.maxSize": 1024,
     "uploads.publicUrl": "https://files.example.com",
   }),
@@ -1937,7 +1944,7 @@ const owner: OwnerInForce = {
 const ownerRows = (inForce: OwnerInForce | undefined, held: ReadonlySet<string> | undefined) =>
   ownerOptionsOf(inForce, held).map((option) => [option.name, option.value, option.starts]);
 
-describe("the options under store, uploads, and previews", () => {
+describe("the options under storage, uploads, and previews", () => {
   it("are every field of the contract's Schema, by its full name, each described", () => {
     expect({
       described: ownerFields.every((field) => field.description !== ""),
@@ -1948,44 +1955,44 @@ describe("the options under store, uploads, and previews", () => {
     });
   });
 
-  it("list each value in force, its default or unset, and a Credential's name and whether it is held", () => {
+  it("list each value in force, its default or unset, and a password's name and whether it is held", () => {
     expect({
-      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(3, 5),
+      held: ownerRows(owner, new Set(["Owner.storage.s3.accessKeyId"])).slice(3, 5),
       notHeld: ownerRows(owner, new Set()).slice(3, 4),
       read: ownerRows(owner, undefined),
       unread: [...new Set(ownerOptionsOf(undefined, undefined).map((option) => option.value._tag))],
     }).toStrictEqual({
       held: [
         [
-          "store.s3.accessKeyId",
-          { _tag: "Credential", held: true, name: "Owner.store.s3.accessKeyId" },
+          "storage.s3.accessKeyId",
+          { _tag: "Credential", held: true, name: "Owner.storage.s3.accessKeyId" },
           "unset",
         ],
-        ["store.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
+        ["storage.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
       ],
       notHeld: [
         [
-          "store.s3.accessKeyId",
-          { _tag: "Credential", held: false, name: "Owner.store.s3.accessKeyId" },
+          "storage.s3.accessKeyId",
+          { _tag: "Credential", held: false, name: "Owner.storage.s3.accessKeyId" },
           "unset",
         ],
       ],
       read: [
         ["away.after", { _tag: "Unset" }, "unset"],
         ["away.message", { _tag: "Unset" }, "unset"],
-        ["previews.maxTotal", { _tag: "Shown", text: "2048" }, "1073741824"],
+        ["previews.maxTotal", { _tag: "Shown", text: "2048" }, "1000000000"],
         [
-          "store.s3.accessKeyId",
-          { _tag: "Credential", held: undefined, name: "Owner.store.s3.accessKeyId" },
+          "storage.s3.accessKeyId",
+          { _tag: "Credential", held: undefined, name: "Owner.storage.s3.accessKeyId" },
           "unset",
         ],
-        ["store.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
-        ["store.s3.endpoint", { _tag: "Unset" }, "unset"],
-        ["store.s3.region", { _tag: "Unset" }, "unset"],
-        ["store.s3.secretAccessKey", { _tag: "Unset" }, "unset"],
+        ["storage.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
+        ["storage.s3.endpoint", { _tag: "Unset" }, "unset"],
+        ["storage.s3.region", { _tag: "Unset" }, "unset"],
+        ["storage.s3.secretAccessKey", { _tag: "Unset" }, "unset"],
         ["uploads.expireAfter", { _tag: "Unset" }, "unset"],
         ["uploads.listen", { _tag: "Unset" }, "unset"],
-        ["uploads.maxSize", { _tag: "Shown", text: "1024" }, "104857600"],
+        ["uploads.maxSize", { _tag: "Shown", text: "1024" }, "100000000"],
         ["uploads.maxTotal", { _tag: "Unset" }, "unset"],
         ["uploads.publicUrl", { _tag: "Shown", text: "https://files.example.com" }, "unset"],
       ],
@@ -2009,45 +2016,45 @@ describe("the options under store, uploads, and previews", () => {
     expect({
       forgotten: forgotten.owner,
       kept: state.owner,
-      store: listed(state, "store.s3.b*").map((option) => [option._tag, option.name]),
+      store: listed(state, "storage.s3.b*").map((option) => [option._tag, option.name]),
       uploads: listed(state, "uploads").length,
     }).toStrictEqual({
       forgotten: undefined,
       kept: owner,
-      store: [["Owner", "store.s3.bucket"]],
+      store: [["Owner", "storage.s3.bucket"]],
       uploads: 5,
     });
   });
 
   it("resolve only a full name the Schema has", () => {
     expect({
-      bucket: resolveOwner("store.s3.bucket")._tag,
-      root: resolveOwner("store"),
+      bucket: resolveOwner("storage.s3.bucket")._tag,
+      root: resolveOwner("storage"),
       typo: resolveOwner("uploads.maxsize"),
     }).toStrictEqual({
       bucket: "Parsed",
       root: {
         _tag: "Invalid",
         message:
-          "There is no option store. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option storage. Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.",
       },
       typo: {
         _tag: "Invalid",
         message:
-          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, away.<option>, store.<option>, uploads.<option>, or previews.<option>.",
+          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, away.<option>, storage.<option>, uploads.<option>, or previews.<option>.",
       },
     });
   });
 
   it("parse text by each kind, then by the Schema, saying why it refuses", () => {
     expect({
-      bucket: parseOwnerText("store.s3.bucket", "my-bucket"),
-      bucketBad: parseOwnerText("store.s3.bucket", "My_Bucket"),
-      credential: parseOwnerText("store.s3.secretAccessKey", "hunter2"),
+      bucket: parseOwnerText("storage.s3.bucket", "my-bucket"),
+      bucketBad: parseOwnerText("storage.s3.bucket", "My_Bucket"),
+      credential: parseOwnerText("storage.s3.secretAccessKey", "hunter2"),
       days: parseOwnerText("uploads.expireAfter", " 30 "),
       daysTooMany: parseOwnerText("uploads.expireAfter", "36501"),
-      endpointQuery: parseOwnerText("store.s3.endpoint", "https://s3.example.com/?x=1"),
-      endpointSlash: parseOwnerText("store.s3.endpoint", "https://S3.example.com:443/"),
+      endpointQuery: parseOwnerText("storage.s3.endpoint", "https://s3.example.com/?x=1"),
+      endpointSlash: parseOwnerText("storage.s3.endpoint", "https://S3.example.com:443/"),
       listen: parseOwnerText("uploads.listen", "127.0.0.1:7668"),
       listenBad: parseOwnerText("uploads.listen", "localhost"),
       maxSize: parseOwnerText("uploads.maxSize", "1048576"),
@@ -2058,12 +2065,12 @@ describe("the options under store, uploads, and previews", () => {
       bucketBad: {
         _tag: "Invalid",
         message:
-          "store.s3.bucket must be 3 to 63 lower-case letters, digits, . and -, starting and ending with a letter or digit.",
+          "storage.s3.bucket must be 3 to 63 lowercase letters, digits, . and -, starting and ending with a letter or digit.",
       },
       credential: {
         _tag: "Invalid",
         message:
-          "store.s3.secretAccessKey: A Credential is set by giving its value, which the Vault holds.",
+          "storage.s3.secretAccessKey: Enter a password in a password prompt. iirc stores it securely and never shows it.",
       },
       days: { _tag: "Parsed", value: 30 },
       daysTooMany: {
@@ -2073,7 +2080,7 @@ describe("the options under store, uploads, and previews", () => {
       endpointQuery: {
         _tag: "Invalid",
         message:
-          "store.s3.endpoint must be an absolute http or https URL, such as https://files.example.com/uploads, with no user, query, or fragment.",
+          "storage.s3.endpoint must be an absolute http or https URL, such as https://files.example.com/uploads, with no user, query, or fragment.",
       },
       endpointSlash: { _tag: "Parsed", value: "https://s3.example.com" },
       listen: { _tag: "Parsed", value: "127.0.0.1:7668" },
@@ -2094,39 +2101,39 @@ describe("the options under store, uploads, and previews", () => {
     });
   });
 
-  it("are set and unset with /set and /unset, never for one device, and a Credential's value only in a prompt", () => {
-    const secret = "/set store.s3.secretAccessKey hunter2";
+  it("are set and unset with /set and /unset, never for one device, and a password's value only in a prompt", () => {
+    const secret = "/set storage.s3.secretAccessKey hunter2";
 
     expect({
-      alone: read("/set store.s3.bucket"),
-      bucket: read("/set store.s3.bucket my-bucket"),
-      bucketBad: read("/set store.s3.bucket My_Bucket")._tag,
-      credential: read("/set store.s3.accessKeyId"),
+      alone: read("/set storage.s3.bucket"),
+      bucket: read("/set storage.s3.bucket my-bucket"),
+      bucketBad: read("/set storage.s3.bucket My_Bucket")._tag,
+      credential: read("/set storage.s3.accessKeyId"),
       credentialTyped: read(secret),
       device: read("/set -device uploads.maxSize 1024"),
       empty: read("/set uploads.maxSize "),
       filter: read("/set uploads.*"),
       refused: typesCredential(secret, []),
-      unknown: read("/set store.s3.colour blue")._tag,
+      unknown: read("/set storage.s3.colour blue")._tag,
       unset: read("/unset uploads.maxSize"),
       unsetDevice: read("/unset -device uploads.maxSize"),
     }).toStrictEqual({
-      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "store.s3.bucket" }] },
-      bucket: owned("store.s3.bucket", "my-bucket"),
+      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "storage.s3.bucket" }] },
+      bucket: owned("storage.s3.bucket", "my-bucket"),
       bucketBad: "Invalid",
       credential: {
         _tag: "Parsed",
-        value: [{ _tag: "PromptCredential", option: "store.s3.accessKeyId" }],
+        value: [{ _tag: "PromptCredential", option: "storage.s3.accessKeyId" }],
       },
       credentialTyped: {
         _tag: "Invalid",
         message:
-          "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set store.s3.secretAccessKey alone, which asks for it in a password prompt.",
+          "Don't type a password into the message input. It was cleared and nothing was sent. Use /set storage.s3.secretAccessKey alone to enter it in a password prompt.",
       },
       device: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
       empty: {
         _tag: "Invalid",
@@ -2139,48 +2146,48 @@ describe("the options under store, uploads, and previews", () => {
       unsetDevice: {
         _tag: "Invalid",
         message:
-          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+          "Only ui options can be set for this device alone, as in /set -device ui.theme light.",
       },
     });
   });
 
-  it("name a Credential the option names, or one no Network's could ever be named", () => {
+  it("name a password the option names, or one no network's could ever be named", () => {
     expect({
-      derived: derivedOwnerCredential("store.s3.secretAccessKey"),
+      derived: derivedOwnerCredential("storage.s3.secretAccessKey"),
       named: ownerCredentialFor(
         Schema.decodeSync(OwnerOptions)({
           "previews.maxTotal": 1,
-          "store.s3.accessKeyId": "kept",
+          "storage.s3.accessKeyId": "kept",
           "uploads.maxSize": 1,
         }),
-        "store.s3.accessKeyId"
+        "storage.s3.accessKeyId"
       ),
       // A Network's derived names start with its id, which never starts upper-case.
       network: derivedCredential(Schema.decodeSync(NetworkId)("owner"), ["password"]),
       prompt: reduceOptions(initialOptions, {
         _tag: "Prompting",
-        prompt: { option: "store.s3.secretAccessKey" },
+        prompt: { option: "storage.s3.secretAccessKey" },
       }).prompting,
-      unnamed: ownerCredentialFor(owner.options, "store.s3.secretAccessKey"),
+      unnamed: ownerCredentialFor(owner.options, "storage.s3.secretAccessKey"),
     }).toStrictEqual({
-      derived: "Owner.store.s3.secretAccessKey",
+      derived: "Owner.storage.s3.secretAccessKey",
       named: "kept",
       network: { _tag: "Parsed", value: "owner.password" },
-      prompt: { name: "store.s3.secretAccessKey", option: "store.s3.secretAccessKey" },
-      unnamed: "Owner.store.s3.secretAccessKey",
+      prompt: { name: "storage.s3.secretAccessKey", option: "storage.s3.secretAccessKey" },
+      unnamed: "Owner.storage.s3.secretAccessKey",
     });
   });
 });
 
 const time = (value: Json | undefined): Wanted => ({
   _tag: "Ui",
-  option: "timeline.timeFormat",
+  option: "conversation.timeFormat",
   value,
 });
 
 const bucket = (value: Json | undefined): Wanted => ({
   _tag: "Owner",
-  option: "store.s3.bucket",
+  option: "storage.s3.bucket",
   value,
 });
 
@@ -2206,9 +2213,9 @@ describe("the options view's headings", () => {
 
   // Three Networks listed, two read, and everything else read.
   const everything = [
-    { _tag: "Listed", networks: [dotted, libera, unread] },
+    { _tag: "Listed", networks: [hyphenated, libera, unread] },
     { _tag: "Read", configuration: plain, network: libera, sequence: 1 },
-    { _tag: "Read", configuration: plain, network: dotted, sequence: 1 },
+    { _tag: "Read", configuration: plain, network: hyphenated, sequence: 1 },
     { _tag: "UiRead", ui: { options: uiDefaults, sequence: 1 } },
     { _tag: "OwnerRead", owner },
   ] satisfies readonly OptionsEvent[];
@@ -2238,13 +2245,13 @@ describe("the options view's headings", () => {
       shown: [
         ["away", 2, true],
         ["network.libera", optionsOf(libera, plain, undefined).length, true],
-        ["network.my.net", optionsOf(dotted, plain, undefined).length, true],
+        ["network.my-net", optionsOf(hyphenated, plain, undefined).length, true],
         ["previews", 1, true],
-        ["store", 5, true],
+        ["storage", 5, true],
         ["ui", Object.keys(uiDefaults).length, true],
         ["uploads", 5, true],
       ],
-      why: "every heading in the order of its name, whatever order the Networks were listed in",
+      why: "every heading in the order of its name, whatever order the networks were listed in",
     },
     {
       filter: "*maxTotal",
@@ -2257,7 +2264,7 @@ describe("the options view's headings", () => {
     {
       filter: "network.libera.nicks",
       shown: [["network.libera", 1, true]],
-      why: "one Network's option heads only its own",
+      why: "one network's option heads only its own",
     },
     { filter: "nothing matches", shown: [], why: "nothing matched is no heading at all" },
   ])("$why", ({ filter, shown }) => {
@@ -2289,20 +2296,24 @@ describe("a change on its way", () => {
       ...read,
       {
         _tag: "UiRead",
-        ui: { ...inForce, options: { ...uiDefaults, "timeline.timeFormat": "none" }, sequence: 2 },
+        ui: {
+          ...inForce,
+          options: { ...uiDefaults, "conversation.timeFormat": "none" },
+          sequence: 2,
+        },
       },
       { _tag: "Asked", change: time(undefined) },
     ]);
 
     const toggled = folded([
       ...read,
-      { _tag: "Asked", change: { _tag: "Ui", option: "composer.spellcheck", value: false } },
+      { _tag: "Asked", change: { _tag: "Ui", option: "input.spellcheck", value: false } },
     ]);
 
     expect({
-      set: shownOf(set, "ui.timeline.timeFormat"),
-      toggled: shownOf(toggled, "ui.composer.spellcheck"),
-      unset: shownOf(unset, "ui.timeline.timeFormat"),
+      set: shownOf(set, "ui.conversation.timeFormat"),
+      toggled: shownOf(toggled, "ui.input.spellcheck"),
+      unset: shownOf(unset, "ui.conversation.timeFormat"),
     }).toStrictEqual({
       set: text("HH:mm:ss"),
       toggled: text("off"),
@@ -2310,7 +2321,7 @@ describe("a change on its way", () => {
     });
   });
 
-  it("shows an edit at once, under a Network", () => {
+  it("shows an edit at once, under a network", () => {
     const set = folded([...read, { _tag: "Asked", change: realname("Dean K") }]);
 
     const unset = folded([
@@ -2333,7 +2344,7 @@ describe("a change on its way", () => {
     expect(shownOf(unset, "network.libera.realname")).not.toStrictEqual(text("Dean"));
   });
 
-  it("shows a value set or unset at once, under store, uploads, and previews", () => {
+  it("shows a value set or unset at once, under storage, uploads, and previews", () => {
     const set = folded([
       ...read,
       { _tag: "Asked", change: bucket("uploads") },
@@ -2349,25 +2360,25 @@ describe("a change on its way", () => {
 
     expect({
       maxSize: shownOf(set, "uploads.maxSize"),
-      set: shownOf(set, "store.s3.bucket"),
-      unsetBucket: shownOf(unset, "store.s3.bucket"),
+      set: shownOf(set, "storage.s3.bucket"),
+      unsetBucket: shownOf(unset, "storage.s3.bucket"),
       unsetMaxSize: shownOf(unset, "uploads.maxSize"),
     }).toStrictEqual({
       maxSize: text("2048"),
       set: text("uploads"),
       unsetBucket: [{ _tag: "Unset" }],
-      unsetMaxSize: text("104857600"),
+      unsetMaxSize: text("100000000"),
     });
   });
 
-  it("leaves out a value its Schema refuses, under store, uploads, and previews", () => {
+  it("leaves out a value its Schema refuses, under storage, uploads, and previews", () => {
     const state = folded([
       ...read,
       { _tag: "OwnerRead", owner: { ...owner, sequence: 2 } },
-      { _tag: "Asked", change: { _tag: "Owner", option: "store.s3.bucket", value: 42 } },
+      { _tag: "Asked", change: { _tag: "Owner", option: "storage.s3.bucket", value: 42 } },
     ]);
 
-    expect(shownOf(state, "store.s3.bucket")).toStrictEqual(text("uploads"));
+    expect(shownOf(state, "storage.s3.bucket")).toStrictEqual(text("uploads"));
   });
 
   it("shows what is in force again once it is answered, or refused", () => {
@@ -2382,16 +2393,16 @@ describe("a change on its way", () => {
       _tag: "UiRead",
       ui: {
         ...inForce,
-        options: { ...uiDefaults, "timeline.timeFormat": "HH:mm:ss" },
+        options: { ...uiDefaults, "conversation.timeFormat": "HH:mm:ss" },
         sequence: 2,
       },
     });
     const answered = reduceOptions(state, { _tag: "Answered", id });
 
     expect({
-      answered: [shownOf(answered, "ui.timeline.timeFormat"), answered.onItsWay],
-      onTheWay: shownOf(state, "ui.timeline.timeFormat"),
-      refused: [shownOf(refused, "ui.timeline.timeFormat"), refused.onItsWay],
+      answered: [shownOf(answered, "ui.conversation.timeFormat"), answered.onItsWay],
+      onTheWay: shownOf(state, "ui.conversation.timeFormat"),
+      refused: [shownOf(refused, "ui.conversation.timeFormat"), refused.onItsWay],
     }).toStrictEqual({
       answered: [text("HH:mm:ss"), []],
       onTheWay: text("HH:mm:ss"),
@@ -2405,13 +2416,17 @@ describe("a change on its way", () => {
       { _tag: "Asked", change: time("HH:mm:ss") },
       {
         _tag: "UiRead",
-        ui: { ...inForce, options: { ...uiDefaults, "timeline.dateFormat": "iso" }, sequence: 2 },
+        ui: {
+          ...inForce,
+          options: { ...uiDefaults, "conversation.dateFormat": "iso" },
+          sequence: 2,
+        },
       },
     ]);
 
     expect([
-      shownOf(meanwhile, "ui.timeline.timeFormat"),
-      shownOf(meanwhile, "ui.timeline.dateFormat"),
+      shownOf(meanwhile, "ui.conversation.timeFormat"),
+      shownOf(meanwhile, "ui.conversation.dateFormat"),
     ]).toStrictEqual([text("HH:mm:ss"), text("iso")]);
   });
 
@@ -2427,8 +2442,8 @@ describe("a change on its way", () => {
 
     expect({
       ids: two.onItsWay.map((way) => way.id),
-      later: shownOf(later, "ui.timeline.timeFormat"),
-      two: shownOf(two, "ui.timeline.timeFormat"),
+      later: shownOf(later, "ui.conversation.timeFormat"),
+      two: shownOf(two, "ui.conversation.timeFormat"),
     }).toStrictEqual({ ids: [0, 1], later: text("none"), two: text("none") });
   });
 
@@ -2441,9 +2456,9 @@ describe("a change on its way", () => {
     ]);
 
     expect({
-      bucket: shownOf(unread, "store.s3.bucket"),
+      bucket: shownOf(unread, "storage.s3.bucket"),
       network: listed(unread, "network.libera").length,
-      time: shownOf(unread, "ui.timeline.timeFormat"),
+      time: shownOf(unread, "ui.conversation.timeFormat"),
     }).toStrictEqual({
       bucket: [{ _tag: "Reading" }],
       network: 0,
@@ -2451,7 +2466,7 @@ describe("a change on its way", () => {
     });
   });
 
-  it("leaves out an edit that cannot be made, and one for another Network", () => {
+  it("leaves out an edit that cannot be made, and one for another network", () => {
     const state = folded([
       ...read,
       {
@@ -2459,7 +2474,7 @@ describe("a change on its way", () => {
         change: {
           _tag: "Network",
           edit: { _tag: "Set", path: ["realname"], text: "Dean K" },
-          network: dotted,
+          network: hyphenated,
         },
       },
       {
@@ -2475,7 +2490,7 @@ describe("a change on its way", () => {
     expect(shownOf(state, "network.libera.realname")).toStrictEqual(text("Dean"));
   });
 
-  it("lets go of those of ui, or of store, uploads, and previews, once the page signs out", () => {
+  it("lets go of those of ui, or of storage, uploads, and previews, once the page signs out", () => {
     const asked = folded([
       ...read,
       { _tag: "Asked", change: time("HH:mm:ss") },

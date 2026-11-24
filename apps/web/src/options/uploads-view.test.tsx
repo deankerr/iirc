@@ -227,7 +227,7 @@ const copy = async (container: HTMLElement, name: string) => {
  */
 const moreButton = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button')].find(
-    (button) => button.textContent === "More"
+    (button) => button.textContent === "load more"
   );
 
 /**
@@ -282,7 +282,7 @@ const renameIn = async (
   await press(container, `Rename ${name}`);
 
   const field = container.querySelector<HTMLInputElement>(
-    `input[aria-label="New name for ${name}"]`
+    `input[aria-label="new name for ${name}"]`
   );
 
   if (field === null) {
@@ -319,7 +319,7 @@ const rowAlerts = (container: HTMLElement) =>
  */
 const deletedSwitch = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button')].find(
-    (button) => button.textContent === "Show deleted"
+    (button) => button.textContent === "show deleted"
   );
 
 /**
@@ -349,8 +349,8 @@ const offered = (container: HTMLElement) =>
 const withPublicUrl = (fake: ReturnType<typeof fakeDaemon>) => {
   fake.daemon.owner = {
     options: {
-      "previews.maxTotal": 1_073_741_824,
-      "uploads.maxSize": 104_857_600,
+      "previews.maxTotal": 1_000_000_000,
+      "uploads.maxSize": 100_000_000,
       "uploads.publicUrl": "https://files.example.com",
     },
     sequence: 1,
@@ -517,11 +517,11 @@ describe("the Uploads view", () => {
         release();
       }
     });
-    await settled(() => view()?.textContent?.includes("Nothing uploaded yet.") === true);
+    await settled(() => view()?.textContent?.includes("No uploads yet.") === true);
 
     expect({
-      after: view()?.textContent?.includes("Reading…"),
-      waiting: [waiting.includes("Reading…"), waiting.includes("Nothing uploaded yet.")],
+      after: view()?.textContent?.includes("loading…"),
+      waiting: [waiting.includes("loading…"), waiting.includes("No uploads yet.")],
     }).toStrictEqual({ after: false, waiting: [true, false] });
   });
 
@@ -553,9 +553,9 @@ describe("the Uploads view", () => {
     expect(
       listed(container).map((row) => ({ ...row, details: row.details?.split(" · ").slice(0, 2) }))
     ).toStrictEqual([
-      { details: ["application/pdf", "1.2 MiB"], name: "b-safe.bin", thumbnail: "icon" },
+      { details: ["application/pdf", "1.3 MB"], name: "b-safe.bin", thumbnail: "icon" },
       {
-        details: ["image/png", "1.2 MiB"],
+        details: ["image/png", "1.3 MB"],
         name: "Cat picture.png",
         thumbnail: "/api/uploads/aaaaaaaaaaaaaaaa/content",
       },
@@ -567,8 +567,8 @@ describe("the Uploads view", () => {
 
     fake.daemon.owner = {
       options: {
-        "previews.maxTotal": 1_073_741_824,
-        "uploads.maxSize": 104_857_600,
+        "previews.maxTotal": 1_000_000_000,
+        "uploads.maxSize": 100_000_000,
         "uploads.publicUrl": "https://files.example.com",
       },
       sequence: 1,
@@ -618,7 +618,7 @@ describe("the Uploads view", () => {
       said: container.querySelector('section[aria-label="Uploads"] p')?.textContent,
     }).toStrictEqual({
       buttons: [],
-      said: "No link to copy until uploads.publicUrl is set.",
+      said: "You can't copy links until uploads.publicUrl is set.",
     });
   });
 
@@ -799,7 +799,7 @@ describe("the Uploads view", () => {
     await settled(() => rowAlerts(container).length === 1);
 
     expect({ alerts: rowAlerts(container), names: names(container) }).toStrictEqual({
-      alerts: ["The Daemon could not write its Journal, so Cat picture.png was not renamed."],
+      alerts: ["The daemon could not write its history, so Cat picture.png was not renamed."],
       names: ["Cat picture.png"],
     });
   });
@@ -814,7 +814,7 @@ describe("the Uploads view", () => {
     const asked = deleteDialog();
 
     await doing(() => {
-      asked?.button("Cancel")?.click();
+      asked?.button("cancel")?.click();
     });
 
     expect({
@@ -824,7 +824,7 @@ describe("the Uploads view", () => {
       names: names(container),
     }).toStrictEqual({
       asked: {
-        body: "Its link stops working at once, wherever it was said. A copy someone already opened or saved cannot be called back.",
+        body: "Its link stops working right away, wherever you shared it. A copy someone already opened or saved stays with them.",
         heading: "Delete Cat picture.png?",
       },
       closed: undefined,
@@ -840,7 +840,7 @@ describe("the Uploads view", () => {
     await settled(() => listed(container).length === 2);
     await press(container, "Delete Cat picture.png");
     await doing(() => {
-      deleteDialog()?.button("Delete")?.click();
+      deleteDialog()?.button("delete")?.click();
     });
     await settled(() => listed(container).length === 1);
 
@@ -868,12 +868,12 @@ describe("the Uploads view", () => {
     await settled(() => listed(container).length === 1);
     await press(container, "Delete Cat picture.png");
     await doing(() => {
-      deleteDialog()?.button("Delete")?.click();
+      deleteDialog()?.button("delete")?.click();
     });
     await settled(() => rowAlerts(container).length === 1);
 
     expect(rowAlerts(container)).toStrictEqual([
-      "The Daemon no longer has Cat picture.png, so it was not deleted.",
+      "The daemon no longer has Cat picture.png, so it was not deleted.",
     ]);
   });
 
@@ -945,7 +945,7 @@ describe("the Uploads view", () => {
     const fake = signedIn(notes, cat);
     const { container } = await page(fake);
     const cats = "a".repeat(16);
-    const field = () => container.querySelector('input[aria-label="New name for b-safe.bin"]');
+    const field = () => container.querySelector('input[aria-label="new name for b-safe.bin"]');
 
     await settled(() => listed(container).length === 2);
     await toggleDeleted(container);
@@ -1067,7 +1067,7 @@ describe("the Uploads view", () => {
     await doing(() => {
       container
         .querySelector<HTMLButtonElement>(
-          'button[aria-label="Go to where Cat picture.png was said in libera #iirc"]'
+          'button[aria-label="Go to where Cat picture.png was shared in libera #iirc"]'
         )
         ?.click();
     });
@@ -1080,8 +1080,8 @@ describe("the Uploads view", () => {
       read: [`?around=${encodeURIComponent(first.position)}&limit=100`],
       said: [
         [
-          "Go to where Cat picture.png was said in oftc friend | oftc friend",
-          "Go to where Cat picture.png was said in libera #iirc | libera #iirc",
+          "Go to where Cat picture.png was shared in oftc friend | oftc friend",
+          "Go to where Cat picture.png was shared in libera #iirc | libera #iirc",
         ],
         [],
       ],
@@ -1126,7 +1126,7 @@ describe("the Uploads view", () => {
     await settled(() => saidListed(container)[0]?.length === 1);
 
     expect(saidListed(container)).toStrictEqual([
-      ["Go to where Cat picture.png was said in libera #iirc | libera #iirc"],
+      ["Go to where Cat picture.png was shared in libera #iirc | libera #iirc"],
       [],
     ]);
   });
