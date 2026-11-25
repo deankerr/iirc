@@ -328,6 +328,16 @@ describe("the web frontend on iirc daemon --web", () => {
               : row.getBoundingClientRect().top - element.getBoundingClientRect().top;
           }, text);
 
+        // How many rows stand before a row, by its text, or `null` while it is not drawn.
+        const indexOf = async (text: string) =>
+          await log.evaluate((element, wanted) => {
+            const row = [...element.querySelectorAll<HTMLElement>("[data-index]")].find(
+              (one) => one.textContent === wanted
+            );
+
+            return row === undefined ? null : Number(row.dataset.index);
+          }, text);
+
         // Near the top, but not near enough to ask for more: the row at the top, once drawn.
         await log.evaluate((element) => {
           element.scrollTop = 300;
@@ -347,6 +357,7 @@ describe("the web frontend on iirc daemon --web", () => {
         const anchored = await rowAtTop();
 
         const before = await offsetOf(anchored);
+        const rowsBefore = await indexOf(anchored);
 
         // Nearer: older items are asked for, and go in above without moving that row.
         const olderRead = page.waitForResponse((response) => response.url().includes("before="));
@@ -355,7 +366,15 @@ describe("the web frontend on iirc daemon --web", () => {
           element.scrollTop = 200;
         });
         await olderRead;
-        await log.getByText("history 1", { exact: true }).waitFor({ state: "attached" });
+        // The older items are in once more rows stand before that row, which stays so however
+        // late it is looked at; the oldest row itself is drawn only in passing.
+        await expect
+          .poll(async () => {
+            const rowsAfter = await indexOf(anchored);
+
+            return rowsBefore !== null && rowsAfter !== null && rowsAfter > rowsBefore;
+          })
+          .toBe(true);
 
         // Moved down by the 100 pixels scrolled, and by nothing the older items added.
         const offsetKept = async () => {
