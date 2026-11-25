@@ -251,12 +251,29 @@ const restOf = (one: HTMLElement) =>
     .replace(/^\S+ /u, "");
 
 /**
- * Waits until something holds, letting React render what changed meanwhile.
+ * Waits until something holds, letting React render what changed meanwhile. With the clock
+ * held, it moves the clock on a few milliseconds at each look rather than waiting on real
+ * time.
  * @param holds - What must hold.
  */
 const settled = async (holds: () => boolean) => {
   await act(async () => {
-    await eventually(holds);
+    if (!vi.isFakeTimers()) {
+      await eventually(holds);
+
+      return;
+    }
+
+    for (let looks = 0; looks < 4000; looks += 1) {
+      if (holds()) {
+        return;
+      }
+
+      // oxlint-disable-next-line no-await-in-loop -- looking again until it holds
+      await vi.advanceTimersByTimeAsync(5);
+    }
+
+    throw new Error("it never held");
   });
 };
 
@@ -2168,9 +2185,16 @@ describe("where the view stands as its rows wrap again", () => {
     observers.clear();
     Reflect.set(globalThis, "ResizeObserver", Observer);
     Reflect.set(window, "ResizeObserver", Observer);
+    // The view takes a scroll as the Owner's by how long ago their input was, and the
+    // virtualizer ends a run of scrolls after a pause, rendering again, so the clock stands
+    // still: on a busy machine, real time between the input and the scroll would make the
+    // scroll the browser's, or stand the view in a changed box before the scroll came.
+    vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
