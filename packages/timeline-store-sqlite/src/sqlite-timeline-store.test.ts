@@ -18,7 +18,7 @@ import {
   timelineIdOf,
 } from "@iirc/timelines";
 import type { Change, Position } from "@iirc/timelines";
-import { Effect, Logger, Option, Schema } from "effect";
+import { Effect, Logger, Option, References, Schema } from "effect";
 import type { Scope } from "effect";
 import { CurrentTransformer } from "effect/sql/Statement";
 import { describe, expect, it } from "vitest";
@@ -498,6 +498,17 @@ const removed = (file: string) => {
   }
 };
 
+// A file as a projection of another shape leaves it: folded another way, its Messages' content
+// without `nicks`, which the codec asks for.
+const undecodable = (file: string) => {
+  raw(file, "UPDATE folded SET folding = 'simple-lower/0.0'");
+  raw(
+    file,
+    `UPDATE items SET content = json_remove(content, '$.nicks')
+     WHERE json_extract(content, '$._tag') = 'Message'`
+  );
+};
+
 describe("a file it cannot use", () => {
   it("makes a file of another layout again", async () => {
     await expect(
@@ -541,6 +552,57 @@ describe("a file it cannot use", () => {
     ).resolves.toStrictEqual(madeAgain);
   });
 
+  it("makes a file folded another way whose items do not decode again, keeping nothing of it", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, applyAll);
+        undecodable(file);
+
+        const warnings: unknown[] = [];
+
+        const seen = yield* using(file, (store) =>
+          Effect.all({
+            changed: store.changedAfter(undefined),
+            folded: store.folded,
+            searched: store.search({ limit: 10, text: SearchText.make("two") }),
+            timelines: store.timelines(libera),
+          })
+        ).pipe(
+          Effect.provide(
+            Logger.layer([
+              Logger.make(({ fiber, logLevel, message }) => {
+                if (logLevel === "Warn") {
+                  warnings.push({
+                    file: fiber.getRef(References.CurrentLogAnnotations).file,
+                    message,
+                  });
+                }
+              }),
+            ])
+          )
+        );
+
+        return { ...seen, changed: seen.changed.items.length, file, warnings };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      changed: 0,
+      file: result.file,
+      folded: { through: undefined, version: undefined },
+      searched: [],
+      timelines: [],
+      warnings: [
+        {
+          file: result.file,
+          message: ["The Timeline store's items do not decode, so it is made again"],
+        },
+      ],
+    });
+  });
+
   it("fails with TimelineStoreFailed for a path that cannot be opened, and removes nothing", async () => {
     await run(
       Effect.gen(function* () {
@@ -558,36 +620,71 @@ describe("a file it cannot use", () => {
   });
 });
 
+// Every row of the file, as SQLite holds it, read without the store.
+const rows = (file: string) => {
+  const database = new Database(file, { readonly: true });
+
+  const held = ["folded", "timelines", "items", "tombstones", "gaps"].map((table) =>
+    database.query(`SELECT * FROM ${table} ORDER BY rowid`).all()
+  );
+
+  database.close();
+
+  return held;
+};
+
 describe("a store it cannot read now", () => {
-  it("fails while another connection holds it locked, and keeps the file as it was", async () => {
-    await run(
-      Effect.gen(function* () {
-        const file = yield* temporaryFile;
-
-        const before = yield* using(file, (store) =>
-          applyAll(store).pipe(Effect.andThen(everything(store)))
-        );
-
-        const holder = new Database(file);
-
+  it.each([
+    {
+      // Every read waits on it.
+      lock: (holder: Database) => {
         holder.run("PRAGMA locking_mode = EXCLUSIVE");
         holder.run("BEGIN EXCLUSIVE");
+      },
+      name: "a store",
+      spoil: (_file: string) => {},
+      what: "cannot read",
+    },
+    {
+      // In WAL mode reads go on, and only folding its search again waits on it.
+      lock: (holder: Database) => {
+        holder.run("BEGIN IMMEDIATE");
+      },
+      name: "a store whose items do not decode",
+      spoil: undecodable,
+      what: "cannot fold the search",
+    },
+  ])(
+    "fails while another connection holds $name locked, and keeps the file as it was",
+    async ({ lock, spoil, what }) => {
+      await run(
+        Effect.gen(function* () {
+          const file = yield* temporaryFile;
 
-        const failure = yield* Effect.scoped(
-          makeSqliteTimelineStore(file, { busyTimeout: "50 millis" }).pipe(
-            Effect.provide(BunFileSystem.layer)
-          )
-        ).pipe(Effect.flip);
+          yield* using(file, applyAll);
+          spoil(file);
 
-        holder.run("ROLLBACK");
-        holder.close();
+          const before = rows(file);
+          const holder = new Database(file);
 
-        expect(`${failure._tag}: ${failure.reason}`).toContain("TimelineStoreFailed: cannot read");
-        expect(failure.reason).toContain("database is locked (SQLITE_BUSY)");
-        expect(yield* using(file, everything)).toStrictEqual(before);
-      })
-    );
-  });
+          lock(holder);
+
+          const failure = yield* Effect.scoped(
+            makeSqliteTimelineStore(file, { busyTimeout: "50 millis" }).pipe(
+              Effect.provide(BunFileSystem.layer)
+            )
+          ).pipe(Effect.flip);
+
+          holder.run("ROLLBACK");
+          holder.close();
+
+          expect(`${failure._tag}: ${failure.reason}`).toContain(`TimelineStoreFailed: ${what}`);
+          expect(failure.reason).toContain("database is locked (SQLITE_BUSY)");
+          expect(rows(file)).toStrictEqual(before);
+        })
+      );
+    }
+  );
 });
 
 // What the fixture prints: how far the store folded, or why it stopped.

@@ -54,7 +54,7 @@ import type {
   Position,
   Searchable,
 } from "@iirc/timelines";
-import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
+import { Data, Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
 import type { Duration, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
@@ -507,8 +507,17 @@ const decodeNamed = decodeAll(
 
 const decodeRows = decodeAll(Schema.Struct({ id: Schema.Int }), "an item's row");
 const decodeHidden = decodeAll(HiddenRow, "a hidden item");
-const decodeContents = decodeAll(ContentRow, "an item");
 const decodeFolding = decodeAll(Schema.Struct({ folding: Schema.String }), "the folding");
+
+/** An item whose content does not decode by its Schema, found while folding again. */
+class Undecodable extends Data.TaggedError("Undecodable") {}
+
+const decodeContentRows = Schema.decodeUnknownExit(Schema.Array(ContentRow));
+
+// Folding again decodes every item, and one that does not decode makes the file one the store
+// cannot use, so it fails apart from a failure to read.
+const decodeContents = (rows: readonly unknown[]) =>
+  Effect.suspend(() => decodeContentRows(rows)).pipe(Effect.mapError(() => new Undecodable()));
 
 /** How many items folding again reads at a time. */
 const refoldPage = 1000;
@@ -516,8 +525,9 @@ const refoldPage = 1000;
 /**
  * Folds what every item is found by again, when the store kept it under another folding
  * than `searchFolding`: each Message's sender, and the search index, made again from the
- * items, in the transaction that opens the store. So no index ever holds text folded two
- * ways, and the Journal need not be folded again.
+ * items, in one transaction as the store opens. So no index ever holds text folded two
+ * ways, and the Journal need not be folded again. An item that does not decode fails it with
+ * `Undecodable`, and the transaction rolls back.
  * @param sql - The store's connection, in a transaction.
  * @returns Whether it folded anything again.
  */
@@ -563,6 +573,23 @@ const refold = (sql: SqlClient) =>
 
     return true;
   });
+
+/**
+ * Folds the search again, as `refold` does, with a warning in the log when it did.
+ * @param sql - The store's connection, in a transaction.
+ * @param filename - The file, named in the warning.
+ * @returns Nothing, once folded.
+ */
+const refolded = (sql: SqlClient, filename: string) =>
+  refold(sql).pipe(
+    Effect.flatMap((folded) =>
+      folded
+        ? Effect.logWarning(
+            "The Timeline store's search was folded another way, so it is folded again"
+          ).pipe(Effect.annotateLogs({ file: filename, folding: searchFolding }))
+        : Effect.void
+    )
+  );
 
 /**
  * Text as a phrase of a full-text query: one string, its quotes doubled, so nothing in it
@@ -755,23 +782,45 @@ export const makeSqliteTimelineStore = (
   Effect.gen(function* () {
     // A path that cannot be opened, or a file that cannot be read now, is a failure, and
     // nothing is removed. A file that is not a store of this layout, or is damaged, is
-    // derived, so it is made again.
+    // derived, so it is made again. A store folded another way is folded again here, in a
+    // transaction of its own, so one whose items do not decode rolls back whole and is made
+    // again too, and none of it is half folded.
     const found = yield* Effect.scoped(
       open(filename, options).pipe(
         Effect.flatMap((sql) =>
-          inspect(sql).pipe(Effect.mapError(failed(`cannot read ${filename}`)))
+          inspect(sql).pipe(
+            Effect.mapError(failed(`cannot read ${filename}`)),
+            Effect.filterOrElse(
+              (now) => now !== "Ready",
+              () =>
+                sql.withTransaction(refolded(sql, filename)).pipe(
+                  Effect.as("Ready" as const),
+                  Effect.catchTags({
+                    SqlError: (error) =>
+                      Effect.fail(failed(`cannot fold the search of ${filename} again`)(error)),
+                    Undecodable: () => Effect.succeed("Undecodable" as const),
+                  })
+                )
+            )
+          )
         )
       )
     );
 
-    if (found === "Unusable") {
+    if (found === "Unusable" || found === "Undecodable") {
       yield* Effect.logWarning(
-        "The Timeline store is not of this layout, so it is made again"
+        found === "Unusable"
+          ? "The Timeline store is not of this layout, so it is made again"
+          : "The Timeline store's items do not decode, so it is made again"
       ).pipe(Effect.annotateLogs({ file: filename }));
       yield* remove(filename);
     }
 
     const sql = yield* open(filename, options);
+
+    const changedWhileOpened = Effect.fail(
+      new TimelineStoreFailed({ reason: `${filename} changed while it was opened` })
+    );
 
     // A derived store may lag after a power failure, never run ahead of what it says it
     // folded: `through` commits with the rows it describes. So commits need not wait for
@@ -792,22 +841,15 @@ export const makeSqliteTimelineStore = (
                 return createLayout(sql);
               }
 
+              // Folded again already, unless another connection changed it since.
               case "Ready": {
-                return refold(sql).pipe(
-                  Effect.flatMap((folded) =>
-                    folded
-                      ? Effect.logWarning(
-                          "The Timeline store's search was folded another way, so it is folded again"
-                        ).pipe(Effect.annotateLogs({ file: filename, folding: searchFolding }))
-                      : Effect.void
-                  )
+                return refolded(sql, filename).pipe(
+                  Effect.catchTag("Undecodable", () => changedWhileOpened)
                 );
               }
 
               case "Unusable": {
-                return Effect.fail(
-                  new TimelineStoreFailed({ reason: `${filename} changed while it was opened` })
-                );
+                return changedWhileOpened;
               }
 
               default: {
