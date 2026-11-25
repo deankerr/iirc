@@ -54,8 +54,8 @@ import type {
   Position,
   Searchable,
 } from "@iirc/timelines";
-import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
-import type { Duration, Scope } from "effect";
+import { Data, Effect, Exit, FileSystem, Layer, Option, Schema, Scope } from "effect";
+import type { Duration } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
@@ -507,8 +507,17 @@ const decodeNamed = decodeAll(
 
 const decodeRows = decodeAll(Schema.Struct({ id: Schema.Int }), "an item's row");
 const decodeHidden = decodeAll(HiddenRow, "a hidden item");
-const decodeContents = decodeAll(ContentRow, "an item");
 const decodeFolding = decodeAll(Schema.Struct({ folding: Schema.String }), "the folding");
+
+/** An item whose content does not decode by its Schema, found while folding again. */
+class Undecodable extends Data.TaggedError("Undecodable") {}
+
+const decodeContentRows = Schema.decodeUnknownExit(Schema.Array(ContentRow));
+
+// Folding again decodes every item, and one that does not decode makes the file one the store
+// cannot use, so it fails apart from a failure to read.
+const decodeContents = (rows: readonly unknown[]) =>
+  Effect.suspend(() => decodeContentRows(rows)).pipe(Effect.mapError(() => new Undecodable()));
 
 /** How many items folding again reads at a time. */
 const refoldPage = 1000;
@@ -517,7 +526,8 @@ const refoldPage = 1000;
  * Folds what every item is found by again, when the store kept it under another folding
  * than `searchFolding`: each Message's sender, and the search index, made again from the
  * items, in the transaction that opens the store. So no index ever holds text folded two
- * ways, and the Journal need not be folded again.
+ * ways, and the Journal need not be folded again. An item that does not decode fails it with
+ * `Undecodable`, and the transaction rolls back.
  * @param sql - The store's connection, in a transaction.
  * @returns Whether it folded anything again.
  */
@@ -563,6 +573,23 @@ const refold = (sql: SqlClient) =>
 
     return true;
   });
+
+/**
+ * Folds the search again, as `refold` does, with a warning in the log when it did.
+ * @param sql - The store's connection, in a transaction.
+ * @param filename - The file, named in the warning.
+ * @returns Nothing, once folded.
+ */
+const refolded = (sql: SqlClient, filename: string) =>
+  refold(sql).pipe(
+    Effect.flatMap((folded) =>
+      folded
+        ? Effect.logWarning(
+            "The Timeline store's search was folded another way, so it is folded again"
+          ).pipe(Effect.annotateLogs({ file: filename, folding: searchFolding }))
+        : Effect.void
+    )
+  );
 
 /**
  * Text as a phrase of a full-text query: one string, its quotes doubled, so nothing in it
@@ -771,55 +798,79 @@ export const makeSqliteTimelineStore = (
       yield* remove(filename);
     }
 
-    const sql = yield* open(filename, options);
+    const changedWhileOpened = Effect.fail(
+      new TimelineStoreFailed({ reason: `${filename} changed while it was opened` })
+    );
 
-    // A derived store may lag after a power failure, never run ahead of what it says it
-    // folded: `through` commits with the rows it describes. So commits need not wait for
-    // the disk, as the Journal's do.
-    yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
-    // SQLite's temporary files are kept in memory, so the store asks for no directory but its
-    // own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal, which
-    // SQLite otherwise spills to a temporary file past 64 KiB, as when several of `items`'
-    // indexes split their pages in one insert. With nowhere to make one, that insert fails
-    // with `SQLITE_IOERR_GETTEMPPATH`.
-    yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
-    yield* sql
-      .withTransaction(
-        inspect(sql).pipe(
-          Effect.flatMap((now): Effect.Effect<void, SqlError | TimelineStoreFailed> => {
-            switch (now) {
-              case "Empty": {
-                return createLayout(sql);
-              }
+    const store = yield* Effect.scope;
 
-              case "Ready": {
-                return refold(sql).pipe(
-                  Effect.flatMap((folded) =>
-                    folded
-                      ? Effect.logWarning(
-                          "The Timeline store's search was folded another way, so it is folded again"
-                        ).pipe(Effect.annotateLogs({ file: filename, folding: searchFolding }))
-                      : Effect.void
-                  )
-                );
-              }
+    // Opens the connection the store keeps, in a Scope of its own, and makes the layout or
+    // folds the search again in the transaction that opens it. An item that does not decode
+    // rolls that transaction back whole and closes the connection, so nothing of the file is
+    // half folded and it can be removed.
+    const connect = Effect.gen(function* () {
+      const connection = yield* Scope.fork(store);
+      const sql = yield* open(filename, options).pipe(Scope.provide(connection));
 
-              case "Unusable": {
-                return Effect.fail(
-                  new TimelineStoreFailed({ reason: `${filename} changed while it was opened` })
-                );
-              }
+      // A derived store may lag after a power failure, never run ahead of what it says it
+      // folded: `through` commits with the rows it describes. So commits need not wait for
+      // the disk, as the Journal's do.
+      yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
+      // SQLite's temporary files are kept in memory, so the store asks for no directory but
+      // its own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal,
+      // which SQLite otherwise spills to a temporary file past 64 KiB, as when several of
+      // `items`' indexes split their pages in one insert. With nowhere to make one, that
+      // insert fails with `SQLITE_IOERR_GETTEMPPATH`.
+      yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
+      yield* sql
+        .withTransaction(
+          inspect(sql).pipe(
+            Effect.flatMap(
+              (now): Effect.Effect<void, SqlError | TimelineStoreFailed | Undecodable> => {
+                switch (now) {
+                  case "Empty": {
+                    return createLayout(sql);
+                  }
 
-              default: {
-                return now satisfies never;
+                  case "Ready": {
+                    return refolded(sql, filename);
+                  }
+
+                  case "Unusable": {
+                    return changedWhileOpened;
+                  }
+
+                  default: {
+                    return now satisfies never;
+                  }
+                }
               }
-            }
+            )
+          )
+        )
+        .pipe(
+          Effect.catchTags({
+            SqlError: (error) => Effect.fail(failed("cannot make the store")(error)),
+            Undecodable: (error) =>
+              Scope.close(connection, Exit.void).pipe(Effect.andThen(Effect.fail(error))),
           })
+        );
+
+      return sql;
+    });
+
+    // A file whose items do not decode is made again from nothing, once.
+    const sql = yield* connect.pipe(
+      Effect.catchTag("Undecodable", () =>
+        Effect.logWarning("The Timeline store's items do not decode, so it is made again").pipe(
+          Effect.annotateLogs({ file: filename }),
+          Effect.andThen(remove(filename)),
+          Effect.andThen(connect),
+          Effect.catchTag("Undecodable", () => changedWhileOpened)
         )
       )
-      .pipe(
-        Effect.catchTag("SqlError", (error) => Effect.fail(failed("cannot make the store")(error)))
-      );
+    );
+
     yield* sql`PRAGMA journal_mode = WAL`.pipe(Effect.mapError(failed("cannot configure")));
 
     // A read that takes more than one statement holds the connection, so it reads one state.
