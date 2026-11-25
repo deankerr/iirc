@@ -652,7 +652,7 @@ describe("a store it cannot read now", () => {
       },
       name: "a store whose items do not decode",
       spoil: undecodable,
-      what: "cannot fold the search",
+      what: "cannot make the store",
     },
   ])(
     "fails while another connection holds $name locked, and keeps the file as it was",

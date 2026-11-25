@@ -54,8 +54,8 @@ import type {
   Position,
   Searchable,
 } from "@iirc/timelines";
-import { Data, Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
-import type { Duration, Scope } from "effect";
+import { Data, Effect, Exit, FileSystem, Layer, Option, Schema, Scope } from "effect";
+import type { Duration } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
@@ -525,7 +525,7 @@ const refoldPage = 1000;
 /**
  * Folds what every item is found by again, when the store kept it under another folding
  * than `searchFolding`: each Message's sender, and the search index, made again from the
- * items, in one transaction as the store opens. So no index ever holds text folded two
+ * items, in the transaction that opens the store. So no index ever holds text folded two
  * ways, and the Journal need not be folded again. An item that does not decode fails it with
  * `Undecodable`, and the transaction rolls back.
  * @param sql - The store's connection, in a transaction.
@@ -782,86 +782,95 @@ export const makeSqliteTimelineStore = (
   Effect.gen(function* () {
     // A path that cannot be opened, or a file that cannot be read now, is a failure, and
     // nothing is removed. A file that is not a store of this layout, or is damaged, is
-    // derived, so it is made again. A store folded another way is folded again here, in a
-    // transaction of its own, so one whose items do not decode rolls back whole and is made
-    // again too, and none of it is half folded.
+    // derived, so it is made again.
     const found = yield* Effect.scoped(
       open(filename, options).pipe(
         Effect.flatMap((sql) =>
-          inspect(sql).pipe(
-            Effect.mapError(failed(`cannot read ${filename}`)),
-            Effect.filterOrElse(
-              (now) => now !== "Ready",
-              () =>
-                sql.withTransaction(refolded(sql, filename)).pipe(
-                  Effect.as("Ready" as const),
-                  Effect.catchTags({
-                    SqlError: (error) =>
-                      Effect.fail(failed(`cannot fold the search of ${filename} again`)(error)),
-                    Undecodable: () => Effect.succeed("Undecodable" as const),
-                  })
-                )
-            )
-          )
+          inspect(sql).pipe(Effect.mapError(failed(`cannot read ${filename}`)))
         )
       )
     );
 
-    if (found === "Unusable" || found === "Undecodable") {
+    if (found === "Unusable") {
       yield* Effect.logWarning(
-        found === "Unusable"
-          ? "The Timeline store is not of this layout, so it is made again"
-          : "The Timeline store's items do not decode, so it is made again"
+        "The Timeline store is not of this layout, so it is made again"
       ).pipe(Effect.annotateLogs({ file: filename }));
       yield* remove(filename);
     }
-
-    const sql = yield* open(filename, options);
 
     const changedWhileOpened = Effect.fail(
       new TimelineStoreFailed({ reason: `${filename} changed while it was opened` })
     );
 
-    // A derived store may lag after a power failure, never run ahead of what it says it
-    // folded: `through` commits with the rows it describes. So commits need not wait for
-    // the disk, as the Journal's do.
-    yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
-    // SQLite's temporary files are kept in memory, so the store asks for no directory but its
-    // own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal, which
-    // SQLite otherwise spills to a temporary file past 64 KiB, as when several of `items`'
-    // indexes split their pages in one insert. With nowhere to make one, that insert fails
-    // with `SQLITE_IOERR_GETTEMPPATH`.
-    yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
-    yield* sql
-      .withTransaction(
-        inspect(sql).pipe(
-          Effect.flatMap((now): Effect.Effect<void, SqlError | TimelineStoreFailed> => {
-            switch (now) {
-              case "Empty": {
-                return createLayout(sql);
-              }
+    const store = yield* Effect.scope;
 
-              // Folded again already, unless another connection changed it since.
-              case "Ready": {
-                return refolded(sql, filename).pipe(
-                  Effect.catchTag("Undecodable", () => changedWhileOpened)
-                );
-              }
+    // Opens the connection the store keeps, in a Scope of its own, and makes the layout or
+    // folds the search again in the transaction that opens it. An item that does not decode
+    // rolls that transaction back whole and closes the connection, so nothing of the file is
+    // half folded and it can be removed.
+    const connect = Effect.gen(function* () {
+      const connection = yield* Scope.fork(store);
+      const sql = yield* open(filename, options).pipe(Scope.provide(connection));
 
-              case "Unusable": {
-                return changedWhileOpened;
-              }
+      // A derived store may lag after a power failure, never run ahead of what it says it
+      // folded: `through` commits with the rows it describes. So commits need not wait for
+      // the disk, as the Journal's do.
+      yield* sql`PRAGMA synchronous = NORMAL`.pipe(Effect.mapError(failed("cannot configure")));
+      // SQLite's temporary files are kept in memory, so the store asks for no directory but
+      // its own. An apply's `INSERT INTO items … RETURNING id` keeps a statement journal,
+      // which SQLite otherwise spills to a temporary file past 64 KiB, as when several of
+      // `items`' indexes split their pages in one insert. With nowhere to make one, that
+      // insert fails with `SQLITE_IOERR_GETTEMPPATH`.
+      yield* sql`PRAGMA temp_store = MEMORY`.pipe(Effect.mapError(failed("cannot configure")));
+      yield* sql
+        .withTransaction(
+          inspect(sql).pipe(
+            Effect.flatMap(
+              (now): Effect.Effect<void, SqlError | TimelineStoreFailed | Undecodable> => {
+                switch (now) {
+                  case "Empty": {
+                    return createLayout(sql);
+                  }
 
-              default: {
-                return now satisfies never;
+                  case "Ready": {
+                    return refolded(sql, filename);
+                  }
+
+                  case "Unusable": {
+                    return changedWhileOpened;
+                  }
+
+                  default: {
+                    return now satisfies never;
+                  }
+                }
               }
-            }
+            )
+          )
+        )
+        .pipe(
+          Effect.catchTags({
+            SqlError: (error) => Effect.fail(failed("cannot make the store")(error)),
+            Undecodable: (error) =>
+              Scope.close(connection, Exit.void).pipe(Effect.andThen(Effect.fail(error))),
           })
+        );
+
+      return sql;
+    });
+
+    // A file whose items do not decode is made again from nothing, once.
+    const sql = yield* connect.pipe(
+      Effect.catchTag("Undecodable", () =>
+        Effect.logWarning("The Timeline store's items do not decode, so it is made again").pipe(
+          Effect.annotateLogs({ file: filename }),
+          Effect.andThen(remove(filename)),
+          Effect.andThen(connect),
+          Effect.catchTag("Undecodable", () => changedWhileOpened)
         )
       )
-      .pipe(
-        Effect.catchTag("SqlError", (error) => Effect.fail(failed("cannot make the store")(error)))
-      );
+    );
+
     yield* sql`PRAGMA journal_mode = WAL`.pipe(Effect.mapError(failed("cannot configure")));
 
     // A read that takes more than one statement holds the connection, so it reads one state.
