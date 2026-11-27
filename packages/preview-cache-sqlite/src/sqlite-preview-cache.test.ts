@@ -61,6 +61,7 @@ const page: Extract<Kept["state"], { readonly _tag: "Ready" }>["preview"] = {
   site: "example.com",
   size: null,
   stream: null,
+  thumbnail: false,
   title: "Ünïcode 🙂",
   type: null,
 };
@@ -95,8 +96,9 @@ const sized: Kept = {
   },
 };
 
-// The record as a layout before files wrote it, which stated no Preview's size.
-const unfiled = `UPDATE previews SET state = json_remove(state, '$.preview.size')`;
+// The record as a layout before files wrote it, which stated no Preview's size, nor, as no
+// layout before this one did, whether its image is a thumbnail.
+const unfiled = `UPDATE previews SET state = json_remove(state, '$.preview.size', '$.preview.thumbnail')`;
 
 // The record as a layout before the sizes wrote it, which a file of that layout holds.
 const unsized = (version: 4 | 5) =>

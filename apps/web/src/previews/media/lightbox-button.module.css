@@ -1,0 +1,11 @@
+/* The control in a media's corner, on a scrim, so it reads over any frame. */
+.corner {
+  position: absolute;
+  inset: var(--space-1) var(--space-1) auto auto;
+  background: var(--color-scrim);
+  color: var(--color-text);
+}
+
+.corner[data-hovered] {
+  background: var(--color-background);
+}

@@ -59,8 +59,9 @@ const glyphs = {
 
 /**
  * The drawings, by name, each on a 16 by 16 grid in the text's colour. They are the icons
- * drawn over media, where a glyph's place in its box would depend on the font that draws it,
- * so each is centred in its control in any font.
+ * drawn over media or in a Preview's controls, where a glyph's size and place in its box
+ * would depend on the font that draws it, so each is the same size, centred in its control,
+ * in any font.
  */
 /**
  * A drawing on the grid, as tall and wide as the text.
@@ -99,10 +100,48 @@ const drawings = {
       />
     </Drawing>
   ),
+  /** Collapses a card shown whole: two chevrons pointing in, toward each other. */
+  fold: (
+    <Drawing>
+      <path
+        d="M4.5 2.5 8 6l3.5-3.5M4.5 13.5 8 10l3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </Drawing>
+  ),
   /** Plays what it is over, as a play button is drawn: its weight in the middle. */
   play: (
     <Drawing>
       <path d="M5.5 3.5 13 8l-7.5 4.5z" fill="currentColor" />
+    </Drawing>
+  ),
+  /** A link's Preview is hidden: a solid caret pointing at where it would open. */
+  previewHidden: (
+    <Drawing>
+      <path d="M6 3.5 11 8l-5 4.5z" fill="currentColor" />
+    </Drawing>
+  ),
+  /** A link's Preview shows under its Message: a solid caret pointing down at it. */
+  previewShown: (
+    <Drawing>
+      <path d="M3.5 6 8 11l4.5-5z" fill="currentColor" />
+    </Drawing>
+  ),
+  /** Shows a card whole: two chevrons pointing out, away from each other. */
+  unfold: (
+    <Drawing>
+      <path
+        d="M4.5 6 8 2.5 11.5 6M4.5 10 8 13.5l3.5-3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
     </Drawing>
   ),
 } as const satisfies Readonly<Record<string, ReactElement>>;

@@ -1,0 +1,49 @@
+/*
+ * A thumbnail: a square as tall as its card, its picture cropped to fill it. A picture
+ * taller than square keeps its top, where a face or a title usually is, and one wider keeps
+ * its middle.
+ */
+.thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  align-self: start;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-border);
+  color: var(--color-text);
+  font: inherit;
+  cursor: default;
+}
+
+.thumb[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-2 * var(--border-width));
+}
+
+.picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 0;
+}
+
+/* The play glyph, on a scrim over the middle of a poster, or alone with none. */
+.play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.play > * {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  background: var(--color-scrim);
+}

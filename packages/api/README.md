@@ -138,6 +138,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the K
 - **A Direct Message waits for a press.** With no entry in `ui.previews.conversations`, a link of its not yet fetched answers `WaitingForPress` until `press` fetches it. A press of any other link is `NotWaiting`.
 - **An item is its link's, wherever it is posted.** Its `id` is the same for one link in any Message and for any Frontend, and opaque.
 - **A Preview's `image` is `null` or an image the Daemon kept,** served at `GET /api/previews/images/{hash}`, with its `dimensions` where its bytes state them, so a Frontend can reserve its box.
+- **A Preview's `thumbnail` says its page means its image small, beside its words,** so a Frontend never draws it larger. It is `false` where the page does not say.
 - **A video or a sound is streamed through the Daemon, and kept nowhere.** `GET /api/previews/{id}/stream` plays only the `stream` the Daemon recorded for a ready Preview of kind `video` or `audio`, and passes on a single `Range`. A Timeline whose mode is `text` is `PreviewsText`.
 - **A held read fetches nothing.** It answers each place asked, in order, from what the Daemon holds, with `NotHeld` for a link nothing is held of, and no items where no Message stands.
 - **The changes are an item each time a Preview's state changes,** for every Frontend, whoever asked. An event has no id and nothing resumes, so a Frontend that follows again asks again for the Previews it shows.

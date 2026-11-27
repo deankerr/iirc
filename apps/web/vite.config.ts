@@ -39,9 +39,10 @@ const fontLicences = (): Plugin => ({
   name: "iirc-font-licences",
 });
 
-// In development the dev server proxies `/api` to a Daemon on its default address, so the
-// browser sees one origin, as it does in every shape the Daemon serves (ADR 0007).
-const daemon = "http://127.0.0.1:7667";
+// In development the dev server proxies `/api` to a Daemon on its default address, or the
+// one `IIRC_DAEMON` names, so the browser sees one origin, as it does in every shape the
+// Daemon serves (ADR 0007).
+const daemon = process.env.IIRC_DAEMON ?? "http://127.0.0.1:7667";
 
 export default defineConfig({
   build: {

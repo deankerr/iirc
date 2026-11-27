@@ -33,6 +33,11 @@ export interface PageRead {
   readonly image?: string;
   readonly imageWidth?: number;
   readonly imageHeight?: number;
+  /**
+   * Whether the page says its image is a thumbnail: `true` for a `twitter:card` of
+   * `summary`, `false` for any other card, and absent where it names no card.
+   */
+  readonly thumbnail?: boolean;
   readonly oembed?: string;
   readonly players?: readonly PlayerCandidate[];
   readonly video?: PageVideo;
@@ -47,9 +52,11 @@ interface Tag {
   readonly attrs: ReadonlyMap<string, string>;
 }
 
-type Piece =
+/** A piece of a page, and whether it was in the page's body, past its `<body` or `</head`. */
+type Piece = { readonly body: boolean } & (
   | { readonly kind: "tag"; readonly tag: Tag }
-  | { readonly kind: "title"; readonly text: string };
+  | { readonly kind: "title"; readonly text: string }
+);
 
 const isSpace = (ch: string): boolean =>
   ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f";
@@ -150,9 +157,26 @@ const elementEnd = (text: string, name: keyof typeof CLOSERS, from: number): num
   return found === null ? text.length : found.index;
 };
 
-// A tolerant walk over the head, keeping `<meta>`, `<base>`, `<link>` and `<title>` only.
+const HEAD_CLOSE = /^<\/head[\t\n\f\r />]/iu;
+
+const CARD_KEY = /^(?:og|twitter):/u;
+
+/**
+ * Whether a `<meta>` names an Open Graph or Twitter card tag, the only kind a page's body may
+ * give, as a streamed page puts them after its head.
+ * @param attrs - Its attributes.
+ * @returns Whether it does.
+ */
+const isCardMeta = (attrs: ReadonlyMap<string, string>): boolean =>
+  [attrs.get("property"), attrs.get("name")].some((key) =>
+    CARD_KEY.test(key?.trim().toLowerCase() ?? "")
+  );
+
+// A tolerant walk over the page, keeping `<meta>`, `<base>`, `<link>` and `<title>` from its
+// head, and from its body only a `<meta>` that names a card tag.
 const scan = (text: string): Piece[] => {
   const pieces: Piece[] = [];
+  let body = false;
   let i = 0;
 
   while (i < text.length) {
@@ -174,6 +198,7 @@ const scan = (text: string): Piece[] => {
     }
 
     if (!isNameStart(text.charAt(lt + 1))) {
+      body ||= HEAD_CLOSE.test(text.slice(lt, lt + 7));
       i = lt + 1;
       continue;
     }
@@ -193,19 +218,19 @@ const scan = (text: string): Piece[] => {
     i = end;
 
     if (name === "body") {
-      break;
-    }
-
-    if (name === "script" || name === "style" || name === "title") {
+      body = true;
+    } else if (name === "script" || name === "style" || name === "title") {
       const stop = elementEnd(text, name, i);
 
-      if (name === "title") {
-        pieces.push({ kind: "title", text: text.slice(i, stop) });
+      if (name === "title" && !body) {
+        pieces.push({ body, kind: "title", text: text.slice(i, stop) });
       }
 
       i = stop;
-    } else if (name === "meta" || name === "base" || name === "link") {
-      pieces.push({ kind: "tag", tag: { attrs, name } });
+    } else if (
+      body ? name === "meta" && isCardMeta(attrs) : ["meta", "base", "link"].includes(name)
+    ) {
+      pieces.push({ body, kind: "tag", tag: { attrs, name } });
     }
   }
 
@@ -311,7 +336,7 @@ const metaCharset = (head: Uint8Array): string | undefined => {
   const text = new TextDecoder("latin1").decode(head.subarray(0, PRESCAN_BYTES));
 
   for (const piece of scan(text)) {
-    if (piece.kind !== "tag" || piece.tag.name !== "meta") {
+    if (piece.body || piece.kind !== "tag" || piece.tag.name !== "meta") {
       continue;
     }
 
@@ -457,14 +482,14 @@ const foldVideo = (videos: VideoEntry[], key: string, given: string): void => {
 
 // The first value of each `<meta>` key, the page's video entries in order, the `<title>`
 // text, the `<base href>` and the first oEmbed `<link href>`, entities decoded.
-const gather = (text: string): Gathered => {
+const gather = (pieces: readonly Piece[]): Gathered => {
   const meta = new Map<string, string>();
   const videos: VideoEntry[] = [];
   let titleText: string | undefined;
   let baseHref: string | undefined;
   let oembedHref: string | undefined;
 
-  for (const piece of scan(text)) {
+  for (const piece of pieces) {
     if (piece.kind === "title") {
       titleText ??= tidy(decodeHTML(piece.text));
       continue;
@@ -509,6 +534,7 @@ interface Draft {
   image?: string;
   imageWidth?: number;
   imageHeight?: number;
+  thumbnail?: boolean;
   oembed?: string;
   players?: readonly PlayerCandidate[];
   video?: PageVideo;
@@ -576,24 +602,8 @@ const videoOf = (videos: readonly VideoEntry[], base: string): PageVideo | undef
   return undefined;
 };
 
-/**
- * A page's head and its Content-Type in, what it says of itself out.
- *
- * @param input - the page's head as bytes, its Content-Type, and the address it was read from.
- * @returns what the page says of itself, which may be nothing: whether that is enough to show
- * is decided once an oEmbed address it names has filled its gaps.
- */
-export const readPage = (input: {
-  readonly head: Uint8Array;
-  readonly contentType: string | undefined;
-  readonly link: string;
-}): PageRead => {
-  const { meta, titleText, baseHref, oembedHref, videos } = gather(
-    decodeHead(input.head, input.contentType)
-  );
-
-  const base = absolute(baseHref, input.link) ?? input.link;
-
+// What the pieces of a page say, their addresses resolved against its base.
+const said = ({ meta, titleText, oembedHref, videos }: Gathered, base: string): Draft => {
   const title = cut(firstOf(meta, ["og:title", "twitter:title"]) ?? titleText, TITLE_LIMIT);
 
   const description = cut(
@@ -634,6 +644,14 @@ export const readPage = (input: {
     page.image = image;
   }
 
+  // A `summary` card's image is a thumbnail beside its words, and any other card's is not.
+  // A card the head names is said either way, so it is taken over one the body names.
+  const card = firstOf(meta, ["twitter:card"]);
+
+  if (card !== undefined) {
+    page.thumbnail = card.toLowerCase() === "summary";
+  }
+
   const oembed = httpAddress(oembedHref, base);
 
   if (oembed !== undefined) {
@@ -649,6 +667,32 @@ export const readPage = (input: {
   }
 
   return page;
+};
+
+/**
+ * A page and its Content-Type in, what it says of itself out. Its head is read whole, and its
+ * body for the Open Graph and Twitter card `<meta>` tags a streamed page puts there, but no
+ * `<title>`, `<base>`, or `<link>`. What the head says of a thing is taken over what the body
+ * says of it.
+ *
+ * @param input - the page as bytes, as far as it was read, its Content-Type, and the address
+ * it was read from.
+ * @returns what the page says of itself, which may be nothing: whether that is enough to show
+ * is decided once an oEmbed address it names has filled its gaps.
+ */
+export const readPage = (input: {
+  readonly page: Uint8Array;
+  readonly contentType: string | undefined;
+  readonly link: string;
+}): PageRead => {
+  const pieces = scan(decodeHead(input.page, input.contentType));
+  const head = gather(pieces.filter((piece) => !piece.body));
+  const base = absolute(head.baseHref, input.link) ?? input.link;
+
+  return {
+    ...said(gather(pieces.filter((piece) => piece.body)), base),
+    ...said(head, base),
+  };
 };
 
 // A field of the wrong type is dropped on its own, so it never discards the rest.

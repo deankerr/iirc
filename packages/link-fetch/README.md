@@ -1,11 +1,11 @@
 # @iirc/link-fetch
 
-The link fetch port: fetches a stranger's link for one purpose, and either answers a body already bounded for it, from a public address, or refuses with a typed reason. It also holds the address policy, as a pure value its adapters are built with.
+The link fetch port: fetches a stranger's link for one purpose, and either answers a body already bounded for it, from a public address, or refuses with a typed reason. It also holds the address policy and the site table, as pure values its adapters are built with.
 
 The test policy and the fake adapter are exported from `@iirc/link-fetch/testing`.
 
 ```ts
-import { LinkFetch, fixedPolicy, parseLink, admit } from "@iirc/link-fetch";
+import { LinkFetch, fixedPolicy, parseLink, admit, sites, asking } from "@iirc/link-fetch";
 
 fetch(link, purpose, precedence?): Effect<Fetched, LinkFetchFailure, Scope>
   precedence: "begun" | "first" | "refresh"                     // "first" unless given
@@ -18,8 +18,10 @@ LinkRefused { reason } | LinkUnreachable { reason } | LinkTimedOut
 
 parseLink(policy, link, base?): Result<Target, LinkRefused>     // scheme, userinfo, port
 admit(policy, port, addresses): Result<Address, LinkRefused>    // every record, or none
+asking(sites, target, purpose): Asking                          // how one hop is asked
+Asking: { agent: "iirc" | "crawler", accept: "purpose" | "media", rewrite: string | undefined }
 
-makePacer: Effect<Pacer>                                        // pacing: { perName: 2, perMinute: 30 }
+makePacer: Effect<Pacer>                                        // pacing: { perName: 6, perMinute: 30 }
 Pacer: Turn & { ask(precedence): Effect<Turn> }                 // alone, a first fetch asked now
 Turn: { start: Effect<void>, hop(name): Effect<void, never, Scope>,
         begin(name): Effect<void, never, Scope> }              // start and a name's place at once
@@ -29,14 +31,14 @@ Turn: { start: Effect<void>, hop(name): Effect<void, never, Scope>,
 
 ## What it promises
 
-- **A body is bounded for its purpose, after decompression.** A page of HTML ends cleanly before its `<body`, after its `</head>`, or at 1 MiB, and a `<body>` in a comment, script, style, or title ends nothing. A page of plain text ends cleanly at 16 KiB, with no scan for a head, since it is no HTML. A raster image may be 8 MiB, an SVG 1 MiB, an oEmbed 64 KiB, and a stream 200 MiB. A stream's `416` is answered whatever its type. A body that passes its bound fails with `LinkTooLarge`, and so does one that reaches it without ending, unless its declared length says it is whole. `limits` holds them.
+- **A body is bounded for its purpose, after decompression.** A page of HTML ends cleanly before its `<body` or after its `</head>` when a tag in its head has an attribute value starting `og:` or `twitter:`, and otherwise at its end or at 1 MiB, since a streamed page may put those tags at the end of its body. A `<body>` in a comment, script, style, or title ends nothing, and neither does an `og:` there. A page of plain text ends cleanly at 16 KiB, with no scan for a head, since it is no HTML. A raster image may be 8 MiB, an SVG 1 MiB, an oEmbed 64 KiB, and a stream 200 MiB. A stream's `416` is answered whatever its type. A body that passes its bound fails with `LinkTooLarge`, and so does one that reaches it without ending, unless its declared length says it is whole. `limits` holds them.
 - **A fetch is held to 10 seconds,** body and all, except a stream, which is held to 10 seconds to its first byte.
-- **The type is the purpose's.** A page is `text/html`, `application/xhtml+xml`, or `text/plain`, an image is PNG, JPEG, GIF, WebP, AVIF, or SVG by its header and its leading bytes alike, an oEmbed is JSON, and a stream is `video/*` or `audio/*`. Anything else is `LinkWrongType`, which names the `link` that answered, after any redirects, and is raised before any byte of the body is read.
+- **The type is the purpose's.** A page is `text/html`, `application/xhtml+xml`, or `text/plain`, an image is PNG, JPEG, GIF, WebP, AVIF, or SVG by its header and its leading bytes alike, an oEmbed is JSON, and a stream is `video/*` or `audio/*`. Anything else is `LinkWrongType`, which names the `link` that answered, after any redirects and rewrites, and is raised before any byte of the body is read.
 - **The length is what the host declared of the bytes the body gives.** `Fetched` and `LinkWrongType` carry it as `length`: the `Content-Length`, in bytes, unless the body is encoded, and null when none is declared. It is the length of the whole body, never of the bytes a bound lets through.
 - **An error is its status alone.** An answer whose status, after any redirects, is outside 200 to 299 is answered with that status, its type unchecked, and an empty body, and no byte of its body is read. A stream is the exception: its answer is checked and read as any other.
 - **The connection lives in the Scope.** Closing it stops the fetch and its body, read or not, and a body that ends at a bound closes its connection.
-- **`link` is the last link fetched, by name,** as the URL parser normalised it, after any redirects.
-- **Fetches wait their turn, and never fail for waiting.** Every adapter builds in a pacer of its own. At most two hops run at once to one name, each counted by the name it is made to and held until it is done, and at most 30 fetches start in any rolling minute, read through `Clock`. A fetch beyond either bound waits, and its time limit does not run while it waits. Every purpose counts, a stream included.
+- **`link` is the last link fetched, by name,** as the URL parser normalised it, after any redirects and rewrites.
+- **Fetches wait their turn, and never fail for waiting.** Every adapter builds in a pacer of its own. At most six hops run at once to one name, each counted by the name it is made to and held until it is done, and at most 30 fetches start in any rolling minute, read through `Clock`. A fetch beyond either bound waits, and its time limit does not run while it waits. Every purpose counts, a stream included.
 - **Of the fetches waiting, the one standing furthest ahead goes next.** A fetch's precedence comes first: `begun`, which finishes what a fetch already made began, such as a page's oEmbed or image, then `first`, a link never fetched before, then `refresh`, one fetched again. Among equals, the one asked last goes first. A fetch keeps its place through every hop it makes. Its first hop starts and takes a name's place at once, once both bounds allow it, so a fetch is counted as started only as it goes, and one waiting for the minute never holds a name. A waiting fetch the bounds would not let go never holds back one they would. Precedence orders the waiting and never changes a bound, and a fetch that stops waiting is forgotten at once.
 
 ## The policy
@@ -45,8 +47,16 @@ A link is parsed by the WHATWG URL parser first, and what it produced is checked
 
 `fixedPolicy` is what production uses: ports 80 and 443, to public addresses only. Special means anything in the IANA special-purpose registries, AS112 and AMT included, and for IPv6 anything outside global unicast, `2000::/3`. No option widens it.
 
+## The site table
+
+`sites` says how each hop of a fetch is asked of the site it reaches, and `asking` reads it for a parsed link and a purpose. A host is matched by its whole name, or as a dot-suffix where a rule says so, never as a substring. Beside each rule is the evidence for it.
+
+- **The agent is iirc's own,** which says it is a bot, except at the few hosts that serve anything but a link-preview crawler a page that needs a browser. Those are sent `crawler`, an agent that still names iirc, for every purpose.
+- **A page that is likely media asks for media,** at the hosts that answer HTML to any `Accept` that names it, and wherever the path's last segment ends in a common image, video, or sound extension. An HTML answer is still read as a page.
+- **A page may be fetched at another link,** where a site's own link answers nothing a preview can use. A rewrite is checked by the policy as any link is, is no redirect, and is never rewritten again.
+
 ## Testing
 
-`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers, { held? })` answers recorded responses or failures by link, as the parser normalises it, and records each fetch in `asked`, with its precedence, once the pacer gives it its turn, as a first hop to the name of the link asked, held until the caller's Scope closes. A `held` link's fetch is made but answers nothing until `release(link)`. A link with no answer is unreachable. A recorded response is answered as the guard would for the purpose, by its declared type alone: a status outside 200 to 299 but a stream's is answered with no body, a type the purpose does not take is `LinkWrongType`, a page is cut at its bound, plain text at its own, its `length` is the `Content-Length` it was recorded with, unless it is encoded, and any other body over its bound gives its bytes up to the bound and then fails with `LinkTooLarge` as it is read. A response may be `zeros: n` in place of a body, which makes its bytes as they are read. A stream of a response with no status recorded is answered as a host serving ranges would: a range is `206` with `Content-Range` and `Content-Length`, one starting at or past the end is `416` with `Content-Range: bytes */total`, and a recorded status is answered as recorded, whole.
+`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers, { held? })` answers recorded responses or failures by link, as the parser normalises it, with no site rules, so a link answers as recorded whatever its host, and records each fetch in `asked`, with its precedence, once the pacer gives it its turn, as a first hop to the name of the link asked, held until the caller's Scope closes. A `held` link's fetch is made but answers nothing until `release(link)`. A link with no answer is unreachable. A recorded response is answered as the guard would for the purpose, by its declared type alone: a status outside 200 to 299 but a stream's is answered with no body, a type the purpose does not take is `LinkWrongType`, a page is cut at its bound, plain text at its own, its `length` is the `Content-Length` it was recorded with, unless it is encoded, and any other body over its bound gives its bytes up to the bound and then fails with `LinkTooLarge` as it is read. A response may be `zeros: n` in place of a body, which makes its bytes as they are read. A stream of a response with no status recorded is answered as a host serving ranges would: a range is `206` with `Content-Range` and `Content-Length`, one starting at or past the end is `416` with `Content-Range: bytes */total`, and a recorded status is answered as recorded, whole.
 
 Production code may not import `@iirc/link-fetch/testing`.

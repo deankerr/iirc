@@ -1,0 +1,37 @@
+/*
+ * The button that expands a card: a square one line of the card's text on a side, floated
+ * to the trailing end of the card's words, so it sits on the title's line, in the same
+ * corner collapsed and expanded, and the words run beside it and under it. Quiet until
+ * hovered.
+ *
+ * Its chevrons are as far from the card's top edge as from its trailing one. The words are
+ * inset `--space-2` above and `--space-3` at the end, and the chevrons are drawn an eighth
+ * of an em narrower on each side than they are tall, so the square is pulled toward the
+ * end by the difference of both.
+ */
+.expand {
+  display: inline-flex;
+  float: inline-end;
+  align-items: center;
+  justify-content: center;
+  block-size: 1lh;
+  inline-size: 1lh;
+  margin: 0;
+  margin-inline: var(--space-2) calc(var(--space-2) - var(--space-3) - 0.125em);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  cursor: default;
+}
+
+.expand[data-hovered] {
+  color: var(--color-accent);
+}
+
+.expand[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}

@@ -139,8 +139,11 @@ export type PreviewPlayer = typeof PreviewPlayer.Type;
  * a Preview of kind `player`, and `null` for any other. A `file` has no `title`, its
  * `type` is its media type, its `description` is a plain-text file's first lines, with their
  * line breaks, or `null`, and its `size` is its length in bytes as its host declared it, or
- * `null` where it did not; `size` is `null` for any other kind. Every field but `kind`,
- * `image`, and `size` is what a stranger wrote.
+ * `null` where it did not; `size` is `null` for any other kind. `thumbnail` is whether a
+ * `page` says its image is a thumbnail to stand beside its words, never larger, as a
+ * `twitter:card` of `summary` does; it is `false` where the page does not say, and for any
+ * other kind. Every field but `kind`, `image`, `size`, and `thumbnail` is what a stranger
+ * wrote.
  */
 export const Preview = Schema.Struct({
   description: Schema.NullOr(Untrusted),
@@ -151,6 +154,7 @@ export const Preview = Schema.Struct({
   site: Untrusted,
   size: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   stream: Schema.NullOr(Untrusted),
+  thumbnail: Schema.Boolean,
   title: Schema.NullOr(Untrusted),
   type: Schema.NullOr(Untrusted),
 }).annotate({ identifier: "Preview" });

@@ -15,7 +15,7 @@ export const pacing = {
   /** Fetches started in any rolling minute, all names together. */
   perMinute: 30,
   /** Hops held at once to one name. */
-  perName: 2,
+  perName: 6,
 } as const;
 
 const minute = 60_000;

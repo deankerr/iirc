@@ -21,6 +21,7 @@ import {
   LinkUnreachable,
   LinkWrongType,
   limits,
+  pacing,
 } from "@iirc/link-fetch";
 import { makeBunLinkFetch } from "@iirc/link-fetch-bun";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
@@ -402,6 +403,7 @@ const media = (link: string, kind: string, type: string) => ({
     site: new URL(link).host,
     size: null,
     stream: kind === "image" ? null : link,
+    thumbnail: false,
     title: null,
     type,
   },
@@ -456,6 +458,7 @@ describe("Previews over a real server", () => {
               site: "Cat News",
               size: null,
               stream: null,
+              thumbnail: false,
               title: "Cats",
               type: null,
             },
@@ -682,6 +685,7 @@ describe("Previews over a real server", () => {
             site: "file.example",
             size: 2048,
             stream: null,
+            thumbnail: false,
             title: null,
             type: "application/pdf",
           },
@@ -821,7 +825,7 @@ const previewed = async (answers: Readonly<Record<string, Answer>>, link: string
 const asPage = { kind: "page" } as const;
 const asOembed = { kind: "oembed" } as const;
 
-const ready = (preview: Partial<Record<string, string | null>>) => ({
+const ready = (preview: Partial<Record<string, boolean | string | null>>) => ({
   _tag: "Ready",
   preview: {
     description: null,
@@ -832,6 +836,7 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     site: "page.example",
     size: null,
     stream: null,
+    thumbnail: false,
     title: null,
     type: null,
     ...preview,
@@ -877,6 +882,19 @@ describe("a page's oEmbed over a real server", () => {
     );
 
     expect(result.state).toStrictEqual(ready({ site: "Some Author", title: "From oEmbed" }));
+  });
+
+  it("says a page's image is a thumbnail where its card is a summary", async () => {
+    const result = await previewed(
+      {
+        "https://page.example/": page(
+          `<title>Tag title</title><meta name="twitter:card" content="summary">`
+        ),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ thumbnail: true, title: "Tag title" }));
   });
 
   it("is unaffected when the guard refuses the oEmbed address as a private host", async () => {
@@ -1370,6 +1388,7 @@ describe("a Preview's image over a real server", () => {
         site: "cat.example",
         size: null,
         stream: null,
+        thumbnail: false,
         title: "Cat",
         type: null,
       },
@@ -1425,6 +1444,7 @@ describe("a Preview's image over a real server", () => {
         site: "image.example",
         size: null,
         stream: null,
+        thumbnail: false,
         title: null,
         type: "image/gif",
       },
@@ -1672,6 +1692,7 @@ describe("a Preview's image over a real server", () => {
         site: "cat.example",
         size: null,
         stream: null,
+        thumbnail: false,
         title: "Cat",
         type: null,
       },
@@ -2077,6 +2098,7 @@ describe("a link to a file over a real server and the real guard", () => {
                 site: result.site,
                 size: 123_456,
                 stream: null,
+                thumbnail: false,
                 title: null,
                 type: "application/pdf",
               },
@@ -3165,7 +3187,15 @@ describe("bounds and the queue over a real server", () => {
   });
 
   it("fetches a name's waiting links latest first, as earlier ones finish", async () => {
-    const links = ["a", "b", "c", "d"].map((one) => `https://one.example/${one}`);
+    // One for each of the name's places, and two more that wait.
+    const links = Array.from(
+      { length: pacing.perName + 2 },
+      (_, at) => `https://one.example/${at}`
+    );
+
+    const holders = links.slice(0, pacing.perName);
+    const [first, second] = holders;
+    const [earlier, latest] = links.slice(pacing.perName);
 
     const result = await runClocked(
       Effect.gen(function* () {
@@ -3173,17 +3203,17 @@ describe("bounds and the queue over a real server", () => {
         const places = yield* saying(served, links);
 
         yield* askingEach(served, places);
-        yield* reaching(served, 2);
-        yield* fake.release("https://one.example/b");
-        yield* reaching(served, 3);
-        yield* fake.release("https://one.example/a");
-        yield* reaching(served, 4);
+        yield* reaching(served, pacing.perName);
+        yield* fake.release(second ?? "");
+        yield* reaching(served, pacing.perName + 1);
+        yield* fake.release(first ?? "");
+        yield* reaching(served, pacing.perName + 2);
 
         return yield* linksAsked(served);
       })
     );
 
-    expect(result).toStrictEqual(["a", "b", "d", "c"].map((one) => `https://one.example/${one}`));
+    expect(result).toStrictEqual([...holders, latest, earlier]);
   });
 });
 
@@ -3691,6 +3721,7 @@ describe("a player over a real server", () => {
         site: "clip.example",
         size: null,
         stream: null,
+        thumbnail: false,
         title: "Clip",
         type: null,
       },
@@ -3916,6 +3947,7 @@ describe("a page that names a video file over a real server", () => {
         site: "streamable.com",
         size: null,
         stream: FILE,
+        thumbnail: false,
         title: "A clip",
         type: "video/mp4",
       },

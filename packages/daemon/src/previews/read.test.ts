@@ -11,8 +11,8 @@ const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (ch) => ch.co
 const bytes = (...parts: (Uint8Array | number[])[]): Uint8Array =>
   Uint8Array.from(parts.flatMap((part) => [...part]));
 
-const readBytes = (head: Uint8Array, contentType: string | undefined = "text/html") =>
-  readPage({ contentType, head, link: LINK });
+const readBytes = (page: Uint8Array, contentType: string | undefined = "text/html") =>
+  readPage({ contentType, link: LINK, page });
 
 const read = (text: string, contentType: string | undefined = "text/html") =>
   readBytes(utf8(text), contentType);
@@ -268,6 +268,66 @@ const OEMBED = "https://p.example/oembed?url=x";
 const SCRIPT_URL = "javascript:alert(1)";
 
 const oembedOf = (head: string) => read(head)?.oembed;
+
+describe("a page's body", () => {
+  it("gives the card tags a streamed page puts there", () => {
+    expect(
+      read(`<head><title>Plain</title></head><body><div>a</div>
+        <meta property="og:title" content="Body title">
+        <meta name="twitter:description" content="Body description">
+        <meta property="og:image" content="/i.png"></body>`)
+    ).toStrictEqual({
+      description: "Body description",
+      image: "https://example.com/i.png",
+      title: "Plain",
+    });
+  });
+
+  it.each([
+    ["<body>", "<head></head><body>"],
+    ["</head> alone", "<head></head>"],
+  ])("past %s gives no title, base, link, or other meta", (_, opening) => {
+    expect(
+      read(`${opening}<title>Not this</title><base href="https://b.example/">
+        <link rel="alternate" type="application/json+oembed" href="${OEMBED}">
+        <meta name="description" content="Not this">
+        <meta property="og:image" content="i.png">`)
+    ).toStrictEqual({ image: "https://example.com/a/b/i.png" });
+  });
+
+  it("never outranks the head, field by field", () => {
+    expect(
+      read(`<head><title>Head title</title>
+        <meta name="twitter:description" content="Head description"></head>
+        <body><meta property="og:title" content="Body title">
+        <meta property="og:description" content="Body description">
+        <meta property="og:site_name" content="Body site"></body>`)
+    ).toStrictEqual({ description: "Head description", site: "Body site", title: "Head title" });
+  });
+});
+
+describe("whether a page's image is a thumbnail", () => {
+  it.each([
+    ["a summary card", `<meta name="twitter:card" content="summary">`, true],
+    [
+      "one named by property, in any case",
+      `<meta property="twitter:card" content=" Summary ">`,
+      true,
+    ],
+    ["a large image card", `<meta name="twitter:card" content="summary_large_image">`, false],
+    ["a player card", `<meta name="twitter:card" content="player">`, false],
+    ["no card", "", undefined],
+  ] as const)("is as %s says", (_name, meta, expected) => {
+    expect(read(`<title>t</title>${meta}`).thumbnail).toBe(expected);
+  });
+
+  it("is as the head's card says, over the body's", () => {
+    expect(
+      read(`<head><title>t</title><meta name="twitter:card" content="summary_large_image"></head>
+        <body><meta name="twitter:card" content="summary"></body>`).thumbnail
+    ).toBeFalsy();
+  });
+});
 
 describe("the oEmbed address a page names", () => {
   it("reads rel as a list of tokens, and rel and type without regard to case", () => {

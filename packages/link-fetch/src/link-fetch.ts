@@ -30,7 +30,7 @@ export const limits = {
   /** A whole fetch, body and all, except a stream, for which it is the time to the first byte. */
   milliseconds: 10_000,
   oembed: 64 * 1024,
-  /** A page ends here, as it does at the end of its head. */
+  /** A page ends here, or sooner at the end of a head that names a card tag. */
   page: 1024 * 1024,
   /** A PNG, JPEG, GIF, WebP, or AVIF. */
   raster: 8 * 1024 * 1024,
@@ -94,7 +94,7 @@ export type LinkFetchFailure =
 
 /** What a link answered, after any redirects. */
 export interface Fetched {
-  /** The last link fetched, by name, as the parser normalised it. */
+  /** The last link fetched, by name, as the parser normalised it, after redirects and rewrites. */
   readonly link: string;
   readonly status: number;
   /**
@@ -113,8 +113,9 @@ export interface Fetched {
   readonly headers: Readonly<Record<string, string>>;
   /**
    * The body as it arrives, decompressed and bounded for the purpose. A page ends early,
-   * cleanly, at the end of its head or at its limit, and a plain-text one at its limit. Anything else over its limit fails. An
-   * answer outside 200 to 299, but a stream's, has none, and none of it is read.
+   * cleanly, at the end of a head that names an `og:` or `twitter:` tag, or at its limit, and
+   * a plain-text one at its limit. Anything else over its limit fails. An answer outside 200
+   * to 299, but a stream's, has none, and none of it is read.
    */
   readonly body: Stream.Stream<Uint8Array, BodyFailure>;
 }

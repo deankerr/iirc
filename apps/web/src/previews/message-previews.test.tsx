@@ -5,7 +5,7 @@ import type { PreviewItem, Timeline, TimelineItem, UiOptions } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
@@ -110,6 +110,7 @@ const ready = {
     site: "example.com",
     size: null,
     stream: null,
+    thumbnail: false,
     title: "Cats",
     type: null,
   },
@@ -151,24 +152,6 @@ const readyWithImage = (
   } as const;
 };
 
-/**
- * A ready Preview of the link, which is itself a video or a sound.
- * @param kind - Which.
- * @returns Its state.
- */
-const readyMedia = (kind: "video" | "audio") =>
-  ({
-    _tag: "Ready",
-    preview: {
-      ...ready.preview,
-      description: null,
-      kind,
-      stream: ready.preview.link,
-      title: null,
-      type: kind === "video" ? "video/mp4" : "audio/ogg",
-    },
-  }) as const;
-
 /** Where the page's video file is, which no page of ours may ever draw or load. */
 const videoFile = "https://media.example.com/cat.mp4";
 
@@ -200,43 +183,6 @@ const readyVideoPage = (poster = true, animated = false, dimensions: Dimensions 
       type: "video/mp4",
     },
   }) as const;
-
-/** Where the page's player plays from, which no page of ours may ever draw or load. */
-const playerAddress = "https://www.youtube-nocookie.com/embed/abc123";
-const playerHost = "www.youtube-nocookie.com";
-
-/**
- * A ready Preview of the link, which is a player from a listed host.
- * @param poster - Whether the Daemon kept the poster.
- * @param animated - Whether the poster moves.
- * @param dimensions - The poster's size in pixels, if the Daemon read it.
- * @returns Its state.
- */
-const readyPlayer = (poster: boolean, animated = false, dimensions: Dimensions | null = null) =>
-  ({
-    _tag: "Ready",
-    preview: {
-      ...ready.preview,
-      description: null,
-      image: poster
-        ? {
-            animated,
-            dimensions,
-            hash,
-            size: 1234,
-            type: animated ? ("image/gif" as const) : ("image/jpeg" as const),
-          }
-        : null,
-      kind: "player",
-      link: "https://www.youtube.com/watch?v=abc123",
-      player: { link: playerAddress, size: { height: 360, width: 640 } },
-      stream: null,
-      title: "A song",
-    },
-  }) as const;
-
-/** The route the Daemon streams `cats` from, for the Message at step 2 in `#iirc`. */
-const streamOfCats = `/api/previews/${cats}/stream?timeline=${iirc}&position=${cursor(2)}`;
 
 /** What the view reads of an entry. */
 interface Seen {
@@ -492,21 +438,10 @@ const toggle = (index = 0) =>
 const caret = () => toggle()?.querySelector<HTMLElement>("[data-icon]")?.dataset.icon;
 
 /**
- * The press of a card's description that was cut, if it was.
- * @returns It, or none.
+ * A card's words, each part as its text, in the order drawn.
+ * @returns Them.
  */
-const more = () =>
-  card()?.firstElementChild?.querySelector<HTMLButtonElement>("[aria-expanded]") ?? null;
-
-/**
- * The press of a card's description that says it is about cats, never the control that
- * opens a poster large.
- * @returns It, or none.
- */
-const catsDescription = () =>
-  [...(list()?.querySelectorAll<HTMLButtonElement>("[aria-expanded]") ?? [])].find(
-    (one) => one.textContent === "A page about cats."
-  ) ?? null;
+const words = () => [...(card()?.querySelectorAll("bdi") ?? [])].map((part) => part.textContent);
 
 /**
  * What a card says, its words and its media's together.
@@ -515,15 +450,11 @@ const catsDescription = () =>
 const cardText = () => card()?.textContent;
 
 /**
- * A card's words, each part as its text, in the order drawn.
- * @returns Them, none when it has no words.
+ * The first card's expand button.
+ * @returns It, or none.
  */
-const words = () => {
-  const first = card()?.firstElementChild;
-  const parts = first?.querySelector("[data-loaded], video, audio") === null ? first : undefined;
-
-  return [...(parts?.children ?? [])].map((part) => part.textContent);
-};
+const expandButton = () =>
+  card()?.querySelector<HTMLButtonElement>('button[aria-label^="full preview of"]') ?? null;
 
 /**
  * Waits for the Message's image to be drawn, and says it came into view, as a browser
@@ -533,20 +464,6 @@ const imageSeen = async () => {
   await settled(() => list()?.querySelector("[data-loaded]") !== null);
   await scrolledIntoView();
 };
-
-/**
- * One of the Message's image's buttons, by what it says.
- * @param name - Its accessible name.
- * @returns It, or none.
- */
-const imageButton = (name: string) =>
-  list()?.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) ?? null;
-
-/**
- * The larger view, if it is open.
- * @returns It, or none.
- */
-const larger = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
 
 /**
  * Presses a button as a person does: it takes focus, and then it is pressed.
@@ -560,225 +477,6 @@ const pressed = async (button: HTMLButtonElement | null) => {
   });
 };
 
-/** Each stub a test made of the browser, to be put back. */
-const restores: (() => void)[] = [];
-
-/**
- * Stands in the browser's media: the Daemon's bytes fetched, decoded to a frame of a size,
- * drawn on a canvas, and held by an object URL.
- * @returns What it was asked.
- */
-const stubMedia = () => {
-  const revoked: string[] = [];
-  const draws: [number, number][] = [];
-  let made = 0;
-
-  const fetching = vi
-    .fn<(input: string) => Promise<Response>>()
-    .mockResolvedValue(new Response(new Uint8Array([71, 73, 70]), { status: 200 }));
-
-  vi.stubGlobal("fetch", fetching);
-  vi.stubGlobal(
-    "createImageBitmap",
-    vi
-      .fn<() => Promise<{ close: () => void; height: number; width: number }>>()
-      .mockResolvedValue({ close: vi.fn<() => void>(), height: 48, width: 64 })
-  );
-
-  vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
-    made += 1;
-
-    return `blob:media-${made}`;
-  });
-  vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
-    revoked.push(url);
-  });
-
-  // happy-dom draws nothing, so a stand-in takes the one call the page makes.
-  const context = {
-    drawImage: (frame: { width: number; height: number }) => {
-      draws.push([frame.width, frame.height]);
-    },
-  };
-
-  // SAFETY: the page only draws an image onto what it is given.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as never);
-
-  restores.push(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  return { draws, fetches: () => fetching.mock.calls.map(([input]) => input), revoked };
-};
-
-/**
- * Sets the device to reduce motion, or not, for what mounts after.
- * @param reduce - Whether it does.
- */
-const reducingMotion = (reduce: boolean) => {
-  const original = window.matchMedia.bind(window);
-
-  vi.spyOn(window, "matchMedia").mockImplementation((query) => {
-    const list = original(query);
-
-    if (query.includes("prefers-reduced-motion")) {
-      Object.defineProperty(list, "matches", { value: reduce });
-    }
-
-    return list;
-  });
-  restores.push(() => {
-    vi.restoreAllMocks();
-  });
-};
-
-/**
- * The Message's animated image, played or not, once it was fetched.
- * @returns What is drawn of it.
- */
-const animated = () => ({
-  badge: list()?.querySelector('[data-badge="play"]') !== null,
-  canvas: list()?.querySelector("canvas") !== null,
-  playing: list()?.querySelector("img")?.getAttribute("src") ?? null,
-});
-
-/**
- * Opens the Message with the player's Preview ready, and its poster, if any, in view.
- * @param poster - Whether the Daemon kept a poster.
- * @param mode - `ui.previews`, on unless given.
- * @param dimensions - The poster's size in pixels, if the Daemon read it.
- * @returns The fake Daemon, to send the stream more.
- */
-const withPlayer = async (
-  poster: boolean,
-  mode: "on" | "text" = "on",
-  dimensions: Dimensions | null = null
-) => {
-  const fake = await opened(mode, catsItem(readyPlayer(poster, false, dimensions)));
-  const { daemon } = fake;
-
-  await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-  await scrolledIntoView();
-  await settled(() => drawn()[0]?.state === "ready");
-
-  if (poster && mode === "on") {
-    await imageSeen();
-    await settled(() => list()?.querySelector("img") !== null);
-  }
-
-  return fake;
-};
-
-const playButton = () => imageButton(`Play from ${playerHost}`);
-
-/**
- * Every attribute in the page that holds the player's address.
- * @returns Each, as its element and name.
- */
-const holdingAddress = () =>
-  [...document.body.querySelectorAll("*")].flatMap((element) =>
-    [...element.attributes].flatMap((attribute) =>
-      /embed\/abc123|youtube-nocookie\.com\//u.test(attribute.value)
-        ? [`${element.localName}[${attribute.name}]`]
-        : []
-    )
-  );
-
-/**
- * What the player's frame is, as drawn.
- * @returns Every frame's attributes, with how it is styled only as present, and whether a
- * poster or the play button is left.
- */
-const framed = () => ({
-  frames: [...document.body.querySelectorAll("iframe")].map((frame) =>
-    Object.fromEntries(
-      [...frame.attributes].map(({ name, value }) => [
-        name,
-        name === "class" || name === "style" ? "drawn" : value,
-      ])
-    )
-  ),
-  poster: list()?.querySelector("img, canvas") !== null,
-  press: playButton() !== null,
-  text: list()?.textContent,
-});
-
-const frame = {
-  allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
-  class: "drawn",
-  referrerpolicy: "strict-origin",
-  sandbox: "allow-scripts allow-same-origin allow-presentation allow-popups",
-  src: `${playerAddress}?autoplay=1`,
-  style: "drawn",
-  title: `Player from ${playerHost}`,
-};
-
-/**
- * Opens the Message with the page's video ready, and its poster, if any, in view.
- * @param mode - `ui.previews`, on unless given.
- * @param poster - Whether the Daemon kept a poster.
- * @param animatedPoster - Whether the poster moves.
- * @param dimensions - The poster's size in pixels, if the Daemon read it.
- * @returns The fake Daemon.
- */
-const withVideo = async (
-  mode: "on" | "text" = "on",
-  poster = true,
-  animatedPoster = false,
-  dimensions: Dimensions | null = null
-) => {
-  const fake = await opened(mode, catsItem(readyVideoPage(poster, animatedPoster, dimensions)));
-
-  await settled(() => fake.daemon.previewFollowers.length === 1 && list() !== null);
-  await scrolledIntoView();
-  await settled(() => drawn()[0]?.state === "ready");
-
-  if (poster && mode === "on") {
-    await imageSeen();
-    await settled(() => list()?.querySelector("img, canvas") !== null);
-  }
-
-  return fake;
-};
-
-/**
- * What gives a box its shape and its limit, as the page sets it, for a holder, a video's
- * box, or a frame. jsdom does no layout, so this is what the stylesheet is given.
- * @param element - The box.
- * @returns Its proportions, and how wide it is at most, as set.
- */
-const boxOf = (element: Element | null | undefined) => {
-  const style = element instanceof HTMLElement ? element.style : undefined;
-
-  return {
-    atMost: style?.getPropertyValue("--box-at-most"),
-    height: style?.getPropertyValue("--box-height"),
-    width: style?.getPropertyValue("--box-width"),
-  };
-};
-
-/**
- * Says the Message's first image has loaded, as a browser would.
- */
-const imageLoaded = async () => {
-  await act(async () => {
-    list()?.querySelector("img")?.dispatchEvent(new Event("load"));
-    await Promise.resolve();
-  });
-};
-
-/**
- * The box the Message's image stands in, and whether it has loaded.
- * @returns Its shape and width, and its `data-loaded`.
- */
-const holder = () => {
-  const element = list()?.querySelector<HTMLElement>("[data-loaded]");
-
-  return { ...boxOf(element), loaded: element?.dataset.loaded };
-};
-
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -790,10 +488,6 @@ describe("a Message's Previews", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
-    }
-
-    for (const restore of restores.splice(0)) {
-      restore();
     }
 
     Reflect.deleteProperty(globalThis, "IntersectionObserver");
@@ -861,721 +555,43 @@ describe("a Message's Previews", () => {
     });
   });
 
-  it("draws a failure as one line of why, and never the link again", async () => {
+  it("draws no row for a failure, and never the link again, as its toggle says why", async () => {
     const { daemon } = await opened("text", catsItem({ _tag: "Failed", reason: "Unreachable" }));
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await settled(() => daemon.previewFollowers.length === 1 && toggle() !== null);
     await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "failed");
+    await settled(() => toggle()?.dataset.failed !== undefined);
 
-    expect({
-      buttons: list()?.querySelectorAll("button").length,
-      drawn: drawn(),
-      links: list()?.querySelectorAll("a").length,
-    }).toStrictEqual({
-      buttons: 0,
-      drawn: [{ state: "failed", text: "No preview: the daemon could not reach this link." }],
-      links: 0,
+    expect({ label: toggle()?.getAttribute("aria-label"), list: list() }).toStrictEqual({
+      label:
+        "preview of https://example.com/cats: No preview: the daemon could not reach this link.",
+      list: null,
     });
   });
 
-  it("draws a page as its title, its description, and its image under them, from the images route, and never its site's name", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+  it("draws a ready card under the Message, which stays expanded when its row is drawn again", async () => {
+    const { daemon, registry } = await opened("on", catsItem(readyVideoPage(false)));
 
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
+    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
+    await pressed(expandButton());
 
-    const image = list()?.querySelector("img");
+    const expanded = card()?.dataset.layout;
 
-    expect({
-      alt: image?.getAttribute("alt"),
-      bare: card()?.dataset.bare,
-      decoding: image?.getAttribute("decoding"),
-      drawn: image?.dataset.drawn,
-      last: card()?.lastElementChild?.contains(image ?? null),
-      loading: image?.getAttribute("loading"),
-      // A description that fits is no press.
-      pressable: card()?.firstElementChild?.querySelector("[aria-expanded]"),
-      referrerPolicy: image?.getAttribute("referrerpolicy"),
-      src: image?.getAttribute("src"),
-      text: cardText(),
-      words: words(),
-    }).toStrictEqual({
-      alt: "Cats",
-      bare: undefined,
-      decoding: "async",
-      drawn: "whole",
-      last: true,
-      loading: "lazy",
-      pressable: null,
-      referrerPolicy: "no-referrer",
-      src: `/api/previews/images/${hash}`,
-      text: "CatsA page about cats.",
-      words: ["Cats", "A page about cats."],
-    });
-  });
-
-  it("draws a text file as its name and its lines, as literal text with their breaks, and never as markup", async () => {
-    const lines = "<b>x</b>\n<img src=x onerror=alert(1)>\n\nlast";
-
-    const { daemon } = await opened(
-      "text",
-      catsItem({
-        _tag: "Ready",
-        preview: {
-          ...ready.preview,
-          description: lines,
-          kind: "file",
-          size: 52,
-          title: null,
-          type: "text/plain",
-        },
-      })
-    );
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-
-    expect({
-      elements: card()?.querySelectorAll("b, img").length,
-      words: words(),
-    }).toStrictEqual({ elements: 0, words: ["cats", lines] });
-  });
-
-  it("draws any other file as its name, its type, and its size", async () => {
-    const { daemon } = await opened(
-      "on",
-      catsItem({
-        _tag: "Ready",
-        preview: {
-          ...ready.preview,
-          description: null,
-          kind: "file",
-          size: 1_200_000,
-          title: null,
-          type: "application/pdf",
-        },
-      })
-    );
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-
-    expect(words()).toStrictEqual(["cats", "application/pdf \u00B7 1.2 MB"]);
-  });
-
-  it("names the host a page was read from above its title, when another than its link's", async () => {
-    const { daemon } = await opened(
-      "text",
-      catsItem({ ...ready, preview: { ...ready.preview, link: "https://www.cats.example.org/c" } })
-    );
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-
-    expect(words()).toStrictEqual(["cats.example.org", "Cats", "A page about cats."]);
-  });
-
-  it("shows all of a description that was cut on a press, and cuts it again on another", async () => {
-    // Laid out, the description runs past the lines it is cut to.
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.localName === "bdi" ? 60 : 0;
-      },
-    });
-    restores.push(() => {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    });
-
-    const { daemon } = await opened("text", catsItem(ready));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => more() !== null);
-
-    const cut = { expanded: more()?.getAttribute("aria-expanded"), text: more()?.textContent };
-
-    await pressed(more());
-
-    const open = more()?.getAttribute("aria-expanded");
-
-    await pressed(more());
-
-    expect({ again: more()?.getAttribute("aria-expanded"), cut, open }).toStrictEqual({
-      again: "false",
-      cut: { expanded: "false", text: "A page about cats." },
-      open: "true",
-    });
-  });
-
-  it("keeps a description shown whole once play swaps its poster for the video", async () => {
-    // Laid out, the description runs past the lines it is cut to.
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.localName === "bdi" ? 60 : 0;
-      },
-    });
-    restores.push(() => {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    });
-
-    const video = readyVideoPage();
-
-    const described = {
-      ...video,
-      preview: { ...video.preview, description: "A page about cats." },
+    const switchTo = async (timeline: string) => {
+      await act(async () => {
+        registry.set(open, Schema.decodeSync(TimelineId)(timeline));
+        await Promise.resolve();
+      });
     };
 
-    const { daemon } = await opened("on", catsItem(described));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await imageSeen();
-    await settled(() => catsDescription() !== null && imageButton("Play A cat") !== null);
-    await pressed(catsDescription());
-    await pressed(imageButton("Play A cat"));
-    await settled(() => list()?.querySelector("video") !== null);
-
-    expect(catsDescription()?.getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("draws a link that is itself an image as the image alone, with no words", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("img") !== null);
-
-    const image = list()?.querySelector("img");
-
-    expect({
-      alt: image?.getAttribute("alt"),
-      bare: card()?.dataset.bare,
-      drawn: image?.dataset.drawn,
-      src: image?.getAttribute("src"),
-      text: cardText(),
-    }).toStrictEqual({
-      alt: "https://example.com/cats",
-      bare: "true",
-      drawn: "whole",
-      src: `/api/previews/images/${hash}`,
-      text: "",
-    });
-  });
-
-  it("draws a link that is itself an image read from another host as bare media, naming the host", async () => {
-    const image = readyWithImage("image");
-
-    const { daemon } = await opened(
-      "on",
-      catsItem({ ...image, preview: { ...image.preview, link: "https://cdn.example.org/c.png" } })
-    );
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
+    await switchTo(own);
+    await switchTo(iirc);
     await settled(() => drawn()[0]?.state === "ready");
 
-    expect({ bare: card()?.dataset.bare, words: words() }).toStrictEqual({
-      bare: "true",
-      words: ["cdn.example.org"],
-    });
-  });
-
-  it("draws a link that is itself a video as a player that fetches nothing until pressed", async () => {
-    const { daemon } = await opened("on", catsItem(readyMedia("video")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => list()?.querySelector("video") !== null);
-
-    const video = list()?.querySelector("video");
-
-    expect({
-      audio: list()?.querySelector("audio"),
-      autoplay: video?.autoplay,
-      controls: video?.controls,
-      kind: video?.dataset.previewMedia,
-      label: video?.getAttribute("aria-label"),
-      preload: video?.getAttribute("preload"),
-      src: video?.getAttribute("src"),
-      words: card()?.querySelectorAll("bdi").length,
-    }).toStrictEqual({
-      audio: null,
-      autoplay: false,
-      controls: true,
-      kind: "video",
-      label: "Play https://example.com/cats",
-      preload: "none",
-      src: streamOfCats,
-      words: 0,
-    });
-  });
-
-  it("draws a link that is itself a sound as a player likewise", async () => {
-    const { daemon } = await opened("on", catsItem(readyMedia("audio")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => list()?.querySelector("audio") !== null);
-
-    const audio = list()?.querySelector("audio");
-
-    expect({
-      controls: audio?.controls,
-      kind: audio?.dataset.previewMedia,
-      preload: audio?.getAttribute("preload"),
-      src: audio?.getAttribute("src"),
-      text: cardText(),
-      video: list()?.querySelector("video"),
-    }).toStrictEqual({
-      controls: true,
-      kind: "audio",
-      preload: "none",
-      src: streamOfCats,
-      text: "",
-      video: null,
-    });
-  });
-
-  it("draws nothing of a link that is itself a video once it fails to play", async () => {
-    const { daemon } = await opened("on", catsItem(readyMedia("video")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => list()?.querySelector("video") !== null);
-
-    await act(async () => {
-      list()?.querySelector("video")?.dispatchEvent(new Event("error"));
-      await Promise.resolve();
-    });
-
-    expect({ drawn: drawn(), video: list()?.querySelector("video") }).toStrictEqual({
-      drawn: [{ state: "ready", text: "" }],
-      video: null,
-    });
-  });
-
-  describe("a page's video", () => {
-    const name = "A cat";
-
-    const play = () => imageButton(`Play ${name}`);
-    const enlarge = () => imageButton(`enlarge ${name}`);
-
-    it("draws its poster from the images route with a play button, and no video, and asks the stream for nothing", async () => {
-      const media = stubMedia();
-
-      await withVideo();
-
-      expect({
-        fetches: media.fetches(),
-        holding: [...document.body.querySelectorAll("*")].flatMap((element) =>
-          [...element.attributes].flatMap((attribute) =>
-            /stream|cat\.mp4/u.test(attribute.value)
-              ? [`${element.localName}[${attribute.name}]`]
-              : []
-          )
-        ),
-        // The poster is under the title.
-        order: [...(card()?.querySelectorAll("bdi, img") ?? [])].map((one) => one.localName),
-        poster: list()?.querySelector("img")?.getAttribute("src"),
-        press: play()?.disabled,
-        title: play()?.closest("[title]"),
-        video: list()?.querySelector("video"),
-      }).toStrictEqual({
-        fetches: [],
-        holding: [],
-        order: ["bdi", "img"],
-        poster: `/api/previews/images/${hash}`,
-        press: false,
-        title: null,
-        video: null,
-      });
-    });
-
-    it("plays through the stream route in place when its play button is pressed", async () => {
-      await withVideo();
-      await pressed(play());
-
-      const video = list()?.querySelector("video");
-
-      expect({
-        autoplay: video?.autoplay,
-        controls: video?.controls,
-        poster: video?.getAttribute("poster"),
-        press: play(),
-        src: video?.getAttribute("src"),
-        still: list()?.querySelector("img"),
-        text: list()?.querySelector("bdi")?.textContent,
-      }).toStrictEqual({
-        autoplay: true,
-        controls: true,
-        poster: `/api/previews/images/${hash}`,
-        press: null,
-        src: streamOfCats,
-        still: null,
-        text: name,
-      });
-    });
-
-    it("opens a video large from its control, with the stream as its source, which Escape closes", async () => {
-      await withVideo();
-
-      const button = enlarge();
-
-      await pressed(button);
-      await settled(() => larger() !== null);
-
-      const video = larger()?.querySelector("video");
-      const link = larger()?.querySelector("a");
-
-      const open = {
-        autoplay: video?.autoplay,
-        controls: video?.controls,
-        href: link?.getAttribute("href"),
-        name: larger()?.getAttribute("aria-label"),
-        poster: video?.getAttribute("poster"),
-        src: video?.getAttribute("src"),
-      };
-
-      await act(async () => {
-        larger()?.dispatchEvent(
-          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
-        );
-        await Promise.resolve();
-      });
-      await settled(() => larger() === null);
-      await settled(() => document.activeElement === button);
-
-      expect(open).toStrictEqual({
-        autoplay: true,
-        controls: true,
-        href: "https://example.com/cats",
-        name,
-        poster: `/api/previews/images/${hash}`,
-        src: streamOfCats,
-      });
-    });
-
-    it("pauses the video playing in place when its larger view opens", async () => {
-      const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-
-      restores.push(() => {
-        vi.restoreAllMocks();
-      });
-
-      await withVideo();
-      await pressed(play());
-      await pressed(enlarge());
-      await settled(() => larger() !== null);
-
-      expect(pause).toHaveBeenCalledOnce();
-    });
-
-    it("draws an animated poster as its first frame, not the GIF, and plays without a poster attribute", async () => {
-      const media = stubMedia();
-
-      await withVideo("on", true, true);
-
-      expect({
-        button: play() !== null,
-        fetches: media.fetches(),
-        image: list()?.querySelector("img"),
-      }).toStrictEqual({
-        button: true,
-        fetches: [`/api/previews/images/${hash}`],
-        image: null,
-      });
-
-      await pressed(play());
-
-      expect({
-        poster: list()?.querySelector("video")?.getAttribute("poster"),
-        src: list()?.querySelector("video")?.getAttribute("src"),
-      }).toStrictEqual({ poster: null, src: streamOfCats });
-    });
-
-    it("draws the video as it is, with the control to open it large, when the Daemon kept no poster", async () => {
-      await withVideo("on", false);
-
-      const video = list()?.querySelector("video");
-
-      expect({
-        enlarge: imageButton(`enlarge ${name}`) !== null,
-        preload: video?.getAttribute("preload"),
-        src: video?.getAttribute("src"),
-      }).toStrictEqual({ enlarge: true, preload: "none", src: streamOfCats });
-    });
-
-    it("draws the video as it is, with the control to open it large, when its poster fails to load", async () => {
-      await withVideo();
-
-      await act(async () => {
-        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
-        await Promise.resolve();
-      });
-
-      const video = list()?.querySelector("video");
-
-      expect({
-        enlarge: imageButton(`enlarge ${name}`) !== null,
-        image: list()?.querySelector("img"),
-        poster: video?.getAttribute("poster") ?? null,
-        preload: video?.getAttribute("preload"),
-        src: video?.getAttribute("src"),
-      }).toStrictEqual({
-        enlarge: true,
-        image: null,
-        poster: null,
-        preload: "none",
-        src: streamOfCats,
-      });
-    });
-
-    it("leaves the text alone when it fails to play", async () => {
-      await withVideo();
-      await pressed(play());
-
-      await act(async () => {
-        list()?.querySelector("video")?.dispatchEvent(new Event("error"));
-        await Promise.resolve();
-      });
-
-      expect({
-        state: drawn()[0]?.state,
-        text: list()?.querySelector("bdi")?.textContent,
-        video: list()?.querySelector("video"),
-      }).toStrictEqual({ state: "ready", text: name, video: null });
-    });
-  });
-
-  describe("a link that is itself a video", () => {
-    it("has the control to open it large, with the stream as its source", async () => {
-      const { daemon } = await opened("on", catsItem(readyMedia("video")));
-
-      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-      await scrolledIntoView();
-      await settled(() => list()?.querySelector("video") !== null);
-
-      const label = "enlarge https://example.com/cats";
-
-      await pressed(imageButton(label));
-      await settled(() => larger() !== null);
-
-      const video = larger()?.querySelector("video");
-
-      expect({
-        poster: video?.getAttribute("poster"),
-        src: video?.getAttribute("src"),
-      }).toStrictEqual({ poster: null, src: streamOfCats });
-    });
-
-    it("has no such control for a sound", async () => {
-      const { daemon } = await opened("on", catsItem(readyMedia("audio")));
-
-      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-      await scrolledIntoView();
-      await settled(() => list()?.querySelector("audio") !== null);
-
-      expect(list()?.querySelectorAll("button[aria-label^='Open']").length).toBe(0);
-    });
-  });
-
-  describe("a player", () => {
-    it("draws its poster from the images route, with a play button that says where it plays from", async () => {
-      await withPlayer(true);
-
-      const image = list()?.querySelector("img");
-      const button = playButton();
-
-      expect({
-        alt: image?.getAttribute("alt"),
-        disabled: button?.disabled,
-        drawn: image?.dataset.drawn,
-        hover: button?.closest("[title]")?.getAttribute("title"),
-        src: image?.getAttribute("src"),
-        text: list()?.textContent,
-      }).toStrictEqual({
-        alt: "A song",
-        disabled: false,
-        drawn: "poster",
-        hover: `plays from ${playerHost}`,
-        src: `/api/previews/images/${hash}`,
-        text: "youtube.comA song",
-      });
-    });
-
-    it("draws no frame, and holds the player's address in no attribute, with or without a poster", async () => {
-      await withPlayer(true);
-
-      const withPoster = {
-        address: holdingAddress(),
-        frames: document.body.querySelectorAll("iframe, frame, embed, object").length,
-      };
-
-      for (const unmount of mounted.splice(0)) {
-        act(unmount);
-      }
-
-      await withPlayer(false);
-
-      expect({
-        withPoster,
-        without: {
-          address: holdingAddress(),
-          frames: document.body.querySelectorAll("iframe, frame, embed, object").length,
-        },
-      }).toStrictEqual({
-        withPoster: { address: [], frames: 0 },
-        without: { address: [], frames: 0 },
-      });
-    });
-
-    it("swaps its poster for the player, already playing, when its play button is pressed", async () => {
-      await withPlayer(true);
-      await pressed(playButton());
-
-      expect(framed()).toStrictEqual({
-        frames: [frame],
-        poster: false,
-        press: false,
-        text: "youtube.comA song",
-      });
-    });
-
-    it("asks for a press again when the player's address changes after one", async () => {
-      const { sendPreview } = await withPlayer(false);
-
-      await pressed(playButton());
-
-      const before = framed().frames.length;
-      const moved = readyPlayer(false);
-
-      await act(async () => {
-        sendPreview(
-          catsItem({
-            ...moved,
-            preview: {
-              ...moved.preview,
-              player: { link: "https://player.vimeo.com/video/7", size: null },
-            },
-          })
-        );
-        await Promise.resolve();
-      });
-      await settled(() => imageButton("Play from player.vimeo.com") !== null);
-
-      expect({ after: framed().frames.length, before }).toStrictEqual({ after: 0, before: 1 });
-    });
-
-    it("does not open the larger view when its poster is pressed", async () => {
-      await withPlayer(true);
-
-      await act(async () => {
-        list()?.querySelector("img")?.click();
-        await Promise.resolve();
-      });
-
-      expect({
-        dialog: larger(),
-        pressable: list()?.querySelector("img")?.closest("button"),
-      }).toStrictEqual({ dialog: null, pressable: null });
-    });
-
-    it("draws the text row with the same play button when the Daemon kept no poster", async () => {
-      await withPlayer(false);
-
-      expect({
-        button: playButton()?.closest("[title]")?.getAttribute("title"),
-        image: list()?.querySelector("img"),
-        text: list()?.textContent?.includes("A song"),
-      }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
-    });
-
-    it("falls back to the text row with the play button when its poster fails to load", async () => {
-      await withPlayer(true);
-
-      await act(async () => {
-        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
-        await Promise.resolve();
-      });
-
-      expect({
-        button: playButton()?.closest("[title]")?.getAttribute("title"),
-        image: list()?.querySelector("img"),
-        text: list()?.textContent?.includes("A song"),
-      }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
-    });
-
-    it("draws an animated poster as its first frame, still, with the play button over it", async () => {
-      const media = stubMedia();
-      const { daemon } = await opened("on", catsItem(readyPlayer(true, true)));
-
-      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-      await scrolledIntoView();
-      await settled(() => drawn()[0]?.state === "ready");
-      await imageSeen();
-      await settled(() => list()?.querySelector("canvas") !== null);
-
-      expect({
-        button: playButton()?.disabled,
-        fetches: media.fetches(),
-        image: list()?.querySelector("img"),
-        pressable: list()?.querySelector("canvas")?.closest("button"),
-      }).toStrictEqual({
-        button: false,
-        fetches: [`/api/previews/images/${hash}`],
-        image: null,
-        pressable: null,
-      });
-    });
-  });
-
-  it("draws nothing of a link that is itself an image once it fails to load", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("img") !== null);
-
-    await act(async () => {
-      list()?.querySelector("img")?.dispatchEvent(new Event("error"));
-      await Promise.resolve();
-    });
-
-    expect({ drawn: drawn(), image: list()?.querySelector("img") }).toStrictEqual({
-      drawn: [{ state: "ready", text: "" }],
-      image: null,
-    });
-  });
-
-  it("leaves a page's words when its image fails to load", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("img") !== null);
-
-    await act(async () => {
-      list()?.querySelector("img")?.dispatchEvent(new Event("error"));
-      await Promise.resolve();
-    });
-
-    expect({ image: list()?.querySelector("img"), text: cardText() }).toStrictEqual({
-      image: null,
-      text: "CatsA page about cats.",
+    expect({ again: card()?.dataset.layout, expanded, text: cardText() }).toStrictEqual({
+      again: "expanded",
+      expanded: "expanded",
+      text: "A cat",
     });
   });
 
@@ -1652,8 +668,8 @@ describe("a Message's Previews", () => {
         reopened: toggle()?.getAttribute("aria-expanded"),
       }).toStrictEqual({
         asks: 1,
-        closed: { caret: "collapsed", expanded: "false", list: null },
-        open: { caret: "expanded", expanded: "true", shown: 1 },
+        closed: { caret: "previewHidden", expanded: "false", list: null },
+        open: { caret: "previewShown", expanded: "true", shown: 1 },
         reopened: "true",
       });
     });
@@ -1715,7 +731,7 @@ describe("a Message's Previews", () => {
           after: true,
           button: "BUTTON",
           focused: true,
-          label: "Preview of https://example.com/cats",
+          label: "preview of https://example.com/cats",
           toggles: 1,
         });
       }
@@ -1805,7 +821,7 @@ describe("a Message's Previews", () => {
           drawn: [
             {
               state: "failed",
-              text: "No preview: the daemon could not reach this link.Try again",
+              text: "No preview: the daemon could not reach this link.try again",
             },
           ],
           presses: [],
@@ -1883,97 +899,6 @@ describe("a Message's Previews", () => {
     await settled(() => daemon.previewAsks.length === 1);
 
     expect(daemon.previewAsks).toStrictEqual([{ position: cursor(2), timeline: iirc }]);
-  });
-
-  describe("an image's box", () => {
-    it("is reserved from the image's size before it loads, and is the same box once it has", async () => {
-      await opened("on", catsItem(readyWithImage("image", false, { height: 48, width: 64 })));
-      await settled(() => list() !== null);
-      await scrolledIntoView();
-      await settled(() => drawn()[0]?.state === "ready");
-      await imageSeen();
-      await settled(() => list()?.querySelector("img") !== null);
-
-      const before = holder();
-
-      await imageLoaded();
-
-      const after = holder();
-
-      expect({ after, before }).toStrictEqual({
-        after: { ...before, loaded: "true" },
-        before: {
-          atMost: "64px",
-          height: "48",
-          loaded: "false",
-          width: "64",
-        },
-      });
-    });
-
-    it("keeps its placeholder where the Daemon read no size, until the image has loaded, not until it is seen", async () => {
-      await opened("on", catsItem(readyWithImage("image")));
-      await settled(() => list() !== null);
-      await scrolledIntoView();
-      await settled(() => drawn()[0]?.state === "ready");
-      await imageSeen();
-      await settled(() => list()?.querySelector("img") !== null);
-
-      const before = holder();
-
-      await imageLoaded();
-
-      expect({ after: holder().loaded, before: before.loaded }).toStrictEqual({
-        after: "true",
-        before: "false",
-      });
-    });
-
-    it("is the box a page's video plays in, before play and after it", async () => {
-      await withVideo("on", true, false, { height: 3, width: 4 });
-
-      const poster = boxOf(list()?.querySelector("[data-loaded]"));
-
-      await pressed(imageButton("Play A cat"));
-
-      expect({ poster, video: boxOf(list()?.querySelector("video")?.parentElement) }).toStrictEqual(
-        {
-          poster: { atMost: "", height: "3", width: "4" },
-          video: { atMost: "", height: "3", width: "4" },
-        }
-      );
-    });
-
-    it("is the box a page's video is left in where its poster fails to load", async () => {
-      await withVideo("on", true, false, { height: 3, width: 4 });
-
-      const poster = boxOf(list()?.querySelector("[data-loaded]"));
-
-      await act(async () => {
-        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
-        await Promise.resolve();
-      });
-
-      expect({ poster, video: boxOf(list()?.querySelector("video")?.parentElement) }).toStrictEqual(
-        {
-          poster: { atMost: "", height: "3", width: "4" },
-          video: { atMost: "", height: "3", width: "4" },
-        }
-      );
-    });
-
-    it("is the box a player plays in, the shape its page gave, whatever its poster's", async () => {
-      await withPlayer(true, "on", { height: 3, width: 4 });
-
-      const poster = boxOf(list()?.querySelector("[data-loaded]"));
-
-      await pressed(playButton());
-
-      expect({ frame: boxOf(document.body.querySelector("iframe")), poster }).toStrictEqual({
-        frame: { atMost: "", height: "360", width: "640" },
-        poster: { atMost: "", height: "360", width: "640" },
-      });
-    });
   });
 
   it("draws a held Preview the first time its Message is drawn, with no placeholder and no ask", async () => {
@@ -2057,253 +982,6 @@ describe("a Message's Previews", () => {
       held: daemon.heldReads.length,
       shown: drawn().map((one) => one.state),
     }).toStrictEqual({ held: 1, shown: ["pending"] });
-  });
-
-  it("draws no image, and gives none a source, until it scrolls into view", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
-
-    // Held, the card is drawn before the Message is ever seen.
-    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
-
-    const before = list()?.querySelectorAll("img, canvas").length;
-
-    await imageSeen();
-
-    expect({ after: list()?.querySelectorAll("img").length, before }).toStrictEqual({
-      after: 1,
-      before: 0,
-    });
-  });
-
-  it("opens a still image large on a press, with a link to its page, which Escape closes, and focus returns", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => imageButton("enlarge https://example.com/cats") !== null);
-
-    const button = imageButton("enlarge https://example.com/cats");
-
-    await pressed(button);
-    await settled(() => larger() !== null);
-
-    const link = larger()?.querySelector("a");
-
-    const open = {
-      href: link?.getAttribute("href"),
-      image: larger()?.querySelector("img")?.getAttribute("src"),
-      name: larger()?.getAttribute("aria-label"),
-      // It lies over the page, outside the Pane that holds the Message.
-      outside: list()?.contains(larger()) === false && document.body.contains(larger()),
-      rel: link?.getAttribute("rel"),
-      target: link?.getAttribute("target"),
-      text: link?.textContent,
-    };
-
-    await act(async () => {
-      larger()?.dispatchEvent(
-        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
-      );
-      await Promise.resolve();
-    });
-    await settled(() => larger() === null);
-    await settled(() => document.activeElement === button);
-
-    expect(open).toStrictEqual({
-      href: "https://example.com/cats",
-      image: `/api/previews/images/${hash}`,
-      name: "https://example.com/cats",
-      outside: true,
-      rel: "noopener noreferrer",
-      target: "_blank",
-      text: "https://example.com/cats",
-    });
-  });
-
-  it("closes the larger view on a press outside it", async () => {
-    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => imageButton("enlarge Cats") !== null);
-
-    const button = imageButton("enlarge Cats");
-
-    await pressed(button);
-    await settled(() => larger() !== null);
-
-    // The overlay, React Aria's dimmed layer around the dialog, is what a tap beside it lands on.
-    const overlay = larger()?.closest('[style*="--visual-viewport"]');
-
-    await act(async () => {
-      overlay?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      overlay?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await settled(() => larger() === null);
-
-    expect(larger()).toBeNull();
-  });
-
-  it("draws an animated image as its first frame under a play badge, fetched once it is in view, and plays it on a press", async () => {
-    const { fetches, draws, revoked } = stubMedia();
-    const { daemon } = await opened("on", catsItem(readyWithImage("image", true)));
-
-    // Held, the card is drawn before the Message is ever seen.
-    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
-
-    const unseen = { fetches: fetches(), image: list()?.querySelectorAll("img, canvas").length };
-
-    await imageSeen();
-    await settled(() => list()?.querySelector("canvas") !== null);
-
-    const still = { ...animated(), draws: [...draws], fetches: fetches() };
-    const canvas = list()?.querySelector("canvas");
-
-    await pressed(imageButton("Play https://example.com/cats"));
-    await settled(() => list()?.querySelector("img") !== null);
-
-    const playing = {
-      ...animated(),
-      fetches: fetches(),
-      stop: imageButton("Stop https://example.com/cats") !== null,
-    };
-
-    await pressed(imageButton("Stop https://example.com/cats"));
-    await settled(() => list()?.querySelector("canvas") !== null);
-
-    expect({
-      back: animated(),
-      playing,
-      size: [canvas?.getAttribute("width"), canvas?.getAttribute("height")],
-      still,
-      unseen,
-    }).toStrictEqual({
-      back: { badge: true, canvas: true, playing: null },
-      playing: {
-        badge: false,
-        canvas: false,
-        fetches: [`/api/previews/images/${hash}`],
-        playing: "blob:media-1",
-        stop: true,
-      },
-      size: ["64", "48"],
-      still: {
-        badge: true,
-        canvas: true,
-        draws: [[64, 48]],
-        fetches: [`/api/previews/images/${hash}`],
-        playing: null,
-      },
-      unseen: { fetches: [], image: 0 },
-    });
-    expect(revoked).toStrictEqual([]);
-  });
-
-  it("opens a playing animated image large from its own control, playing there", async () => {
-    stubMedia();
-    const { daemon } = await opened("on", catsItem(readyWithImage("page", true)));
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("canvas") !== null);
-
-    const stillOnly = imageButton("enlarge Cats");
-
-    await pressed(imageButton("Play Cats"));
-    await settled(() => imageButton("enlarge Cats") !== null);
-
-    const enlarge = imageButton("enlarge Cats");
-
-    await pressed(enlarge);
-    await settled(() => larger() !== null);
-
-    expect({
-      href: larger()?.querySelector("a")?.getAttribute("href"),
-      src: larger()?.querySelector("img")?.getAttribute("src"),
-      stillOnly,
-    }).toStrictEqual({
-      href: "https://example.com/cats",
-      src: "blob:media-1",
-      stillOnly: null,
-    });
-  });
-
-  it("plays an animated image on its own with animate on, shared or this device's own, and keeps it still where this device's is off", async () => {
-    stubMedia();
-
-    const shared = await opened("on", catsItem(readyWithImage("image", true)), {}, true);
-
-    await settled(() => shared.daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("img") !== null);
-
-    const playsShared = animated();
-
-    await act(async () => {
-      shared.registry.set(deviceUi, { "previews.animate": false });
-      await Promise.resolve();
-    });
-    await settled(() => list()?.querySelector("canvas") !== null);
-
-    const stillOverridden = animated();
-
-    expect({ playsShared, stillOverridden }).toStrictEqual({
-      playsShared: { badge: false, canvas: false, playing: "blob:media-1" },
-      stillOverridden: { badge: true, canvas: true, playing: null },
-    });
-  });
-
-  it("keeps an animated image still under reduced motion with animate on, and plays it on a press", async () => {
-    stubMedia();
-    reducingMotion(true);
-
-    const { daemon } = await opened("on", catsItem(readyWithImage("image", true)), {}, true);
-
-    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
-    await scrolledIntoView();
-    await settled(() => drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("canvas") !== null);
-
-    const still = animated();
-
-    await pressed(imageButton("Play https://example.com/cats"));
-    await settled(() => list()?.querySelector("img") !== null);
-
-    expect({ playing: animated(), still }).toStrictEqual({
-      playing: { badge: false, canvas: false, playing: "blob:media-1" },
-      still: { badge: true, canvas: true, playing: null },
-    });
-  });
-
-  it("falls back to the text row when an animated image cannot be fetched", async () => {
-    stubMedia();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<() => Promise<Response>>().mockResolvedValue(new Response(null, { status: 404 }))
-    );
-
-    const { daemon } = await opened("on", catsItem(readyWithImage("page", true)));
-
-    // Held, the card is drawn before the Message is ever seen.
-    await settled(() => daemon.previewFollowers.length === 1 && drawn()[0]?.state === "ready");
-    await imageSeen();
-    await settled(() => list()?.querySelector("[data-loaded]") === null);
-
-    expect({
-      image: list()?.querySelectorAll("img, canvas").length,
-      state: drawn()[0]?.state,
-      text: cardText(),
-    }).toStrictEqual({ image: 0, state: "ready", text: "CatsA page about cats." });
   });
 
   describe("how cards are stacked and sized", () => {

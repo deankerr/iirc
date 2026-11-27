@@ -531,26 +531,26 @@ What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the
 - **Before its answer, a Message shows each link `previewableLinksOf` finds as a held read gave it,** or a placeholder.
 - **After its answer, each link shows its item's state now:** pending, ready as its card, or failed as one line of why (`reasonWords`), never the link again. A link waiting for a press is drawn pending.
 - **A link is an anchor only when it reads as one `http` or `https` link,** and everything a stranger wrote is contained.
-- **Every Preview is one card** of its `title`, its `description`, and its media, in that order, each only when it has it.
-- **A page is its title and description with its image,** drawn `Whole`. A page that names a video file or a listed player is drawn with its poster, `Poster`.
-- **A link that is itself an image, a video, or a sound is its media alone.**
+- **Every ready Preview is one card, a link card or a media card.** A `LinkCard` is its `title` and its `description`, each only when it has it, and its media. A `MediaCard` is a link with no words, its media alone, and always has media.
+- **A card's media is one `MediaShown`:** none, a picture, a picture that is only a thumbnail, a video, a player, or a sound. A video and a player carry their poster, if they have one, and the `box` they share with it: the player's size, else the poster's `dimensions`, else 16 by 9. A sound has no picture.
+- **A page is its words with its image as a picture.** A page that names a video file or a listed player is its words with that, its image as the poster. A link that is itself an image, a video, or a sound is a media card.
 - **A file is its name, and as its description its first lines when it is a text file, else its type and size.** The name is the last part of the link's path, percent-decoded where that decodes, or its host. A file has no media, so it draws the same under `text` as under `on`.
 - **A text file's lines are each contained,** a tab is four spaces, and blank lines before the first and after the last are dropped.
-- **A file's size is in powers of a thousand, the same in every locale:** `0 bytes` to `999 bytes`, then `kB`, `MB`, `GB`, or `TB`, to one decimal below ten and whole from ten, rounded before the unit is chosen, so 999,999 bytes is `1.0 MB`.
-- **Media is given only while the mode is `on`.** An image has its `dimensions` or none, its `src` on the Daemon's own origin, and its `alt` the title, else the link. A video or a sound has its kind, its type, and a `src` on the Daemon's stream route.
+- **A file's size is in powers of a thousand, the same in every locale:** `0 B` to `999 B`, then `KB`, `MB`, `GB`, or `TB`, to one decimal below ten and whole from ten, rounded before the unit is chosen, so 999,999 bytes is `1.0 MB`.
+- **Media is given only while the mode is `on`.** A picture has its `dimensions` or none, its `src` on the Daemon's own origin, and its `alt` the title, else the link. A video or a sound has its type and a `src` on the Daemon's stream route.
 - **Under `text` a card is its words alone,** and a card that would hold nothing is not drawn.
-- **The site's name is never drawn.**
-- **A card read from another host than its Message's link names that host** (`hostNamed`), compared in lower case without a leading `www.`.
+- **Neither the site's name nor the host a card was read from is drawn.**
+- **`thumbnailOf` gives a link card's collapsed thumbnail:** none without media, the picture, the poster under a play glyph for a video or a player with one, or the play glyph alone for one with none and for a sound.
+- **A link card's picture that its page calls a thumbnail is `ThumbnailOnly`,** from the Preview's `thumbnail`: it is the card's thumbnail collapsed and expanded, and is never drawn larger. With no words, the same picture is a media card's, drawn as any picture.
+- **`hasMedia` says whether a link card shows more than its words once expanded:** media to draw under them, which a `ThumbnailOnly` is not. Whether its words are cut is the view's to measure.
 - **A card's `name` is its title, or else its link.**
 - **`isOpen` says whether a Message's Preview is open:** as the Owner last toggled it (`linkKey`), else as `ui.previews.start` says. One in a Direct Message with no mode of its own, or waiting for a press, starts closed.
 - **`asksWanted` asks for a Message only while one of its Previews is open, or while its links wait for a press.**
 - **`pressesWanted` presses a waiting link once the Owner opened it, and never twice,** unless the press was let go of unanswered (`PressDropped`).
 - **A Message shown again with another count of links is wanted again,** and an answer for its old links settles nothing.
 - **`togglesIn` places each toggle after the first run of each link that may be previewed.**
-- **A player plays only from a host `ui.previews.players` lists now.** Under `on`, a Ready Preview of kind `player` gives `player`: its host, contained, the words `plays from <host>`, its `size` or none, and a `src` with the host's autoplay parameter set (`autoplay=1` for `www.youtube-nocookie.com` and `player.vimeo.com`, `auto_play=true` for `w.soundcloud.com`).
+- **A player plays only from a host `ui.previews.players` lists now.** One whose host the list no longer names, or whose address cannot be read, is drawn as a page at once, even from an answer held before. A player is its host, contained, the words `plays from <host>`, and a `src` with the host's autoplay parameter set (`autoplay=1` for `www.youtube-nocookie.com` and `player.vimeo.com`, `auto_play=true` for `w.soundcloud.com`).
 - **A view loads a player's `src` only once the Owner presses play.**
-- **`playsIn` gives one box for the poster, the video, and the player:** the player's `size`, else the poster's `dimensions`, else 16 by 9.
-- **A player whose host the list no longer names is drawn as a page at once,** even from an answer held before.
 
 ## Activity
 

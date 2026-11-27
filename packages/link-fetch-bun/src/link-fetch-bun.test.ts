@@ -1,7 +1,7 @@
 import type * as Http from "node:http";
 import { gzipSync } from "node:zlib";
 
-import { limits } from "@iirc/link-fetch";
+import { limits, pacing } from "@iirc/link-fetch";
 import type { Precedence, Purpose } from "@iirc/link-fetch";
 import { loopbackPolicy } from "@iirc/link-fetch/testing";
 import { Effect, Option, Schedule, Stream } from "effect";
@@ -120,9 +120,9 @@ describe("the fetch is pinned to the checked address", () => {
     const result = await run(
       Effect.gen(function* () {
         const checked = yield* serve(html);
-        // The same port on another loopback address, where a fetch by name would now go.
-        const rebound = yield* serve(html, { address: "127.0.0.2", port: checked.port });
-        const names = scripted({ "rebind.test": [["127.0.0.1"], ["127.0.0.2"]] });
+        // The same port on the IPv6 loopback, where a fetch by name would now go.
+        const rebound = yield* serve(html, { address: "::1", port: checked.port });
+        const names = scripted({ "rebind.test": [["127.0.0.1"], ["::1"]] });
         const guard = { policy: loopbackPolicy(checked.port), resolver: names.resolver };
         const link = `http://rebind.test:${checked.port}/`;
         const first = yield* fetched(guard, link);
@@ -137,7 +137,7 @@ describe("the fetch is pinned to the checked address", () => {
       first: { answer: { status: 200 } },
       lookups: 2,
       rebound: { connections: { opened: 0 } },
-      second: { failed: { _tag: "LinkRefused", reason: "127.0.0.2 is loopback" } },
+      second: { failed: { _tag: "LinkRefused", reason: "::1 is loopback" } },
     });
     expect(result.checked.seen).toHaveLength(1);
   });
@@ -150,8 +150,8 @@ describe("the fetch is pinned to the checked address", () => {
           response.end();
         });
 
-        const rebound = yield* serve(html, { address: "127.0.0.2", port: checked.port });
-        const names = scripted({ "rebind.test": [["127.0.0.1"], ["127.0.0.2"]] });
+        const rebound = yield* serve(html, { address: "::1", port: checked.port });
+        const names = scripted({ "rebind.test": [["127.0.0.1"], ["::1"]] });
 
         return {
           checked,
@@ -165,7 +165,7 @@ describe("the fetch is pinned to the checked address", () => {
     );
 
     expect(result.outcome).toMatchObject({
-      failed: { _tag: "LinkRefused", reason: "127.0.0.2 is loopback" },
+      failed: { _tag: "LinkRefused", reason: "::1 is loopback" },
     });
     expect(result.checked.seen).toHaveLength(1);
     expect(result.rebound.connections.opened).toBe(0);
@@ -463,8 +463,11 @@ const splitAt = (page: string, at: number) => {
   return read + decoder.decode(ends.flush());
 };
 
+// A head that names a card tag, which is a head a page ends after.
+const card = `<meta property="og:title" content="T">`;
+
 const rawAttribute = (name: string) =>
-  `<head><${name} data-x="</${name}><body>">ignored</${name}><title>Real title</title></head><body>x`;
+  `<head>${card}<${name} data-x="</${name}><body>">ignored</${name}><title>Real title</title></head><body>x`;
 
 describe("bounds are on the decompressed stream", () => {
   it.each([
@@ -530,10 +533,20 @@ describe("bounds are on the decompressed stream", () => {
     expect(result.closed).toBe(1);
   });
 
-  it("a page ends at the end of its head", async () => {
+  it("a page ends at the end of a head that names a card tag", async () => {
     await expect(
-      head(["<html><HEAD><title>t</title></HEAD>", "<body>secret</body>"])
-    ).resolves.toBe("<html><HEAD><title>t</title></HEAD>");
+      head([`<html><HEAD>${card}<title>t</title></HEAD>`, "<body>secret</body>"])
+    ).resolves.toBe(`<html><HEAD>${card}<title>t</title></HEAD>`);
+  });
+
+  it.each([
+    ["names none", "<title>t</title>"],
+    ["names one only in a comment and a script", "<!-- og: --><script>'og:'</script>"],
+    ["names one only in its text", "<title>twitter: og:</title>"],
+  ])("a page whose head %s is read to its end", async (_, inside) => {
+    const page = `<html><head>${inside}</head><body><meta property="og:title" content="T"></body>`;
+
+    await expect(head([page.slice(0, 20), page.slice(20)])).resolves.toBe(page);
   });
 
   it.each(["script", "style"])("a %s's quoted attribute ends nothing, at every split", (name) => {
@@ -546,8 +559,13 @@ describe("bounds are on the decompressed stream", () => {
   });
 
   it.each([
-    ["before its <body>", "<head><title>T</title><body>x", "<head><title>T</title>"],
-    ["after its </head >", "<head><title>T</title></head >x", "<head><title>T</title></head >"],
+    ["before its <body>", `<head>${card}<body>x`, `<head>${card}`],
+    ["after its </head >", `<head>${card}</head >x`, `<head>${card}</head >`],
+    [
+      "by a twitter tag",
+      "<head><meta name=twitter:card></head>x",
+      "<head><meta name=twitter:card></head>",
+    ],
   ])("a page ends %s however it is split", (_, page, read) => {
     for (let at = 1; at < page.length; at += 1) {
       expect(splitAt(page, at)).toBe(read);
@@ -561,18 +579,18 @@ describe("bounds are on the decompressed stream", () => {
   it("a quoted attribute is skipped across chunks", async () => {
     await expect(
       head([
-        "<head><meta content='Use <bo",
+        "<head><meta property=og:description content='Use <bo",
         "dy> and </he",
         "ad> here' x=\"'\"><title>T</title></head>x",
       ])
     ).resolves.toBe(
-      "<head><meta content='Use <body> and </head> here' x=\"'\"><title>T</title></head>"
+      "<head><meta property=og:description content='Use <body> and </head> here' x=\"'\"><title>T</title></head>"
     );
   });
 
   it("a tag whose name only starts like body ends nothing", async () => {
-    await expect(head(["<head><bodyguard>", "<title>T</title></head>x"])).resolves.toBe(
-      "<head><bodyguard><title>T</title></head>"
+    await expect(head([`<head><bodyguard>${card}`, "<title>T</title></head>x"])).resolves.toBe(
+      `<head><bodyguard>${card}<title>T</title></head>`
     );
   });
 
@@ -583,11 +601,13 @@ describe("bounds are on the decompressed stream", () => {
         "-- <body> -",
         "-><scr",
         "ipt>'<body>'</scr",
-        "ipt ><title>T</title></he",
+        `ipt >${card}<title>T</title></he`,
         "ad",
         " >x",
       ])
-    ).resolves.toBe("<head><!-- <body> --><script>'<body>'</script ><title>T</title></head >");
+    ).resolves.toBe(
+      `<head><!-- <body> --><script>'<body>'</script >${card}<title>T</title></head >`
+    );
   });
 
   it("a page with no head is read to its end", async () => {
@@ -1131,7 +1151,93 @@ const seenPaths = (site: Site, count: number) =>
     })
   );
 
+/**
+ * A site that redirects `/go` to a link, and answers anything else as a page.
+ * @param to - Where `/go` redirects, given the site's port.
+ * @returns The handler.
+ */
+const redirecting =
+  (to: (port: number) => string): Handler =>
+  (request, response) => {
+    if (request.url === "/go") {
+      response.writeHead(302, { location: to(request.socket.localPort ?? 0) });
+      response.end();
+    } else {
+      html(request, response);
+    }
+  };
+
+describe("each hop is asked as its site answers it", () => {
+  it("a redirect to a crawler's host sends the crawler agent, and a likely image asks for media", async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const site = yield* serve(redirecting((port) => `http://www.reddit.com:${port}/r/a`));
+
+        const names = scripted({
+          "short.test": [["127.0.0.1"]],
+          "www.reddit.com": [["127.0.0.1"]],
+        });
+
+        const guard = { policy: loopbackPolicy(site.port), resolver: names.resolver };
+
+        yield* fetched(guard, `http://short.test:${site.port}/go`);
+        yield* fetched(guard, `http://short.test:${site.port}/a.png`);
+
+        return site.seen.map(({ headers, url }) => [url, headers["user-agent"], headers.accept]);
+      })
+    );
+
+    const honest = "iirc/1.2.3 (+https://github.com/deankerr/iirc) bot";
+    const pages = "text/html, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1";
+
+    expect(seen).toStrictEqual([
+      ["/go", honest, pages],
+      [
+        "/r/a",
+        "Mozilla/5.0 (compatible; iirc/1.2.3; +https://github.com/deankerr/iirc) facebookexternalhit/1.1 Twitterbot/1.0",
+        pages,
+      ],
+      [
+        "/a.png",
+        honest,
+        "image/avif, image/webp, image/png, image/jpeg, image/gif, image/svg+xml;q=0.8, video/*;q=0.8, audio/*;q=0.8",
+      ],
+    ]);
+  });
+
+  it("a redirect to an X post is rewritten, and the rewrite is checked as any link", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const site = yield* serve(redirecting((port) => `http://x.com:${port}/someone/status/1`));
+
+        const names = scripted({
+          "fixupx.com": [["127.0.0.1"]],
+          "short.test": [["127.0.0.1"]],
+          "x.com": [["127.0.0.1"]],
+        });
+
+        const outcome = yield* fetched(
+          { policy: loopbackPolicy(site.port), resolver: names.resolver },
+          `http://short.test:${site.port}/go`
+        );
+
+        return { lookups: Object.fromEntries(names.lookups), outcome, seen: site.seen.length };
+      })
+    );
+
+    // The rewrite is to fixupx.com on 443, where the policy admits no loopback address.
+    expect(result).toMatchObject({
+      outcome: { failed: { _tag: "LinkRefused", reason: "127.0.0.1 is loopback" } },
+      seen: 1,
+    });
+    expect(result.lookups).toStrictEqual({ "fixupx.com": 1, "short.test": 1 });
+  });
+});
+
 describe("fetches are paced", () => {
+  /** One for each of a name's places. */
+  const places = Array.from({ length: pacing.perName }, (_, at) => at);
+
   it("a redirect gives up the name it left, and goes by the name it goes to once that name frees a place", async () => {
     const paths = await run(
       Effect.gen(function* () {
@@ -1153,25 +1259,36 @@ describe("fetches are paced", () => {
             )
           );
 
-        yield* fetching(at("b.test", "/held/b1"));
-        yield* fetching(at("b.test", "/held/b2"));
-        yield* seenPaths(listening, 2);
-        yield* fetching(at("a.test", `/to/${encodeURIComponent(at("b.test", "/held/b3"))}`));
-        yield* seenPaths(listening, 3);
-        // Were the redirect still holding its place at a.test, only one of these would go.
-        yield* fetching(at("a.test", "/held/a1"));
-        yield* fetching(at("a.test", "/held/a2"));
-        const waiting = yield* seenPaths(listening, 5);
+        for (const held of places) {
+          yield* fetching(at("b.test", `/held/b${held}`));
+        }
+
+        yield* seenPaths(listening, pacing.perName);
+        yield* fetching(
+          at("a.test", `/to/${encodeURIComponent(at("b.test", "/held/redirected"))}`)
+        );
+        yield* seenPaths(listening, pacing.perName + 1);
+
+        // Were the redirect still holding its place at a.test, one of these would wait.
+        for (const held of places) {
+          yield* fetching(at("a.test", `/held/a${held}`));
+        }
+
+        const waiting = yield* seenPaths(listening, 2 * pacing.perName + 1);
 
         yield* site.letGo;
 
-        return { after: (yield* seenPaths(listening, 6)).slice(5), waiting };
+        return {
+          after: (yield* seenPaths(listening, 2 * pacing.perName + 2)).slice(
+            2 * pacing.perName + 1
+          ),
+          waiting,
+        };
       })
     );
 
-    expect(paths.waiting).toContain("/held/a1");
-    expect(paths.waiting).toContain("/held/a2");
-    expect(paths.after).toStrictEqual(["/held/b3"]);
+    expect(paths.waiting).toStrictEqual(expect.arrayContaining(places.map((at) => `/held/a${at}`)));
+    expect(paths.after).toStrictEqual(["/held/redirected"]);
   });
 
   it("counts a fetch waiting for a name as started only once it goes", async () => {
@@ -1179,7 +1296,11 @@ describe("fetches are paced", () => {
       Effect.gen(function* () {
         const site = holding();
         const listening = yield* serve(site.handler);
-        const others = Array.from({ length: 28 }, (_, at) => `n${at}.test`);
+
+        const others = Array.from(
+          { length: pacing.perMinute - pacing.perName },
+          (_, at) => `n${at}.test`
+        );
 
         const names = scripted(
           Object.fromEntries(["a.test", ...others].map((name) => [name, [["127.0.0.1"]]]))
@@ -1201,22 +1322,24 @@ describe("fetches are paced", () => {
             )
           );
 
-        yield* fetching("a.test", "/held/a1");
-        yield* fetching("a.test", "/held/a2");
-        yield* seenPaths(listening, 2);
-        // It waits for a.test, which holds both its places, and has not started.
-        yield* fetching("a.test", "/held/a3");
+        for (const at of places) {
+          yield* fetching("a.test", `/held/a${at}`);
+        }
+
+        yield* seenPaths(listening, pacing.perName);
+        // It waits for a.test, which holds all its places, and has not started.
+        yield* fetching("a.test", "/held/waits");
 
         for (const name of others) {
           yield* fetching(name, `/held/${name}`);
         }
 
-        return (yield* seenPaths(listening, 30)).length;
+        return (yield* seenPaths(listening, pacing.perMinute)).length;
       })
     );
 
-    // The two at a.test and all 28 others start within the minute.
-    expect(seen).toBe(30);
+    // Those holding a.test's places and all the others start within the minute.
+    expect(seen).toBe(pacing.perMinute);
   });
 
   it("gives a name's freed place to a first fetch ahead of a refresh asked after it", async () => {
@@ -1242,16 +1365,18 @@ describe("fetches are paced", () => {
             )
           );
 
-        yield* fetching("/held/1", "first");
-        yield* fetching("/held/2", "first");
-        yield* seenPaths(listening, 2);
+        for (const at of places) {
+          yield* fetching(`/held/${at}`, "first");
+        }
+
+        yield* seenPaths(listening, pacing.perName);
         // Both wait for a.test's place, the refresh asked last.
         yield* fetching("/held/first", "first");
         yield* fetching("/held/refresh", "refresh");
         yield* Effect.yieldNow.pipe(Effect.repeat({ times: 100 }));
         yield* site.letGo;
 
-        return (yield* seenPaths(listening, 3)).slice(2);
+        return (yield* seenPaths(listening, pacing.perName + 1)).slice(pacing.perName);
       })
     );
 

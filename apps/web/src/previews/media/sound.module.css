@@ -1,0 +1,5 @@
+/* A sound's player, as wide as the room it has. */
+.sound {
+  display: block;
+  width: 100%;
+}
