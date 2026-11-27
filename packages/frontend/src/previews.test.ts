@@ -17,8 +17,8 @@ import {
   asksAnywhere,
   asksWanted,
   choosing,
+  hasMedia,
   heldReadOf,
-  hostNamed,
   initialPreviews,
   isOpen,
   linkKey,
@@ -27,15 +27,16 @@ import {
   motionOf,
   pressOf,
   pressesWanted,
-  playsIn,
   pressOn,
   previewsModesOf,
   previewsOf,
   reasonWords,
   reducePreviews,
+  thumbnailOf,
   togglesIn,
 } from "./previews.ts";
 import type {
+  MediaShown,
   Motion,
   MotionAsked,
   Opening,
@@ -96,6 +97,7 @@ const page = {
   site: "example.com",
   size: null,
   stream: null,
+  thumbnail: false,
   title: "Cats",
   type: null,
 } as const;
@@ -411,8 +413,8 @@ describe("a link waiting for a press", () => {
       previewsOf(one, "on", timeline, at(1), links, drawing).map((shown) => shown._tag);
 
     expect([tags(pressed), tags(raced)]).toStrictEqual([
-      ["Ready", "Pending"],
-      ["Ready", "Ready"],
+      ["LinkCard", "Pending"],
+      ["LinkCard", "LinkCard"],
     ]);
   });
 
@@ -793,7 +795,7 @@ describe("folding a change", () => {
           (shownItem) => shownItem._tag
         )
       )
-    ).toStrictEqual([["Ready"], ["Ready"]]);
+    ).toStrictEqual([["LinkCard"], ["LinkCard"]]);
   });
 
   it("keeps a change the stream gave while the ask was in flight over the answer", () => {
@@ -807,7 +809,7 @@ describe("folding a change", () => {
 
     expect(
       previewsOf(raced, "on", timeline, at(1), links, drawing).map((one) => one._tag)
-    ).toStrictEqual(["Ready"]);
+    ).toStrictEqual(["LinkCard"]);
   });
 
   it("takes an answer over a change the stream gave before its ask began", () => {
@@ -897,8 +899,8 @@ describe("a held read", () => {
         previewsOf(state, "on", timeline, at(1), links, drawing).map((one) => one._tag)
       )
     ).toStrictEqual([
-      ["Ready", "Failed"],
-      ["Ready", "Failed"],
+      ["LinkCard", "Failed"],
+      ["LinkCard", "Failed"],
     ]);
   });
 
@@ -917,7 +919,7 @@ describe("a held read", () => {
       previewsOf(raced, "on", timeline, at(1), said("https://a.example/"), drawing).map(
         (one) => one._tag
       )
-    ).toStrictEqual(["Ready"]);
+    ).toStrictEqual(["LinkCard"]);
   });
 
   it("draws a link not held as a placeholder, and still asks for its message once shown", () => {
@@ -935,7 +937,7 @@ describe("a held read", () => {
 
     expect(
       previewsOf(held, "on", timeline, at(1), links, drawing).map((one) => one._tag)
-    ).toStrictEqual(["Ready", "Pending"]);
+    ).toStrictEqual(["LinkCard", "Pending"]);
     expect(asksWanted(shown, everywhere("on"), opened).map((one) => one.key)).toStrictEqual([
       messageKey(timeline, at(1)),
     ]);
@@ -959,7 +961,7 @@ describe("a held read", () => {
       previewsOf(changed, "on", timeline, at(1), said("https://a.example/"), drawing).map(
         (one) => one._tag
       )
-    ).toStrictEqual(["Ready"]);
+    ).toStrictEqual(["LinkCard"]);
   });
 });
 
@@ -1020,15 +1022,12 @@ describe("what a message shows", () => {
 
     expect(previewsOf(answered, "on", timeline, at(1), links, drawing)).toStrictEqual([
       {
-        _tag: "Ready",
+        _tag: "LinkCard",
         description: "A page about cats.",
-        host: "example.com",
-        image: undefined,
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
-        media: undefined,
+        media: { _tag: "None" },
         name: "Cats",
-        player: undefined,
         title: "Cats",
       },
       {
@@ -1083,10 +1082,10 @@ describe("what a message shows", () => {
     const shown = previewsOf(answered, "on", timeline, at(1), message, drawing);
 
     expect(
-      shown.map((one) => [one._tag, one._tag === "Ready" ? one.link.href : undefined, one.key])
+      shown.map((one) => [one._tag, one._tag === "LinkCard" ? one.link.href : undefined, one.key])
     ).toStrictEqual([
-      ["Ready", "https://a.example/#one", "0"],
-      ["Ready", "https://a.example/#two", "1"],
+      ["LinkCard", "https://a.example/#one", "0"],
+      ["LinkCard", "https://a.example/#two", "1"],
     ]);
   });
 });
@@ -1121,53 +1120,49 @@ const shownReady = (
 
   const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), players);
 
-  return only?._tag === "Ready" ? only : undefined;
+  return only?._tag === "LinkCard" || only?._tag === "MediaCard" ? only : undefined;
 };
 
-describe("a Preview's image", () => {
-  it("is the whole image for a link that is itself an image, and says when it moves", () => {
+/**
+ * A card's words, or none for a media card, which has none.
+ * @param fields - The Preview's fields other than the page's.
+ * @param mode - `ui.previews`.
+ * @returns Its title and description.
+ */
+const wordsIn = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "text" = "on") => {
+  const shown = shownReady(fields, mode);
+
+  return shown?._tag === "LinkCard" ? [shown.title, shown.description] : undefined;
+};
+
+const picture = {
+  _tag: "Picture",
+  alt: "Cats",
+  animated: false,
+  dimensions: undefined,
+  src: `/api/previews/images/${hash}`,
+} as const;
+
+describe("a card's picture", () => {
+  it("is the link itself for a link that is itself an image, and says when it moves", () => {
     expect(
       shownReady({
+        description: null,
         image: { animated: true, dimensions: null, hash, size: 10, type: "image/gif" },
         kind: "image",
         title: null,
         type: "image/gif",
-      })?.image
-    ).toStrictEqual({
-      alt: "https://example.com/cats",
-      animated: true,
-      dimensions: undefined,
-      drawn: "Whole",
-      src: `/api/previews/images/${hash}`,
-    });
-  });
-
-  it("is none when the daemon kept none", () => {
-    expect(shownReady({ image: null })?.image).toBeUndefined();
+      })?.media
+    ).toStrictEqual({ ...picture, alt: "https://example.com/cats", animated: true });
   });
 
   it("carries its dimensions in pixels, or none where the daemon read none", () => {
     const sized = { animated: false, dimensions: { height: 48, width: 64 }, hash, size: 10 };
 
     expect([
-      shownReady({ image: { ...sized, type: "image/png" } })?.image?.dimensions,
-      shownReady({ image: { ...sized, dimensions: null, type: "image/png" } })?.image?.dimensions,
-    ]).toStrictEqual([{ height: 48, width: 64 }, undefined]);
-  });
-
-  it("is a poster for a page's video, and whole for a page", () => {
-    const image = {
-      animated: false,
-      dimensions: null,
-      hash,
-      size: 10,
-      type: "image/jpeg",
-    } as const;
-
-    expect([
-      shownReady({ image, kind: "video", stream: "https://example.com/cats.mp4" })?.image?.drawn,
-      shownReady({ image, kind: "page" })?.image?.drawn,
-    ]).toStrictEqual(["Poster", "Whole"]);
+      shownReady({ image: { ...sized, type: "image/png" } })?.media,
+      shownReady({ image: { ...sized, dimensions: null, type: "image/png" } })?.media,
+    ]).toStrictEqual([{ ...picture, dimensions: { height: 48, width: 64 } }, picture]);
   });
 });
 
@@ -1183,19 +1178,33 @@ const playing = {
 } as const;
 
 /**
+ * A card's player, or none when its media is another.
+ * @param fields - The Preview's fields other than the page's.
+ * @param players - The hosts listed now.
+ * @returns The player.
+ */
+const playerIn = (fields: Partial<typeof Preview.Encoded>, players: readonly string[] = listed) => {
+  const media = shownReady(fields, "on", players)?.media;
+
+  return media?._tag === "Player" ? media : undefined;
+};
+
+/**
  * The address a player's frame loads, once pressed.
  * @param link - The player's address, as the Daemon answered it.
  * @param hosts - The hosts listed now.
  * @returns What the frame loads.
  */
 const srcOf = (link: string, hosts: readonly string[]) =>
-  shownReady({ ...playing, player: { link, size: null } }, "on", hosts)?.player?.src;
+  playerIn({ ...playing, player: { link, size: null } }, hosts)?.src;
 
-describe("a Preview's player", () => {
-  it("is the host it plays from, the words that say so, and what a frame needs, under on", () => {
-    expect(shownReady(playing)?.player).toStrictEqual({
+describe("a card's player", () => {
+  it("is the host it plays from, the words that say so, its poster, and what a frame needs, under on", () => {
+    expect(playerIn(playing)).toStrictEqual({
+      _tag: "Player",
+      box: { height: 360, width: 640 },
       host: "www.youtube-nocookie.com",
-      size: { height: 360, width: 640 },
+      poster: { ...picture, alt: "A song" },
       src: "https://www.youtube-nocookie.com/embed/abc?autoplay=1",
       words: "plays from www.youtube-nocookie.com",
     });
@@ -1216,81 +1225,98 @@ describe("a Preview's player", () => {
   });
 
   it("leaves the link of a host with no autoplay parameter as it is", () => {
-    expect(
-      shownReady(
-        { ...playing, player: { link: "https://bandcamp.com/EmbeddedPlayer/album=1", size: null } },
-        "on",
-        listed
-      )?.player?.src
-    ).toBe("https://bandcamp.com/EmbeddedPlayer/album=1");
+    expect(srcOf("https://bandcamp.com/EmbeddedPlayer/album=1", listed)).toBe(
+      "https://bandcamp.com/EmbeddedPlayer/album=1"
+    );
   });
 
-  it("has no size when its page gave none", () => {
-    expect(
-      shownReady({ ...playing, player: { link: playing.player.link, size: null } })?.player?.size
-    ).toBeUndefined();
+  it.each([
+    ["the list no longer names its host", playing, ["player.vimeo.com"]],
+    ["the list names none", playing, []],
+    ["the list names its host by a suffix", playing, ["youtube-nocookie.com"]],
+    ["the list names a look-alike", playing, ["www.youtube-nocookie.com."]],
+    [
+      "its address cannot be read",
+      { ...playing, player: { link: "not a link", size: null } },
+      listed,
+    ],
+  ] as const)("is a page with its picture once %s", (_name, fields, players) => {
+    expect(shownReady(fields, "on", players)?.media).toStrictEqual({ ...picture, alt: "A song" });
   });
+});
 
-  it("is none for any kind but a player", () => {
-    expect(
-      (["page", "image", "video", "audio"] as const).map(
-        (kind) => shownReady({ ...playing, kind })?.player
-      )
-    ).toStrictEqual([undefined, undefined, undefined, undefined]);
-  });
+/**
+ * The box a card's poster and what it plays share, or none when it plays nothing.
+ * @param fields - The Preview's fields other than the page's.
+ * @returns The box.
+ */
+const boxIn = (fields: Partial<typeof Preview.Encoded>) => {
+  const media = shownReady(fields)?.media;
 
-  it("is a page with its image once the list no longer names its host, as the daemon would answer it", () => {
-    const shown = shownReady(playing, "on", ["player.vimeo.com"]);
+  return media?._tag === "Player" || media?._tag === "Video" ? media.box : undefined;
+};
 
-    expect([
-      shown?.player,
-      shown?.image?.drawn,
-      shownReady(playing, "on", [])?.player,
-    ]).toStrictEqual([undefined, "Whole", undefined]);
-  });
+describe("the box a poster and what it plays share", () => {
+  const poster = { ...playing.image, dimensions: { height: 3, width: 4 } };
 
-  it("matches its host exactly, never by a suffix or a look-alike", () => {
-    expect(
-      [["youtube-nocookie.com"], ["nocookie.com"], ["www.youtube-nocookie.com."]].map(
-        (players) => shownReady(playing, "on", players)?.player
-      )
-    ).toStrictEqual([undefined, undefined, undefined]);
-  });
-
-  it("is none when its address cannot be read", () => {
-    expect(
-      shownReady({ ...playing, player: { link: "not a link", size: null } })?.player
-    ).toBeUndefined();
-  });
-
-  it("draws its image as the poster, served from our own origin", () => {
-    expect(shownReady(playing)?.image).toStrictEqual({
-      alt: "A song",
-      animated: false,
-      dimensions: undefined,
-      drawn: "Poster",
-      src: `/api/previews/images/${hash}`,
-    });
-  });
-
-  it("is text alone under text: no image, no player", () => {
-    const shown = shownReady(playing, "text");
-
-    expect([shown?.image, shown?.player, shown?.media, shown?.title]).toStrictEqual([
-      undefined,
-      undefined,
-      undefined,
-      "A song",
-    ]);
+  it.each([
+    ["a player's size, if its page gave one", { ...playing, image: poster }, 640, 360],
+    [
+      "else its poster's shape",
+      { ...playing, image: poster, player: { ...playing.player, size: null } },
+      4,
+      3,
+    ],
+    ["else 16 by 9", { ...playing, player: { ...playing.player, size: null } }, 16, 9],
+    ["a video's poster's shape", { image: poster, kind: "video" }, 4, 3],
+    ["16 by 9 for a video with no poster", { kind: "video" }, 16, 9],
+  ] as const)("is %s", (_name, fields, width, height) => {
+    expect(boxIn(fields)).toStrictEqual({ height, width });
   });
 });
 
 const image = { animated: false, dimensions: null, hash, size: 10, type: "image/png" } as const;
 
 /**
- * What a card holds, in its order, as a row of a table: its title, its description, how
- * its image is drawn, its media's kind, and the host its player plays from, each `-` where
- * it has none, or `nothing` for no card at all.
+ * What media a card holds, in a word, with its poster or the host it plays from.
+ * @param media - The media.
+ * @returns The word.
+ */
+const mediaWords = (media: MediaShown): string => {
+  switch (media._tag) {
+    case "None": {
+      return "-";
+    }
+
+    case "Picture": {
+      return "picture";
+    }
+
+    case "ThumbnailOnly": {
+      return "thumbnail only";
+    }
+
+    case "Video": {
+      return media.poster === undefined ? "video" : "video, poster";
+    }
+
+    case "Player": {
+      return `player ${media.host}${media.poster === undefined ? "" : ", poster"}`;
+    }
+
+    case "Sound": {
+      return "sound";
+    }
+
+    default: {
+      return media satisfies never;
+    }
+  }
+};
+
+/**
+ * What a card holds, in its order, as a row of a table: which card it is, its title, its
+ * description, and its media, each `-` where it has none, or `nothing` for no card at all.
  * @param fields - The Preview's fields other than the page's.
  * @param mode - `ui.previews`.
  * @returns The row.
@@ -1298,15 +1324,13 @@ const image = { animated: false, dimensions: null, hash, size: 10, type: "image/
 const holds = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "text") => {
   const shown = shownReady(fields, mode);
 
-  return shown === undefined
-    ? "nothing"
-    : [
-        shown.title ?? "-",
-        shown.description ?? "-",
-        shown.image?.drawn ?? "-",
-        shown.media?.kind ?? "-",
-        shown.player?.host ?? "-",
-      ].join(" | ");
+  if (shown === undefined) {
+    return "nothing";
+  }
+
+  const words = shown._tag === "LinkCard" ? [shown.title, shown.description] : [];
+
+  return [shown._tag, ...[0, 1].map((at) => words[at] ?? "-"), mediaWords(shown.media)].join(" | ");
 };
 
 /** A page that names a video file, which streams from elsewhere than its own link. */
@@ -1328,40 +1352,75 @@ const videoItself = {
 
 describe("what a card holds", () => {
   it.each([
-    ["a page", { image }, "on", "Cats | A page about cats. | Whole | - | -"],
-    ["a page", { image }, "text", "Cats | A page about cats. | - | - | -"],
+    ["a page", { image }, "on", "LinkCard | Cats | A page about cats. | picture"],
+    ["a page", { image }, "text", "LinkCard | Cats | A page about cats. | -"],
     [
       "a page with no title",
       { image, title: null },
       "on",
-      "- | A page about cats. | Whole | - | -",
+      "LinkCard | - | A page about cats. | picture",
     ],
-    ["a page with no image", {}, "on", "Cats | A page about cats. | - | - | -"],
+    ["a page with no image", {}, "on", "LinkCard | Cats | A page about cats. | -"],
+    [
+      "a page that calls its image a thumbnail",
+      { image, thumbnail: true },
+      "on",
+      "LinkCard | Cats | A page about cats. | thumbnail only",
+    ],
+    [
+      "a page that calls its image a thumbnail, with no words",
+      { description: null, image, thumbnail: true, title: null },
+      "on",
+      "MediaCard | - | - | picture",
+    ],
     ["a page with only blank words", { description: " ", title: "" }, "on", "nothing"],
+    [
+      "a page with no words but its image",
+      { description: null, image, title: null },
+      "on",
+      "MediaCard | - | - | picture",
+    ],
     [
       "a page that names a video file",
       pageVideo,
       "on",
-      "Cats | A page about cats. | Poster | video | -",
+      "LinkCard | Cats | A page about cats. | video, poster",
     ],
-    ["a page that names a video file", pageVideo, "text", "Cats | A page about cats. | - | - | -"],
+    [
+      "a page that names a video file with no poster",
+      { ...pageVideo, image: null },
+      "on",
+      "LinkCard | Cats | A page about cats. | video",
+    ],
+    [
+      "a page that names a video file",
+      pageVideo,
+      "text",
+      "LinkCard | Cats | A page about cats. | -",
+    ],
     [
       "a page that names a listed player",
       playing,
       "on",
-      "A song | A page about cats. | Poster | - | www.youtube-nocookie.com",
+      "LinkCard | A song | A page about cats. | player www.youtube-nocookie.com, poster",
     ],
     [
       "a page that names a listed player",
       playing,
       "text",
-      "A song | A page about cats. | - | - | -",
+      "LinkCard | A song | A page about cats. | -",
+    ],
+    [
+      "a listed player with no words",
+      { ...playing, description: null, image: null, title: null },
+      "on",
+      "MediaCard | - | - | player www.youtube-nocookie.com",
     ],
     [
       "a link that is itself an image",
       { description: null, image, kind: "image", title: null },
       "on",
-      "- | - | Whole | - | -",
+      "MediaCard | - | - | picture",
     ],
     [
       "a link that is itself an image",
@@ -1373,15 +1432,15 @@ describe("what a card holds", () => {
       "a page whose video file is its own link",
       { ...pageVideo, stream: page.link },
       "text",
-      "Cats | A page about cats. | - | - | -",
+      "LinkCard | Cats | A page about cats. | -",
     ],
-    ["a link that is itself a video", videoItself, "on", "- | - | - | video | -"],
+    ["a link that is itself a video", videoItself, "on", "MediaCard | - | - | video"],
     ["a link that is itself a video", videoItself, "text", "nothing"],
     [
       "a link that is itself a sound",
       { description: null, kind: "audio", stream: page.link, title: null },
       "on",
-      "- | - | - | audio | -",
+      "MediaCard | - | - | sound",
     ],
     [
       "a link that is itself a sound",
@@ -1397,8 +1456,7 @@ describe("what a card holds", () => {
     expect([
       shownReady({})?.name,
       shownReady({ title: null })?.name,
-      shownReady({ description: "a\u0007b", title: "evil\u202E" })?.title,
-      shownReady({ description: "a\u0007b", title: "evil\u202E" })?.description,
+      ...(wordsIn({ description: "a\u0007b", title: "evil\u202E" }) ?? []),
     ]).toStrictEqual(["Cats", "https://a.example/", "evil\u202E\u202C", "a␇b"]);
   });
 });
@@ -1427,7 +1485,7 @@ describe("a file's card", () => {
     ["its host for a name that decodes to blank", "https://example.com/%20", "example.com"],
     ["its name contained", "https://example.com/a%0Ab%E2%80%AEc", "a\u240Ab\u202Ec\u202C"],
   ] as const)("is %s", (_name, link, title) => {
-    expect(fileHolds(link).split(" | ")[0]).toBe(title);
+    expect(fileHolds(link).split(" | ")[1]).toBe(title);
   });
 
   it.each([
@@ -1470,16 +1528,16 @@ describe("a file's card", () => {
     ["its type contained", { type: "a/b\u202E" }, "a/b\u202E\u202C"],
   ] as const)("has %s", (_name, fields, description) => {
     expect(
-      fileHolds("https://example.com/a.bin", fields).split(" | ").slice(1, -3).join(" | ")
+      fileHolds("https://example.com/a.bin", fields).split(" | ").slice(2, -1).join(" | ")
     ).toBe(description);
   });
 
   it("is shown under text as under on, with no media", () => {
     expect(fileHolds("https://example.com/a.bin", { type: "text/x" }, "text")).toBe(
-      "a.bin | text/x | - | - | -"
+      "LinkCard | a.bin | text/x | -"
     );
-    expect(fileHolds("https://example.com/a.bin", { type: "text/x" }, "on")).toBe(
-      "a.bin | text/x | - | - | -"
+    expect(fileHolds("https://example.com/a.bin", { image, type: "text/x" }, "on")).toBe(
+      "LinkCard | a.bin | text/x | -"
     );
   });
 
@@ -1511,68 +1569,93 @@ describe("how big a file is said to be", () => {
     [5_600_000_000_000, "5.6 TB"],
     [5_600_000_000_000_000, "5600 TB"],
   ] as const)("%d bytes as %s", (bytes, words) => {
-    expect(fileHolds("https://example.com/a", { size: bytes })).toBe(`a | ${words} | - | - | -`);
+    expect(fileHolds("https://example.com/a", { size: bytes })).toBe(`LinkCard | a | ${words} | -`);
   });
 });
 
-describe("the host a card names", () => {
+describe("a link card's thumbnail", () => {
+  const video = {
+    _tag: "Video",
+    box: { height: 9, width: 16 },
+    src: "/v",
+    type: undefined,
+  } as const;
+
+  const player = {
+    _tag: "Player",
+    box: { height: 9, width: 16 },
+    host: "p.example",
+    src: "/p",
+    words: "plays from p.example",
+  } as const;
+
   it.each([
-    ["the same host", "https://example.com/a", "https://example.com/b", undefined],
+    ["none for no media", { _tag: "None" }, { _tag: "None" }],
+    ["the picture for a picture", picture, { _tag: "Picture", picture }],
     [
-      "the same host, but for www.",
-      "https://example.com/a",
-      "https://www.example.com/a",
-      undefined,
-    ],
-    ["the same host in another case", "https://EXAMPLE.com/a", "https://example.com/a", undefined],
-    [
-      "a shortened link that led elsewhere",
-      "https://t.co/abc",
-      "https://www.example.com/cats",
-      "example.com",
+      "the picture for one that is only a thumbnail",
+      { _tag: "ThumbnailOnly", picture },
+      { _tag: "Picture", picture },
     ],
     [
-      "another host under the same name",
-      "https://example.com/",
-      "https://cdn.example.com/",
-      "cdn.example.com",
+      "the picture for an animated one",
+      { ...picture, animated: true },
+      { _tag: "Picture", picture: { ...picture, animated: true } },
     ],
-    ["a link that cannot be read", "not a link", "https://example.com/", undefined],
-  ] as const)("is %s", (_name, address, read, expected) => {
-    expect(hostNamed(address, read)).toBe(expected);
-  });
-
-  it("is said on a card read from another host than its message's link", () => {
-    expect([
-      shownReady({ link: "https://www.example.com/cats" })?.host,
-      shownReady({ link: "https://a.example/" })?.host,
-    ]).toStrictEqual(["example.com", undefined]);
+    [
+      "the poster under play for a video with one",
+      { ...video, poster: picture },
+      { _tag: "Poster", poster: picture },
+    ],
+    ["play alone for a video with no poster", { ...video, poster: undefined }, { _tag: "Play" }],
+    [
+      "the poster under play for a player with one",
+      { ...player, poster: picture },
+      { _tag: "Poster", poster: picture },
+    ],
+    ["play alone for a player with no poster", { ...player, poster: undefined }, { _tag: "Play" }],
+    ["play alone for a sound", { _tag: "Sound", src: "/a", type: undefined }, { _tag: "Play" }],
+  ] as const)("is %s", (_name, media: MediaShown, expected) => {
+    expect(thumbnailOf(media)).toStrictEqual(expected);
   });
 });
 
-describe("a Preview's media", () => {
+describe("whether a link card shows more than its words", () => {
+  it.each([
+    ["no media", { _tag: "None" }, false],
+    ["a picture", picture, true],
+    ["a picture that is only a thumbnail", { _tag: "ThumbnailOnly", picture }, false],
+    ["a sound", { _tag: "Sound", src: "/a", type: undefined }, true],
+  ] as const)("is %s for %s", (_name, media: MediaShown, expected) => {
+    expect(hasMedia({ media })).toBe(expected);
+  });
+});
+
+describe("a card's media", () => {
   it("is a video to stream under on, from the route by the message's place", () => {
     expect(streamed({ kind: "video", type: "video/mp4" })).toStrictEqual({
-      kind: "video",
+      _tag: "Video",
+      box: { height: 9, width: 16 },
+      poster: undefined,
       src: `/api/previews/${idOf("a")}/stream?timeline=${timeline}&position=${cursorOf(at(1))}`,
       type: "video/mp4",
     });
   });
 
   it("is a sound likewise, and has no type when the daemon read none", () => {
-    expect(streamed({ kind: "audio", type: null })?.kind).toBe("audio");
-    expect(streamed({ kind: "audio", type: null })?.type).toBeNull();
+    expect(streamed({ kind: "audio", type: null })).toStrictEqual({
+      _tag: "Sound",
+      src: `/api/previews/${idOf("a")}/stream?timeline=${timeline}&position=${cursorOf(at(1))}`,
+      type: undefined,
+    });
   });
 
-  it("is none under text, even one held from while Previews were on", () => {
-    expect(streamed({ kind: "video", type: "video/mp4" }, "text")).toBeUndefined();
-    expect(streamed({ kind: "audio", type: "audio/ogg" }, "text")).toBeUndefined();
-  });
-
-  it("is none for a page, an image, or a player", () => {
-    expect(streamed({ kind: "page" })).toBeUndefined();
-    expect(streamed({ kind: "image", type: "image/png" })).toBeUndefined();
-    expect(streamed({ kind: "player" })).toBeUndefined();
+  it("is none for a page, an image, or a player that has none", () => {
+    expect(
+      ([{ kind: "page" }, { kind: "image", type: "image/png" }, { kind: "player" }] as const).map(
+        (fields) => streamed(fields)?._tag
+      )
+    ).toStrictEqual(["None", "None", "None"]);
   });
 });
 
@@ -1656,28 +1739,5 @@ describe("what a press of an image does", () => {
       moving: pressOn({ animated: true }, "Moving"),
       still: pressOn({ animated: true }, "Still"),
     }).toStrictEqual({ moving: "Stop", still: "Play" });
-  });
-});
-
-describe("the box a poster, its video, and its player share", () => {
-  const player = { size: { height: 360, width: 640 } };
-  const poster = { dimensions: { height: 3, width: 4 } };
-
-  it("is the player's shape if its page gave one, else the poster's, else 16 by 9", () => {
-    expect([
-      playsIn({ player, poster }),
-      playsIn({ player: { size: undefined }, poster }),
-      playsIn({ poster }),
-      playsIn({ player: { size: undefined }, poster: { dimensions: undefined } }),
-      playsIn({ player }),
-      playsIn({}),
-    ]).toStrictEqual([
-      { height: 360, width: 640 },
-      { height: 3, width: 4 },
-      { height: 3, width: 4 },
-      { height: 9, width: 16 },
-      { height: 360, width: 640 },
-      { height: 9, width: 16 },
-    ]);
   });
 });

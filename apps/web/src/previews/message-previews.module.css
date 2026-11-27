@@ -1,8 +1,8 @@
 /*
  * A Message's Previews: under its text, in the text's column, with room above and below, as
  * wide as its text may run, each a card stacked under the last, far enough apart that two
- * cards never read as one. A row pending is one line. Nothing in it scrolls sideways. Its
- * media is as tall as `--preview-media-height` at most, which the view sets from the option.
+ * cards never read as one. Nothing in it scrolls sideways. Its media is as tall as
+ * `--preview-media-height` at most, which the view sets from the option.
  */
 .previews {
   display: flex;
@@ -21,129 +21,22 @@
 
 /*
  * One Preview, never wider than a card is. 34em of the Previews' own text is about seventy
- * characters, the far end of a comfortable line to read a description in, and a 16 by 9
- * poster that wide is about as tall as `ui.previews.mediaHeight`'s middle size, so a card's
- * words and its media end near each other. In a narrower Pane it is the Pane's width.
+ * characters, the far end of a comfortable line to read a description in. In a narrower
+ * Pane it is the Pane's width.
  */
 .row {
   min-width: 0;
   max-width: min(34em, 100%);
 }
 
-/*
- * A row with words, a card's or a failure's, or a pulse standing for them, stands behind a
- * rule and an indent. A link that is itself media, an image, a video, or a sound, is a card
- * with no title and no description, its media alone, flush with the text.
- */
-.row:not(:has(> .card[data-bare])) {
-  padding-left: var(--space-3);
-  box-shadow: inset var(--edge-width) 0 0 var(--color-border);
-}
-
-/* A row whose card holds nothing, as a link that is itself media that failed, takes no room. */
-.row:has(> .card:empty) {
+/* A row whose card draws nothing, as a link that is itself media that failed, takes no room. */
+.row:empty {
   display: none;
 }
 
-/*
- * A card: its words, then its media under them, each only when it has it, in one column
- * that every part fills and none overflows.
- */
-.card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-/* The host it was read from, its title, and its description, close together. */
-.words {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-1);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* Where a card was read from, when another host than its link's: small and quiet. */
-.host {
-  display: block;
-  overflow: hidden;
-  font-size: 0.86em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The title, two lines at most. */
-.title {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--color-text);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-
-/*
- * The description, three lines at most until it is pressed open. Its line breaks show as
- * breaks, as a text file's first lines hold them. A page's description holds none, since
- * its text is contained and a break in it is a symbol, so only the runs of spaces a page
- * wrote are kept.
- */
-.description {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-}
-
-.description[data-open="true"] {
-  display: block;
-  -webkit-line-clamp: none;
-  line-clamp: none;
-}
-
-/* A description that was cut: a press of all of it, which reads as the text it is. */
-.more {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  cursor: default;
-}
-
-.more[data-hovered] .description {
-  text-decoration: underline dotted var(--color-muted);
-}
-
-.more[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--border-width);
-}
-
-/* A sound runs the card's width. */
-.audio {
-  display: block;
-  width: 100%;
-}
-
-/* While pending: a bar a line high, pulsing, standing where the card will be. */
+/* While pending: a collapsed card's surface, pulsing, standing where the card will be. */
 .pending {
-  display: flex;
-  align-items: center;
-  height: calc(var(--line-height) * 1em);
-}
-
-.pulse {
-  width: min(24ch, 60%);
-  height: 0.7em;
+  height: calc(3lh + 2 * var(--space-2));
   border-radius: var(--radius);
   background: var(--color-surface);
   animation: pulse 1.4s ease-in-out infinite;
@@ -156,7 +49,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse {
+  .pending {
     animation: none;
   }
 }
@@ -171,7 +64,6 @@
   white-space: nowrap;
 }
 
-/* A failure: one quiet line of why there is none. */
 /* A failure is one line, cut to it, whose whole reason a hover says. */
 .failed {
   margin: 0;
@@ -213,28 +105,46 @@
 }
 
 /*
- * The toggle after a link that may be previewed: a bare caret in the Message's text, as a
- * Network's row in the Sidebar has, which opens or closes the Preview under the Message.
- * Closed it is quiet and open it is the text's colour, and either takes the accent while
- * hovered. Its press reaches past the caret's own box on the far side from the link.
+ * The toggle after a link that may be previewed: a bare caret in the Message's text, which
+ * opens or closes the Preview under the Message. Closed it is quiet and open it is the
+ * text's colour, and either takes the accent while hovered. Its box is the caret's, centred,
+ * so the focus ring sits evenly around it, far enough from its link that the ring clears the
+ * link's last letter. Nothing follows it but the text's own space, which is pressed through
+ * a box of its own that reaches over it and moves no ring.
  */
 .toggle {
-  display: inline-block;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
-  padding: 0 0.3em 0 0;
+  margin-inline-start: 0.25em;
+  padding: 0;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
   color: var(--color-muted);
   font: inherit;
   line-height: inherit;
-  text-align: center;
-  vertical-align: baseline;
+  vertical-align: middle;
   cursor: default;
+}
+
+.toggle::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: 0 -0.3em;
+  content: "";
 }
 
 .toggle[aria-expanded="true"] {
   color: var(--color-text);
+}
+
+/* A link with no Preview: its toggle stays quiet and closed, and a hover says why. */
+.toggle[data-failed] {
+  color: var(--color-muted);
+  opacity: 0.5;
 }
 
 .toggle[data-hovered] {
@@ -259,7 +169,7 @@
 @media (pointer: coarse) {
   .toggle {
     min-width: 2.2em;
-    margin-left: 0.4em;
+    margin-inline-start: 0.4em;
     padding-block: 0.2em;
   }
 }

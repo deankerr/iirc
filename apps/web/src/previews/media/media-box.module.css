@@ -1,0 +1,139 @@
+/*
+ * A media's box, which its press, its play button, and its control to open the lightbox sit
+ * in. A box given a shape, with `data-reserved`, is that shape from the first paint and is
+ * filled by what it holds, so it is the same box before and after that loads. One without a
+ * shape is a placeholder until what it holds has loaded.
+ */
+
+/* As tall as `--preview-media-height` at most, never wider than the room it has. */
+.box {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+/*
+ * A box given a shape, as `--box-width` and `--box-height`, which are only the shape's
+ * proportions: as wide as it can be while no taller than `--preview-media-height` and no
+ * wider than the room it has, nor than `--box-at-most` where a picture is no larger than
+ * itself.
+ */
+.box[data-reserved] {
+  width: min(
+    100%,
+    var(--box-at-most, 100%),
+    calc(var(--preview-media-height) * var(--box-width) / var(--box-height))
+  );
+  aspect-ratio: var(--box-width) / var(--box-height);
+}
+
+.box[data-loaded="false"]:not([data-reserved]) {
+  width: 12em;
+  height: 6em;
+}
+
+/* While it loads, a picture with no shape to reserve sits unseen in the placeholder. */
+.box[data-loaded="false"]:not([data-reserved]) .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+/*
+ * A still picture with no shape to reserve, once loaded. One with no size of its own, as an
+ * SVG with only a `viewBox`, adds nothing to the width of a box as wide as what it holds, so
+ * its box takes the room it has instead, and the picture is as wide as that room where it
+ * has no size and its own size where it has. The picture alone is then what is seen and
+ * pressed, so the room beside it stays empty.
+ */
+.box[data-still][data-loaded="true"]:not([data-reserved]) {
+  width: auto;
+  background: transparent;
+}
+
+.box[data-still][data-loaded="true"]:not([data-reserved]) .press {
+  pointer-events: none;
+}
+
+.box[data-still][data-loaded="true"]:not([data-reserved]) .press[data-focus-visible] {
+  outline: none;
+}
+
+.box[data-still][data-loaded="true"]:not([data-reserved]) .picture {
+  background: var(--color-surface);
+  pointer-events: auto;
+}
+
+.box[data-still][data-loaded="true"]:not([data-reserved]) .press[data-focus-visible] .picture {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+/* A reserved box's picture, and the press around it, fill it. */
+.box[data-reserved] .press {
+  position: absolute;
+  inset: 0;
+}
+
+.box[data-reserved] .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A video or a player's frame fills its box, so playing it moves nothing below it. */
+.fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+/*
+ * The press of a picture fills its box, and is nothing but the picture. A still one opens
+ * the lightbox, and says so; an animated one plays it.
+ */
+.press {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  font: inherit;
+}
+
+.box[data-still] .press {
+  cursor: zoom-in;
+}
+
+.press[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+.picture {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.box .picture {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: var(--preview-media-height);
+}

@@ -1,4 +1,4 @@
-import { limits } from "@iirc/link-fetch";
+import { limits, pacing } from "@iirc/link-fetch";
 import type { Purpose } from "@iirc/link-fetch";
 import { loopbackPolicy } from "@iirc/link-fetch/testing";
 import { Effect, Stream } from "effect";
@@ -162,12 +162,12 @@ const playing: Handler = (request, response) => {
 };
 
 /**
- * Plays two streams from one name, and while they play, fetches a page from the link given,
+ * Plays a stream in each of one name's places, and while they play, fetches a page from the link given,
  * which reaches that name, timing it from the start.
  * @param link - The page's link, from the site's port.
  * @returns How the page's fetch ended, and after how many seconds.
  */
-const behindTwo = async (link: (port: number) => string) =>
+const behindAll = async (link: (port: number) => string) =>
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -187,8 +187,10 @@ const behindTwo = async (link: (port: number) => string) =>
           )
         );
 
-        yield* Effect.forkChild(play);
-        yield* Effect.forkChild(play);
+        for (const _ of Array.from({ length: pacing.perName })) {
+          yield* Effect.forkChild(play);
+        }
+
         yield* Effect.sleep("500 millis");
 
         const started = performance.now();
@@ -206,15 +208,15 @@ const behindTwo = async (link: (port: number) => string) =>
   );
 
 describe.concurrent("a fetch never fails for waiting its turn", () => {
-  it("a third fetch to one name waits out two longer than 10 s, and is answered", async () => {
-    const result = await behindTwo((port) => `http://b.test:${port}/page`);
+  it("a fetch to a name whose places are all held longer than 10 s is answered", async () => {
+    const result = await behindAll((port) => `http://b.test:${port}/page`);
 
     expect(result.end).toBe("ended");
     expect(result.seconds).toBeGreaterThan(limit);
   });
 
   it("a redirect that waits longer than 10 s at the name it goes to is answered", async () => {
-    const result = await behindTwo(
+    const result = await behindAll(
       (port) => `http://a.test:${port}/to/${encodeURIComponent(`http://b.test:${port}/page`)}`
     );
 

@@ -27,6 +27,7 @@ const page = {
   site: "example.com",
   size: null,
   stream: null,
+  thumbnail: false,
   title: "Cats",
   type: null,
 } as const;
@@ -51,6 +52,7 @@ const states = [
       site: "example.com",
       size: null,
       stream: null,
+      thumbnail: false,
       title: null,
       type: "image/png",
     },

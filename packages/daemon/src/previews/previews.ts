@@ -48,6 +48,7 @@ import type { TimelineStoreFailed } from "@iirc/timeline-store";
 import { comparePositions } from "@iirc/timelines";
 import type { Position, TimelineId } from "@iirc/timelines";
 import {
+  Bytes,
   Clock,
   Context,
   Data,
@@ -269,6 +270,7 @@ const mediaPreview = (link: string, type: string): Read => {
             site: hostOf(link),
             size: null,
             stream: kind === "image" ? null : link,
+            thumbnail: false,
             title: null,
             type,
           },
@@ -302,6 +304,7 @@ const filePreview = (
       site: hostOf(link),
       size,
       stream: null,
+      thumbnail: false,
       title: null,
       type: type === "" ? null : type,
     },
@@ -358,23 +361,6 @@ const failedFetch = (failure: LinkFetchFailure): Read => {
     : mediaPreview(failure.link, failure.type);
 };
 
-/**
- * Bytes, one after another.
- * @param chunks - The chunks.
- * @returns Them, joined.
- */
-const joined = (chunks: readonly Uint8Array[]): Uint8Array => {
-  const whole = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-  let at = 0;
-
-  for (const chunk of chunks) {
-    whole.set(chunk, at);
-    at += chunk.length;
-  }
-
-  return whole;
-};
-
 const utf8 = new TextDecoder("utf-8");
 
 /**
@@ -398,7 +384,7 @@ const filled = (links: LinkFetchService, page: PageRead) => {
           return page;
         }
 
-        const read = readOembed(utf8.decode(joined(yield* Stream.runCollect(answer.body))));
+        const read = readOembed(utf8.decode(Bytes.concat(yield* Stream.runCollect(answer.body))));
 
         return read === undefined ? page : fillFromOembed(page, read, answer.link);
       }).pipe(
@@ -425,7 +411,7 @@ const answered = ({ fetched, said }: Logged) =>
       return mediaPreview(fetched.link, fetched.type);
     }
 
-    const head = joined(yield* Stream.runCollect(fetched.body));
+    const head = Bytes.concat(yield* Stream.runCollect(fetched.body));
 
     // A text file is read to its own bound, and no more.
     if (fetched.type === "text/plain") {
@@ -439,8 +425,8 @@ const answered = ({ fetched, said }: Logged) =>
 
     const page = readPage({
       contentType: fetched.headers["content-type"],
-      head,
       link: fetched.link,
+      page: head,
     });
 
     yield* said(page);
@@ -502,6 +488,8 @@ const pageRead = (
           site: page.site ?? hostOf(link),
           size: null,
           stream: video?.link ?? null,
+          // Only a page's image may be a thumbnail: a video's or a player's is its poster.
+          thumbnail: kind === "page" && page.thumbnail === true,
           title: page.title ?? null,
           type: video?.type ?? null,
         },
@@ -787,7 +775,7 @@ export const layerPreviews = Layer.effect(Previews)(
             }
 
             return {
-              bytes: joined(yield* Stream.runCollect(fetched.body)),
+              bytes: Bytes.concat(yield* Stream.runCollect(fetched.body)),
               type: decoded.value,
             };
           })
@@ -1139,7 +1127,7 @@ export const layerPreviews = Layer.effect(Previews)(
           // The type is read from the bytes as they are served, never from what was recorded,
           // and bytes of none of the image types are not served at all.
           const [leading, rest] = yield* Stream.peel(bytes, head);
-          const type = decodeImageType(sniff(joined(leading.chunks)));
+          const type = decodeImageType(sniff(Bytes.concat(leading.chunks)));
 
           if (Option.isNone(type)) {
             return yield* new NoSuchImage();

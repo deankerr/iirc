@@ -1,6 +1,6 @@
 /**
  * Previews, as atoms: what the core holds of them; what the Owner opened or closed with
- * each link's toggle, which is this view's own; `previewsSync`, which, while the browser is
+ * each link's toggle, and which cards they expanded, both this view's own; `previewsSync`, which, while the browser is
  * signed in and any Timeline's mode asks, follows their stream and makes each ask and press
  * the core calls for; and a Timeline's own choice over `ui.previews`, made for every
  * device. A Message is shown to the core only by the view, as it scrolls into sight, so
@@ -50,6 +50,29 @@ export { previewsModes, previewsState } from "./state.ts";
  * view, and forgotten when the page is loaded again.
  */
 const previewsToggles = Atom.make<Toggles>(new Map<string, boolean>()).pipe(Atom.keepAlive);
+
+/**
+ * Which cards the Owner expanded, by their link's `linkKey`, kept and forgotten as what was
+ * toggled is. A card not named is collapsed.
+ */
+const previewsExpanded = Atom.make<ReadonlyMap<string, boolean>>(new Map<string, boolean>()).pipe(
+  Atom.keepAlive
+);
+
+/** Whether the card of a link, by its `linkKey`, is expanded. */
+export const expandedIn = Atom.family((key: string) =>
+  Atom.make((get) => get(previewsExpanded).get(key) === true)
+);
+
+/** Expands or collapses the card of a link, by its `linkKey`, for this view alone. */
+export const expandPreview = Atom.fnSync(
+  (expanded: { readonly key: string; readonly expanded: boolean }, get) => {
+    get.registry.set(
+      previewsExpanded,
+      new Map(get.registry.get(previewsExpanded)).set(expanded.key, expanded.expanded)
+    );
+  }
+).pipe(Atom.keepAlive);
 
 /** How this view opens Previews: `ui.previews.start` on this device, and what was toggled. */
 export const previewsOpening = Atom.make((get): Opening => ({

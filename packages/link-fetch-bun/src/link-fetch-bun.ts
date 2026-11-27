@@ -13,14 +13,17 @@ import {
   LinkUnreachable,
   LinkWrongType,
   admit,
+  asking,
   fixedPolicy,
   limits,
   makePacer,
   parseLink,
+  sites,
   writeAddress,
 } from "@iirc/link-fetch";
 import type {
   Address,
+  Asking,
   BodyFailure,
   Fetched,
   LinkFetchFailure,
@@ -33,6 +36,7 @@ import type {
 } from "@iirc/link-fetch";
 import {
   Array as Arr,
+  Bytes,
   Cause,
   Clock,
   Deferred,
@@ -56,7 +60,7 @@ export interface Resolver {
 
 /** How the guard is built. Production gives only `version`. */
 export interface BunLinkFetchOptions {
-  /** iirc's version, for the user agent. */
+  /** iirc's version, for the user agents. */
   readonly version: string;
   /** What may be fetched. Defaults to the fixed policy, which production never changes. */
   readonly policy?: LinkPolicy;
@@ -157,7 +161,8 @@ const declaredLength = (response: Response) => {
  * How a body ends past what it may give.
  * @param purpose - What the link is fetched for.
  * @param type - Its type.
- * @returns A page's HTML at the end of its head, a page's text at its cap, anything else fails.
+ * @returns A page's HTML at the end of a head that names a card tag or at its cap, a page's
+ * text at its cap, and anything else fails.
  */
 const endingOf = (purpose: Purpose, type: string) => {
   if (purpose.kind !== "page") {
@@ -223,15 +228,7 @@ const lead = (reader: Reader, purpose: Purpose, connection: Connection) =>
       size += chunk.value.length;
     }
 
-    const first = new Uint8Array(size);
-    let at = 0;
-
-    for (const chunk of chunks) {
-      first.set(chunk, at);
-      at += chunk.length;
-    }
-
-    return first;
+    return Bytes.concat(chunks);
   });
 
 /**
@@ -240,8 +237,8 @@ const lead = (reader: Reader, purpose: Purpose, connection: Connection) =>
  * @param first - Its first bytes, already read.
  * @param cap - The most it may give.
  * @param length - The length it declared, when that is of the bytes it gives.
- * @param ending - How it ends past what it may give: a page cleanly at the end of its head or
- * its cap, a text cleanly at its cap, and anything else fails.
+ * @param ending - How it ends past what it may give: a page cleanly at the end of a head that
+ * names a card tag or at its cap, a text cleanly at its cap, and anything else fails.
  * @param connection - Its connection.
  * @returns The body, which runs once.
  */
@@ -306,7 +303,7 @@ const bounded = (
       return total === cap ? Effect.as(stop, chunk) : Effect.succeed(chunk);
     }
 
-    // A page ends cleanly at the end of its head, or at its cap.
+    // A page ends cleanly at the end of a head that names a card tag, or at its cap.
     const { done, give } = ends.feed(chunk);
     const end = Math.min(give.length, cap - total);
 
@@ -359,16 +356,29 @@ const bounded = (
 const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => {
   const policy = options.policy ?? fixedPolicy;
   const resolver = options.resolver ?? systemResolver;
-  const userAgent = `iirc/${options.version} (+https://github.com/deankerr/iirc) bot`;
+
+  // The honest agent, and the crawler's, which still names iirc, for the sites that serve a
+  // page that needs a browser to anything not named as a link-preview crawler.
+  const agents = {
+    crawler: `Mozilla/5.0 (compatible; iirc/${options.version}; +https://github.com/deankerr/iirc) facebookexternalhit/1.1 Twitterbot/1.0`,
+    iirc: `iirc/${options.version} (+https://github.com/deankerr/iirc) bot`,
+  } as const;
+
   const trust = options.trust ?? [];
   const roots = trust.length === 0 ? {} : { ca: [...systemRoots(), ...trust] };
 
-  const request = (target: Target, address: Address, purpose: Purpose, signal: AbortSignal) => ({
+  const request = (
+    target: Target,
+    address: Address,
+    purpose: Purpose,
+    asked: Asking,
+    signal: AbortSignal
+  ) => ({
     headers: {
-      Accept: accept[purpose.kind],
+      Accept: asked.accept === "media" ? accept.media : accept[purpose.kind],
       "Accept-Language": acceptLanguage,
       Host: target.host,
-      "User-Agent": userAgent,
+      "User-Agent": agents[asked.agent],
       ...streamHeaders(purpose),
     },
     keepalive: false,
@@ -444,13 +454,30 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
       const waiting = (turn: Effect.Effect<void>) =>
         pause.pipe(Effect.andThen(turn), Effect.andThen(run));
 
+      // A hop is asked as its site answers it. A rewrite is parsed and checked as any link is,
+      // and is no redirect, so it counts toward none, and its own link is never rewritten.
+      const site = (parsed: Target) =>
+        Effect.gen(function* () {
+          const asked = asking(sites, parsed, purpose);
+
+          if (asked.rewrite === undefined) {
+            return { asked, target: parsed };
+          }
+
+          const target = yield* Effect.fromResult(parseLink(policy, asked.rewrite));
+
+          return { asked: { ...asking(sites, target, purpose), rewrite: undefined }, target };
+        });
+
       // Each hop is parsed, resolved once, checked, and pinned to what was checked.
       const follow = Effect.gen(function* () {
         let next = link;
         let base: string | undefined;
 
         for (let hop = 0; ; hop += 1) {
-          const target = yield* Effect.fromResult(parseLink(policy, next, base));
+          const { asked, target } = yield* site(
+            yield* Effect.fromResult(parseLink(policy, next, base))
+          );
 
           // Each hop waits its turn by the name it is made to, the first starting as it takes
           // its place, and holds its place until it is done: a redirect once it is read, and
@@ -471,7 +498,7 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
           }
 
           const address = yield* Effect.fromResult(admit(policy, target.port, addresses));
-          const { url, ...init } = request(target, address, purpose, signal);
+          const { url, ...init } = request(target, address, purpose, asked, signal);
 
           const response = yield* Effect.tryPromise({
             catch: connection.failed,

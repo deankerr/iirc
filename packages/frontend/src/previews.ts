@@ -919,17 +919,16 @@ export interface Size {
 }
 
 /**
- * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
- * its link; where the Daemon serves it, from its own origin and never the host it came
- * from; whether it moves; its `dimensions` in pixels, when the Daemon read them from its
- * bytes; and how it is drawn, `Whole`, a page's image or a link that is itself the image,
- * or `Poster`, a player's or a video's, which a play button is drawn over.
+ * A picture a card shows: what it is said to show, the Preview's title or else its link;
+ * where the Daemon serves it, from its own origin and never the host it came from; whether
+ * it moves; and its `dimensions` in pixels, when the Daemon read them from its bytes. It is
+ * a page's image, a link that is itself an image, or the poster of what plays.
  */
-export interface ImageShown {
+export interface PictureShown {
+  readonly _tag: "Picture";
   readonly alt: string;
   readonly animated: boolean;
   readonly dimensions: Size | undefined;
-  readonly drawn: "Poster" | "Whole";
   readonly src: string;
 }
 
@@ -978,7 +977,7 @@ export type PressDoes = "OpenLarge" | "Play" | "Stop";
  * @param motion - Whether it moves now.
  * @returns What a press does.
  */
-export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): PressDoes => {
+export const pressOn = (image: Pick<PictureShown, "animated">, motion: Motion): PressDoes => {
   if (!image.animated) {
     return "OpenLarge";
   }
@@ -987,21 +986,20 @@ export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): Pr
 };
 
 /**
- * A ready Preview's image as drawn: a player's or a video's as its poster, and any other
- * whole.
+ * A ready Preview's image as drawn, whether it is a page's own or a poster.
  * @param preview - The Preview.
- * @returns The image, or none when the Daemon kept none.
+ * @returns The picture, or none when the Daemon kept none.
  */
-const imageOf = (preview: Preview): ImageShown | undefined =>
+const pictureOf = (preview: Preview): PictureShown | undefined =>
   preview.image === null
     ? undefined
     : {
+        _tag: "Picture",
         alt: contained(
           preview.title === null || preview.title === "" ? preview.link : preview.title
         ),
         animated: preview.image.animated,
         dimensions: preview.image.dimensions ?? undefined,
-        drawn: preview.kind === "player" || preview.kind === "video" ? "Poster" : "Whole",
         src: `/api/previews/images/${preview.image.hash}`,
       };
 
@@ -1112,69 +1110,6 @@ const fileWordsOf = (preview: Preview) => {
 };
 
 /**
- * A host as a card compares it: lower case, without a leading `www.`.
- * @param link - A link.
- * @returns Its host, or none when it cannot be read.
- */
-const hostCompared = (link: string): string | undefined => {
-  const host = URL.parse(link)?.hostname.toLowerCase();
-
-  return host === undefined || host === "" ? undefined : host.replace(/^www\./u, "");
-};
-
-/**
- * The host a Preview was read from, when it is another than its Message's link's, so a
- * link that led elsewhere, as a shortened one does, says where. A leading `www.` is no
- * other host.
- * @param address - The link as its Message holds it.
- * @param read - The link the Preview was read from, after any redirects.
- * @returns The host it was read from, contained, or none when it is the same, or either
- *   cannot be read.
- */
-export const hostNamed = (address: string, read: string): string | undefined => {
-  const said = hostCompared(address);
-  const from = hostCompared(read);
-
-  return said === undefined || from === undefined || said === from ? undefined : contained(from);
-};
-
-/**
- * A video or a sound, a link that is itself one or a page that names a video file, as drawn: which, where the Daemon streams it
- * from, its own origin and never the host it came from, by the Message's place, and its
- * media type as the Daemon read it. Nothing is fetched until the Owner presses play.
- */
-export interface MediaShown {
-  readonly kind: "audio" | "video";
-  readonly src: string;
-  readonly type: string | null;
-}
-
-/**
- * A ready Preview's media as drawn.
- * @param preview - The Preview.
- * @param id - The Preview's id.
- * @param timeline - The Message's Timeline.
- * @param position - Its place there.
- * @returns The media, or none for any other kind.
- */
-const mediaOf = (
-  preview: Preview,
-  id: PreviewId,
-  timeline: TimelineId,
-  position: Position
-): MediaShown | undefined =>
-  preview.kind === "video" || preview.kind === "audio"
-    ? {
-        kind: preview.kind,
-        src: `/api/previews/${id}/stream?${new URLSearchParams([
-          ["timeline", timeline],
-          ["position", cursorOf(position)],
-        ]).toString()}`,
-        type: preview.type,
-      }
-    : undefined;
-
-/**
  * How a host's player is asked to start by itself: the query parameter that does it, and its
  * value. A host not named here has none, so its link is loaded as the page gave it.
  */
@@ -1191,34 +1126,81 @@ const sixteenByNine: Size = { height: 9, width: 16 };
  * The shape of the one box a poster, the video it plays, and the player it plays share, so
  * pressing play moves nothing below it: a player's, if its page gave one; else the
  * poster's own; else 16 by 9. Where the poster fails to load, the box keeps its shape.
- * @param playing - The player, and the poster, each if there is one.
+ * @param size - The player's size, if its page gave one.
+ * @param poster - The poster, if there is one.
  * @returns The box's shape.
  */
-export const playsIn = (playing: {
-  readonly player?: Pick<PlayerShown, "size"> | undefined;
-  readonly poster?: Pick<ImageShown, "dimensions"> | undefined;
-}): Size => playing.player?.size ?? playing.poster?.dimensions ?? sixteenByNine;
+const playsIn = (size: Size | undefined, poster: PictureShown | undefined): Size =>
+  size ?? poster?.dimensions ?? sixteenByNine;
 
 /**
- * A player, as drawn: the host it plays from, the words that say so, and what a frame
- * needs once the Owner presses play. A view loads `src` only then, never before, and shows
- * the frame at `size`, in CSS pixels, whose shape is all that matters, if its page gave one.
+ * A video the Daemon streams, a link that is itself one or a page that names a video file:
+ * where the Daemon streams it from, its own origin and never the host it came from, by the
+ * Message's place; its media type as the Daemon read it; its poster, if it has one; and the
+ * `box` its poster and it share. Nothing is fetched until the Owner presses play.
+ */
+export interface VideoShown {
+  readonly _tag: "Video";
+  readonly src: string;
+  readonly type: string | undefined;
+  readonly poster: PictureShown | undefined;
+  readonly box: Size;
+}
+
+/**
+ * Another site's player: the host it plays from, the words that say so, its poster, if it
+ * has one, and the `box` its poster and its frame share. A view loads `src` only once the
+ * Owner presses play, never before.
  */
 export interface PlayerShown {
+  readonly _tag: "Player";
   readonly host: string;
   readonly words: string;
   /** The player's address, set to start playing where its host allows that. */
   readonly src: string;
-  readonly size: Size | undefined;
+  readonly poster: PictureShown | undefined;
+  readonly box: Size;
+}
+
+/** A sound the Daemon streams, as a video is, with no picture. */
+export interface SoundShown {
+  readonly _tag: "Sound";
+  readonly src: string;
+  readonly type: string | undefined;
 }
 
 /**
- * A ready Preview's player as drawn.
- * @param preview - The Preview.
- * @returns The player, or none for any other kind, or when its address cannot be read.
+ * A page's picture that its page says is a thumbnail, to stand beside its words: it is the
+ * card's thumbnail collapsed and expanded, and is never drawn larger.
  */
-const playerOf = (preview: Preview): PlayerShown | undefined => {
-  if (preview.kind !== "player" || preview.player === null) {
+export interface ThumbnailOnlyShown {
+  readonly _tag: "ThumbnailOnly";
+  readonly picture: PictureShown;
+}
+
+/**
+ * The one piece of media a card shows: `None`; a `Picture`; a `ThumbnailOnly`, a link
+ * card's picture that is never drawn larger; a `Video` or a `Player`, each with its poster
+ * or none; or a `Sound`. Media is shown only while Previews are `on`.
+ */
+export type MediaShown =
+  | { readonly _tag: "None" }
+  | ThumbnailOnlyShown
+  | PictureShown
+  | VideoShown
+  | PlayerShown
+  | SoundShown;
+
+const noMedia = { _tag: "None" } as const;
+
+/**
+ * A ready Preview's player as drawn.
+ * @param preview - The Preview, of kind `player`.
+ * @param poster - Its poster, if it has one.
+ * @returns The player, or none when its address cannot be read.
+ */
+const playerOf = (preview: Preview, poster: PictureShown | undefined): PlayerShown | undefined => {
+  if (preview.player === null) {
     return undefined;
   }
 
@@ -1237,11 +1219,69 @@ const playerOf = (preview: Preview): PlayerShown | undefined => {
   const host = contained(url.hostname);
 
   return {
+    _tag: "Player",
+    box: playsIn(preview.player.size ?? undefined, poster),
     host,
-    size: preview.player.size ?? undefined,
+    poster,
     src: url.href,
     words: `plays from ${host}`,
   };
+};
+
+/**
+ * A ready Preview's media as drawn: a video's or a player's image is its poster, a sound
+ * shows none, a file has no media, and a player whose address cannot be read is its image.
+ * @param preview - The Preview.
+ * @param id - The Preview's id.
+ * @param timeline - The Message's Timeline.
+ * @param position - Its place there.
+ * @returns The media.
+ */
+const mediaOf = (
+  preview: Preview,
+  id: PreviewId,
+  timeline: TimelineId,
+  position: Position
+): Exclude<MediaShown, ThumbnailOnlyShown> => {
+  const picture = pictureOf(preview);
+
+  const stream = `/api/previews/${id}/stream?${new URLSearchParams([
+    ["timeline", timeline],
+    ["position", cursorOf(position)],
+  ]).toString()}`;
+
+  switch (preview.kind) {
+    case "video": {
+      return {
+        _tag: "Video",
+        box: playsIn(undefined, picture),
+        poster: picture,
+        src: stream,
+        type: preview.type ?? undefined,
+      };
+    }
+
+    case "audio": {
+      return { _tag: "Sound", src: stream, type: preview.type ?? undefined };
+    }
+
+    case "player": {
+      return playerOf(preview, picture) ?? picture ?? noMedia;
+    }
+
+    case "file": {
+      return noMedia;
+    }
+
+    case "page":
+    case "image": {
+      return picture ?? noMedia;
+    }
+
+    default: {
+      return preview.kind satisfies never;
+    }
+  }
 };
 
 /**
@@ -1261,41 +1301,110 @@ const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
 };
 
 /**
- * A ready Preview as its card draws it, in this order, each part only when it has it: the
- * host it was read from when another than its link's; its `title`; its `description`; and
- * its media, an image, a video or a sound, or a player. A page, and a page that names a
- * video file or a listed player, is its title and description, with its image, or its
- * poster, under them. A file is its file name, and its first lines when it is a text file
- * that has some, or else its type and size, with no media. A link that is itself an image,
- * a video, or a sound is its media alone. The site's name is never drawn, since the link stands right above. Under `text`, a
- * card is its words alone. `name` is what the card is called: its title, or else its link.
+ * A ready Preview whose link has words, a page or a file, as its card draws it: its
+ * `title`, its `description`, each only when it has it, and its media, `None` for a file
+ * and under `text`. A file is its file name, and its first lines when it is a text file
+ * that has some, or else its type and size. Neither the site's name nor the host it was
+ * read from is drawn, since the link stands right above. `name` is what the card is called:
+ * its title, or else its link.
  */
-export interface CardShown {
-  readonly _tag: "Ready";
+export interface LinkCardShown {
+  readonly _tag: "LinkCard";
   readonly key: string;
   readonly link: LinkShown;
   readonly name: string;
-  readonly host: string | undefined;
   readonly title: string | undefined;
   readonly description: string | undefined;
-  readonly image: ImageShown | undefined;
-  readonly media: MediaShown | undefined;
-  readonly player: PlayerShown | undefined;
+  readonly media: MediaShown;
 }
+
+/**
+ * A ready Preview of a link that is itself an image, a video, or a sound, or rarely a
+ * player with no words, as its card draws it: its media alone. `name` is its link.
+ */
+export interface MediaCardShown {
+  readonly _tag: "MediaCard";
+  readonly key: string;
+  readonly link: LinkShown;
+  readonly name: string;
+  readonly media: Exclude<MediaShown, { readonly _tag: "None" } | ThumbnailOnlyShown>;
+}
+
+/** A ready Preview's card: a link card, with words, or a media card, with none. */
+export type CardShown = LinkCardShown | MediaCardShown;
+
+/**
+ * The square at a link card's start while it is collapsed: `None`, so its words fill the
+ * row; a `Picture`; a `Poster` under a play glyph, for what plays with a poster; or `Play`,
+ * the glyph alone, for what plays with none. A press of one that plays expands the card
+ * and plays.
+ */
+export type ThumbnailShown =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Picture"; readonly picture: PictureShown }
+  | { readonly _tag: "Poster"; readonly poster: PictureShown }
+  | { readonly _tag: "Play" };
+
+/**
+ * A link card's thumbnail while it is collapsed, from its media.
+ * @param media - The card's media.
+ * @returns The thumbnail.
+ */
+export const thumbnailOf = (media: MediaShown): ThumbnailShown => {
+  switch (media._tag) {
+    case "None": {
+      return { _tag: "None" };
+    }
+
+    case "Picture": {
+      return { _tag: "Picture", picture: media };
+    }
+
+    case "ThumbnailOnly": {
+      return { _tag: "Picture", picture: media.picture };
+    }
+
+    case "Video":
+    case "Player": {
+      return media.poster === undefined
+        ? { _tag: "Play" }
+        : { _tag: "Poster", poster: media.poster };
+    }
+
+    case "Sound": {
+      return { _tag: "Play" };
+    }
+
+    default: {
+      return media satisfies never;
+    }
+  }
+};
+
+/**
+ * Whether a link card shows more than its words once expanded: whether it has media to
+ * draw under them, which a picture that is only a thumbnail is not. A card whose words are
+ * cut shows more too, which only a view can measure.
+ * @param card - The card.
+ * @returns Whether it has media to draw under its words.
+ */
+export const hasMedia = (card: Pick<LinkCardShown, "media">): boolean =>
+  card.media._tag !== "None" && card.media._tag !== "ThumbnailOnly";
 
 /**
  * One Preview, as drawn:
  *
  * - `Pending`: a placeholder in its card's place, while it is fetched, before it is
  *   asked for, or while a link the Daemon holds for a press is pressed.
- * - `Ready`: its card.
+ * - `LinkCard` or `MediaCard`: its card.
  * - `Failed`: one line of why there is none, and never the link again.
  *
  * Its `key` is its index among the Message's links that may be previewed, as text.
  */
 export type PreviewShown =
   | { readonly _tag: "Pending"; readonly key: string; readonly link: LinkShown }
-  | CardShown
+  | LinkCardShown
+  | MediaCardShown
   | { readonly _tag: "Failed"; readonly key: string; readonly reason: string };
 
 /**
@@ -1326,27 +1435,28 @@ const cardOf = (
       ? fileWordsOf(preview)
       : { description: wordsOf(preview.description), title: wordsOf(preview.title) };
 
-  const image = on ? imageOf(preview) : undefined;
-  const media = on ? mediaOf(preview, id, timeline, position) : undefined;
-  const player = on ? playerOf(preview) : undefined;
+  const media = on ? mediaOf(preview, id, timeline, position) : noMedia;
 
-  // The host it was read from says nothing on its own.
-  if ([title, description, image, media, player].every((part) => part === undefined)) {
-    return undefined;
+  if (title !== undefined || description !== undefined) {
+    return {
+      _tag: "LinkCard",
+      description,
+      key,
+      link,
+      // A picture its page calls a thumbnail stays one beside the words.
+      media:
+        preview.thumbnail && media._tag === "Picture"
+          ? { _tag: "ThumbnailOnly", picture: media }
+          : media,
+      name: title ?? link.text,
+      title,
+    };
   }
 
-  return {
-    _tag: "Ready",
-    description,
-    host: hostNamed(address, preview.link),
-    image,
-    key,
-    link,
-    media,
-    name: title ?? link.text,
-    player,
-    title,
-  };
+  // With no words, it is a link that is itself media, or holds nothing and is not drawn.
+  return media._tag === "None"
+    ? undefined
+    : { _tag: "MediaCard", key, link, media, name: link.text };
 };
 
 /**

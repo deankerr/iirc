@@ -48,7 +48,7 @@ const fetchOne = (answers: Readonly<Record<string, Answer>>, link: string, purpo
         if (purpose.kind === "page") {
           const head = new Uint8Array(chunks.flatMap((chunk) => [...chunk]));
 
-          yield* said(readPage({ contentType: fetched.type, head, link: fetched.link }));
+          yield* said(readPage({ contentType: fetched.type, link: fetched.link, page: head }));
         }
       })
     ).pipe(Effect.ignore);

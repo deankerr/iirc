@@ -1,11 +1,12 @@
 /**
- * What a Timeline's Previews watch to know a row is near: its scroller, and a screen's
- * height beyond it, above and below. A Message is asked for, and an image starts loading,
- * once the row is within that margin.
+ * Whether an element has come near the view: within a screen's height of its scroller, above
+ * or below. A Message is asked for, and media starts loading, once it is near. Where no
+ * browser observes, nothing ever is.
  *
  * @packageDocumentation
  */
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import type { RefObject } from "react";
 
 /**
  * The scroller a Timeline's rows are in, once it is in the page. A row's box is clipped by
@@ -16,13 +17,7 @@ import { createContext, useContext } from "react";
 const ScrollerContext = createContext<Element | null>(null);
 
 /** Gives the Timeline's scroller to the Previews drawn inside it. */
-export const ScrollerProvider = ScrollerContext.Provider;
-
-/**
- * The scroller the Previews around this one are in, if any.
- * @returns The scroller, or none.
- */
-export const useScroller = (): Element | null => useContext(ScrollerContext);
+export const PreviewScrollerProvider = ScrollerContext.Provider;
 
 /**
  * Tells once an element is within a screen's height of a view, above or below, and watches
@@ -32,7 +27,7 @@ export const useScroller = (): Element | null => useContext(ScrollerContext);
  * @param near - What to do once it is.
  * @returns How to stop watching.
  */
-export const watchNear = (
+const watchNear = (
   element: Element | null,
   root: Element | null,
   near: () => void
@@ -59,4 +54,37 @@ export const watchNear = (
   return () => {
     observer.disconnect();
   };
+};
+
+/**
+ * Whether an element has come near the view, once: from then on it stays so, wherever it
+ * scrolls. Given `onNear`, it is called once the element is near, and again each time
+ * `onNear` itself changes while it is, so a caller that memoizes it on what it tells is told
+ * anew when that changes.
+ * @param target - The element, or a ref to it, or none to watch nothing yet.
+ * @param onNear - What to call once it is near, if anything.
+ * @returns Whether it is.
+ */
+export const useNearView = (
+  target: Element | RefObject<Element | null> | null,
+  onNear?: () => void
+): boolean => {
+  const [near, setNear] = useState(false);
+  const scroller = useContext(ScrollerContext);
+
+  useEffect(() => {
+    const element = target === null || target instanceof Element ? target : target.current;
+
+    return watchNear(near ? null : element, scroller, () => {
+      setNear(true);
+    });
+  }, [near, scroller, target]);
+
+  useEffect(() => {
+    if (near) {
+      onNear?.();
+    }
+  }, [near, onNear]);
+
+  return near;
 };

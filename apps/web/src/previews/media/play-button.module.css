@@ -1,0 +1,31 @@
+/*
+ * A play button: a chip with the play glyph in the middle of its media's box, on the page's
+ * own colour, so the glyph reads over a poster of any colour.
+ */
+.place {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  font-size: 1.4em;
+  transform: translate(-50%, -50%);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-text);
+  cursor: default;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.button[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}

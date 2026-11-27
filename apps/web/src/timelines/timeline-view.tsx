@@ -21,7 +21,7 @@ import { flushSync } from "react-dom";
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown, leadingShown, lineShown, sizeShown, spacingShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
-import { ScrollerProvider } from "../previews/near-view.ts";
+import { PreviewScrollerProvider } from "../previews/media/near-view.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { TailView } from "../tail/tail-view.tsx";
 import { Button } from "../ui/button.tsx";
@@ -975,7 +975,7 @@ const Lines = ({
         // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        <ScrollerProvider value={scrollerElement}>
+        <PreviewScrollerProvider value={scrollerElement}>
           <div className={styles.rows} style={{ height: total }}>
             {items.map((item) => {
               const row = rows[item.index];
@@ -994,7 +994,7 @@ const Lines = ({
               );
             })}
           </div>
-        </ScrollerProvider>
+        </PreviewScrollerProvider>
       </div>
       <ColumnsLeast ref={least} />
       {drawn === "columns" ? <NickEdge onHeld={setNickDragged} /> : null}

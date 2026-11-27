@@ -1,0 +1,18 @@
+/* The play badge, over the middle of an animated picture's first frame. */
+.badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text);
+  pointer-events: none;
+}
+
+.badge > * {
+  inline-size: auto;
+  padding: var(--space-1) var(--space-2);
+  font-size: 1.4em;
+  border-radius: var(--radius);
+  background: var(--color-scrim);
+}

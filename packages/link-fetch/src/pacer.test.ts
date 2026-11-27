@@ -11,13 +11,20 @@ const run = async <A, E>(test: Effect.Effect<A, E, Scope.Scope>) =>
 /** Lets every fiber that can run do so, without moving the clock. */
 const settle = Effect.yieldNow.pipe(Effect.repeat({ times: 50 }));
 
+/**
+ * The numbers from 0 up to, but not including, a count.
+ * @param count - The count.
+ * @returns The numbers.
+ */
+const upTo = (count: number) => Array.from({ length: count }, (_, at) => at);
+
 describe("the pacer", () => {
-  it("holds two places at once to one name, giving a third its turn once one is given up", async () => {
+  it("holds a name's places at once, giving the next its turn once one is given up", async () => {
     const order = await run(
       Effect.gen(function* () {
         const pacer = yield* makePacer;
         const turns = yield* Ref.make<readonly number[]>([]);
-        const scopes = yield* Effect.forEach([0, 1, 2, 3], () => Scope.make());
+        const scopes = yield* Effect.forEach(upTo(pacing.perName + 2), () => Scope.make());
 
         // Forked one after another, so they ask in order.
         for (const [at, scope] of scopes.entries()) {
@@ -51,16 +58,25 @@ describe("the pacer", () => {
     );
 
     // The place given up goes to the latest ask.
-    expect(order).toStrictEqual({ first: [0, 1], second: [0, 1, 3], third: [0, 1, 3, 2] });
+    const holding = upTo(pacing.perName);
+
+    expect(order).toStrictEqual({
+      first: holding,
+      second: [...holding, pacing.perName + 1],
+      third: [...holding, pacing.perName + 1, pacing.perName],
+    });
   });
 
   it("counts a name with and without its trailing dot as one, and another name apart", async () => {
+    // a.test's places, taken by it with and without its dot in turn.
+    const names = upTo(pacing.perName).map((at) => (at % 2 === 0 ? "a.test" : "a.test."));
+
     const turns = await run(
       Effect.gen(function* () {
         const pacer = yield* makePacer;
         const taken = yield* Ref.make<readonly string[]>([]);
 
-        yield* Effect.forEach(["a.test", "a.test.", "a.test", "b.test"], (name) =>
+        yield* Effect.forEach([...names, "a.test", "b.test"], (name) =>
           Effect.forkChild(
             Effect.scoped(
               pacer
@@ -78,7 +94,7 @@ describe("the pacer", () => {
       })
     );
 
-    expect(turns).toStrictEqual(["a.test", "a.test.", "b.test"]);
+    expect(turns).toStrictEqual([...names, "b.test"]);
   });
 
   it("starts thirty in a minute, and the rest in the order they asked once the minute turns", async () => {
@@ -160,7 +176,11 @@ describe("the pacer", () => {
           );
 
         yield* hop("first", first);
-        yield* hop("second", yield* Scope.make());
+
+        for (const _ of upTo(pacing.perName - 1)) {
+          yield* hop("held", yield* Scope.make());
+        }
+
         yield* settle;
 
         const gaveUp = yield* hop("gave up", yield* Scope.make());
@@ -175,7 +195,7 @@ describe("the pacer", () => {
       })
     );
 
-    expect(taken).toStrictEqual(["first", "second", "next"]);
+    expect(taken).toStrictEqual(["first", ...upTo(pacing.perName - 1).map(() => "held"), "next"]);
   });
 });
 
@@ -262,13 +282,17 @@ describe("a fetch's first hop", () => {
 
         const first = yield* Scope.make();
 
-        yield* going("a1", "a.test", first);
-        yield* going("a2", "a.test");
+        yield* going("a.test first", "a.test", first);
+
+        for (const at of upTo(pacing.perName - 1)) {
+          yield* going(`a.test ${at}`, "a.test");
+        }
+
         yield* settle;
         yield* going("waits for a.test", "a.test");
         yield* settle;
 
-        for (const at of Array.from({ length: pacing.perMinute - pacing.perName }, (_, n) => n)) {
+        for (const at of upTo(pacing.perMinute - pacing.perName)) {
           yield* going(`other ${at}`, `${at}.test`);
         }
 
@@ -298,7 +322,8 @@ describe("a fetch's first hop", () => {
 });
 
 /**
- * Whether two hops asked now both take a place at a.test, which nothing should hold.
+ * How many of one more hop than a name has places, asked now, take a place at a.test, which
+ * nothing should hold.
  * @param pacer - The pacer.
  * @returns How many took one.
  */
@@ -306,7 +331,7 @@ const placesLeft = (pacer: Pacer) =>
   Effect.gen(function* () {
     const taken = yield* Ref.make(0);
 
-    yield* Effect.forEach([0, 1], () =>
+    yield* Effect.forEach(upTo(pacing.perName + 1), () =>
       Effect.forkChild(
         Effect.scoped(
           pacer
@@ -329,18 +354,22 @@ describe("a name's places", () => {
       Effect.gen(function* () {
         const pacer = yield* makePacer;
         const first = yield* Scope.make();
-        const second = yield* Scope.make();
+        const rest = yield* Scope.make();
         const queued = yield* Scope.make();
 
         yield* Scope.provide(pacer.hop("a.test"), first);
-        yield* Scope.provide(pacer.hop("a.test"), second);
+
+        for (const _ of upTo(pacing.perName - 1)) {
+          yield* Scope.provide(pacer.hop("a.test"), rest);
+        }
+
         // It waits, and its Scope closes under it, its fiber still running.
         yield* Effect.forkChild(Scope.provide(pacer.hop("a.test"), queued));
         yield* settle;
         yield* Scope.close(queued, Exit.void);
         yield* Scope.close(first, Exit.void);
         yield* settle;
-        yield* Scope.close(second, Exit.void);
+        yield* Scope.close(rest, Exit.void);
         yield* settle;
 
         // One hop run twice in one Scope takes two places, and gives both back.
@@ -371,7 +400,10 @@ describe("the pacer's order", () => {
         const open = yield* Scope.make();
 
         yield* Scope.provide(pacer.hop("a.test"), first);
-        yield* Scope.provide(pacer.hop("a.test"), open);
+
+        for (const _ of upTo(pacing.perName - 1)) {
+          yield* Scope.provide(pacer.hop("a.test"), open);
+        }
 
         const hop = (label: string, precedence: Precedence) =>
           Effect.flatMap(pacer.ask(precedence), (turn) =>

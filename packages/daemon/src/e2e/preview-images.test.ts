@@ -221,6 +221,7 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
             site: `127.0.0.1:${fixture.port}`,
             size: null,
             stream: null,
+            thumbnail: false,
             title: "Cat",
             type: null,
           },

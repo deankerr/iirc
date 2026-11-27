@@ -5,10 +5,17 @@
  */
 import { limits } from "@iirc/link-fetch";
 import type { Purpose } from "@iirc/link-fetch";
+import { Bytes } from "effect";
 
-/** What each purpose asks for. */
-export const accept: Record<Purpose["kind"], string> = {
+/**
+ * What each purpose asks for, and `media`, what a page that is likely media asks for: images,
+ * video, and sound only, never HTML or any type at all, so a site that answers HTML to any
+ * `Accept` that would take it answers the media.
+ */
+export const accept: Record<Purpose["kind"] | "media", string> = {
   image: "image/avif, image/webp, image/png, image/jpeg, image/gif, image/svg+xml;q=0.8",
+  media:
+    "image/avif, image/webp, image/png, image/jpeg, image/gif, image/svg+xml;q=0.8, video/*;q=0.8, audio/*;q=0.8",
   oembed: "application/json",
   page: "text/html, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1",
   stream: "video/*, audio/*",
@@ -223,6 +230,8 @@ export const sniff = (bytes: Uint8Array): string | undefined => {
 
 const lower = (byte: number) => (byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte);
 
+const isLetter = (byte: number) => lower(byte) >= 0x61 && lower(byte) <= 0x7a;
+
 const codes = (text: string) => Array.from(text, (character) => character.codePointAt(0) ?? 0);
 
 const boundaries = new Set(codes("\t\n\f\r />"));
@@ -244,6 +253,7 @@ const bodyOpen = codes("<body");
 
 type Mode =
   | { readonly in: "text" }
+  | { readonly in: "read on" }
   | { readonly in: "comment" }
   | { readonly in: "raw"; readonly close: readonly number[] }
   | { readonly in: "head end" }
@@ -313,8 +323,7 @@ const quotes = new Set(codes(`"'`));
  * @param byte - The byte.
  * @returns Whether it does.
  */
-const startsTag = (byte: number) =>
-  (lower(byte) >= 0x61 && lower(byte) <= 0x7a) || codes("/!?").includes(byte);
+const startsTag = (byte: number) => isLetter(byte) || codes("/!?").includes(byte);
 
 /**
  * Skips a tag to its `>`, honouring quoted attribute values.
@@ -380,6 +389,36 @@ const opened = (bytes: Uint8Array, open: number): Step => {
   };
 };
 
+// What a tag's attribute value starts with when it names an Open Graph or Twitter card tag,
+// before the letter its name goes on with, as `og:title` does. A prefix declaration, as in
+// `<html prefix="og: https://ogp.me/ns#">`, has a space there, and names no tag.
+const cardTags = ["og:", "twitter:"].flatMap((prefix) =>
+  ['"', "'", "="].map((before) => codes(`${before}${prefix}`))
+);
+
+// The longest of them, and the letter after it.
+const cardTagLength = Math.max(...cardTags.map((each) => each.length)) + 1;
+
+/**
+ * Whether bytes of a tag name a card tag: one of {@link cardTags} and then a letter.
+ * @param bytes - The bytes.
+ * @returns Whether they do.
+ */
+const namesCardTag = (bytes: Uint8Array) =>
+  cardTags.some((tag) => {
+    let at = find(bytes, 0, tag);
+
+    while (at !== -1) {
+      if (isLetter(bytes[at + tag.length] ?? -1)) {
+        return true;
+      }
+
+      at = find(bytes, at + 1, tag);
+    }
+
+    return false;
+  });
+
 /** What of a page may be given now, and whether the page has ended. */
 interface Fed {
   readonly give: Uint8Array;
@@ -392,6 +431,11 @@ interface Fed {
  * elements, such as a script, are skipped, so a `<body>` in a string ends nothing. It is no
  * HTML tokenizer: it looks only for what ends a head.
  *
+ * The page ends there only when a tag in its head has an attribute whose value starts `og:`
+ * or `twitter:` and then a letter, as a card tag's name does. Otherwise its tags may be later
+ * in the page, so the page reads on to its end, and nothing more is looked for. A prefix
+ * declaration, `og:` and then a space, is no card tag.
+ *
  * Bytes it cannot yet decide, such as a `<bo` at the end of a chunk, are held back until the
  * next chunk decides them, so the page is the same however the network split it.
  * @returns `feed`, which takes each chunk and gives what of the page may be given now, and
@@ -400,6 +444,21 @@ interface Fed {
 export const headEnd = () => {
   let mode: Mode = { in: "text" };
   let carry = new Uint8Array();
+  let named = false;
+  // The end of the tag bytes seen so far, so a value split across chunks is still seen.
+  let tail = new Uint8Array();
+
+  // Looks for a card tag in bytes of a tag, after the end of those before them.
+  const notice = (bytes: Uint8Array) => {
+    if (named) {
+      return;
+    }
+
+    const seen = Bytes.concat([tail, bytes]);
+
+    named = namesCardTag(seen);
+    tail = seen.slice(Math.max(seen.length - cardTagLength + 1, 0));
+  };
 
   const flush = () => {
     const held = carry;
@@ -410,10 +469,8 @@ export const headEnd = () => {
   };
 
   const feed = (chunk: Uint8Array): Fed => {
-    const bytes = new Uint8Array(carry.length + chunk.length);
+    const bytes = Bytes.concat([carry, chunk]);
 
-    bytes.set(carry);
-    bytes.set(chunk, carry.length);
     carry = new Uint8Array();
 
     const ended = (at: number): Fed => ({ done: true, give: bytes.subarray(0, at) });
@@ -428,9 +485,24 @@ export const headEnd = () => {
       return { done: false, give: bytes.subarray(0, held) };
     };
 
+    // A head that named no card tag ends nothing.
+    const headEnded = (at: number): Fed => {
+      if (named) {
+        return ended(at);
+      }
+
+      mode = { in: "read on" };
+
+      return goOn;
+    };
+
     let at = 0;
 
     for (;;) {
+      if (mode.in === "read on") {
+        return goOn;
+      }
+
       if (mode.in === "comment") {
         const end = find(bytes, at, commentClose);
 
@@ -457,6 +529,8 @@ export const headEnd = () => {
       } else if (mode.in === "tag") {
         const skipped = skipTag(bytes, at, mode.quote);
 
+        notice(bytes.subarray(at, skipped.end === -1 ? bytes.length : skipped.end));
+
         if (skipped.end === -1) {
           mode = { ...mode, quote: skipped.quote };
 
@@ -468,7 +542,7 @@ export const headEnd = () => {
       } else if (mode.in === "head end") {
         const end = bytes.indexOf(greaterThan, at);
 
-        return end === -1 ? goOn : ended(end + 1);
+        return end === -1 ? goOn : headEnded(end + 1);
       } else {
         const open = bytes.indexOf(lessThan, at);
 
@@ -481,7 +555,7 @@ export const headEnd = () => {
         }
 
         if (isTag(bytes, open, bodyOpen)) {
-          return ended(open);
+          return headEnded(open);
         }
 
         ({ at, mode } = opened(bytes, open));

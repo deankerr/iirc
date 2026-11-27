@@ -4,7 +4,8 @@
  *
  * @packageDocumentation
  */
-import { Result } from "effect";
+import { Equal, Result } from "effect";
+import { IpNetwork, NetAddress } from "effect/net";
 
 import { LinkRefused } from "./link-fetch.ts";
 
@@ -25,11 +26,8 @@ export interface LinkPolicy {
 /** The policy production uses: `http` and `https` on 80 and 443, to public addresses only. */
 export const fixedPolicy: LinkPolicy = { admitted: [], ports: [80, 443] };
 
-/** An IP address, as its 4 or 16 bytes. */
-export interface Address {
-  readonly family: 4 | 6;
-  readonly bytes: readonly number[];
-}
+/** An IP address, IPv4 or IPv6. */
+export type Address = NetAddress.IpAddress;
 
 /** A link the policy let through as far as its address, ready to resolve and check. */
 export interface Target {
@@ -51,104 +49,17 @@ const defaultPorts = { "http:": 80, "https:": 443 } as const;
 
 const refuse = (reason: string) => Result.fail(new LinkRefused({ reason }));
 
-const decimalOctet = /^(?:0|[1-9]\d{0,2})$/u;
-
 /**
- * Reads dotted-decimal IPv4, as the URL parser writes it and a resolver answers it. Any other
- * spelling, such as octal or a leading zero, is not read.
- * @param text - The address.
- * @returns Its four bytes, or nothing.
- */
-const readIPv4 = (text: string): number[] | undefined => {
-  const parts = text.split(".");
-
-  if (parts.length !== 4 || !parts.every((part) => decimalOctet.test(part))) {
-    return undefined;
-  }
-
-  const bytes = parts.map(Number);
-
-  return bytes.every((byte) => byte <= 255) ? bytes : undefined;
-};
-
-const hexGroup = /^[0-9a-f]{1,4}$/iu;
-
-const groupsOf = (part: string, last: boolean): number[] | undefined => {
-  if (part === "") {
-    return [];
-  }
-
-  const pieces = part.split(":");
-  const groups: number[] = [];
-
-  for (const [index, piece] of pieces.entries()) {
-    if (piece.includes(".")) {
-      const v4 = last && index === pieces.length - 1 ? readIPv4(piece) : undefined;
-
-      if (v4 === undefined) {
-        return undefined;
-      }
-
-      const [a = 0, b = 0, c = 0, d = 0] = v4;
-
-      groups.push(a * 256 + b, c * 256 + d);
-    } else if (hexGroup.test(piece)) {
-      groups.push(Number.parseInt(piece, 16));
-    } else {
-      return undefined;
-    }
-  }
-
-  return groups;
-};
-
-/**
- * Reads IPv6 without brackets, in any form a parser or resolver writes, with an IPv4 tail or
- * without. A zone, such as `%eth0`, is not read.
- * @param text - The address.
- * @returns Its sixteen bytes, or nothing.
- */
-const readIPv6 = (text: string): number[] | undefined => {
-  const halves = text.split("::");
-
-  if (halves.length > 2) {
-    return undefined;
-  }
-
-  const head = groupsOf(halves[0] ?? "", halves.length === 1);
-  const tail = halves.length === 2 ? groupsOf(halves[1] ?? "", true) : [];
-
-  if (head === undefined || tail === undefined) {
-    return undefined;
-  }
-
-  const missing = 8 - head.length - tail.length;
-
-  if (halves.length === 1 ? missing !== 0 : missing < 1) {
-    return undefined;
-  }
-
-  const groups = [...head, ...Array.from({ length: missing }, () => 0), ...tail];
-
-  return groups.flatMap((group) => [Math.floor(group / 256), group % 256]);
-};
-
-/**
- * Reads an IP address, IPv4 dotted-decimal or IPv6 with or without brackets.
+ * Reads an IP address: IPv4 in dotted decimal, as the URL parser writes it and a resolver
+ * answers it, or IPv6 with or without brackets. Any other spelling, such as octal, a leading
+ * zero, or a zone such as `%eth0`, is not read.
  * @param text - The address.
  * @returns The address, or nothing when it is not one.
  */
-export const readAddress = (text: string): Address | undefined => {
-  const v4 = readIPv4(text);
-
-  if (v4 !== undefined) {
-    return { bytes: v4, family: 4 };
-  }
-
+const readAddress = (text: string): Address | undefined => {
   const bare = text.startsWith("[") && text.endsWith("]") ? text.slice(1, -1) : text;
-  const v6 = bare.includes(":") ? readIPv6(bare) : undefined;
 
-  return v6 === undefined ? undefined : { bytes: v6, family: 6 };
+  return Result.getOrUndefined(NetAddress.ipFromString(bare));
 };
 
 /**
@@ -156,46 +67,19 @@ export const readAddress = (text: string): Address | undefined => {
  * @param address - The address.
  * @returns Its text.
  */
-export const writeAddress = (address: Address): string => {
-  if (address.family === 4) {
-    return address.bytes.join(".");
-  }
-
-  const groups = Array.from({ length: 8 }, (_, index) =>
-    ((address.bytes[index * 2] ?? 0) * 256 + (address.bytes[index * 2 + 1] ?? 0)).toString(16)
-  );
-
-  return `[${groups.join(":")}]`;
-};
-
-/**
- * An address as a string of its bits, so a prefix of it is a prefix of the string.
- * @param address - The address.
- * @returns Its bits, as `0` and `1`.
- */
-const bitsOf = (address: Address) =>
-  address.bytes.map((byte) => byte.toString(2).padStart(8, "0")).join("");
+export const writeAddress = (address: Address): string => NetAddress.formatUrlHost(address);
 
 interface Range {
-  readonly family: 4 | 6;
-  /** The bits every address in the range starts with. */
-  readonly prefix: string;
+  readonly network: IpNetwork.IpNetwork;
   readonly name: string;
 }
 
-const range = (cidr: string, name: string): Range => {
-  const [first = "", length = ""] = cidr.split("/");
-  const address = readAddress(first);
+const range = (cidr: string, name: string): Range => ({
+  name,
+  network: IpNetwork.fromStringUnsafe(cidr),
+});
 
-  if (address === undefined) {
-    throw new Error(`not a range: ${cidr}`);
-  }
-
-  return { family: address.family, name, prefix: bitsOf(address).slice(0, Number(length)) };
-};
-
-const within = (address: Address, of: Range) =>
-  address.family === of.family && bitsOf(address).startsWith(of.prefix);
+const within = (address: Address, of: Range) => IpNetwork.contains(of.network, address);
 
 // The IANA special-purpose registries (RFC 6890) and research #22. Where the registry calls a
 // block globally reachable but it is still not a place a stranger's link should lead, such as
@@ -256,8 +140,9 @@ const globalUnicast = range("2000::/3", "global unicast");
  * @returns The address to check and connect to.
  */
 const unmapped = (address: Address): Address =>
-  address.family === 6 && (within(address, ipv4Mapped) || within(address, ipv4Compatible))
-    ? { bytes: address.bytes.slice(12), family: 4 }
+  NetAddress.isIpv6Address(address) &&
+  (within(address, ipv4Mapped) || within(address, ipv4Compatible))
+    ? NetAddress.ipv4FromBytesUnsafe(Uint8Array.from(NetAddress.ipv6ToOctets(address).slice(12)))
     : address;
 
 /**
@@ -274,21 +159,20 @@ const special = (address: Address): string | undefined => {
 
   const target = unmapped(address);
 
-  if (target.family === 4) {
+  if (NetAddress.isIpv4Address(target)) {
     return ipv4Ranges.find((each) => within(target, each))?.name;
   }
 
   return within(target, globalUnicast) ? undefined : "not global unicast";
 };
 
-const same = (one: Address, other: Address) =>
-  one.family === other.family && one.bytes.every((byte, index) => byte === other.bytes[index]);
-
 const isAdmitted = (policy: LinkPolicy, address: Address, port: number) =>
   policy.admitted.some((each) => {
     const admitted = readAddress(each.address);
 
-    return each.port === port && admitted !== undefined && same(unmapped(admitted), address);
+    return (
+      each.port === port && admitted !== undefined && Equal.equals(unmapped(admitted), address)
+    );
   });
 
 /**
@@ -331,7 +215,10 @@ export const parseLink = (
 
   return Result.succeed({
     host: url.host,
-    hostname: literal?.family === 6 ? url.hostname.slice(1, -1) : url.hostname,
+    hostname:
+      literal !== undefined && NetAddress.isIpv6Address(literal)
+        ? url.hostname.slice(1, -1)
+        : url.hostname,
     href: url.href,
     literal,
     path: `${url.pathname}${url.search}`,
@@ -381,7 +268,7 @@ export const admit = (
     checked.push(target);
   }
 
-  const chosen = checked.find((each) => each.family === 4) ?? checked[0];
+  const chosen = checked.find(NetAddress.isIpv4Address) ?? checked[0];
 
   return chosen === undefined ? refuse("no address") : Result.succeed(chosen);
 };

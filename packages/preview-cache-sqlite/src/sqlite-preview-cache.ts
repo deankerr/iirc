@@ -16,7 +16,7 @@ import { SqlError } from "effect/sql/SqlError";
  * The version of the file's layout, in SQLite's `user_version`. A file of an earlier version
  * that has a step to this one is brought up to it, and one of any other is made again.
  */
-const layoutVersion = 8;
+const layoutVersion = 9;
 
 // The step from each earlier version that has one to the next, each the statements that
 // bring this table, with Previews as that version wrote them, to the next. A file is brought
@@ -71,6 +71,15 @@ const steps = new Map<number, readonly string[]>([
       "DROP TABLE previews",
       "ALTER TABLE previews_next RENAME TO previews",
       "CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL",
+    ],
+  ],
+  // From 8: a Preview, whose page was never asked whether its image is a thumbnail, says it
+  // is not, until the Preview is fetched again.
+  [
+    8,
+    [
+      `UPDATE previews SET state = json_set(state, '$.preview.thumbnail', json('false'))
+    WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.preview') = 'object' END`,
     ],
   ],
 ]);

@@ -26,6 +26,10 @@ export { makePacer, pacing } from "./pacer.ts";
 
 export type { Pacer, Precedence, Turn } from "./pacer.ts";
 
-export { admit, fixedPolicy, parseLink, readAddress, writeAddress } from "./policy.ts";
+export { admit, fixedPolicy, parseLink, writeAddress } from "./policy.ts";
 
 export type { Address, Admitted, LinkPolicy, Target } from "./policy.ts";
+
+export { asking, sites } from "./sites.ts";
+
+export type { Accepting, Agent, Asking, Rewrite, Sites } from "./sites.ts";

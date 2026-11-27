@@ -1,5 +1,5 @@
 /*
- * The larger view: the whole viewport dimmed, whatever Pane the image was in, with the
+ * The lightbox: the whole viewport dimmed, whatever Pane its media was in, with the
  * image in the middle and its page's link under it. It runs to the screen's edges, less a
  * margin and the notches' own room.
  */
@@ -118,8 +118,8 @@ video.large {
 }
 
 /*
- * A control drawn over media: the one that opens it large and the one that closes the larger
- * view, the same square at the text's own size wherever it is drawn, its icon in the middle,
+ * A control drawn over media: the one that opens the lightbox and the one that closes it,
+ * the same square at the text's own size wherever it is drawn, its icon in the middle,
  * and a finger's size on a touch screen.
  */
 .control {

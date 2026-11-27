@@ -146,6 +146,10 @@ export const serve = (
         });
       });
       server.on("tlsClientError", () => null);
+      // A site that cannot listen fails the test at once, rather than leaving it to time out.
+      server.once("error", (error) => {
+        resume(Effect.die(error));
+      });
       server.listen(options.port ?? 0, options.address ?? "127.0.0.1", () => {
         const { port } = Schema.decodeUnknownSync(Listening)(server.address());
 

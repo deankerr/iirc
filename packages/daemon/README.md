@@ -183,8 +183,9 @@ A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Dae
 
 - **A fetch tells the link fetch where it stands.** A link fetched again is a `refresh` when a ready Preview stands for it and a `first` when a failure does, so a refresh waits behind any link never fetched. A page's oEmbed and image, and a stream, are `begun`, so a Preview already begun is finished before a page asked later starts. Of the rest, the latest ask goes first.
 - **An error status is a failure,** `AnsweredError`, whatever its type, and its body is never read.
-- **A page's head is read** by the pure reader in `src/previews/read.ts`.
+- **A page is read** by the pure reader in `src/previews/read.ts`: its head whole, and its body for Open Graph and Twitter card `<meta>` tags only, never a `<title>`, `<base>`, or `<link>`, and never a tag written in a `<textarea>`. What the head says of a thing always outranks what the body says.
 - **A page's oEmbed fills only what its tags left empty.** Only `<link rel="alternate" type="application/json+oembed">` is followed, fetched as `oembed` once the page's own fetch is over. It gives the title, the author as the site, and the thumbnail as the image when the tags name none. Its `html` is never read, and a failure there leaves the page as it was.
+- **A page whose `twitter:card` is `summary` says its image is a thumbnail,** in the Preview's `thumbnail`, compared in any case. Any other card, or none, says it is not, and so does every Preview that is not a `page`. An oEmbed's thumbnail says nothing of it.
 - **An answer of an image, video, or audio type is a text Preview of its kind,** with its type, and its host as its site.
 - **An answer of `text/plain` is a `file` whose description is its first lines.** Its body is read to the link fetch's bound of 16 KiB, in the character set its byte order mark says, else its `Content-Type`'s, else UTF-8, with line breaks as LF and indentation kept, cut to 500 code points, and none when it is only whitespace.
 - **Any other answer that is not a page is a `file`** from its headers alone: no title, its declared `type` and `size` or none, and its body never read.
