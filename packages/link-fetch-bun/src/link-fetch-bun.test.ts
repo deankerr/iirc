@@ -549,6 +549,16 @@ describe("bounds are on the decompressed stream", () => {
     await expect(head([page.slice(0, 20), page.slice(20)])).resolves.toBe(page);
   });
 
+  // Catches a page that declares the Open Graph prefix, and streams its card tags into its
+  // body, cut off at its head with none of them.
+  it("a page that only declares the og prefix is read to its end, however it is split", () => {
+    const page = `<html prefix="og: https://ogp.me/ns#"><head prefix='og: https://ogp.me/ns#'><title>t</title></head><body>${card}</body>`;
+
+    for (let at = 1; at < page.length; at += 1) {
+      expect(splitAt(page, at)).toBe(page);
+    }
+  });
+
   it.each(["script", "style"])("a %s's quoted attribute ends nothing, at every split", (name) => {
     const page = rawAttribute(name);
     const read = page.slice(0, page.indexOf("<body>x"));

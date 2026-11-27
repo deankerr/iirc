@@ -142,11 +142,15 @@ const readAttributes = (text: string, from: number): Attributes => {
   return { attrs, end: text.length };
 };
 
+// Elements whose contents are text, so what looks like a tag in them is none.
 const CLOSERS = {
   script: /<\/script/giu,
   style: /<\/style/giu,
+  textarea: /<\/textarea/giu,
   title: /<\/title/giu,
 };
+
+const holdsText = (name: string): name is keyof typeof CLOSERS => Object.hasOwn(CLOSERS, name);
 
 // Where the element named `name`, whose contents start at `from`, ends.
 const elementEnd = (text: string, name: keyof typeof CLOSERS, from: number): number => {
@@ -173,7 +177,8 @@ const isCardMeta = (attrs: ReadonlyMap<string, string>): boolean =>
   );
 
 // A tolerant walk over the page, keeping `<meta>`, `<base>`, `<link>` and `<title>` from its
-// head, and from its body only a `<meta>` that names a card tag.
+// head, and from its body only a `<meta>` that names a card tag. What a script, a style, a
+// title, or a textarea holds is text, so a tag written there, as an example, is never kept.
 const scan = (text: string): Piece[] => {
   const pieces: Piece[] = [];
   let body = false;
@@ -219,7 +224,7 @@ const scan = (text: string): Piece[] => {
 
     if (name === "body") {
       body = true;
-    } else if (name === "script" || name === "style" || name === "title") {
+    } else if (holdsText(name)) {
       const stop = elementEnd(text, name, i);
 
       if (name === "title" && !body) {

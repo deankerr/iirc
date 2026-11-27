@@ -295,6 +295,16 @@ describe("a page's body", () => {
     ).toStrictEqual({ image: "https://example.com/a/b/i.png" });
   });
 
+  // Catches a page's HTML example in a textarea giving its Preview's title or image.
+  it("gives no card tag written in a textarea, only the real one after it", () => {
+    expect(
+      read(`<head></head><body>
+        <textarea><meta property="og:title" content="An example">
+        <meta property="og:image" content="/example.png"></textarea>
+        <meta property="og:title" content="Body title"></body>`)
+    ).toStrictEqual({ title: "Body title" });
+  });
+
   it("never outranks the head, field by field", () => {
     expect(
       read(`<head><title>Head title</title>

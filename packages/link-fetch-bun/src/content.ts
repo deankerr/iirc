@@ -230,6 +230,8 @@ export const sniff = (bytes: Uint8Array): string | undefined => {
 
 const lower = (byte: number) => (byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte);
 
+const isLetter = (byte: number) => lower(byte) >= 0x61 && lower(byte) <= 0x7a;
+
 const codes = (text: string) => Array.from(text, (character) => character.codePointAt(0) ?? 0);
 
 const boundaries = new Set(codes("\t\n\f\r />"));
@@ -321,8 +323,7 @@ const quotes = new Set(codes(`"'`));
  * @param byte - The byte.
  * @returns Whether it does.
  */
-const startsTag = (byte: number) =>
-  (lower(byte) >= 0x61 && lower(byte) <= 0x7a) || codes("/!?").includes(byte);
+const startsTag = (byte: number) => isLetter(byte) || codes("/!?").includes(byte);
 
 /**
  * Skips a tag to its `>`, honouring quoted attribute values.
@@ -388,12 +389,35 @@ const opened = (bytes: Uint8Array, open: number): Step => {
   };
 };
 
-// What a tag's attribute value starts with when it names an Open Graph or Twitter card tag.
+// What a tag's attribute value starts with when it names an Open Graph or Twitter card tag,
+// before the letter its name goes on with, as `og:title` does. A prefix declaration, as in
+// `<html prefix="og: https://ogp.me/ns#">`, has a space there, and names no tag.
 const cardTags = ["og:", "twitter:"].flatMap((prefix) =>
   ['"', "'", "="].map((before) => codes(`${before}${prefix}`))
 );
 
-const cardTagLength = Math.max(...cardTags.map((each) => each.length));
+// The longest of them, and the letter after it.
+const cardTagLength = Math.max(...cardTags.map((each) => each.length)) + 1;
+
+/**
+ * Whether bytes of a tag name a card tag: one of {@link cardTags} and then a letter.
+ * @param bytes - The bytes.
+ * @returns Whether they do.
+ */
+const namesCardTag = (bytes: Uint8Array) =>
+  cardTags.some((tag) => {
+    let at = find(bytes, 0, tag);
+
+    while (at !== -1) {
+      if (isLetter(bytes[at + tag.length] ?? -1)) {
+        return true;
+      }
+
+      at = find(bytes, at + 1, tag);
+    }
+
+    return false;
+  });
 
 /** What of a page may be given now, and whether the page has ended. */
 interface Fed {
@@ -408,8 +432,9 @@ interface Fed {
  * HTML tokenizer: it looks only for what ends a head.
  *
  * The page ends there only when a tag in its head has an attribute whose value starts `og:`
- * or `twitter:`. Otherwise its tags may be later in the page, so the page reads on to its end,
- * and nothing more is looked for.
+ * or `twitter:` and then a letter, as a card tag's name does. Otherwise its tags may be later
+ * in the page, so the page reads on to its end, and nothing more is looked for. A prefix
+ * declaration, `og:` and then a space, is no card tag.
  *
  * Bytes it cannot yet decide, such as a `<bo` at the end of a chunk, are held back until the
  * next chunk decides them, so the page is the same however the network split it.
@@ -431,7 +456,7 @@ export const headEnd = () => {
 
     const seen = Bytes.concat([tail, bytes]);
 
-    named = cardTags.some((tag) => find(seen, 0, tag) !== -1);
+    named = namesCardTag(seen);
     tail = seen.slice(Math.max(seen.length - cardTagLength + 1, 0));
   };
 
