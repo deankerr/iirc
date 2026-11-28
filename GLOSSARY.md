@@ -1,93 +1,91 @@
 # iirc
 
-iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC reuses words like "server", "client", and "message" for several things, so this glossary fixes what each one means here. Where a term carries _UI_, use that wording in user-facing copy instead of the code term.
-
 ## Our system
 
-**Daemon**: The headless program that stays on Networks on the Owner's behalf and exposes the API. _Avoid_: Server, client, bouncer, iircd
+**Daemon**: The headless program that stays on **Networks** on the **Owner**'s behalf and exposes the API. _Avoid_: Server, client, bouncer, iircd
 
-**Runtime**: What drives one Client per Network inside the Daemon: it journals each input, steps the Client, and carries out what the Client asked for. _Avoid_: Engine, driver, supervisor
+**Runtime**: What drives one **Client** per **Network** inside the **Daemon**: it journals each input, steps the **Client**, and carries out what the **Client** asked for. _Avoid_: Engine, driver, supervisor
 
-**Client**: iirc's pure understanding of one Network, which takes each input in turn and answers with what to send and what happened, holding nothing the Journal cannot rebuild. _Avoid_: Core, engine, state machine, IRC client
+**Client**: iirc's pure understanding of one **Network**, which takes each input in turn and answers with what to send and what happened, holding nothing the **Journal** cannot rebuild. _Avoid_: Core, engine, state machine, IRC client
 
-**Frontend**: Any program that uses the Daemon's API, including the web app, a script, or an agent. _Avoid_: Client, operator, consumer. _UI_: device (for settings/sync), client (for open connections)
+**Frontend**: Any program that uses the **Daemon**'s API, including the web app, a script, or an agent. _Avoid_: Client, operator, consumer. _UI_: device (for settings/sync), client (for open connections)
 
 **Owner**: The one human a deployment belongs to. _Avoid_: User, admin, operator. _UI_: you, your
 
-**Journal**: The Daemon's ordered record of everything that happened, as Entries: what it was told, and what it did. Everything else is derived from it, except what a Preview fetched and the bytes of an Upload. _Avoid_: Log (overloaded), history, scrollback, buffer. _UI_: history (logs and CLI may say journal)
+**Journal**: The **Daemon**'s ordered record of everything that happened, as **Entries**: what it was told, and what it did. Everything else is derived from it, except what a **Preview** fetched and the bytes of an **Upload**. _Avoid_: Log (overloaded), history, scrollback, buffer. _UI_: history (logs and CLI may say journal)
 
-**Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
+**Entry**: One numbered record in the **Journal**, such as a **Line**, a **Connection** opening or closing, or a **Change**. _Avoid_: Event, record, row
 
-**Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that no Client takes in, such as an option, an Upload, or how far the Owner has read a Timeline no Client can name. _Avoid_: Update, mutation
+**Change**: Something the **Owner** altered, or the **Daemon** on the **Owner**'s behalf, that no **Client** takes in, such as an option, an **Upload**, or how far the **Owner** has read a **Timeline** no **Client** can name. _Avoid_: Update, mutation
 
-**Tail**: The most recent of what the Daemon logged, held in memory for any Frontend to read and gone when the Daemon restarts. Nothing is derived from it. _Avoid_: Log, Journal, console, core buffer. _UI_: logs
+**Tail**: The most recent of what the **Daemon** logged, held in memory for any **Frontend** to read and gone when the **Daemon** restarts. Nothing is derived from it. _Avoid_: Log, Journal, console, core buffer. _UI_: logs
 
-**Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state. _UI_: settings
+**Configuration**: What the **Owner** wants to be true, as opposed to what is true. _Avoid_: Settings, desired state. _UI_: settings
 
-**Credential**: A secret the Owner gives the Daemon to use on their behalf, which it can use but never reveal. Nothing a Network sends is a Credential. _Avoid_: Password, secret. _UI_: password, secret
+**Credential**: A secret the **Owner** gives the **Daemon** to use on their behalf, which it can use but never reveal. Nothing a **Network** sends is a Credential. _Avoid_: Password, secret. _UI_: password, secret
 
-**Upload**: A file the Owner gave the Daemon to host, reached by a link anyone can open. _Avoid_: Attachment, file, media item, asset
+**Upload**: A file the **Owner** gave the **Daemon** to host, reached by a link anyone can open. _Avoid_: Attachment, file, media item, asset
 
-**Link listener**: The Daemon's second address, which answers a request for an Upload's link and nothing else, and is all of iirc the Owner puts on the internet. _Avoid_: Public listener, second listener, file server. _UI_: upload server
+**Link listener**: The **Daemon**'s second address, which answers a request for an **Upload**'s link and nothing else, and is all of iirc the **Owner** puts on the internet. _Avoid_: Public listener, second listener, file server. _UI_: upload server
 
-**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads and a Preview's images. _Avoid_: Bucket (for the role), storage, blob store. _UI_: storage
+**Store**: The S3-compatible bucket the **Owner** names, where the **Daemon** keeps the bytes of **Uploads** and a **Preview**'s images. _Avoid_: Bucket (for the role), storage, blob store. _UI_: storage
 
-**Key**: A secret the Owner makes so a Frontend can use the API, held by a script or agent or traded by a browser for a Sign-in. Not a Credential, which the Daemon uses on the Owner's behalf. _Avoid_: Token, API token, password. _UI_: API key
+**Key**: A secret the **Owner** makes so a **Frontend** can use the API, held by a script or agent or traded by a browser for a **Sign-in**. Not a **Credential**, which the **Daemon** uses on the **Owner**'s behalf. _Avoid_: Token, API token, password. _UI_: API key
 
-**Sign-in**: A browser's proof that it was given a Key, which it holds as a cookie so that no script ever holds the Key. _Avoid_: Session, login. _UI_: session (or verb: sign in / sign out)
+**Sign-in**: A browser's proof that it was given a **Key**, which it holds as a cookie so that no script ever holds the **Key**. _Avoid_: Session, login. _UI_: session (or verb: sign in / sign out)
 
 ## The IRC side
 
-**Network**: An IRC service the Owner belongs to, which is what gets configured and what history belongs to. It outlives any Ircd, Connection, or Session. _Avoid_: Server, IRC server
+**Network**: An IRC service the **Owner** belongs to, which is what gets configured and what history belongs to. It outlives any **Ircd**, **Connection**, or **Session**. _Avoid_: Server, IRC server
 
-**Ircd**: A single IRC server process that a Connection reaches. One Network may be served by many. _Avoid_: Server, IRC server. _UI_: server, IRC server
+**Ircd**: A single IRC server process that a **Connection** reaches. One **Network** may be served by many. _Avoid_: Server, IRC server. _UI_: server, IRC server
 
 **IRC client**: Any IRC software, such as irssi; another one when it means not iirc. Always the full phrase. _Avoid_: Client
 
-**Feature**: The Client's support for one IRCv3 capability or ISUPPORT token, or a tight group of them, which refines what the Client already works out and is on only while the Ircd offers it. _Avoid_: Extension, plugin, cap (for the support rather than what the Ircd offers)
+**Feature**: The **Client**'s support for one IRCv3 capability or ISUPPORT token, or a tight group of them, which refines what the **Client** already works out and is on only while the **Ircd** offers it. _Avoid_: Extension, plugin, cap (for the support rather than what the Ircd offers)
 
-**User**: Any participant on a Network, including our own presence there. _Avoid_: Client, person, peer
+**User**: Any participant on a **Network**, including our own presence there. _Avoid_: Client, person, peer
 
-**Self**: Our own User on a Network. _Avoid_: Me, bot. _UI_: you, your
+**Self**: Our own **User** on a **Network**. _Avoid_: Me, bot. _UI_: you, your
 
-**Channel**: A named place on a Network where Users exchange Messages. _Avoid_: Room, group
+**Channel**: A named place on a **Network** where **Users** exchange **Messages**. _Avoid_: Room, group
 
 ## Being connected
 
-**Connection**: One transport to an Ircd, which may end before registration completes. _Avoid_: Link, socket
+**Connection**: One transport to an **Ircd**, which may end before registration completes. _Avoid_: Link, socket
 
-**Session**: The registered presence on a Network, lasting from welcome until its Connection ends. A reconnect is always a new Session. _Avoid_: Connection, login. _UI_: connection (or: until reconnect)
+**Session**: The registered presence on a **Network**, lasting from welcome until its **Connection** ends. A reconnect is always a new Session. _Avoid_: Connection, login. _UI_: connection (or: until reconnect)
 
-**Gap**: A period when the Daemon was not on a Network, so anything said then is unknown. _Avoid_: Downtime, outage
+**Gap**: A period when the **Daemon** was not on a **Network**, so anything said then is unknown. _Avoid_: Downtime, outage
 
 ## What is exchanged
 
 **Line**: Any single unit of the IRC protocol, in either direction. _Avoid_: Message, raw message. _UI_: raw command, message
 
-**Message**: Something a participant said, carried by a `PRIVMSG` or `NOTICE` Line. Every Message arrives as a Line, but most Lines are not Messages. _Avoid_: Line, event, chat
+**Message**: Something a participant said, carried by a `PRIVMSG` or `NOTICE` **Line**. Every Message arrives as a **Line**, but most **Lines** are not Messages. _Avoid_: Line, event, chat
 
-**Target**: The Channel or User a Message is addressed to. _Avoid_: Conversation, query, buffer. _UI_: channel or user
+**Target**: The **Channel** or **User** a **Message** is addressed to. _Avoid_: Conversation, query, buffer. _UI_: channel or user
 
-**Direct Message**: A Message whose Target is a User. The Direct Messages between Self and one other User make up one Timeline. _Avoid_: Query, private message, PM. _UI_: direct message (DM in short inline copy)
+**Direct Message**: A **Message** whose **Target** is a **User**. The Direct Messages between **Self** and one other **User** make up one **Timeline**. _Avoid_: Query, private message, PM. _UI_: direct message (DM in short inline copy)
 
-**Activity**: Something that changed on a Network rather than something said, such as a join, a quit, or a topic change. _Avoid_: Event, notice, status
+**Activity**: Something that changed on a **Network** rather than something said, such as a join, a quit, or a topic change. _Avoid_: Event, notice, status
 
-**Lookup**: Asking a Network for information and collecting the reply, which may span many Lines. _Avoid_: Query, request. _UI_: request, result (or name the command: whois, bans, channel list)
+**Lookup**: Asking a **Network** for information and collecting the reply, which may span many **Lines**. _Avoid_: Query, request. _UI_: request, result (or name the command: whois, bans, channel list)
 
 ## What a Frontend sees
 
-**News**: What happened in one step of a Client, such as a Message, an Activity, or a Read Marker moving, derived from the Journal and never journaled itself. _Avoid_: Event, update, feed, notification
+**News**: What happened in one step of a **Client**, such as a **Message**, an **Activity**, or a **Read Marker** moving, derived from the **Journal** and never journaled itself. _Avoid_: Event, update, feed, notification
 
-**Timeline**: The ordered Messages and Activity of one Channel, Direct Message partner, or Network. _Avoid_: Buffer, window, scrollback, conversation. _UI_: conversation (history for stored messages)
+**Timeline**: The ordered **Messages** and **Activity** of one **Channel**, **Direct Message** partner, or **Network**. _Avoid_: Buffer, window, scrollback, conversation. _UI_: conversation (history for stored messages)
 
-**Pane**: One part of a Frontend's screen, showing a Timeline or the options, beside others it was split from. _Avoid_: Window, buffer, split
+**Pane**: One part of a **Frontend**'s screen, showing a **Timeline** or the options, beside others it was split from. _Avoid_: Window, buffer, split
 
-**Sidebar**: The part of a Frontend's screen that lists the Networks and their Timelines. _Avoid_: Buffer list, channel list, nav
+**Sidebar**: The part of a **Frontend**'s screen that lists the **Networks** and their **Timelines**. _Avoid_: Buffer list, channel list, nav
 
-**Composer**: Where the Owner writes a Message or a command. _Avoid_: Input, message input, prompt. _UI_: message input
+**Composer**: Where the **Owner** writes a **Message** or a command. _Avoid_: Input, message input, prompt. _UI_: message input
 
-**Preview**: What the Daemon learns of a link in a Message beyond its address, such as a page's title and image or the media itself, for any Frontend to show. _Avoid_: Embed, unfurl, card
+**Preview**: What the **Daemon** learns of a link in a **Message** beyond its address, such as a page's title and image or the media itself, for any **Frontend** to show. _Avoid_: Embed, unfurl, card
 
-**Read Marker**: How far through a Timeline the Owner has read, shared by every Frontend. _Avoid_: Unread pointer, last seen
+**Read Marker**: How far through a **Timeline** the **Owner** has read, shared by every **Frontend**. _Avoid_: Unread pointer, last seen
 
-**Highlight**: A Message that calls for the Owner's attention, such as one that mentions Self. _Avoid_: Mention, ping, alert
+**Highlight**: A **Message** that calls for the **Owner**'s attention, such as one that mentions **Self**. _Avoid_: Mention, ping, alert

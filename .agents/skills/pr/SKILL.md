@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "Use when writing a PR body."
+description: "Use when opening a pull request or writing its body."
 metadata:
   credits:
     skill: show-me
@@ -9,9 +9,11 @@ metadata:
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
 ---
 
-Use this template for writing the PR body:
+Use this template for writing the PR body, shaped to the change: a section with little to say says it in a line.
 
 ```markdown
+Closes #<issue>
+
 ## Summary
 
 <diagram, diff-sketch, or tree>
@@ -31,6 +33,8 @@ Use this template for writing the PR body:
 
 <optional: potential ramifications of merge>
 ```
+
+`Closes #<issue>` goes in only when the work came from an issue.
 
 ## Sections
 
@@ -162,6 +166,10 @@ Concrete evidence that the change works. Show a before and after.
 Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
 Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.
+
+A screenshot goes on the orphan `evidence` branch, in a folder named for the issue (or the PR's branch, without one), and is linked by that commit's SHA.
+
+When nothing has a before and after, such as a change to the docs alone, say what you checked instead.
 
 ### Merge Danger
 
