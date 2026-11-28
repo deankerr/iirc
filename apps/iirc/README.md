@@ -35,7 +35,7 @@ Either makes the data directory, mode `0700`, if it is missing.
 
 ## Building
 
-`bun run build:iirc` builds the web frontend, then compiles `src/main.ts` with `build.ts`, through `compile.ts`, into one executable, `dist/iirc`, with `apps/web/dist` embedded. From a clean checkout, `bun install` and that one script are all it needs. `bun run build:iirc:no-web` makes `dist/iirc-no-web`, without the web frontend, which refuses a bare `--web` (ADR 0007: a build flag only decides whether web assets are included). `bun apps/iirc/build.ts --outfile <path>` puts either anywhere.
+`bun run build:iirc` builds the web frontend, then compiles `src/main.ts` with `build.ts` into one executable, `dist/iirc`, with `apps/web/dist` embedded. From a clean checkout, `bun install` and that one script are all it needs. `bun run build:iirc:no-web` makes `dist/iirc-no-web`, without the web frontend, which refuses a bare `--web` (ADR 0007: a build flag only decides whether web assets are included). `bun apps/iirc/build.ts --outfile <path>` puts either anywhere.
 
 - **It carries its own runtime and source map.** It needs no Bun to run, and a stack trace in the log names the source.
 - **Nothing in the directory it starts in changes it.** It reads no `.env`, `bunfig.toml`, `package.json`, or `tsconfig.json` at start, so its behaviour comes from its arguments and its data directory alone.
@@ -93,9 +93,7 @@ Then open `http://127.0.0.1:7667` and sign in with the key, as for the service. 
 
 ## Tests
 
-`bun run test` runs `iirc` from source, as a process. `bun run e2e` builds the web frontend, compiles `iirc` with and without it, and drives a real `iirc daemon --web` with Chromium through Playwright, on private Ircds that `@iirc/daemon/testing` starts, as a smoke set against a real Ircd. It needs Playwright's Chromium, which `bunx playwright install chromium` fetches. Where `systemd-analyze` is installed, it also verifies `systemd/iirc.service`, and installs nothing.
-
-One end-to-end file runs from this directory, as `bun run --filter @iirc/web build && bun --bun vitest run src/e2e/web.test.ts`. Neither the hooks nor CI run them. A change to the Transport, the Runtime, pacing, or the Daemon runs them by hand, and a Frontend change shows fake-Daemon tests and screenshots instead. A test that flakes is quarantined, not rerun.
+`bun run test` runs `iirc` from source, as a process.
 
 ## Not yet
 

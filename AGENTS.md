@@ -9,7 +9,7 @@
 
 The brief says what to run. A run by hand covers the files a change reaches, as `bun --bun vitest related <files> --run`. The whole suite is the push's, since two at once starve each other.
 
-End-to-end tests run in neither the hooks nor CI. A change to the Transport, the Runtime, pacing, or the Daemon runs `bun run e2e`, and gives the run as evidence.
+End-to-end tests run in neither the hooks nor CI. A change to the S3 byte store, image stripping, the Bun link fetch, or how `iirc` is compiled, serves its web frontend, or stops, runs `bun run e2e`, and gives the run as evidence.
 
 A test earns its place by the regression it alone catches, one a Frontend, the Owner, or a Network would notice. Name it before writing the test. If another test already fails on it, write nothing.
 

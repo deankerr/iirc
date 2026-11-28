@@ -13,7 +13,6 @@ permissions:
   contents: read
 
 # Each job is a required status check by its name, so keep `check`, `knip` and `test` stable.
-# The end-to-end suites need real Ircds and Chromium, and run outside CI.
 jobs:
   check:
     runs-on: ubuntu-latest

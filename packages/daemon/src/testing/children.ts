@@ -1,5 +1,5 @@
 /**
- * What the private servers of the end-to-end runs share: loopback ports the kernel picks,
+ * What a private server for the end-to-end runs needs: loopback ports the kernel picks,
  * release binaries fetched once into `.cache/` and checked against a pinned SHA-256, and
  * children that are killed however the run ends. Linux only: readiness reads `/proc`.
  *
@@ -160,7 +160,7 @@ export const onFreePorts = async <A>(start: () => Promise<A>): Promise<A> => {
  * @param cwd - Where to run it.
  * @returns Once it has exited 0.
  */
-export const run = async (command: readonly string[], cwd: string): Promise<void> => {
+const run = async (command: readonly string[], cwd: string): Promise<void> => {
   const child = Bun.spawn([...command], { cwd, stderr: "pipe", stdin: "ignore", stdout: "pipe" });
   const code = await child.exited;
 

@@ -30,7 +30,7 @@ A failure is told from the error's code, never its wording. A name that resolves
 
 ## Tests
 
-`bun run test` runs the adversarial suite against servers on loopback ports the kernel picks, with the loopback policy and a scripted resolver. Waiting out the real 10 seconds takes `bun run e2e`, at the root or in this package, which runs `src/e2e/`.
+`bun run test` runs the adversarial suite against servers on loopback ports the kernel picks, with the loopback policy and a scripted resolver.
 
 ## Not yet
 
