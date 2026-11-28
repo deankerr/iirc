@@ -7,14 +7,14 @@ IRC is an open protocol with decades of history and a living standards effort in
 ## What we are building
 
 1. **The library.** A modular IRC client library. Its protocol core is pure and does no I/O. Runtime concerns such as transports, negotiation, and reconnection compose on top. Take as much of it as a project needs and leave the rest.
-2. **The Daemon.** A headless IRC client that stays connected and remembers everything while your devices come and go. It is a composition of the library's packages, with durability, Configuration, and an API added on top. You operate it through a typed API, so a browser, a script, a bot, or an agent are all equal Frontends. An agent can do anything through that API that a person can, and the Daemon's state is open to inspection.
-3. **The web frontend.** A fast, keyboard-first interface: terminal-chic, built for 2026. It is dense and calm on a desktop, at home on a phone, and it uses nothing the API does not offer to every other frontend.
+2. **The Daemon.** It stays connected and remembers everything while your devices come and go. It composes the library's packages and adds durability, Configuration, and a typed API that every Frontend uses on equal terms.
+3. **The web frontend.** A fast, keyboard-first interface: terminal-chic, built for 2026. It is dense and calm on a desktop, and at home on a phone.
 
 The split is the point. Each component is meant for use in other projects, so none of them may depend on what sits above it.
 
 ## Who it is for
 
-It is first a daily driver for its Owner, held to a public standard. One deployment serves one Owner across many devices. Shared, multi-user hosting is a far-future concern and does not shape today's design.
+It is first a daily driver for its Owner across many devices, held to a public standard. Shared, multi-user hosting is a far-future concern and does not shape today's design.
 
 iirc is MIT licensed. We will publish the library once it has earned a stable API, and there is no rush.
 
@@ -22,7 +22,7 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 - **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun. Finite lifecycles are pure folds over the Journal.
 - **Parse, don't validate.** Bytes from the network and input from frontends become precise types at the boundary. A value that exists is a value that is valid, and that goes for outbound lines too: an IRC line that cannot be sent safely cannot be constructed.
-- **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt.
+- **Don't sync state. Derive it.** The Journal is an append-only record of what happened. State, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt.
 - **Deep modules, compositional packages.** Small interfaces hide real work. One package has one job, and packages combine without knowing about each other.
 - **Contract-driven.** Schemas define the boundaries first, and implementations follow. `HttpApi` is the primary surface. Other transports, such as Effect RPC or a wire format of our own, are adapters over the same contract.
 - **Agent-drivable and observable from the start.** Everything the Daemon can do is reachable through its API, and everything it knows can be inspected, except Credentials. An agent can run a real Daemon on a real Network, see exactly what happened, and check its own work. We build this first because it is what makes everything else fast.

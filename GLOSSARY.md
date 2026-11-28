@@ -1,7 +1,5 @@
 # iirc
 
-iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC reuses words like "server", "client", and "message" for several things, so this glossary fixes what each one means here. Where a term carries _UI_, use that wording in user-facing copy instead of the code term.
-
 ## Our system
 
 **Daemon**: The headless program that stays on **Networks** on the **Owner**'s behalf and exposes the API. _Avoid_: Server, client, bouncer, iircd

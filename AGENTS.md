@@ -46,16 +46,16 @@ User-facing copy is written in plain, contemporary US English: direct, calm, and
 
 ## Issue tracker
 
-Issues live in this repo's GitHub Issues, through the `gh` CLI. Read `docs/agents/issue-tracker.md` before filing, reading, linking, or closing one.
+GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 ## Triage labels
 
-The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Read `docs/agents/triage-labels.md` before labelling an issue.
+See `docs/agents/triage-labels.md`.
+
+## Domain docs
+
+Single-context. See `docs/agents/domain.md`.
 
 ## Pull requests
 
 Open every pull request with the `pr` skill.
-
-## Domain docs
-
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the root. Read `docs/agents/domain.md` before naming a domain concept or contradicting an ADR.
