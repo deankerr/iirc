@@ -14,11 +14,9 @@
  *
  * @packageDocumentation
  */
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-
-import { compile } from "./compile.ts";
 
 const repository = path.join(import.meta.dir, "..", "..");
 const web = path.join(repository, "apps", "web", "dist");
@@ -42,14 +40,27 @@ if (withWeb && !existsSync(path.join(web, "index.html"))) {
   process.exit(1);
 }
 
-const failures = await compile(
-  path.join(import.meta.dir, "src", "main.ts"),
-  outfile,
-  withWeb ? [web] : []
-);
+const built = await Bun.build({
+  compile: {
+    assets: withWeb ? [web] : [],
+    // What it does comes from its arguments and its data directory alone, never from a
+    // `.env`, `bunfig.toml`, `package.json`, or `tsconfig.json` where it happens to start.
+    autoloadBunfig: false,
+    autoloadDotenv: false,
+    autoloadPackageJson: false,
+    autoloadTsconfig: false,
+    outfile,
+  },
+  entrypoints: [path.join(import.meta.dir, "src", "main.ts")],
+  // The executable carries its own source map, compressed, so a stack trace in the log names
+  // the source. The copy Bun also writes beside it is not needed.
+  sourcemap: "linked",
+});
 
-if (failures.length > 0) {
-  process.stderr.write(`${failures.join("\n")}\n`);
+rmSync(`${outfile}.map`, { force: true });
+
+if (!built.success) {
+  process.stderr.write(`${built.logs.map((log) => log.message).join("\n")}\n`);
   process.exit(1);
 }
 

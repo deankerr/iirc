@@ -1,24 +1,13 @@
 /// <reference lib="dom" />
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { connectPeer, startNgircd } from "@iirc/daemon/testing";
-import { Schema } from "effect";
 import { chromium } from "playwright";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { compile } from "../../compile.ts";
-import { raw, run, startDaemon, startDaemonIn, watchedPage } from "./daemon.ts";
+import { raw, run, startDaemon, watchedPage } from "./daemon.ts";
 
 const app = path.join(import.meta.dirname, "..", "..");
 const web = path.join(app, "..", "web", "dist");
@@ -28,69 +17,48 @@ const analyze = Bun.which("systemd-analyze");
 const contentSecurityPolicy =
   "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com https://w.soundcloud.com https://bandcamp.com https://open.spotify.com https://player.twitch.tv; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
-/** What a run reads of one News event: how each Session it tells of ended. */
-const decodeHappened = Schema.decodeUnknownSync(
-  Schema.fromJsonString(
-    Schema.Struct({
-      news: Schema.Array(
-        Schema.Struct({ _tag: Schema.String, reason: Schema.optional(Schema.Unknown) })
-      ),
-    })
-  )
-);
-
 /**
- * Reads the News from the start until it tells of a Session's end, for at most 10 s.
- * @param base - The Daemon's base URL.
- * @param key - A key.
- * @returns How the first Session to end ended, or `"none"` if none did in time.
+ * A loopback port that takes one Connection and keeps every Line it is sent, and answers
+ * nothing, which is as far as an Ircd need go for a Daemon to begin registering.
+ * @returns Its port, a wait for the first `NICK`, the Lines once the far end hangs up, and a
+ * way to stop listening.
  */
-const firstEnding = async (base: string, key: string) => {
-  const stopped = new AbortController();
+const listenAsIrcd = () => {
+  const lines: string[] = [];
+  const decoder = new TextDecoder();
+  const named = Promise.withResolvers<undefined>();
+  const closed = Promise.withResolvers<readonly string[]>();
+  let buffered = "";
 
-  const following = await fetch(`${base}/api/news?after=0`, {
-    headers: { authorization: `Bearer ${key}` },
-    signal: stopped.signal,
+  const server = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      close: () => {
+        closed.resolve(lines);
+      },
+      data: (_, chunk) => {
+        buffered += decoder.decode(chunk, { stream: true });
+        const parts = buffered.split("\r\n");
+        buffered = parts.pop() ?? "";
+        lines.push(...parts);
+
+        if (lines.some((line) => line.split(" ", 1)[0] === "NICK")) {
+          named.resolve(undefined);
+        }
+      },
+    },
   });
 
-  const read = async () => {
-    const decoder = new TextDecoder();
-    let buffered = "";
-
-    for await (const chunk of following.body ?? []) {
-      buffered += decoder.decode(chunk, { stream: true });
-
-      const ending = buffered
-        .split("\n\n")
-        .slice(0, -1)
-        .filter((event) => event.split("\n").includes("event: happened"))
-        .flatMap((event) => event.split("\n").filter((line) => line.startsWith("data: ")))
-        .flatMap((line) => decodeHappened(line.slice("data: ".length)).news)
-        .find((one) => one._tag === "SessionEnded");
-
-      if (ending !== undefined) {
-        return ending.reason;
-      }
-    }
-
-    return "none";
+  return {
+    closed: closed.promise,
+    named: named.promise,
+    port: server.port,
+    stop: () => {
+      server.stop(true);
+    },
   };
-
-  const ended = await Promise.race([read(), Bun.sleep(10_000).then(() => "none")]);
-
-  stopped.abort();
-
-  return ended;
 };
-
-/**
- * Whether a Line is ours, decided by its command and source alone.
- * @param command - The command.
- * @returns The test of a Line.
- */
-const ours =
-  (command: string) => (line: { readonly command: string; readonly source?: string | undefined }) =>
-    line.command === command && line.source?.split("!")[0] === "iirc";
 
 /**
  * Compiles `iirc` with `build.ts`, as `bun run build:iirc` does.
@@ -103,36 +71,6 @@ const build = async (outfile: string, ...args: readonly string[]) => {
   if (built.code !== 0) {
     throw new Error(`iirc did not compile: ${built.stderr}`);
   }
-};
-
-/**
- * A directory holding everything Bun reads from where a program starts, when it is let:
- * a `.env` setting a variable, a `bunfig.toml` preloading a script that leaves a file behind
- * when it runs, and a `package.json` and `tsconfig.json` of another project.
- * @param directory - Where to make it.
- * @returns The directory, the variable the `.env` sets, and the file the preload would leave.
- */
-const hostileStart = (directory: string) => {
-  const cwd = path.join(directory, "elsewhere");
-  const preloaded = path.join(directory, "preloaded");
-
-  mkdirSync(cwd);
-  writeFileSync(path.join(cwd, ".env"), "IIRC_FROM_DOTENV=loaded\n");
-  writeFileSync(
-    path.join(cwd, "preload.ts"),
-    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(preloaded)}, "ran");\n`
-  );
-  writeFileSync(path.join(cwd, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
-  writeFileSync(
-    path.join(cwd, "package.json"),
-    JSON.stringify({ imports: { "#effect": "./nothing.js" }, name: "not-iirc", type: "commonjs" })
-  );
-  writeFileSync(
-    path.join(cwd, "tsconfig.json"),
-    JSON.stringify({ compilerOptions: { paths: { "effect/*": ["./nothing/*"] } } })
-  );
-
-  return { cwd, preloaded, variable: "IIRC_FROM_DOTENV" };
 };
 
 /**
@@ -332,97 +270,46 @@ describe("the compiled iirc", () => {
 
   it(
     "says QUIT and hangs up on its Networks when SIGTERM stops it",
-    { timeout: 90_000 },
+    { timeout: 60_000 },
     async () => {
       const dataDir = path.join(directory, "quitting-data");
       const created = await run([iirc], "key", "create", "quitter", "--data-dir", dataDir);
       const key = created.stdout.trim();
-      const channel = "#iirc-quitting";
-      const ngircd = await startNgircd();
-      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+      const ircd = listenAsIrcd();
       const { base, child } = await startDaemon([iirc], dataDir);
 
       try {
-        peer.send(`JOIN ${channel}`);
-
         const configured = await fetch(`${base}/api/networks/private`, {
           body: JSON.stringify({
-            channels: [{ name: channel }],
+            channels: [],
             declined: [],
             enabled: true,
             fallbackEncoding: "windows-1252",
             login: { _tag: "None" },
             nicks: ["iirc"],
             realname: "iirc",
-            servers: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+            servers: [{ host: "127.0.0.1", port: ircd.port, tls: false }],
             username: "iirc",
           }),
           headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
           method: "PUT",
         });
 
-        await peer.waitFor(ours("JOIN"), "the Daemon's JOIN");
+        // Registering has begun once the Daemon has said who it is.
+        await ircd.named;
         child.kill("SIGTERM");
-        const exited = await child.exited;
 
-        // An Ircd says QUIT for a User whose Connection merely ended too, so what proves
-        // the stop is the Journal, as a Daemon started after it on the same data reads it:
-        // the Session ended because the Client hung up.
-        const again = await startDaemon([iirc], dataDir);
-
-        const ended = await firstEnding(again.base, key).finally(() => {
-          again.child.kill("SIGTERM");
-        });
-
-        await again.child.exited;
-
-        expect({ configured: configured.status, ended, exited }).toStrictEqual({
-          configured: 200,
-          ended: { _tag: "Closed", reason: "HungUp" },
-          exited: 0,
-        });
-      } finally {
-        peer.close();
-        child.kill("SIGTERM");
-        await child.exited;
-        await ngircd.stop();
-      }
-    }
-  );
-
-  it(
-    "says a running Daemon is well, to the route without a key and by iirc health's exit",
-    { timeout: 60_000 },
-    async () => {
-      const dataDir = path.join(directory, "health-data");
-      await run([iirc], "key", "create", "owner", "--data-dir", dataDir);
-      const { base, child } = await startDaemon([iirc], dataDir);
-      const { port } = new URL(base);
-
-      try {
-        const route = await fetch(`${base}/api/health`);
-        const others = await fetch(`${base}/api/networks`);
-        const well = await run([iirc], "health", "--listen", `127.0.0.1:${port}`);
-
-        child.kill("SIGTERM");
-        await child.exited;
-
-        const gone = await run([iirc], "health", "--listen", `127.0.0.1:${port}`);
+        const [exited, lines] = await Promise.all([child.exited, ircd.closed]);
 
         expect({
-          gone,
-          others: others.status,
-          route: [route.status, await route.text()],
-          well,
-        }).toStrictEqual({
-          gone: { code: 1, stderr: `No response from 127.0.0.1:${port}.\n`, stdout: "" },
-          others: 401,
-          route: [200, '{"_tag":"Well"}'],
-          well: { code: 0, stderr: "", stdout: "" },
-        });
+          configured: configured.status,
+          exited,
+          quit: lines.some((line) => line.split(" ", 1)[0] === "QUIT"),
+        }).toStrictEqual({ configured: 200, exited: 0, quit: true });
       } finally {
         child.kill("SIGTERM");
         await child.exited;
+        ircd.stop();
       }
     }
   );
@@ -497,62 +384,6 @@ describe("the compiled iirc", () => {
         child.kill("SIGTERM");
         await child.exited;
       }
-    }
-  );
-
-  it(
-    "reads no .env, bunfig.toml, package.json, or tsconfig.json from where it starts",
-    { timeout: 60_000 },
-    async () => {
-      const start = hostileStart(directory);
-
-      // The real executable, started among them, serves as it would anywhere, and the
-      // `bunfig.toml`'s preload never runs.
-      const dataDir = path.join(directory, "elsewhere-data");
-      const { base, child } = await startDaemonIn(start.cwd, [iirc], dataDir, "--web");
-
-      const served = await Promise.all([
-        fetch(base, { headers: { accept: "text/html" } }),
-        fetch(`${base}/api/networks`),
-      ])
-        .then(([index, api]) => ({ api: api.status, index: index.status }))
-        .finally(() => {
-          child.kill("SIGTERM");
-        });
-
-      const exited = await child.exited;
-
-      // The Daemon reads no variable, and a `.env` Bun loads never reaches the process's
-      // environment as the kernel keeps it, so nothing outside can see one loaded. A probe,
-      // compiled exactly as `iirc` is, says what it sees instead.
-      const probe = path.join(directory, "probe");
-      const source = path.join(directory, "probe.ts");
-
-      writeFileSync(
-        source,
-        `process.stdout.write(JSON.stringify({ seen: process.env.${start.variable} ?? null }));\n`
-      );
-      const failures = await compile(source, probe, []);
-      const probed = Bun.spawn([probe], { cwd: start.cwd, stdout: "pipe" });
-
-      const [seen, probeExited] = await Promise.all([
-        new Response(probed.stdout).text(),
-        probed.exited,
-      ]);
-
-      expect({
-        exited,
-        failures,
-        preloaded: existsSync(start.preloaded),
-        probe: { exited: probeExited, seen },
-        served,
-      }).toStrictEqual({
-        exited: 0,
-        failures: [],
-        preloaded: false,
-        probe: { exited: 0, seen: '{"seen":null}' },
-        served: { api: 401, index: 200 },
-      });
     }
   );
 

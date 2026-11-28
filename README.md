@@ -23,12 +23,12 @@ bun install
 bun run check         # lint and format (Ultracite)
 bun run knip          # unused files and dependencies
 bun run test          # every workspace's tests, with no network
-bun run e2e           # a real Daemon against a private ngircd and Ergo, and in Chromium
+bun run e2e           # the end-to-end suites
 bun run build:web     # the web frontend, into apps/web/dist
 bun run build:iirc    # one executable, dist/iirc, with the web frontend inside
 ```
 
-`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo and MinIO itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches.
+`bun run e2e` needs Playwright's Chromium, which `bunx playwright install chromium` fetches.
 
 ## Run a Daemon
 

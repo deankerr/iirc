@@ -335,17 +335,8 @@ The Tail is the last 4096 lines the Daemon logged at `Debug` and above, in its m
 
 `bun run test` uses no network. The handlers run through an in-process client (`HttpApiTest`) on the Runtime's in-memory ports and a `TestClock`, and the routes over a real Bun server on a loopback port the kernel picks. Previews are tested with the link fetch's fake, which answers by link and records what it was asked, and with the byte store in memory.
 
-`bun run e2e`, at the root or in this package, runs `src/e2e/` and is never part of `bun run test`. Each run drives a real Daemon, with the production adapters, through its HTTP API alone, and plays the other User over a raw IRC connection. The Ircds are private, on loopback ports the kernel picks, never port 6667.
-
-- **ngircd** is `~/.local/opt/ngircd/ngircd`, or `IIRC_NGIRCD`, with a configuration of its own in a temporary directory.
-- **Ergo** 2.19.1 is fetched into the gitignored `.cache/ergo/` and checked against its checksums file and a pinned SHA-256 before it runs. The Daemon dials it over TLS and trusts its self-signed root through the Transport's `trust`.
-- **MinIO** is the maintained pgsty/minio fork, fetched into `.cache/minio/` and checked the same way. It serves its S3 API on loopback with an empty bucket.
-
-`@iirc/daemon/testing` exports what another package's end-to-end run, such as the web frontend's in `apps/iirc`, needs to start them the same way: `startNgircd`, with the operator it grants as `ngircdOperName` and `ngircdOperPassword`, `startErgo`, `startMinio`, `connectPeer`, `freePort`, `loopback`, `layerLoopbackLinkFetch(port)`, the guard admitting a fixture site on `127.0.0.1:<port>`, and `seedUpload`, `holdsBytes`, and `loseBytes`, for an Upload seeded while the Daemon is stopped. Each start returns once that child listens on its ports, and starts it again on fresh ports if another process took one first.
-
 ## Not yet
 
-- **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser that follows the fixtures' rules.
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Evicting Preview images by age.**
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

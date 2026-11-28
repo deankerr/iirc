@@ -11,8 +11,8 @@ const testTimeout = 60_000;
 // is small and has only this to run, so it uses all of its own.
 const maxWorkers = process.env.CI === undefined ? "50%" : "100%";
 
-// The end-to-end suites drive a real Daemon, or wait out real time limits, and are never
-// part of this run: `bun run e2e` runs them from their packages.
+// The end-to-end suites need what this run does not have, or wait out real time limits, and
+// are never part of it: `bun run e2e` runs them from their packages.
 const endToEnd = { exclude: [...configDefaults.exclude, "src/e2e/**"] };
 
 // A pure package's test files share a worker's modules rather than each loading its own,

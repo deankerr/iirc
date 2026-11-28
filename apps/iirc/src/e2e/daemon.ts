@@ -8,7 +8,7 @@
 import { once } from "node:events";
 import { connect } from "node:net";
 
-import type { Browser, Page } from "playwright";
+import type { Browser } from "playwright";
 
 /**
  * Runs `iirc` to its end.
@@ -57,23 +57,20 @@ export const raw = async (base: string, target: string, accept: string) => {
 };
 
 /**
- * Starts `iirc daemon` in a working directory, on a port the kernel picks, and waits until it
- * listens.
- * @param cwd - The directory it starts in.
+ * Starts `iirc daemon` on a port the kernel picks, and waits until it listens.
  * @param command - How to run `iirc`.
  * @param dataDir - Its data directory.
  * @param args - More arguments, such as `--web`.
  * @returns Where it listens, and the process.
  */
-export const startDaemonIn = async (
-  cwd: string,
+export const startDaemon = async (
   command: readonly string[],
   dataDir: string,
   ...args: readonly string[]
 ) => {
   const child = Bun.spawn(
     [...command, "daemon", "--data-dir", dataDir, "--listen", "127.0.0.1:0", ...args],
-    { cwd, stderr: "pipe", stdout: "inherit" }
+    { stderr: "pipe", stdout: "inherit" }
   );
 
   const reader = child.stderr.getReader();
@@ -98,19 +95,6 @@ export const startDaemonIn = async (
     }
   }
 };
-
-/**
- * Starts `iirc daemon` on a port the kernel picks, and waits until it listens.
- * @param command - How to run `iirc`.
- * @param dataDir - Its data directory.
- * @param args - More arguments, such as `--web`.
- * @returns Where it listens, and the process.
- */
-export const startDaemon = async (
-  command: readonly string[],
-  dataDir: string,
-  ...args: readonly string[]
-) => await startDaemonIn(process.cwd(), command, dataDir, ...args);
 
 /**
  * A page that keeps every Content Security Policy violation it meets where the test can
@@ -138,35 +122,4 @@ export const watchedPage = async (browser: Browser) => {
   page.on("pageerror", (error) => problems.push(error.message));
 
   return { page, problems };
-};
-
-/** How a Network's row ends its label, once its connection is known: the word for it. */
-const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
-
-/**
- * The first Network's row in the sidebar, once its connection is known.
- * @param page - The page.
- * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol,
- * which a connected Network has none of.
- */
-export const networkRow = async (page: Page) => {
-  await page.getByRole("row", { name: standingWord }).first().waitFor();
-
-  // The buttons that open the row's menu and pick the row up are not part of what it says.
-  return await page
-    .getByRole("row")
-    .first()
-    .evaluate((row) => {
-      const copy = row.cloneNode(true);
-
-      if (!(copy instanceof Element)) {
-        return "";
-      }
-
-      for (const button of copy.querySelectorAll('[aria-label^="More for"], [slot="drag"]')) {
-        button.remove();
-      }
-
-      return copy.textContent;
-    });
 };

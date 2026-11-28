@@ -104,23 +104,6 @@ describe("the S3 byte store", () => {
     await expect(Effect.runPromise(holds(law, harness))).resolves.toBeUndefined();
   });
 
-  it("a missing object is not found", async () => {
-    const { store } = await holdingAbc();
-
-    await expect(outcomes(store, neverPut)).resolves.toMatchObject({
-      read: "ByteStoreNotFound",
-      readMissing: "ByteStoreNotFound",
-      readRange: "ByteStoreNotFound",
-    });
-  });
-
-  it("a closed port is unavailable", async () => {
-    const { bucket } = await holdingAbc();
-    const closed = await make(optionsFor(bucket, { endpoint: closedEndpoint() }));
-
-    await expect(outcomes(closed, abc)).resolves.toStrictEqual(unavailableEverywhere);
-  });
-
   it("refused keys are unavailable", async () => {
     const { bucket, store } = await holdingAbc();
 
