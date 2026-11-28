@@ -16,7 +16,7 @@ Most packages' READMEs end with what the package does not do yet.
 
 ## Quick start
 
-Needs Bun 1.4.4.
+Needs Bun 1.4.5.
 
 ```sh
 bun install

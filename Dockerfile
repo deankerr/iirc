@@ -2,7 +2,7 @@
 # Built from a checkout and never published: docker compose build, or docker build -t iirc .
 
 # The Bun that package.json pins, which compiles the executable as build:iirc does.
-FROM oven/bun:1.4.4-slim AS build
+FROM oven/bun:1.4.5-slim AS build
 WORKDIR /src
 COPY . .
 # No lifecycle scripts: they set up lint and git hooks, which the build needs neither of.
