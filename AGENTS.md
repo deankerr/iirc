@@ -2,9 +2,6 @@
 
 @GLOSSARY.md @VISION.md
 
-- A feature exists when its scenarios pass.
-- Decide from the protocol's structure, never from an Ircd's free text. Ergo and ngircd are examples of what the protocol allows, not the cases to code for.
-
 # Tests
 
 The brief says what to run. A run by hand covers the files a change reaches, as `bun --bun vitest related <files> --run`. The whole suite is the push's, since two at once starve each other.
@@ -23,8 +20,6 @@ A test earns its place by the regression it alone catches, one a Frontend, the O
 # Determinism
 
 `@iirc/protocol`, `@iirc/client`, `@iirc/outbox`, `@iirc/timelines`, and `@iirc/frontend` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and their state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
-
-The lint fence in `oxlint.config.ts` is deliberately small. A gap it misses is fixed in the code and named in review, not added to the fence.
 
 # Docs
 
@@ -56,6 +51,10 @@ Issues live in this repo's GitHub Issues, through the `gh` CLI. Read `docs/agent
 ## Triage labels
 
 The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Read `docs/agents/triage-labels.md` before labelling an issue.
+
+## Pull requests
+
+Open every pull request with the `pr` skill.
 
 ## Domain docs
 

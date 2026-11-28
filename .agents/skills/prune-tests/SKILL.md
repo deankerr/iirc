@@ -14,11 +14,11 @@ If another test already guards the same behavior, prune the copy.
 
 Prune tests that depend on:
 
-**The past:** it guards code that no longer exists, so it has no reason of its own to change.
+**The past:** it asserts that removed code stays gone. Bringing it back would be a decision, not a regression.
 
 For example:
 
-- A feature was removed, and tests assert it's gone. Removed code never changes, so they can't catch a regression.
+- A feature was removed, and tests assert it's gone.
 - A module was moved, and a test asserts it's absent from its old path.
 
 **Nothing:** no change to the code can make it fail, so it has no reason of its own to change.
